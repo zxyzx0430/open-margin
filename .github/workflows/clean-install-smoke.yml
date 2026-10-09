@@ -1,0 +1,48 @@
+name: Clean Install Smoke Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanroom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Create isolated throwaway deployment
+        run: |
+          cp .env.example .env
+          sed -i 's/FINANCE_API_PORT=8767/FINANCE_API_PORT=18767/;s/WALLOS_PORT=18082/WALLOS_PORT=18083/' .env
+          python3 scripts/init-config.py --url https://finance.example.com/finance
+          docker compose -p pfs-acceptance config -q
+          docker compose -p pfs-acceptance up -d --build
+      - name: Wait for ready services
+        run: |
+          for i in $(seq 1 50); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18767/health >/dev/null 2>&1 &&
+               curl -fsS --max-time 3 http://127.0.0.1:18083/health.php >/dev/null 2>&1; then
+              echo "Services ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -p pfs-acceptance ps
+          exit 1
+      - name: Simulate Wallos setup, Android ingestion, expense UI and OAuth
+        run: |
+          python -m pip install 'requests>=2.31,<3'
+          python scripts/smoke_clean_install.py
+      - name: Test live SQLite snapshot after synthetic data
+        run: |
+          docker compose -p pfs-acceptance --profile maintenance run --rm backup
+      - name: Tear down isolated containers and synthetic records
+        if: always()
+        run: |
+          docker compose -p pfs-acceptance down -v --remove-orphans || true
+          # The generated credentials are never uploaded as CI artifacts.

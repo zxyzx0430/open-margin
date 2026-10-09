@@ -2,9 +2,13 @@
 /** Native Wallos daily-expense extension, backed by the existing Finance ledger.
  * Wallos's own subscription database remains untouched.
  */
+// The vendor header emits HTML. Buffer it until the owner check passes so
+// unauthorized accounts receive a real HTTP 403, not a 200 with partial UI.
+ob_start();
 require_once 'includes/header.php';
 require_once 'ledger-common.php';
 ledger_require_owner();
+ob_end_flush();
 $options = @parse_ini_file('/run/secrets/wallos-ledger.env', false, INI_SCANNER_RAW);
 date_default_timezone_set($options['FINANCE_TIMEZONE'] ?? 'Asia/Shanghai');
 $month=$_GET['month'] ?? date('Y-m');

@@ -51,11 +51,11 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
    ```
    The services listen only on `127.0.0.1`; do **not** expose port 8767 or 18082 directly to the Internet.
 4. Place the Nginx routing from `deploy/nginx-locations.conf.example` inside your existing **HTTPS** server block; update your domain/ports, test Nginx and reload it. Obtain your TLS certificate separately.
-5. Visit `https://YOUR_DOMAIN/finance/wallos/` and register the first Wallos owner. The initial owner ID is normally `1`. The ledger page is `https://YOUR_DOMAIN/finance/wallos/expenses.php`.
+5. **Secure initial registration:** temporarily restrict the public Wallos URL to your IP (or use a local SSH tunnel) until you register the first owner; otherwise anyone who reaches the fresh site first could claim it. Visit `https://YOUR_DOMAIN/finance/wallos/` and register the owner. The initial owner ID is normally `1`; check that registration is closed afterward. The ledger page is `https://YOUR_DOMAIN/finance/wallos/expenses.php`.
 6. Verify `https://YOUR_DOMAIN/finance/health` and `https://YOUR_DOMAIN/finance/.well-known/oauth-protected-resource`. An **unauthorized** request to `/finance/api/v1/transactions` must return 401; do not disable auth for troubleshooting.
 7. Optional Android: build APK from `android/`, install, grant notification listener, enable HTTPS sync, enter `https://YOUR_DOMAIN/finance` and the device token from **your** `secrets/backend.env`. Keep this token private. Run a *real* low-value transaction and check its amount, time, merchant and deduplication against the Wallos ledger.
 
-**Credentials:** `secrets/backend.env` and `secrets/wallos-ledger.env` are generated with mode 0600 and ignored by Git. Never commit or share them. Changing a device upload token requires updating the phone. The Wallos browser never receives the backend ledger token.
+**Credentials:** `secrets/` is mode **0700**, `secrets/backend.env` is **0600**, and `secrets/wallos-ledger.env` is **0644 inside that non-traversable directory**, because the non-root PHP worker must be able to read the file inside its container. All are ignored by Git. Keep the private parent directory restricted and never commit/share these files. Changing a device upload token requires updating the phone. The Wallos browser never receives the backend ledger token.
 
 ## Daily workflow
 
@@ -69,7 +69,13 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 
 The two databases must be backed up separately: Wallos **subscriptions** and Finance **transactions**.
 
-After registering the Wallos owner and initializing the ledger, run a verified on-demand snapshot:\n\n```sh\ndocker compose --profile maintenance run --rm backup\n```\n\nThe maintenance service mounts the two named SQLite volumes and writes verified snapshots to its dedicated backup volume. SQLite WAL access requires the source volume to permit shared-memory journal files; the Python connection itself is read-only. Schedule this command **daily** using your host scheduler (or a dedicated cron container). Snapshots have integrity checks, atomic writes and 30-day daily retention. Backups on the same host do not survive a disk or provider failure: also maintain **encrypted off-VPS backups**.
+After registering the Wallos owner and initializing the ledger, run a verified on-demand snapshot:
+
+```sh
+docker compose --profile maintenance run --rm backup
+```
+
+The maintenance service mounts the two named SQLite volumes and writes verified snapshots to its dedicated backup volume. SQLite WAL access requires the source volume to permit shared-memory journal files; the Python connection itself is read-only. Schedule this command **daily** using your host scheduler (or a dedicated cron container). Snapshots have integrity checks, atomic writes and 30-day daily retention. Backups on the same host do not survive a disk or provider failure: also maintain **encrypted off-VPS backups**.
 
 Never delete or reset the live SQLite database to fix an app problem. Keep immutable snapshots and verify restores against **copies** before relying on them.
 
@@ -80,6 +86,8 @@ python3 -m pip install -r backend/requirements.txt "httpx>=0.27,<1"
 cd backend && FINANCE_PUBLIC_URL=https://finance.example.com/finance python3 -m unittest discover -p "test_*.py" -v
 cd .. && python3 scripts/check-public-ready.py
 ```
+
+A clean-room HTTP integration script is included at `scripts/smoke_clean_install.py`. It requires a **throwaway**, empty staging stack bound to ports 18767 and 18083 with `https://finance.example.com/finance` in the staging secrets. It deliberately creates synthetic Wallos and transaction records. See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the full reproducible test and results; **never run it against live data**.
 
 CI also runs Android tests and outputs **unsigned** release APKs. Never store signing keys in this repository. If publishing signed binaries, create a dedicated permanent signing key privately and use a repeatable offline process.
 

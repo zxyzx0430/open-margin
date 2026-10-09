@@ -1,4 +1,10 @@
 <?php
+/**
+ * Modified Wallos file for Personal Finance System (2026-10-09).
+ * Adds daily-spending integration to upstream Wallos UI.
+ * Original project: https://github.com/ellite/Wallos (GPL-3.0).
+ * Retains the original Wallos license and attribution.
+ */
 
 require_once 'includes/header.php';
 

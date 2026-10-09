@@ -57,6 +57,8 @@ function ledger_require_owner(): void {
     $settings = @parse_ini_file('/run/secrets/wallos-ledger.env', false, INI_SCANNER_RAW);
     $expected = (int)($settings['FINANCE_WALLOS_OWNER_ID'] ?? 1);
     if ($expected < 1 || !isset($_SESSION['userId']) || (int)$_SESSION['userId'] !== $expected) {
+        // Drop any buffered Wallos navigation markup before denying access.
+        if (ob_get_level() > 0) ob_end_clean();
         http_response_code(403);
         exit('The daily ledger is restricted to the configured owner.');
     }

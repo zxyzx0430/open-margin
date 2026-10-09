@@ -13,6 +13,8 @@ parser.add_argument("--url",required=True,help="https://YOUR_DOMAIN/finance (HTT
 parser.add_argument("--owner-id",type=int,default=1)
 args=parser.parse_args()
 url=args.url.rstrip("/")
+if any(ch.isspace() or ord(ch) < 32 for ch in url):
+    parser.error("The HTTPS URL must not contain whitespace or control characters")
 parsed=urlsplit(url)
 if parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
     parser.error("Use a public HTTPS URL without credentials, query or fragment")
@@ -51,11 +53,15 @@ try:
         fd=os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
         with os.fdopen(fd,"w") as f:
             f.write(content)
-        os.chmod(path,stat.S_IRUSR|stat.S_IWUSR)
+        # Compose bind-mounted file secrets keep host file permissions.
+        # Wallos PHP-FPM runs as non-root www-data and must read its secret;
+        # the secrets/ parent itself is 0700, so other host users cannot
+        # traverse to the 0644 file. Backend credentials stay root-only 0600.
+        os.chmod(path,0o644 if path == wallos else 0o600)
 except BaseException:
     backend.unlink(missing_ok=True)
     wallos.unlink(missing_ok=True)
     raise
-print("Created git-ignored secrets/backend.env and secrets/wallos-ledger.env (0600).")
+print("Created ignored backend.env (0600) and Wallos ledger file (0644 inside a 0700 directory).")
 print("No token was printed. Do not copy secrets into issues, commits, or support chats.")
 print("Set up HTTPS reverse proxy before connecting Android or ChatGPT.")
