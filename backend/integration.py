@@ -69,31 +69,36 @@ def month_shift(d:datetime, months:int)->datetime:
     return d.replace(year=y,month=m,day=min(d.day,calendar.monthrange(y,m)[1]))
 
 def occurrences(s:dict, first_ms:int,last_ms:int)->list:
+    """Project each cycle directly from the anchor day, avoiding drift.
+
+    E.g. Jan 31 monthly -> Feb 28 -> Mar 31 -> Apr 30, not Mar 28.
+    This is an estimated schedule; Wallos remains the billing source.
+    """
     due_ms=s.get("next_due_ms")
-    if not due_ms or s.get("cadence") not in ("weekly","monthly","quarterly","yearly","one_time"):return []
-    start=dt(first_ms);end=dt(last_ms)
-    due=dt(due_ms)
-    step=s["cadence"]
-    # Wallos next_payment can be a future date. Project backward as well,
-    # otherwise the current month would have no scheduled subscription.
-    for _ in range(900):
-        if due<end or step=="one_time":break
-        due=due-timedelta(days=7) if step=="weekly" else month_shift(due,-{"monthly":1,"quarterly":3,"yearly":12}[step])
-    result=[]
-    for _ in range(900):
-        if due < start:
-            step=s["cadence"]
-            if step=="one_time":break
-            due=due+timedelta(days=7) if step=="weekly" else month_shift(due, {"monthly":1,"quarterly":3,"yearly":12}[step])
-            continue
-        if due>=end:break
-        result.append({"subscription_id":s["id"],"name":s["name"],"amount_cents":s["amount_cents"],
-                       "currency":s["currency"],"payment_channel":s["payment_channel"],
-                       "due_ms":int(due.timestamp()*1000),"cycle_key":due.strftime("%Y-%m-%d")})
-        step=s["cadence"]
-        if step=="one_time":break
-        due=due+timedelta(days=7) if step=="weekly" else month_shift(due, {"monthly":1,"quarterly":3,"yearly":12}[step])
-    return result
+    cadence=s.get("cadence")
+    if not due_ms or cadence not in ("weekly","monthly","quarterly","yearly","one_time"):
+        return []
+    start,end,anchor=dt(first_ms),dt(last_ms),dt(due_ms)
+    if end<=start:return []
+    candidate_dates=[]
+    if cadence=="one_time":
+        candidate_dates=[anchor]
+    elif cadence=="weekly":
+        first=max(-900,((start-anchor).days//7)-1)
+        last=min(900,((end-anchor).days//7)+2)
+        candidate_dates=[anchor+timedelta(weeks=n) for n in range(first,last+1)]
+    else:
+        stride={"monthly":1,"quarterly":3,"yearly":12}[cadence]
+        first_month=(start.year-anchor.year)*12+(start.month-anchor.month)
+        last_month=(end.year-anchor.year)*12+(end.month-anchor.month)
+        first=max(-900,(first_month//stride)-2)
+        last=min(900,(last_month//stride)+2)
+        candidate_dates=[month_shift(anchor,n*stride) for n in range(first,last+1)]
+    return [{
+        "subscription_id":s["id"],"name":s["name"],"amount_cents":s["amount_cents"],
+        "currency":s["currency"],"payment_channel":s["payment_channel"],
+        "due_ms":int(day.timestamp()*1000),"cycle_key":day.strftime("%Y-%m-%d")
+    } for day in candidate_dates if start<=day<end]
 
 def forecast(db, month, subscriptions):
     a,b=boundaries(month)
@@ -171,13 +176,21 @@ def snapshot(month:str):
         for row in rows:
             totals[(row["currency"],row["direction"])]+=row["amount_cents"]
             if row["direction"]=="EXPENSE":categories[(row["currency"],row["category"])]+=row["amount_cents"]
+        # Period cash flow: count a refund in the month the money arrives,
+        # NOT retroactively in the original purchase month.
         refunds=db.execute(f"""SELECT t.currency,SUM(r.amount_cents) cents FROM refund_links r
-              JOIN transactions t ON t.id=r.original_tx_id WHERE t.timestamp_ms>=?
-              AND t.timestamp_ms<? AND {VALID} GROUP BY t.currency""",(a,b)).fetchall()
+              JOIN transactions t ON t.id=r.refund_tx_id
+              JOIN transactions o ON o.id=r.original_tx_id
+              WHERE t.timestamp_ms>=? AND t.timestamp_ms<?
+              AND o.review_status NOT IN ('excluded','transfer','refund')
+              GROUP BY t.currency""",(a,b)).fetchall()
         refund_map={r["currency"]:r["cents"] for r in refunds}
         refund_records=[dict(r) for r in db.execute("""SELECT r.refund_tx_id,r.original_tx_id,
               r.amount_cents,o.currency FROM refund_links r
-              JOIN transactions o ON o.id=r.original_tx_id ORDER BY r.refund_tx_id DESC LIMIT 40""")]
+              JOIN transactions o ON o.id=r.original_tx_id
+              JOIN transactions t ON t.id=r.refund_tx_id
+              WHERE t.timestamp_ms>=? AND t.timestamp_ms<?
+              ORDER BY t.timestamp_ms DESC LIMIT 40""",(a,b))]
         budget_row=db.execute("SELECT amount_cents FROM expense_budgets WHERE month=?",(month,)).fetchone()
         budget=budget_row[0] if budget_row else None
         matches=candidate_matches(db,month,schedule)
@@ -366,7 +379,12 @@ def refund(t:Refund):
         if original["direction"]!="EXPENSE" or received["direction"]!="INCOME":
             raise HTTPException(422,"Refund must link income to expense")
         if original["currency"]!=received["currency"]:raise HTTPException(422,"Currency mismatch")
-        if t.amount_cents>received["amount_cents"]:raise HTTPException(422,"Refund exceeds income")
+        if original["review_status"] in ("excluded","transfer","refund") or received["review_status"] in ("excluded","transfer"):
+            raise HTTPException(422,"Excluded or transferred records cannot be linked as a refund")
+        # Each observed refund event has one linked purchase in the current
+        # schema. A partial allocation silently drops the unmatched income.
+        if t.amount_cents!=received["amount_cents"]:
+            raise HTTPException(422,"Refund allocation must equal the full income event")
         used=db.execute("SELECT COALESCE(SUM(amount_cents),0) FROM refund_links WHERE original_tx_id=?",
                         (t.original_tx_id,)).fetchone()[0]
         if used+t.amount_cents>original["amount_cents"]:raise HTTPException(422,"Refund exceeds original expense")
@@ -412,15 +430,18 @@ def trends(months:int=Query(12,ge=2,le=36)):
         rows=db.execute(f"""SELECT timestamp_ms,amount_cents,currency,direction,category
              FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<? AND {VALID}""",
              (int(start.timestamp()*1000),int((now+timedelta(days=1)).timestamp()*1000))).fetchall()
-        refunds=db.execute("""SELECT o.timestamp_ms, o.currency, r.amount_cents
+        refunds=db.execute("""SELECT t.timestamp_ms, o.currency, r.amount_cents
             FROM refund_links r JOIN transactions o ON o.id=r.original_tx_id
-            WHERE o.timestamp_ms>=? AND o.review_status NOT IN ('excluded','transfer','refund')""",(int(start.timestamp()*1000),)).fetchall()
+            JOIN transactions t ON t.id=r.refund_tx_id
+            WHERE t.timestamp_ms>=? AND t.timestamp_ms<?
+            AND o.review_status NOT IN ('excluded','transfer','refund')""",
+            (int(start.timestamp()*1000),int((now+timedelta(days=1)).timestamp()*1000))).fetchall()
     totals=defaultdict(int)
     for r in rows:totals[(dt(r["timestamp_ms"]).strftime("%Y-%m"),r["currency"],r["direction"])]+=r["amount_cents"]
     for r in refunds:totals[(dt(r["timestamp_ms"]).strftime("%Y-%m"),r["currency"],"REFUND")]+=r["amount_cents"]
     return {"months":months,"series":[{"month":m,"currency":c,"direction":d,"amount_cents":v}
              for (m,c,d),v in sorted(totals.items())],
-            "note":"Refunds are separate deductions and are attributed to the original purchase month."}
+            "note":"Refunds are separate deductions and are attributed to the month the money was received (cash-flow basis)."}
 
 @router.get("/integration/discover")
 def discover(months:int=Query(12,ge=2,le=36)):
@@ -431,10 +452,17 @@ def discover(months:int=Query(12,ge=2,le=36)):
         schema(db)
         rows=db.execute(f"""SELECT * FROM transactions WHERE timestamp_ms>=?
                  AND direction='EXPENSE' AND {VALID} ORDER BY timestamp_ms""",(threshold,)).fetchall()
+    # Suggestions should not re-propose subscriptions already maintained in
+    # Wallos; this is discovery, not another subscription database.
+    try:
+        existing={(x["name"].strip().casefold(),x["currency"]) for x in get_all() if x["active"]}
+    except WallosError:
+        existing=set()
     groups=defaultdict(list)
     for r in rows:
         merchant=r["merchant"].strip().casefold()
-        if merchant and merchant not in ("微信支付","支付宝","其他","unknown","paid"):
+        if (merchant and merchant not in ("微信支付","支付宝","其他","unknown","paid")
+                and (merchant,r["currency"]) not in existing):
             groups[(merchant,r["currency"])].append(r)
     out=[]
     for (merchant,currency),records in groups.items():
@@ -442,13 +470,17 @@ def discover(months:int=Query(12,ge=2,le=36)):
         recurring=[]
         for a,b in zip(records,records[1:]):
             gap=(b["timestamp_ms"]-a["timestamp_ms"])/86400000
-            if 25<=gap<=35 or 350<=gap<=380:
-                if abs(a["amount_cents"]-b["amount_cents"])<=max(100,a["amount_cents"]//5):
-                    recurring.append("yearly" if gap>100 else "monthly")
+            cadence=("weekly" if 6<=gap<=8 else
+                     "monthly" if 25<=gap<=35 else
+                     "quarterly" if 83<=gap<=100 else
+                     "yearly" if 350<=gap<=380 else None)
+            if cadence and abs(a["amount_cents"]-b["amount_cents"])<=max(100,a["amount_cents"]//5):
+                recurring.append(cadence)
         if recurring:
             cycle=max(set(recurring),key=recurring.count)
             prev=dt(records[-1]["timestamp_ms"])
-            next_due=month_shift(prev,12 if cycle=="yearly" else 1)
+            next_due=(prev+timedelta(days=7) if cycle=="weekly" else
+                      month_shift(prev,12 if cycle=="yearly" else 3 if cycle=="quarterly" else 1))
             out.append({"merchant":records[-1]["merchant"],"currency":currency,
                  "amount_cents":records[-1]["amount_cents"],"cadence":cycle,
                  "next_due_date":next_due.strftime("%Y-%m-%d"),
@@ -460,7 +492,7 @@ class NewSubscription(BaseModel):
     name:str=Field(min_length=3,max_length=140)
     currency:str=Field(pattern=r"^[A-Z]{3}$")
     amount_cents:int=Field(gt=0,le=100_000_000_000)
-    cadence:Literal["monthly","yearly"]
+    cadence:Literal["weekly","monthly","quarterly","yearly"]
     next_due_ms:int=Field(gt=946684800000,lt=4102444800000)
 
 @router.post("/integration/subscribe")

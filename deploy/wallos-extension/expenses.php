@@ -369,10 +369,11 @@ $notice=$_GET['notice'] ?? '';
                 <input type="hidden" name="action" value="review">
                 <input type="hidden" name="entry_id" value="<?= $id ?>">
                 <select name="status" aria-label="核对 <?= ledger_escape($entry['merchant']??'交易') ?>" onchange="this.form.submit()">
-                  <?php foreach(['unverified'=>'待核对','confirmed'=>'已确认','excluded'=>'不计入','transfer'=>'转账','refund'=>'退款'] as $state=>$title): ?>
+                  <?php foreach(['unverified'=>'待核对','confirmed'=>'已确认','excluded'=>'不计入','transfer'=>'转账'] as $state=>$title): ?>
                     <option value="<?= ledger_escape($state) ?>" <?= $status===$state?'selected':'' ?>><?= ledger_escape($title) ?></option>
                   <?php endforeach; ?>
                   <?php if($status==='possible_duplicate'): ?><option value="possible_duplicate" selected>疑似重复</option><?php endif; ?>
+                  <?php if($status==='refund'): ?><option value="refund" selected>已关联退款（在对账页面管理）</option><?php endif; ?>
                 </select>
               </form>
             </div>

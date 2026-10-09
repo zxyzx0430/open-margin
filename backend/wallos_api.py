@@ -7,6 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import json
 import sqlite3
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from pathlib import Path
 import urllib.parse
 import urllib.request
@@ -59,9 +60,14 @@ def normalize(row: dict) -> dict:
         ms=int(datetime.strptime(str(due),"%Y-%m-%d").replace(tzinfo=LOCAL_TZ).timestamp()*1000)
     except ValueError:
         ms=None
+    try:
+        price_cents=int((Decimal(str(row.get("price") or "0"))*100)
+                        .quantize(Decimal("1"),rounding=ROUND_HALF_UP))
+    except (InvalidOperation,ValueError):
+        price_cents=0
     return {
         "id":int(row["id"]),"name":row["name"],
-        "amount_cents":round(float(row.get("price") or 0)*100),
+        "amount_cents":price_cents,
         "currency":CURRENCY_CODES.get(int(row.get("currency_id") or 0),"UNKNOWN"),
         "cadence":cadence,"next_due_ms":ms,
         "start_ms":subscription_start_ms(row.get("start_date")),

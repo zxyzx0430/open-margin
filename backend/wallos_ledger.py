@@ -250,6 +250,9 @@ def review(entry_id:int,t:ReviewEntry):
     with core.db_connection() as db:
         from integration import schema
         schema(db)
+        if t.status=="refund" and not db.execute(
+            "SELECT 1 FROM refund_links WHERE refund_tx_id=?",(entry_id,)).fetchone():
+            raise HTTPException(status_code=422,detail="Link refund to a purchase first")
         if t.status!="refund" and db.execute(
             "SELECT 1 FROM refund_links WHERE refund_tx_id=?",(entry_id,)).fetchone():
             raise HTTPException(status_code=409,detail="Unlink refund first")

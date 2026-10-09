@@ -62,7 +62,7 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
       <div class="statistic"><span><?=intval($overview['linked_count']??0)?></span><div class="title">已匹配期数</div></div>
       <div class="statistic"><span><?=intval($overview['pending_count']??0)?></span><div class="title">待匹配期数</div></div>
     </div>
-    <p class="integ-note">净支出＝真实支出－已关联退款。预计总开销＝净支出＋未付款的 CNY 订阅预测；同一笔已匹配交易只计一次。币种分开展示，不进行推测汇率换算。</p>
+    <p class="integ-note">净支出＝本月真实支出－本月实际到账的已关联退款。预计总开销＝净支出＋未付款的 CNY 订阅预测；同一笔已匹配交易只计一次。币种分开展示，不进行推测汇率换算。</p>
   </section>
   <section class="stats-section">
     <h2>订阅周期付款状态</h2>
@@ -201,6 +201,6 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
       <?php endforeach; ?>
     </tbody></table></div>
     <?php if(empty($trends['series'])): ?><p class="integ-note">尚无足够交易形成趋势。</p><?php endif; ?>
-    <p class="integ-note">多币种不合并；已关联退款单独作为扣减项展示。</p>
+    <p class="integ-note">多币种不合并；已关联退款按实际到账月份单独作为扣减项展示。</p>
   </section>
 </section>

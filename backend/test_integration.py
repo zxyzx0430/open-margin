@@ -46,6 +46,35 @@ class IntegrationTests(unittest.TestCase):
                  VALUES(?,?,?,?,?,'WECHAT',?,?)""",(f"test:{ts}:{amount}:{direction}:{merchant}",ts,amount,currency,direction,category,merchant))
             return cur.lastrowid
 
+    def test_recurrence_discovery_supports_weekly_and_skips_existing_wallos(self):
+        for day in (1,8,15):
+            self.insert(ts=stamp(2026,9,day),amount=850,merchant="Coffee Pass")
+        for day,month in ((15,8),(15,9)):
+            self.insert(ts=stamp(2026,month,day),amount=2000,merchant="Example Streaming")
+        result=self.client.get(self.base+"/discover",params={"months":12},headers=self.h)
+        self.assertEqual(result.status_code,200,result.text)
+        names={r["merchant"]:r for r in result.json()["items"]}
+        self.assertEqual(names["Coffee Pass"]["cadence"],"weekly")
+        self.assertNotIn("Example Streaming",names,"Known active Wallos subscriptions must not be proposed again")
+
+    def test_money_decimal_rounding_from_wallos(self):
+        from wallos_api import normalize
+        row={"id":99,"name":"Rounding Example","price":"1.005",
+             "currency_id":20,"cycle":3,"frequency":1,"next_payment":"2026-11-12",
+             "start_date":"2026-10-12","inactive":0}
+        self.assertEqual(normalize(row)["amount_cents"],101)
+
+    def test_month_end_billing_does_not_drift(self):
+        from integration import occurrences
+        jan31={**SUBS[0],"next_due_ms":stamp(2026,1,31)}
+        start=stamp(2026,2,1)
+        end=stamp(2026,6,1)
+        self.assertEqual([r["cycle_key"] for r in occurrences(jan31,start,end)],
+                         ["2026-02-28","2026-03-31","2026-04-30","2026-05-31"])
+        leap={**SUBS[0],"next_due_ms":stamp(2024,2,29),"cadence":"yearly"}
+        self.assertEqual([r["cycle_key"] for r in occurrences(leap,stamp(2025,1,1),stamp(2029,1,1))],
+                         ["2025-02-28","2026-02-28","2027-02-28","2028-02-29"])
+
     def test_forecast_link_and_no_double_count(self):
         tx=self.insert()
         res=self.client.get(self.base,params={"month":"2026-10"},headers=self.h)
@@ -81,6 +110,32 @@ class IntegrationTests(unittest.TestCase):
         with core.db_connection() as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM transaction_edits WHERE tx_id=?",(tx,)).fetchone()[0],3)
         self.assertEqual(self.client.delete(self.base+"/rules/1",headers=self.h).status_code,200)
+
+    def test_cross_month_refund_tracks_received_month_cashflow(self):
+        original=self.insert(ts=stamp(2026,9,25),amount=2500,merchant="A September expense")
+        income=self.insert(ts=stamp(2026,10,16),amount=500,direction="INCOME",merchant="Refund received")
+        res=self.client.post(self.base+"/refund",headers=self.h,
+            json={"original_tx_id":original,"refund_tx_id":income,"amount_cents":500})
+        self.assertEqual(res.status_code,200,res.text)
+        september=self.client.get(self.base,params={"month":"2026-09"},headers=self.h).json()
+        october=self.client.get(self.base,params={"month":"2026-10"},headers=self.h).json()
+        self.assertEqual(september["net_actual_spend_cny_cents"],2500)
+        self.assertEqual(october["net_actual_spend_cny_cents"],-500)
+        self.assertEqual(october["refunds_cents_by_currency"]["CNY"],500)
+        self.assertEqual(len(october["refund_links"]),1)
+
+    def test_partial_allocation_and_manual_refund_without_link_rejected(self):
+        original=self.insert(ts=stamp(2026,10,12),amount=2500)
+        income=self.insert(ts=stamp(2026,10,14),amount=500,direction="INCOME",merchant="Refund received")
+        result=self.client.post(self.base+"/refund",headers=self.h,
+            json={"original_tx_id":original,"refund_tx_id":income,"amount_cents":400})
+        self.assertEqual(result.status_code,422,result.text)
+        result=self.client.patch("/api/v1/wallos-ledger/review/"+str(income),
+            headers=self.h,json={"status":"refund"})
+        self.assertEqual(result.status_code,422,result.text)
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT review_status FROM transactions WHERE id=?",(income,)).fetchone()[0],
+                             "unverified")
 
     def test_refund_and_duplicate(self):
         tx=self.insert(amount=2500)

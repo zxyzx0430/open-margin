@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from config import DB, PUBLIC_BASE
 DEVICE_TOKEN = os.getenv("FINANCE_DEVICE_TOKEN", "")
 ADMIN_TOKEN = os.getenv("FINANCE_ADMIN_TOKEN", "")
-app = FastAPI(title="Personal Finance API", version="1.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="Personal Finance API", version="1.4.1", docs_url=None, redoc_url=None)
 
 class Event(BaseModel):
     event_id: str = Field(min_length=8, max_length=130, pattern=r"^[a-zA-Z0-9_.:-]+$")
@@ -104,7 +104,7 @@ def ledger_start_ms(db: sqlite3.Connection) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "finance-api", "version": "1.4.0"}
+    return {"ok": True, "service": "finance-api", "version": "1.4.1"}
 
 @app.post("/api/v1/transactions/batch", dependencies=[Depends(device_auth)])
 def ingest(batch: Batch):

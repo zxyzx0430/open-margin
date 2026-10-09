@@ -55,6 +55,9 @@ def attach(api, core):
         with core.db_connection() as db:
             from integration import schema
             schema(db)
+            if review.status=="refund" and not db.execute(
+                "SELECT 1 FROM refund_links WHERE refund_tx_id=?",(tx_id,)).fetchone():
+                raise HTTPException(422,"Link refund to a purchase before marking it as refund")
             if review.status!="refund" and db.execute(
                 "SELECT 1 FROM refund_links WHERE refund_tx_id=?",(tx_id,)).fetchone():
                 raise HTTPException(409,"Unlink refund first")
