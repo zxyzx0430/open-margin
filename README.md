@@ -69,7 +69,7 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 
 The two databases must be backed up separately: Wallos **subscriptions** and Finance **transactions**.
 
-Use `deploy/backup.py` with volume access and `FINANCE_DB`, `FINANCE_WALLOS_DB` and `FINANCE_BACKUP_DIR` configured; schedule it on the host daily. It uses SQLite online backup, integrity checks, atomic writes and 30-day daily retention. Off-machine **encrypted backups** are still strongly recommended.
+After registering the Wallos owner and initializing the ledger, run a verified on-demand snapshot:\n\n```sh\ndocker compose --profile maintenance run --rm backup\n```\n\nThe maintenance service mounts the two named SQLite volumes and writes verified snapshots to its dedicated backup volume. SQLite WAL access requires the source volume to permit shared-memory journal files; the Python connection itself is read-only. Schedule this command **daily** using your host scheduler (or a dedicated cron container). Snapshots have integrity checks, atomic writes and 30-day daily retention. Backups on the same host do not survive a disk or provider failure: also maintain **encrypted off-VPS backups**.
 
 Never delete or reset the live SQLite database to fix an app problem. Keep immutable snapshots and verify restores against **copies** before relying on them.
 
