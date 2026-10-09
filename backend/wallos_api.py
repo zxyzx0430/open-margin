@@ -38,6 +38,17 @@ def call(endpoint: str, data: dict) -> dict:
         raise WallosError(str(result.get("message") or result.get("title") or "Wallos error")[:150])
     return result
 
+def subscription_start_ms(raw) -> int | None:
+    if raw in (None, "", 0, "0"):return None
+    try:
+        if isinstance(raw,(int,float)) or str(raw).isdigit():
+            n=int(raw)
+            if n<946684800:return None
+            return n if n>10_000_000_000 else n*1000
+        return int(datetime.strptime(str(raw)[:10],"%Y-%m-%d")
+                   .replace(tzinfo=LOCAL_TZ).timestamp()*1000)
+    except (ValueError,TypeError,OverflowError):return None
+
 def normalize(row: dict) -> dict:
     cycle=int(row.get("cycle",0))
     frequency=int(row.get("frequency",0))
@@ -53,6 +64,7 @@ def normalize(row: dict) -> dict:
         "amount_cents":round(float(row.get("price") or 0)*100),
         "currency":CURRENCY_CODES.get(int(row.get("currency_id") or 0),"UNKNOWN"),
         "cadence":cadence,"next_due_ms":ms,
+        "start_ms":subscription_start_ms(row.get("start_date")),
         "payment_channel":row.get("payment_method_name") or "",
         "active":not bool(int(row.get("inactive") or 0)),
         "source":"Wallos", "payment_confirmed":False,

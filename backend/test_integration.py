@@ -96,6 +96,35 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.client.post(self.base+"/duplicate/"+str(tx),headers=self.h).status_code,200)
         self.assertEqual(self.client.get(self.base,params={"month":"2026-10"},headers=self.h).json()["net_actual_spend_cny_cents"],0)
 
+    def test_duplicate_subscription_cycle_charge_is_flagged(self):
+        original=self.insert()
+        self.insert(ts=stamp(2026,10,17),amount=2000,merchant="Example Streaming")
+        ok=self.client.post(self.base+"/link",headers=self.h,
+            json={"tx_id":original,"subscription_id":42,"cycle_key":"2026-10-15"})
+        self.assertEqual(ok.status_code,200,ok.text)
+        j=self.client.get(self.base,params={"month":"2026-10"},headers=self.h).json()
+        self.assertTrue(any(alert["kind"]=="duplicate_subscription_charge" for alert in j["alerts"]))
+
+    def test_payment_channel_mismatch_warning(self):
+        with patch("integration.get_all",return_value=[
+             {**SUBS[0],"payment_channel":"AliPay"}]):
+            tx=self.insert()
+            self.assertEqual(self.client.post(self.base+"/link",headers=self.h,
+                json={"tx_id":tx,"subscription_id":42,"cycle_key":"2026-10-15"}).status_code,200)
+            j=self.client.get(self.base,params={"month":"2026-10"},headers=self.h).json()
+            self.assertTrue(any(a["kind"]=="payment_method_mismatch" for a in j["alerts"]))
+
+    def test_reset_cutoff_excludes_before_start_subscription_billing(self):
+        old={**SUBS[0],"next_due_ms":stamp(2026,11,9)}
+        with patch("integration.get_all",return_value=[old]):
+            with core.db_connection() as db:
+                db.execute("INSERT INTO ledger_settings(key,value) VALUES(?,?)",
+                           ("start_timestamp_ms",str(stamp(2026,10,10))))
+            j=self.client.get(self.base,params={"month":"2026-10"},headers=self.h).json()
+            self.assertEqual(j["subscriptions"],[])
+            self.assertEqual(j["pending_count"],0)
+            self.assertEqual(j["alerts"],[])
+
     def test_no_unauthorized_access_or_automatic_subscription_creation(self):
         r=self.client.get(self.base,params={"month":"2026-10"})
         self.assertEqual(r.status_code,401)

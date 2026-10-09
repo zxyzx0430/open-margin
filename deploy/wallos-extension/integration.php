@@ -127,7 +127,7 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
     <h2>扣款提醒与异常</h2>
     <?php foreach(($overview['alerts']??[]) as $a): ?>
       <div class="integ-item">
-        <span><?=ledger_escape(match($a['kind']){'price_change'=>'金额变化','payment_method_mismatch'=>'支付渠道不一致，请核对','missing_payment'=>'预计扣款日已过，未匹配到账单','possible_duplicates'=>'疑似重复交易',default=>'需要核对'})?></span>
+        <span><?=ledger_escape(match($a['kind']){'price_change'=>'金额变化','payment_method_mismatch'=>'支付渠道不一致，请核对','duplicate_subscription_charge'=>'疑似同一会员周期重复扣款','missing_payment'=>'预计扣款日已过，未匹配到账单','possible_duplicates'=>'疑似重复交易',default=>'需要核对'})?></span>
         <span class="integ-note"><?=ledger_escape($a['subscription']??('交易 '.($a['count']??'')))?> · <?=ledger_escape($a['cycle_key']??'')?></span>
       </div>
     <?php endforeach; ?>

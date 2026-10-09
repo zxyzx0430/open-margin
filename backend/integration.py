@@ -97,11 +97,15 @@ def occurrences(s:dict, first_ms:int,last_ms:int)->list:
 
 def forecast(db, month, subscriptions):
     a,b=boundaries(month)
-    # Allow nearby billing date variance without altering Wallos schedules.
+    # No projected historical billing before the ledger's explicit fresh start.
+    # Users may have deliberately reset their bookkeeping.
+    cutoff=db.execute("SELECT value FROM ledger_settings WHERE key='start_timestamp_ms'").fetchone()
+    if cutoff:a=max(a,int(cutoff[0]))
     items=[]
     for sub in subscriptions:
         if not sub["active"]:continue
-        items.extend(occurrences(sub,a,b))
+        first=max(a,int(sub.get("start_ms") or 0))
+        if first<b:items.extend(occurrences(sub,first,b))
     items.sort(key=lambda r:r["due_ms"])
     links={ (r["sub_id"],r["cycle_key"]):dict(r) for r in db.execute(
         """SELECT l.*,t.amount_cents AS paid_cents,t.currency AS paid_currency,
@@ -193,6 +197,22 @@ def snapshot(month:str):
                                    "expected_cents":item["amount_cents"],"actual_cents":item["paid_cents"]})
             elif item["due_ms"]<now_ms-2*86400000:
                 alerts.append({"kind":"missing_payment","subscription":item["name"],"cycle_key":item["cycle_key"]})
+        # Detect a possible double charge within a paid subscription cycle,
+        # even when events arrived days apart rather than 90 seconds apart.
+        for matched in paid:
+            name=matched["name"].strip().casefold()
+            if len(name)<3:continue
+            other=db.execute("""SELECT t.id,t.merchant FROM transactions t
+                LEFT JOIN tx_subscription_links l ON l.tx_id=t.id
+                WHERE t.direction='EXPENSE' AND t.currency=? AND t.id!=?
+                  AND t.review_status NOT IN ('excluded','transfer','refund')
+                  AND l.tx_id IS NULL
+                  AND ABS(t.timestamp_ms-?)<=? AND ABS(t.amount_cents-?)<=? LIMIT 12""",
+                  (matched["currency"],matched["transaction_id"],matched["due_ms"],4*86400000,
+                   matched["amount_cents"],max(100,round(matched["amount_cents"]*.15)))).fetchall()
+            if any(name in (r["merchant"] or "").casefold() for r in other):
+                alerts.append({"kind":"duplicate_subscription_charge","subscription":matched["name"],
+                               "cycle_key":matched["cycle_key"]})
         dups=db.execute("""SELECT COUNT(*) FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<?
               AND review_status='possible_duplicate'""",(a,b)).fetchone()[0]
         if dups:alerts.append({"kind":"possible_duplicates","count":dups})
