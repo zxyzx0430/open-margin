@@ -53,6 +53,15 @@ def attach(api, core):
     @api.patch("/api/v1/transactions/{tx_id}/review",dependencies=[Depends(core.admin_auth)])
     def review(tx_id:int, review: Review):
         with core.db_connection() as db:
+            from integration import schema
+            schema(db)
+            if review.status!="refund" and db.execute(
+                "SELECT 1 FROM refund_links WHERE refund_tx_id=?",(tx_id,)).fetchone():
+                raise HTTPException(409,"Unlink refund first")
+            if review.status in ("excluded","transfer","refund"):
+                if db.execute("SELECT 1 FROM refund_links WHERE original_tx_id=?",(tx_id,)).fetchone():
+                    raise HTTPException(409,"Unlink original purchase refund first")
+                db.execute("DELETE FROM tx_subscription_links WHERE tx_id=?",(tx_id,))
             cur=db.execute("UPDATE transactions SET review_status=? WHERE id=?",(review.status,tx_id))
             if cur.rowcount!=1: raise HTTPException(404,"Transaction not found")
         return {"updated":True}

@@ -57,6 +57,14 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 
 **Credentials:** `secrets/` is mode **0700**, `secrets/backend.env` is **0600**, and `secrets/wallos-ledger.env` is **0644 inside that non-traversable directory**, because the non-root PHP worker must be able to read the file inside its container. All are ignored by Git. Keep the private parent directory restricted and never commit/share these files. Changing a device upload token requires updating the phone. The Wallos browser never receives the backend ledger token.
 
+## Wallos × actual payment integration (v1.4)
+
+- A native Wallos **Subscriptions × Spending** screen reconciles expected subscription billing cycles against existing Android transactions, without inventing payments.
+- Suggested matches require human confirmation; one transaction cannot be linked to multiple billing periods. Linked real expenses are counted **once**.
+- Supports refund reconciliation, transaction corrections with an audit log, merchant-category rules, recurrence discovery, estimated remaining budgets, anomaly cards and up to 36 months of separate-currency trends.
+- The private Wallos API, background mobile ingestion and OAuth MCP tools expose the same data model. Write tools require a finance:write grant.
+- Access: /finance/wallos/integration.php (after Wallos owner login). See [technical guide](docs/wallos-integration-v14.md).
+
 ## Daily workflow
 
 - Android queues new structured transaction events immediately; WorkManager retries and schedules additional sync at **minimum 15-minute intervals** subject to Android battery restrictions.

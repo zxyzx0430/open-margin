@@ -74,3 +74,56 @@ def add_subscription(name:str, amount_cents:int, currency:str, cadence:str, next
         return {"created":True,"subscription_id":add(name,amount_cents,currency,cadence,next_due_ms,payment_channel),"source":"Wallos"}
     except WallosError as exc:
         return {"error":str(exc)}
+
+@mcp.tool()
+def personal_finance_overview(month: str) -> dict:
+    """Combine REAL spending with Wallos subscriptions, paid cycles, pending charges,
+    current CNY budget/forecast, anomalies and suggested matches for YYYY-MM.
+    This never counts a scheduled subscription as a real payment.
+    """
+    from integration import snapshot
+    try:return snapshot(month)
+    except Exception as exc:return {"error":str(exc)[:150]}
+
+@mcp.tool()
+def personal_finance_long_term_trends(months: int=12) -> dict:
+    """Historical monthly spending by currency, including linked refund deductions."""
+    from integration import trends
+    if not 2<=months<=36:return {"error":"months must be 2..36"}
+    return trends(months)
+
+@mcp.tool()
+def personal_finance_recurring_discovery(months:int=12) -> dict:
+    """Candidate recurring payments requiring confirmation before adding to Wallos."""
+    from integration import discover
+    if not 2<=months<=36:return {"error":"months must be 2..36"}
+    return discover(months)
+
+@mcp.tool()
+def confirm_subscription_payment(tx_id:int,subscription_id:int,cycle_key:str) -> dict:
+    """Explicitly confirm that an existing payment belongs to this Wallos billing cycle.
+    Does not create an additional expense or advance Wallos renewal dates.
+    """
+    from integration import link, Link
+    return link(Link(tx_id=tx_id,subscription_id=subscription_id,cycle_key=cycle_key))
+
+@mcp.tool()
+def edit_record(tx_id:int,amount_cents:int|None=None,merchant:str|None=None,category:str|None=None) -> dict:
+    """Correct an existing ledger entry, recording an audit trail of edited fields."""
+    from integration import edit_transaction, Edit
+    values={k:v for k,v in {"amount_cents":amount_cents,"merchant":merchant,"category":category}.items() if v is not None}
+    return edit_transaction(tx_id,Edit(**values))
+
+@mcp.tool()
+def register_merchant_rule(needle:str,category:str) -> dict:
+    """After owner confirmation, classify future OTHER transactions from this merchant."""
+    from integration import rule_add, Rule
+    return rule_add(Rule(needle=needle,category=category))
+
+@mcp.tool()
+def link_refund(original_tx_id:int,refund_tx_id:int,amount_cents:int) -> dict:
+    """Associate an existing income record with a previous expense as a refund.
+    Never invent a payment or refund transaction.
+    """
+    from integration import refund, Refund
+    return refund(Refund(original_tx_id=original_tx_id,refund_tx_id=refund_tx_id,amount_cents=amount_cents))

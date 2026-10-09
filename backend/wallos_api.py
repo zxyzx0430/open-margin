@@ -86,6 +86,15 @@ def valid_subscription_links(payment_channel: str = "") -> dict:
              else "未指定（待确认）")
         method=db.execute("SELECT id FROM payment_methods WHERE user_id=? AND enabled=1 AND name=? LIMIT 1",
                           (owner,method_name)).fetchone()
+        if not method:
+            # Fresh upstream Wallos installs have English defaults such as
+            # "Money"/"Credit Card", but no custom "未指定（待确认）" payment method.
+            # Use the existing default money method rather than failing all
+            # subscription creation on a completely fresh installation.
+            method=db.execute("""SELECT id FROM payment_methods
+                WHERE user_id=? AND enabled=1
+                ORDER BY CASE WHEN name IN ('Money','Cash','现金') THEN 0 ELSE 1 END,id LIMIT 1""",
+                (owner,)).fetchone()
         if not (household and category and method):
             raise WallosError("Wallos member, category or payment method missing")
         return {"payer_user_id":household[0],"category_id":category[0],

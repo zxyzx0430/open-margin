@@ -63,6 +63,74 @@ try {
         }
         ledger_request('PUT','budget/'.$month,['amount_cents'=>$cents]);
         $notice='budget';
+    } elseif ($action==='link') {
+        $tx=filter_var($_POST['tx_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $sub=filter_var($_POST['subscription_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $cycle=(string)($_POST['cycle_key']??'');
+        if (isset($_POST['subscription_cycle'])) {
+            $pair=explode('|',(string)$_POST['subscription_cycle'],2);
+            if(count($pair)===2){$sub=filter_var($pair[0],FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);$cycle=$pair[1];}
+        }
+        if(!$tx||!$sub||!preg_match('/^\d{4}-\d{2}-\d{2}$/D',$cycle))throw new InvalidArgumentException('Invalid link');
+        ledger_request('POST','integration/link',['tx_id'=>$tx,'subscription_id'=>$sub,'cycle_key'=>$cycle]);
+        $notice='saved';
+    } elseif ($action==='unlink') {
+        $tx=filter_var($_POST['tx_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        if(!$tx)throw new InvalidArgumentException('Invalid unlink');
+        ledger_request('DELETE','integration/link/'.$tx);
+        $notice='saved';
+    } elseif ($action==='rule') {
+        $needle=trim((string)($_POST['needle']??''));
+        $category=(string)($_POST['category']??'OTHER');
+        if(mb_strlen($needle)<3||mb_strlen($needle)>90)throw new InvalidArgumentException('Invalid merchant');
+        ledger_request('POST','integration/rules',['needle'=>$needle,'category'=>$category]);
+        $notice='saved';
+    } elseif ($action==='delete_rule') {
+        $id=filter_var($_POST['rule_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        if(!$id)throw new InvalidArgumentException('Invalid rule');
+        ledger_request('DELETE','integration/rules/'.$id);
+        $notice='saved';
+    } elseif ($action==='edit') {
+        $tx=filter_var($_POST['entry_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $raw=trim((string)($_POST['amount']??''));
+        if(!$tx||!preg_match('/^[0-9]{1,9}(?:\.[0-9]{1,2})?$/D',$raw))throw new InvalidArgumentException('Invalid amount');
+        [$whole,$fraction]=array_pad(explode('.',$raw,2),2,'');
+        $amount=intval($whole)*100+intval(str_pad($fraction,2,'0'));
+        if($amount<1)throw new InvalidArgumentException('Invalid amount');
+        ledger_request('PATCH','integration/transaction/'.$tx,[
+            'amount_cents'=>$amount,'merchant'=>mb_substr((string)($_POST['merchant']??''),0,140),
+            'category'=>(string)($_POST['category']??'OTHER')]);
+        $notice='saved';
+    } elseif ($action==='duplicate') {
+        $tx=filter_var($_POST['entry_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        if(!$tx)throw new InvalidArgumentException('Invalid entry');
+        ledger_request('POST','integration/duplicate/'.$tx);
+        $notice='saved';
+    } elseif ($action==='refund') {
+        $original=filter_var($_POST['original_tx_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $refund=filter_var($_POST['refund_tx_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        $raw=trim((string)($_POST['refund_amount']??''));
+        if(!$original||!$refund||!preg_match('/^[0-9]{1,9}(?:\.[0-9]{1,2})?$/D',$raw))throw new InvalidArgumentException('Invalid refund');
+        [$whole,$fraction]=array_pad(explode('.',$raw,2),2,'');
+        $amount=intval($whole)*100+intval(str_pad($fraction,2,'0'));
+        ledger_request('POST','integration/refund',['original_tx_id'=>$original,'refund_tx_id'=>$refund,'amount_cents'=>$amount]);
+        $notice='saved';
+    } elseif ($action==='unlink_refund') {
+        $tx=filter_var($_POST['refund_tx_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        if(!$tx)throw new InvalidArgumentException('Invalid refund');
+        ledger_request('DELETE','integration/refund/'.$tx);
+        $notice='saved';
+    } elseif ($action==='subscribe') {
+        $date=(string)($_POST['next_due_date']??'');
+        $parsed=DateTimeImmutable::createFromFormat('!Y-m-d',$date,new DateTimeZone('Asia/Shanghai'));
+        $amount=filter_var($_POST['amount_cents']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+        if(!$amount||!$parsed||$parsed->format('Y-m-d')!==$date)throw new InvalidArgumentException('Invalid next payment date');
+        ledger_request('POST','integration/subscribe',[
+          'name'=>mb_substr(trim((string)($_POST['name']??'')),0,140),
+          'currency'=>(string)($_POST['currency']??'CNY'),
+          'amount_cents'=>$amount,'cadence'=>(string)($_POST['cadence']??'monthly'),
+          'next_due_ms'=>intval($parsed->format('U'))*1000]);
+        $notice='saved';
     } elseif ($action==='review') {
         $entry=(string)($_POST['entry_id'] ?? '');
         $status=(string)($_POST['status'] ?? '');
@@ -79,5 +147,6 @@ try {
     error_log('[Wallos daily-ledger] Failed expense action '.get_class($e));
     $notice='failed';
 }
-header('Location: expenses.php?month='.rawurlencode($month).'&notice='.$notice,true,303);
+$target=in_array($action,['link','unlink','rule','delete_rule','refund','unlink_refund','subscribe'],true)?'integration.php':'expenses.php';
+header('Location: '.$target.'?month='.rawurlencode($month).'&notice='.$notice,true,303);
 exit;

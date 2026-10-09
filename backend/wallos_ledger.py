@@ -248,6 +248,15 @@ def review(entry_id:int,t:ReviewEntry):
     if t.status not in {"confirmed","unverified","excluded","transfer","refund","possible_duplicate"}:
         raise HTTPException(status_code=422,detail="Invalid review status")
     with core.db_connection() as db:
+        from integration import schema
+        schema(db)
+        if t.status!="refund" and db.execute(
+            "SELECT 1 FROM refund_links WHERE refund_tx_id=?",(entry_id,)).fetchone():
+            raise HTTPException(status_code=409,detail="Unlink refund first")
+        if t.status in ("excluded","transfer","refund"):
+            if db.execute("SELECT 1 FROM refund_links WHERE original_tx_id=?",(entry_id,)).fetchone():
+                raise HTTPException(status_code=409,detail="Unlink related refunds first")
+            db.execute("DELETE FROM tx_subscription_links WHERE tx_id=?",(entry_id,))
         cur=db.execute("UPDATE transactions SET review_status=? WHERE id=?",(t.status,entry_id))
         if cur.rowcount!=1:raise HTTPException(status_code=404,detail="Transaction not found")
     return {"ok":True}

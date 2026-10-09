@@ -7,7 +7,7 @@ function ledger_escape($value): string {
 }
 
 function ledger_request(string $method, string $path, ?array $body = null): array {
-    if (!preg_match('#^(month\?month=\d{4}-\d{2}(?:&(day|category|direction|q|offset)=[A-Za-z0-9._%~-]*){0,5}|manual|review/[0-9]+|budget/\d{4}-\d{2})$#', $path)) {
+    if (!preg_match('#^(month\?month=\d{4}-\d{2}(?:&(day|category|direction|q|offset)=[A-Za-z0-9._%~-]*){0,5}|manual|review/[0-9]+|budget/\d{4}-\d{2}|integration\?month=\d{4}-\d{2}|integration/trends\?months=\d{1,2}|integration/discover\?months=\d{1,2}|integration/rules(?:/[0-9]+)?|integration/link(?:/[0-9]+)?|integration/transaction/[0-9]+|integration/refund(?:/[0-9]+)?|integration/duplicate/[0-9]+|integration/subscribe)$#', $path)) {
         throw new RuntimeException('Invalid ledger route');
     }
     $secretPath = '/run/secrets/wallos-ledger.env';

@@ -88,6 +88,11 @@ check(r.status_code==303 and "notice=added" in r.headers.get("Location",""),
       "Native PHP manual expense saved")
 r=session.get(wallos+"/expenses.php?month=2026-10",timeout=25)
 check("12.34" in r.text,"Manually added transaction visible")
+integrated=session.get(wallos+"/integration.php?month=2026-10",timeout=30)
+check(integrated.status_code==200 and "订阅 × 消费对账" in integrated.text,
+      "Wallos-native subscription reconciliation page renders")
+check("综合月度概览" in integrated.text and "商户自动分类规则" in integrated.text,
+      "Unified forecast, matching and merchant-rule panels available")
 
 # Export and PHP budget save test, both same Wallos login.
 export=session.get(wallos+"/expenses-export.php?month=2026-10",timeout=25)

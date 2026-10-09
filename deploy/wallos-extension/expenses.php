@@ -295,6 +295,7 @@ $notice=$_GET['notice'] ?? '';
       <h2 style="flex:1;margin-bottom:14px">交易流水 · <?= ledger_escape($month) ?></h2>
       <a href="expenses-export.php?month=<?= ledger_escape($month) ?>" class="button secondary-button tiny"><i class="fa-solid fa-file-csv"></i> 导出 CSV</a>
       <a href="subscriptions.php" class="button secondary-button tiny"><i class="fa-solid fa-rotate"></i> 订阅管理</a>
+      <a href="integration.php?month=<?= ledger_escape($month) ?>" class="button secondary-button tiny"><i class="fa-solid fa-link"></i> 订阅对账与分析</a>
     </div>
     <form method="get" action="expenses.php" class="ledger-search-form" aria-label="筛选消费流水">
       <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">
@@ -340,6 +341,26 @@ $notice=$_GET['notice'] ?? '';
                 <?= $entry['direction']==='INCOME'?'+':'−' ?><?= ledger_escape(ledger_money(intval($entry['amount_cents']),$entry['currency'])) ?>
               </div>
             </div>
+            <details class="ledger-section-message" style="margin:0 12px 0 60px">
+              <summary>修改交易 / 排除重复</summary>
+              <form method="post" action="expenses-action.php" class="ledger-budget-form" style="margin-bottom:10px">
+                <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">
+                <input type="hidden" name="month" value="<?=ledger_escape($month)?>">
+                <input type="hidden" name="action" value="edit">
+                <input type="hidden" name="entry_id" value="<?=$id?>">
+                <label>金额（元）<input name="amount" value="<?=ledger_escape(number_format(intval($entry['amount_cents'])/100,2,'.',''))?>" pattern="[0-9]+(\.[0-9]{1,2})?" required></label>
+                <label>商户<input name="merchant" maxlength="140" value="<?=ledger_escape($entry['merchant'])?>"></label>
+                <select name="category"><?php foreach($labels as $k=>$label): ?><option value="<?=ledger_escape($k)?>" <?=$category===$k?'selected':''?>><?=ledger_escape($label)?></option><?php endforeach; ?></select>
+                <button type="submit" class="button secondary-button tiny">保存修正</button>
+              </form>
+              <form method="post" action="expenses-action.php">
+                <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">
+                <input type="hidden" name="month" value="<?=ledger_escape($month)?>">
+                <input type="hidden" name="action" value="duplicate">
+                <input type="hidden" name="entry_id" value="<?=$id?>">
+                <button class="button secondary-button tiny" type="submit">确认这笔是重复交易（不计入统计）</button>
+              </form>
+            </details>
             <div class="ledger-review">
               <small><?= $status==='possible_duplicate'?'⚠ 疑似重复':'交易状态' ?></small>
               <form method="post" action="expenses-action.php">

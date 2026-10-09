@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from config import DB, PUBLIC_BASE
 DEVICE_TOKEN = os.getenv("FINANCE_DEVICE_TOKEN", "")
 ADMIN_TOKEN = os.getenv("FINANCE_ADMIN_TOKEN", "")
-app = FastAPI(title="Personal Finance API", version="1.3.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="Personal Finance API", version="1.4.0", docs_url=None, redoc_url=None)
 
 class Event(BaseModel):
     event_id: str = Field(min_length=8, max_length=130, pattern=r"^[a-zA-Z0-9_.:-]+$")
@@ -86,6 +86,8 @@ def db_connection():
         db.execute("""CREATE TABLE IF NOT EXISTS expense_budgets (
             month TEXT PRIMARY KEY, amount_cents INTEGER NOT NULL
             CHECK(amount_cents>0))""")
+        from integration import schema as integration_schema
+        integration_schema(db)
         db.commit()
         yield db
         db.commit()
@@ -102,7 +104,7 @@ def ledger_start_ms(db: sqlite3.Connection) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "finance-api", "version": "1.3.0"}
+    return {"ok": True, "service": "finance-api", "version": "1.4.0"}
 
 @app.post("/api/v1/transactions/batch", dependencies=[Depends(device_auth)])
 def ingest(batch: Batch):
@@ -118,10 +120,12 @@ def ingest(batch: Batch):
                   AND review_status NOT IN ('excluded','transfer','refund') LIMIT 1""",
                   (e.amount_cents,e.currency,e.direction,e.source,e.timestamp_ms)).fetchone()
             status = "possible_duplicate" if possible else "unverified"
+            from integration import resolve_category
+            classified=resolve_category(db,e.merchant,e.category)
             cur = db.execute("""INSERT OR IGNORE INTO transactions
                 (event_id,timestamp_ms,amount_cents,currency,direction,source,category,merchant,review_status)
                 VALUES (?,?,?,?,?,?,?,?,?)""",
-                (e.event_id,e.timestamp_ms,e.amount_cents,e.currency,e.direction,e.source,e.category,e.merchant,status))
+                (e.event_id,e.timestamp_ms,e.amount_cents,e.currency,e.direction,e.source,classified,e.merchant,status))
             if cur.rowcount == 1:
                 inserted += 1
                 if possible:
@@ -186,6 +190,8 @@ attach_features(app, __import__(__name__))
 
 from wallos_ledger import router as wallos_ledger_router
 app.include_router(wallos_ledger_router)
+from integration import router as integration_router
+app.include_router(integration_router)
 
 # The MCP surface requires the same administrator token and runs a read-only-by-default toolset.
 from contextlib import asynccontextmanager
@@ -216,7 +222,9 @@ async def mcp_authentication(request: Request, call_next):
             # An OAuth read-only grant must not call a modifying MCP tool.
             try:
                 payload = await request.json()
-                is_write = payload.get("method") == "tools/call" and payload.get("params",{}).get("name") == "add_subscription"
+                is_write = payload.get("method") == "tools/call" and payload.get("params",{}).get("name") in (
+                    "add_subscription","confirm_subscription_payment","edit_record",
+                    "register_merchant_rule","link_refund")
             except (ValueError,AttributeError,TypeError):
                 is_write = False
             if is_write and not verify_access_token(token,"finance:write"):
