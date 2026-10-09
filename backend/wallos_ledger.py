@@ -115,10 +115,20 @@ def month_view(
                 SUM(amount_cents) AS total_cents
                 FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<? AND {valid}
                 GROUP BY currency,direction,category""",(start_ms,end_ms)).fetchall()
-        daily=db.execute(f"""SELECT date(timestamp_ms/1000,'unixepoch','+8 hours') AS day,
-                currency,direction,SUM(amount_cents) AS total_cents, COUNT(*) AS count
+        # Group by the configured IANA timezone, not a hard-coded UTC offset.
+        # This also handles daylight-saving transitions correctly.
+        daily_points=db.execute(f"""SELECT timestamp_ms,currency,direction,amount_cents
                 FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<? AND {valid}
-                GROUP BY day,currency,direction ORDER BY day ASC""",(start_ms,end_ms)).fetchall()
+                ORDER BY timestamp_ms""",(start_ms,end_ms)).fetchall()
+        daily_groups={}
+        for event in daily_points:
+            local_day=datetime.fromtimestamp(event["timestamp_ms"]/1000,LOCAL).strftime("%Y-%m-%d")
+            key=(local_day,event["currency"],event["direction"])
+            group=daily_groups.setdefault(key,{"day":local_day,"currency":event["currency"],
+                                                 "direction":event["direction"],"total_cents":0,"count":0})
+            group["total_cents"]+=event["amount_cents"]
+            group["count"]+=1
+        daily=[daily_groups[key] for key in sorted(daily_groups)]
         def period_total(a,b):
             return [dict(r) for r in db.execute(f"""SELECT currency,direction,
                 SUM(amount_cents) AS total_cents,COUNT(*) AS count
