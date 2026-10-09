@@ -1,0 +1,5 @@
+*.db
+*.sqlite3
+*.env
+*.p12
+*.jks

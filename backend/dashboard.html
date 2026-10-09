@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>个人财务中心</title>
+<style>
+:root{color-scheme:light;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,"Noto Sans SC",sans-serif;color:#17223b;background:#f3f6fa}
+*{box-sizing:border-box}body{max-width:1150px;margin:0 auto;padding:18px}header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:1.55rem;margin:12px 0}h2{font-size:1.12rem;margin:0 0 12px}h3{font-size:1rem;margin:12px 0}
+small,.muted{color:#627086}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}
+.card{background:white;border:1px solid #e2e9f3;border-radius:14px;padding:18px;margin:12px 0;box-shadow:0 1px 3px #0c26420b}
+button{background:#1258ce;color:white;padding:9px 12px;border:0;border-radius:8px;cursor:pointer}
+button.gray{background:#eff3f9;color:#1e3154}input,select{border:1px solid #cbd6e3;border-radius:8px;padding:9px;width:100%;font-size:0.95rem}
+label{display:block;font-size:.83rem;color:#586880;margin:10px 0 4px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:145px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{border-bottom:1px solid #edf0f5;padding:10px 6px;text-align:left}th{color:#627086;font-weight:600}
+.scroller{overflow:auto}.pill{border-radius:15px;background:#e8f1ff;color:#1258ce;padding:4px 8px;white-space:nowrap}
+.warning{border:1px solid #f3d991;background:#fff9e8;padding:12px;border-radius:10px;font-size:.88rem;color:#6d5305}
+#message{white-space:pre-wrap} .hide{display:none} .num{font-variant-numeric:tabular-nums;font-weight:700;font-size:1.2rem}
+</style></head><body>
+<header><div><h1>个人消费流水 <span class="pill">V1 RC · 自托管</span></h1><small>实际交易与预计订阅分开统计 · 以本地记录为准</small></div><button class="gray" onclick="lock()">退出登录</button></header>
+<div class="warning">通知采集可能漏记、重复；这不是银行官方账单。订阅管理请使用 Wallos，消费流水在这里查看。</div>
+<section id="login" class="card"><h2>使用 Wallos 账号登录</h2>
+<form id="signInForm"><div class="row"><div><label>用户名</label><input id="username" autocomplete="username" required placeholder="Wallos 用户名"></div>
+<div><label>密码</label><input id="password" type="password" autocomplete="current-password" required placeholder="Wallos 密码"></div></div>
+<p><button type="submit">登录消费流水</button></p></form><p id="loginError" class="muted"></p>
+<small>与 Wallos 使用相同用户名和密码，独立短期登录状态，不需要复制 VPS 管理员令牌。</small></section>
+<div id="protected" class="hide">
+<div class="panels"><div class="card"><h2>本月实际交易</h2><div id="totals" class="num">—</div><small>仅统计已采集数据，按币种分别汇总</small></div>
+<div class="card"><h2>订阅管理 · Wallos</h2>
+<p><a href="/finance/wallos/" target="_blank" rel="noopener">打开 Wallos 订阅管理 ↗</a></p>
+<small>订阅续费、预算和提醒由 Wallos 管理；这里专注真实消费流水。</small></div>
+<div class="card"><h2>同步状态</h2><div id="status" class="num">—</div>
+<small>Android App 中主动开启同步后，才能接收实际扣费记录</small></div></div>
+<section class="card"><h2>可能的周期扣费</h2><p class="muted">同商户、同金额、相似月份间隔的建议。系统不会自动增加订阅。</p><button class="gray" onclick="candidates()">识别候选订阅</button><div id="candidateList"></div></section>
+<section class="card"><h2>实际交易（最近 25 条）</h2><div class="scroller"><table><thead><tr><th>时间</th><th>商户</th><th>金额</th><th>来源</th><th>类别</th><th>核对</th></tr></thead><tbody id="transactions"></tbody></table></div></section>
+<section class="card"><h2>账单补录（标准 CSV）</h2><p class="muted">支持列 timestamp_ms, amount_cents, currency, direction, source, merchant, category。导入后需要核对与手机通知重合的记录。</p>
+<div class="row"><input id="csv" type="file" accept=".csv,text/csv"><button onclick="uploadCSV()">导入 CSV</button><button class="gray" onclick="downloadCSV()">导出全部交易</button></div><p id="message" class="muted"></p></section></div>
+<script>
+const apiRoot = './api/v1/';
+const escapeHtml=x=>String(x??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const date=x=>new Date(Number(x)).toLocaleDateString('zh-CN');
+const money=(v,c)=>c+' '+(Number(v)/100).toFixed(2);
+async function request(route,opts={}){
+  const headers={...(opts.headers||{})};
+  if(opts.body && !(opts.body instanceof FormData))headers['Content-Type']='application/json';
+  const res=await fetch(apiRoot+route,{credentials:'same-origin',...opts,headers});
+  if(!res.ok)throw Error('HTTP '+res.status+': '+(await res.text()).slice(0,120));
+  return await res.json();
+}
+async function lock(){
+ try { await fetch('./auth/logout',{method:'POST',credentials:'same-origin'}); } catch(e){}
+ document.getElementById('protected').classList.add('hide');
+ document.getElementById('login').classList.remove('hide');
+ document.getElementById('password').value='';
+}
+async function unlock(){
+ const username=document.getElementById('username').value;
+ const password=document.getElementById('password').value;
+ const error=document.getElementById('loginError');
+ error.textContent='';
+ try {
+  const response=await fetch('./auth/login',{method:'POST',credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
+  if(!response.ok)throw Error('登录失败，请检查 Wallos 用户名和密码');
+  document.getElementById('password').value='';
+  await refresh();
+  document.getElementById('login').classList.add('hide');
+  document.getElementById('protected').classList.remove('hide');
+ } catch(e){error.textContent=e.message;}
+}
+document.getElementById('signInForm').onsubmit=e=>{e.preventDefault();unlock()};
+(async()=>{try{
+ const r=await fetch('./auth/status',{credentials:'same-origin'});
+ if(r.ok && (await r.json()).authenticated){
+  await refresh();
+  document.getElementById('login').classList.add('hide');
+  document.getElementById('protected').classList.remove('hide');
+ }
+ }catch(e){} })();
+async function refresh(){
+ const data=await request('dashboard');const curr={};
+ for(const r of data.totals){const k=r.currency+' / '+(r.direction==='EXPENSE'?'支出':'收入');curr[k]=(curr[k]||0)+r.cents;}
+ document.getElementById('totals').innerHTML=Object.keys(curr).length?Object.entries(curr).map(([k,v])=>'<div>'+escapeHtml(k)+'：'+(v/100).toFixed(2)+'</div>').join(''):'尚无本月数据';
+ document.getElementById('status').textContent='API 可用';
+ document.getElementById('transactions').innerHTML=data.recent.map(t=>'<tr><td>'+date(t.timestamp_ms)+'</td><td>'+escapeHtml(t.merchant)+'</td><td>'+money(t.amount_cents,escapeHtml(t.currency))+'</td><td>'+escapeHtml(t.source)+'</td><td>'+escapeHtml(t.category)+'</td><td>'+escapeHtml(t.review_status)+'<select data-id="'+Number(t.id)+'" onchange="reviewRow(this)"><option value="">操作</option><option value="confirmed">确认</option><option value="excluded">排除</option></select></td></tr>').join('')||'<tr><td colspan="6">暂无交易</td></tr>';
+}
+async function reviewRow(el){const id=Number(el.dataset.id),status=el.value;if(!status)return;if(status==='excluded'&&!confirm('确认从消费统计中排除本条记录？'))return;try{await request('transactions/'+id+'/review',{method:'PATCH',body:JSON.stringify({status})});await refresh();}catch(err){alert(err.message);}}
+async function candidates(){try{const r=await request('candidates');document.getElementById('candidateList').innerHTML=r.items.map(x=>'<p>'+escapeHtml(x.merchant)+' · '+money(x.amount_cents,escapeHtml(x.currency))+' / '+escapeHtml(x.cadence)+' （待确认）</p>').join('')||'<p>尚未发现候选订阅</p>';}catch(err){alert(err.message);}}
+async function downloadCSV(){try{const r=await fetch(apiRoot+'export/standard-csv',{credentials:'same-origin'});if(!r.ok)throw Error('HTTP '+r.status);const u=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=u;a.download='finance-transactions.csv';a.click();setTimeout(()=>URL.revokeObjectURL(u),3000);}catch(err){alert(err.message);}}
+async function uploadCSV(){const file=document.getElementById('csv').files[0];if(!file)return;const form=new FormData();form.append('file',file);try{const r=await request('import/standard-csv',{method:'POST',body:form});document.getElementById('message').textContent=JSON.stringify(r);await refresh();}catch(err){document.getElementById('message').textContent=err.message;}}
+</script></body></html>

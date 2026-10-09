@@ -1,0 +1,13 @@
+secrets/
+.env
+data/
+backups/
+.git/
+android/
+**/__pycache__/
+**/*.pyc
+**/*.db
+**/*.sqlite3
+*.p12
+*.jks
+*.keystore

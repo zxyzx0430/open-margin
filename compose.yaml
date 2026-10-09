@@ -1,0 +1,77 @@
+name: personal-finance-system
+
+services:
+  finance-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: ./secrets/backend.env
+    environment:
+      FINANCE_DB: /data/finance/finance.sqlite3
+      FINANCE_OAUTH_DB: /data/finance/oauth.sqlite3
+      FINANCE_WALLOS_DB: /data/wallos/wallos.db
+      WALLOS_API_URL: http://wallos:80
+    volumes:
+      - finance-data:/data/finance
+      - wallos-db:/data/wallos:ro
+    ports:
+      - "127.0.0.1:${FINANCE_API_PORT:-8767}:8767"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8767/health',timeout=5).read()"]
+      interval: 30s
+      timeout: 7s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    networks: [finance-internal]
+
+  wallos:
+    build:
+      context: deploy/wallos-extension
+    restart: unless-stopped
+    environment:
+      TZ: ${FINANCE_TIMEZONE:-Asia/Shanghai}
+    volumes:
+      - wallos-db:/var/www/html/db
+      - wallos-logos:/var/www/html/images/uploads/logos
+    secrets:
+      - source: ledger-config
+        target: wallos-ledger.env
+    ports:
+      - "127.0.0.1:${WALLOS_PORT:-18082}:80"
+    security_opt:
+      - no-new-privileges:true
+    networks: [finance-internal]
+
+  backup:
+    image: python:3.11-slim
+    profiles: [maintenance]
+    command: ["python", "/scripts/backup.py"]
+    environment:
+      FINANCE_DB: /data/finance/finance.sqlite3
+      FINANCE_WALLOS_DB: /data/wallos/wallos.db
+      FINANCE_BACKUP_DIR: /data/backups
+    volumes:
+      - ./deploy/backup.py:/scripts/backup.py:ro
+      # SQLite WAL may need to create a -shm file while performing an online
+      # backup. The Python source connection itself uses mode=ro.
+      - finance-data:/data/finance
+      - wallos-db:/data/wallos
+      - finance-backups:/data/backups
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  finance-backups:
+  finance-data:
+  wallos-db:
+  wallos-logos:
+
+secrets:
+  ledger-config:
+    file: ./secrets/wallos-ledger.env
+
+networks:
+  finance-internal:
+    driver: bridge

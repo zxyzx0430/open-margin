@@ -1,0 +1,24 @@
+# Never commit live customer or payment data, credentials, or signing identities.
+/secrets/*
+!/secrets/*.example
+/.env
+/data/
+/backups/
+/releases/
+/*.p12
+/*.jks
+/*.keystore
+*.pem
+*.key
+*.db
+*.sqlite3
+*.sqlite3-*
+/**/local.properties
+**/.gradle/
+**/build/
+__pycache__/
+*.pyc
+.venv/
+.gradle/
+.idea/
+.DS_Store

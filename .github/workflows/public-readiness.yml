@@ -1,0 +1,29 @@
+name: Open Source Readiness
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Scan public tracked files and check Python syntax
+        run: |
+          python scripts/check-public-ready.py
+          python -m compileall -q backend deploy scripts
+      - name: Validate Compose using throwaway credentials
+        run: |
+          cp .env.example .env
+          python scripts/init-config.py --url https://finance.example.com/finance
+          docker compose config --quiet
+          # Clear generated secrets after validating; do not upload as artifacts.
+          rm -rf secrets/backend.env secrets/wallos-ledger.env .env

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android Auto-Backup 规则。
+  排除所有财务敏感数据，避免被自动同步到 Google Drive（违反 README 的本地存储承诺）。
+  保留默认行为允许其他无害文件备份（无）。
+  适用于 API < 31。API 31+ 使用 data_extraction_rules.xml。
+-->
+<full-backup-content>
+    <!-- 排除 Room 数据库（包含全部交易记录） -->
+    <exclude domain="database" path="bookkeeping.db" />
+    <exclude domain="database" path="bookkeeping.db-shm" />
+    <exclude domain="database" path="bookkeeping.db-wal" />
+    <!-- 排除 DataStore Preferences（预算设置） -->
+    <exclude domain="file" path="datastore/" />
+    <!-- Device bearer token must never be included in an Android cloud backup. -->
+    <exclude domain="sharedpref" path="finance_sync.xml" />
+</full-backup-content>
