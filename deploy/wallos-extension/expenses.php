@@ -190,6 +190,29 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-form-grid{grid-template-columns:1fr}
 .wallos-ledger .ledger-form-grid .form-group{grid-column:1/-1}
 }
+
+/* Compact readable finance statistics and transaction editor on small screens. */
+.wallos-ledger .statistics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.wallos-ledger .statistics .statistic{flex:initial;min-width:0;min-height:105px;padding:18px 14px;align-items:flex-start;justify-content:center;gap:6px}
+.wallos-ledger .statistics .statistic>span{font-size:clamp(20px,2.2vw,29px);font-weight:600;line-height:1.3;letter-spacing:-.03em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.wallos-ledger .statistics .statistic>.title{font-size:13px;text-align:left;margin:0;line-height:1.4}
+.wallos-ledger .ledger-entry .ledger-edit-details{margin:12px 0 12px 0;padding:10px 14px;border:1px solid var(--box-border-color);border-radius:10px;background:var(--box-background-color)}
+.wallos-ledger .ledger-entry .ledger-edit-details>summary{cursor:pointer;font-size:13px}
+.wallos-ledger .ledger-entry .ledger-edit-details label{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 150px}
+.wallos-ledger .ledger-entry .ledger-edit-details form{max-width:100%}
+.wallos-ledger .ledger-entry .ledger-edit-details input,.wallos-ledger .ledger-entry .ledger-edit-details select{max-width:100%;min-width:0}
+.wallos-ledger .ledger-entry .ledger-edit-details .ledger-budget-form{align-items:flex-end}
+.wallos-ledger :is(button,input,select,summary,a):focus-visible{outline:2px solid var(--main-color);outline-offset:3px}
+@media(max-width:768px){
+ .wallos-ledger .statistics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .wallos-ledger .statistics .statistic{min-height:93px;padding:14px 12px}
+ .wallos-ledger .statistics .statistic>span{font-size:clamp(19px,5vw,24px)}
+ .wallos-ledger .statistics .statistic>.title{font-size:12px}
+ .wallos-ledger .ledger-heading .ledger-tools{gap:10px}
+ .wallos-ledger .ledger-entry .ledger-edit-details{margin:10px 0}
+ .wallos-ledger .ledger-entry .ledger-edit-details .ledger-budget-form{display:grid;grid-template-columns:1fr}
+ .wallos-ledger .ledger-entry .ledger-edit-details form input,.wallos-ledger .ledger-entry .ledger-edit-details form select,.wallos-ledger .ledger-entry .ledger-edit-details form button{width:100%;max-width:none}
+}
 </style>
 <section class="contain dashboard wallos-ledger">
   <div class="ledger-heading">
@@ -341,7 +364,7 @@ $notice=$_GET['notice'] ?? '';
                 <?= $entry['direction']==='INCOME'?'+':'−' ?><?= ledger_escape(ledger_money(intval($entry['amount_cents']),$entry['currency'])) ?>
               </div>
             </div>
-            <details class="ledger-section-message" style="margin:0 12px 0 60px">
+            <details class="ledger-section-message ledger-edit-details">
               <summary>修改交易 / 排除重复</summary>
               <form method="post" action="expenses-action.php" class="ledger-budget-form" style="margin-bottom:10px">
                 <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">

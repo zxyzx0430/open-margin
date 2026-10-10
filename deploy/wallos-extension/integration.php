@@ -39,6 +39,85 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
 .wallos-integration .integ-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .wallos-integration h2{margin:25px 0 12px}
 .wallos-integration .integ-tag{font-size:12px;border-radius:6px;padding:4px 7px;background:var(--input-background-color)}
+
+/* Native Wallos design system, responsive finance layout — v1.5 UI polish. */
+.wallos-integration{padding-bottom:84px;min-width:0}
+.wallos-integration *{box-sizing:border-box}
+.wallos-integration .integ-heading{margin:0 0 26px;align-items:flex-start;gap:16px}
+.wallos-integration .integ-heading h1{font-size:clamp(23px,2.3vw,30px);line-height:1.2}
+.wallos-integration .integ-heading>div{min-width:0}
+.wallos-integration .integ-heading .integ-form{justify-content:flex-end}
+.wallos-integration .integ-form{gap:10px}
+.wallos-integration .integ-form>label{min-width:0}
+.wallos-integration .integ-form input,.wallos-integration .integ-form select{font-size:14px;max-width:100%;min-height:42px}
+.wallos-integration .integ-form input[type="hidden"]{display:none}
+.wallos-integration .integ-form button,.wallos-integration .integ-form .button{min-height:42px;display:inline-flex;align-items:center;justify-content:center;text-align:center;white-space:normal}
+.wallos-integration .integ-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 15px}
+.wallos-integration .integ-summary .statistic{flex:initial;min-width:0;min-height:110px;padding:17px 12px 15px;align-items:flex-start;justify-content:center;gap:5px}
+.wallos-integration .integ-summary .statistic>span{display:block;font-size:clamp(20px,2.1vw,27px);font-weight:600;line-height:1.25;letter-spacing:-.035em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.wallos-integration .integ-summary .statistic>.title{margin:0;text-align:left;color:var(--text-muted);font-size:13px;line-height:1.4}
+.wallos-integration h2{font-size:16px;font-weight:600;line-height:1.45;margin:27px 0 12px}
+.wallos-integration .integ-table{table-layout:fixed;min-width:610px}
+.wallos-integration .integ-table th,.wallos-integration .integ-table td{vertical-align:middle;padding:13px 10px;overflow-wrap:anywhere}
+.wallos-integration .integ-table th:nth-child(1){width:35%}
+.wallos-integration .integ-table th:nth-child(2),.wallos-integration .integ-table th:nth-child(3){width:19%}
+.wallos-integration .integ-table th:nth-child(4){width:27%}
+.wallos-integration .integ-table td b{line-height:1.5}
+.wallos-integration .integ-table .integ-form{margin:7px 0 0}
+.wallos-integration .integ-table .integ-form button{min-height:34px;font-size:12px}
+.wallos-integration .integ-scroll{max-width:100%;border:1px solid var(--box-border-color);border-radius:12px;background:var(--box-background-color);overflow-x:auto}
+.wallos-integration .integ-item{background:var(--box-background-color);min-width:0}
+.wallos-integration .integ-item>div{min-width:0;flex:1 1 225px;overflow-wrap:anywhere}
+.wallos-integration .integ-item>.integ-form{flex:0 0 auto}
+.wallos-integration .integ-item b{line-height:1.45}
+.wallos-integration .integ-tag{display:inline-block;max-width:100%;line-height:1.45;overflow-wrap:anywhere}
+.wallos-integration .integ-note{line-height:1.55;overflow-wrap:anywhere}
+.wallos-integration .integ-panel{border:1px solid var(--box-border-color);border-radius:12px;background:var(--box-background-color);margin:15px 0;overflow:hidden}
+.wallos-integration .integ-panel>summary{cursor:pointer;padding:16px 18px;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:15px;font-weight:600}
+.wallos-integration .integ-panel>summary::-webkit-details-marker{display:none}
+.wallos-integration .integ-panel>summary::after{content:"＋";font-size:19px;color:var(--text-muted);font-weight:400;flex:0 0 auto}
+.wallos-integration .integ-panel[open]>summary::after{content:"－"}
+.wallos-integration .integ-panel[open]>summary{border-bottom:1px solid var(--box-border-color)}
+.wallos-integration .integ-panel>.integ-panel-content{padding:16px 18px 18px}
+.wallos-integration .integ-panel .integ-form{margin-top:12px}
+.wallos-integration .integ-panel .integ-item{padding:12px}
+.wallos-integration details:not(.integ-panel)>summary{cursor:pointer;line-height:1.5;padding:12px 0}
+.wallos-integration :is(button,input,select,summary,a):focus-visible{outline:2px solid var(--main-color);outline-offset:3px}
+@media(max-width:768px){
+ .wallos-integration{padding:20px 16px 88px}
+ .wallos-integration .integ-heading{display:block}
+ .wallos-integration .integ-heading>.integ-form{margin-top:16px;justify-content:flex-start}
+ .wallos-integration .integ-heading .integ-form>form{flex:1 1 100%}
+ .wallos-integration .integ-heading .integ-form input[type=month]{flex:1;min-width:0}
+ .wallos-integration .integ-heading .integ-form>a{flex:1 1 calc(50% - 8px);min-width:0}
+ .wallos-integration .integ-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .wallos-integration .integ-summary .statistic{min-height:94px;padding:14px 12px}
+ .wallos-integration .integ-summary .statistic>span{font-size:clamp(19px,5vw,24px);white-space:normal}
+ .wallos-integration .integ-summary .statistic>.title{font-size:12px}
+ .wallos-integration h2{margin:24px 0 12px}
+ .wallos-integration .integ-scroll{border:0;background:transparent;overflow:visible}
+ .wallos-integration .integ-table{display:block;width:100%;min-width:0}
+ .wallos-integration .integ-table thead{display:none}
+ .wallos-integration .integ-table tbody{display:grid;gap:10px}
+ .wallos-integration .integ-table tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border:1px solid var(--box-border-color);border-radius:12px;background:var(--box-background-color);padding:12px 14px;gap:9px;min-width:0}
+ .wallos-integration .integ-table td{display:block;border:0;padding:0;min-width:0;overflow-wrap:anywhere;line-height:1.4}
+ .wallos-integration .integ-table td::before{content:attr(data-label);display:block;color:var(--text-muted);font-size:11px;font-weight:500;margin-bottom:4px}
+ .wallos-integration .integ-table td:first-child{grid-column:1/-1;padding-bottom:7px;border-bottom:1px solid var(--box-border-color)}
+ .wallos-integration .integ-table td:first-child::before{display:none}
+ .wallos-integration .integ-table td:last-child{grid-column:1/-1;padding-top:5px}
+ .wallos-integration .integ-table td .integ-form{margin:8px 0 0}
+ .wallos-integration .integ-item{align-items:stretch;padding:12px}
+ .wallos-integration .integ-item>div{flex:1 1 100%}
+ .wallos-integration .integ-item>.integ-form{flex:1 1 100%;justify-content:stretch}
+ .wallos-integration .integ-item>.integ-form button{width:100%}
+ .wallos-integration .integ-panel>summary{padding:14px}
+ .wallos-integration .integ-panel>.integ-panel-content{padding:13px}
+ .wallos-integration .integ-panel .integ-form input:not([type=hidden]),.wallos-integration .integ-panel .integ-form select{flex:1 1 100%;width:100%}
+ .wallos-integration .integ-panel .integ-form button{width:100%}
+}
+@media(max-width:350px){
+ .wallos-integration .integ-summary .statistic>span{font-size:18px}
+}
 </style>
 <section class="contain dashboard wallos-integration">
   <div class="integ-heading">
@@ -71,10 +150,10 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
       <thead><tr><th>会员 / 本期日期</th><th>预计扣款</th><th>实际扣款</th><th>状态 / 操作</th></tr></thead>
       <tbody><?php foreach($overview['subscriptions'] as $sub): ?>
         <tr>
-          <td><b><?=ledger_escape($sub['name'])?></b><div class="integ-note"><?=ledger_escape($sub['cycle_key'])?></div></td>
-          <td><?=ledger_escape(ledger_money((int)$sub['amount_cents'],$sub['currency']))?></td>
-          <td><?=isset($sub['paid_cents'])?ledger_escape(ledger_money((int)$sub['paid_cents'],$sub['currency'])):'—'?></td>
-          <td>
+          <td data-label="会员 / 本期日期"><b><?=ledger_escape($sub['name'])?></b><div class="integ-note"><?=ledger_escape($sub['cycle_key'])?></div></td>
+          <td data-label="预计扣款"><?=ledger_escape(ledger_money((int)$sub['amount_cents'],$sub['currency']))?></td>
+          <td data-label="实际扣款"><?=isset($sub['paid_cents'])?ledger_escape(ledger_money((int)$sub['paid_cents'],$sub['currency'])):'—'?></td>
+          <td data-label="状态 / 操作">
             <?php if($sub['status']==='matched'): ?>
               <span class="integ-tag">已关联真实交易 #<?=intval($sub['transaction_id'])?></span>
               <form method="post" action="expenses-action.php" class="integ-form">
@@ -134,8 +213,9 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
     <?php if(empty($overview['alerts'])): ?><p class="integ-note">目前没有发现上述异常。这不代表通知一定完整，仍需定期核对官方账单。</p><?php endif; ?>
   </section>
   <?php endif; ?>
-  <section class="stats-section">
-    <h2>商户自动分类规则</h2>
+  <details class="stats-section integ-panel">
+    <summary>商户自动分类规则</summary>
+    <div class="integ-panel-content">
     <p class="integ-note">经过确认的商户关键词，未来新交易若原分类为「其他」会自动采用此分类；不会自动创建或扣除 Wallos 订阅。</p>
     <form method="post" action="expenses-action.php" class="integ-form">
       <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>"><input type="hidden" name="month" value="<?=ledger_escape($month)?>"><input type="hidden" name="action" value="rule">
@@ -148,9 +228,11 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
         <form action="expenses-action.php" method="post"><input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>"><input type="hidden" name="month" value="<?=ledger_escape($month)?>"><input type="hidden" name="action" value="delete_rule"><input type="hidden" name="rule_id" value="<?=intval($r['id'])?>"><button class="button secondary-button tiny">删除</button></form>
       </div>
     <?php endforeach; ?>
-  </section>
-  <section class="stats-section">
-    <h2>退款与重复消费修正</h2>
+    </div>
+  </details>
+  <details class="stats-section integ-panel">
+    <summary>退款与重复消费修正</summary>
+    <div class="integ-panel-content">
     <p class="integ-note">退款必须关联一笔已存在的收入和原始消费，仅减少净支出，不会凭空添加交易。</p>
     <form method="post" action="expenses-action.php" class="integ-form">
       <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>"><input type="hidden" name="month" value="<?=ledger_escape($month)?>"><input type="hidden" name="action" value="refund">
@@ -172,11 +254,13 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
       </form>
     </div>
     <?php endforeach; ?>
-  </section>
+    </div>
+  </details>
   <?php endif; ?>
   </section>
-  <section class="stats-section">
-    <h2>可能遗漏的会员订阅</h2>
+  <details class="stats-section integ-panel">
+    <summary>可能遗漏的会员订阅</summary>
+    <div class="integ-panel-content">
     <p class="integ-note">检测重复扣款周期后提出建议；只在你确认后才会加入 Wallos。</p>
     <?php foreach(($discovery['items']??[]) as $candidate): ?>
       <div class="integ-item"><div><b><?=ledger_escape($candidate['merchant'])?></b>
@@ -192,9 +276,11 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
         </form></div>
     <?php endforeach; ?>
     <?php if(empty($discovery['items'])): ?><p class="integ-note">数据不足或暂未发现稳定的重复订阅模式。</p><?php endif; ?>
-  </section>
-  <section class="stats-section">
-    <h2>近 12 个月实际支出趋势</h2>
+    </div>
+  </details>
+  <details class="stats-section integ-panel">
+    <summary>近 12 个月实际支出趋势</summary>
+    <div class="integ-panel-content">
     <div class="integ-scroll"><table class="integ-table"><thead><tr><th>月份</th><th>币种</th><th>方向</th><th>总额</th></tr></thead><tbody>
       <?php foreach(($trends['series']??[]) as $r): ?>
         <tr><td><?=ledger_escape($r['month'])?></td><td><?=ledger_escape($r['currency'])?></td><td><?=ledger_escape($r['direction'])?></td><td><?=ledger_escape(ledger_money((int)$r['amount_cents'],$r['currency']))?></td></tr>
@@ -202,5 +288,6 @@ function integ_cny($cents):string{return ledger_money((int)$cents,'CNY');}
     </tbody></table></div>
     <?php if(empty($trends['series'])): ?><p class="integ-note">尚无足够交易形成趋势。</p><?php endif; ?>
     <p class="integ-note">多币种不合并；已关联退款按实际到账月份单独作为扣减项展示。</p>
-  </section>
+    </div>
+  </details>
 </section>
