@@ -179,6 +179,7 @@ def summary(start_ms: int = Query(...), end_ms: int = Query(...)):
                   SUM(amount_cents) AS total_cents FROM transactions
                   WHERE timestamp_ms>=? AND timestamp_ms<?
                   AND review_status NOT IN ('excluded','transfer','refund')
+                  AND category<>'TRANSFER'
                   GROUP BY currency,direction,category ORDER BY currency,direction,category""",
                   (start_ms,end_ms)).fetchall()
     # Different currencies must never be added together without an FX rate.

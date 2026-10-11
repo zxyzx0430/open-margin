@@ -46,7 +46,9 @@ $labels=[
     'HOUSING'=>'住房','UTILITIES'=>'水电通信','HEALTH'=>'医疗','EDUCATION'=>'学习',
     'SUBSCRIPTION'=>'订阅','OTHER'=>'其他','SALARY'=>'工资','TRANSFER'=>'转账'
 ];
-$error='';
+$error='';$ledgerLoaded=false;
+$sourceNames=['WECHAT'=>'微信','ALIPAY'=>'支付宝','BANK_SMS'=>'银行短信',
+    'MANUAL'=>'手动记录','OTHER'=>'其他来源'];
 try {
     $parameters=array_filter($filters,static fn($v)=>$v!=='');
     if ($offset>0) $parameters['offset']=$offset;
@@ -55,6 +57,7 @@ try {
         $query.='&'.$key.'='.rawurlencode((string)$val);
     }
     $result=ledger_request('GET',$query);
+    $ledgerLoaded=true;
     $items=$result['items'] ?? [];
     $totals=$result['totals'] ?? [];
     $todayTotals=$result['today_totals'] ?? [];
@@ -152,6 +155,9 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-entry .ledger-amount{font-size:19px;flex:0 0 auto}
 .wallos-ledger .ledger-entry .ledger-review{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-left:60px}
 .wallos-ledger .ledger-entry .ledger-review small{color:var(--text-muted);font-size:12px}
+.wallos-ledger .ledger-review-state.is-excluded{color:var(--text-muted);background:var(--box-background-color);border:1px solid var(--box-border-color);border-radius:7px;padding:5px 7px}
+.wallos-ledger .ledger-review-state:not(.is-excluded){font-weight:600}
+
 .wallos-ledger .ledger-entry .ledger-review select{height:35px;font-size:13px;padding:0 30px 0 10px;min-width:100px}
 .wallos-ledger .ledger-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 15px}
 .wallos-ledger .ledger-form-grid .form-group{min-width:0;margin-bottom:14px}
@@ -353,6 +359,10 @@ $notice=$_GET['notice'] ?? '';
           <input type="hidden" name="csrf" value="<?= ledger_escape($csrf) ?>">
           <input type="hidden" name="action" value="budget">
           <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">
+<?php foreach($filters as $returnKey=>$returnValue): ?>
+          <input type="hidden" name="return_<?= ledger_escape($returnKey) ?>" value="<?= ledger_escape($returnValue) ?>">
+          <?php endforeach; ?>
+          <input type="hidden" name="return_offset" value="<?= intval($offset) ?>">
           <label for="ledger-budget-amount" class="ledger-section-message">本月预算金额（CNY，留空可清除）</label>
           <input id="ledger-budget-amount" name="budget_amount" type="text" inputmode="decimal"
                pattern="[0-9]+(\.[0-9]{1,2})?" placeholder="例如 1500.00"
@@ -429,6 +439,7 @@ $notice=$_GET['notice'] ?? '';
     </div>
     <form method="get" action="expenses.php" class="ledger-search-form" aria-label="筛选消费流水">
       <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">
+
       <label class="ledger-filter-field"><span>交易日期</span><input type="date" name="day" aria-label="按日期" value="<?= ledger_escape($filters['day']) ?>"></label>
       <label class="ledger-filter-field"><span>消费分类</span><select name="category" aria-label="按类别"><option value="">全部分类</option>
         <?php foreach($labels as $key=>$label): ?><option value="<?= ledger_escape($key) ?>" <?= $filters['category']===$key?'selected':'' ?>><?= ledger_escape($label) ?></option><?php endforeach; ?>
@@ -459,7 +470,7 @@ $notice=$_GET['notice'] ?? '';
            default=>'fa-wallet'
          };
       ?>
-        <div class="subscription-container ledger-entry">
+        <div class="subscription-container ledger-entry" id="transaction-<?= $id ?>">
           <div class="subscription">
             <div class="subscription-main">
               <div class="ledger-mark"><i class="fa-solid <?= ledger_escape($icon) ?>"></i></div>
@@ -476,6 +487,10 @@ $notice=$_GET['notice'] ?? '';
               <form method="post" action="expenses-action.php" class="ledger-budget-form" style="margin-bottom:10px">
                 <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">
                 <input type="hidden" name="month" value="<?=ledger_escape($month)?>">
+<?php foreach($filters as $returnKey=>$returnValue): ?>
+                <input type="hidden" name="return_<?= ledger_escape($returnKey) ?>" value="<?= ledger_escape($returnValue) ?>">
+                <?php endforeach; ?>
+                <input type="hidden" name="return_offset" value="<?= intval($offset) ?>">
                 <input type="hidden" name="action" value="edit">
                 <input type="hidden" name="entry_id" value="<?=$id?>">
                 <label>金额（元）<input name="amount" value="<?=ledger_escape(number_format(intval($entry['amount_cents'])/100,2,'.',''))?>" pattern="[0-9]+(\.[0-9]{1,2})?" required></label>
@@ -486,16 +501,28 @@ $notice=$_GET['notice'] ?? '';
               <form method="post" action="expenses-action.php">
                 <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">
                 <input type="hidden" name="month" value="<?=ledger_escape($month)?>">
+<?php foreach($filters as $returnKey=>$returnValue): ?>
+                <input type="hidden" name="return_<?= ledger_escape($returnKey) ?>" value="<?= ledger_escape($returnValue) ?>">
+                <?php endforeach; ?>
+                <input type="hidden" name="return_offset" value="<?= intval($offset) ?>">
                 <input type="hidden" name="action" value="duplicate">
                 <input type="hidden" name="entry_id" value="<?=$id?>">
                 <button class="button secondary-button tiny" type="submit">确认这笔是重复交易（不计入统计）</button>
               </form>
             </details>
             <div class="ledger-review">
-              <small><?= $status==='possible_duplicate'?'⚠ 疑似重复':'交易状态' ?></small>
+              <small class="ledger-review-state <?= (in_array($status,['excluded','transfer','refund'],true)||$category==='TRANSFER')?'is-excluded':'' ?>"><?= ledger_escape($category==='TRANSFER'?'转账 · 不计入':match($status) {
+                'confirmed'=>'已确认', 'excluded'=>'不计入统计', 'transfer'=>'转账 · 不计入',
+                'refund'=>'退款 · 不计入', 'possible_duplicate'=>'疑似重复 · 待核对',
+                default=>'待核对'
+              }) ?></small>
               <form method="post" action="expenses-action.php">
                 <input type="hidden" name="csrf" value="<?= ledger_escape($csrf) ?>">
                 <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">
+<?php foreach($filters as $returnKey=>$returnValue): ?>
+                <input type="hidden" name="return_<?= ledger_escape($returnKey) ?>" value="<?= ledger_escape($returnValue) ?>">
+                <?php endforeach; ?>
+                <input type="hidden" name="return_offset" value="<?= intval($offset) ?>">
                 <input type="hidden" name="action" value="review">
                 <input type="hidden" name="entry_id" value="<?= $id ?>">
                 <select name="status" aria-label="核对 <?= ledger_escape($entry['merchant']??'交易') ?>" onchange="this.form.submit()">
@@ -537,7 +564,7 @@ $notice=$_GET['notice'] ?? '';
         <div class="form-group"><label for="ledger-currency">币种</label><select id="ledger-currency" name="currency"><option value="CNY">人民币 CNY</option><option value="USD">美元 USD</option><option value="HKD">港币 HKD</option><option value="EUR">欧元 EUR</option><option value="JPY">日元 JPY</option><option value="GBP">英镑 GBP</option></select></div>
         <div class="form-group"><label for="ledger-direction">类型</label><select id="ledger-direction" name="direction"><option value="EXPENSE">支出</option><option value="INCOME">收入</option></select></div>
         <div class="form-group"><label for="ledger-category">分类</label><select id="ledger-category" name="category"><?php foreach($labels as $key=>$label): ?><option value="<?= ledger_escape($key) ?>"><?= ledger_escape($label) ?></option><?php endforeach; ?></select></div>
-        <div class="form-group"><label for="ledger-date">交易时间</label><input id="ledger-date" type="datetime-local" name="spent_at" value="<?= ledger_escape(date('Y-m-d\TH:i')) ?>" required></div>
+        <div class="form-group"><label for="ledger-date">交易时间</label><input id="ledger-date" type="datetime-local" name="spent_at" value="<?= ledger_escape(date('Y-m-d\TH:i')) ?>" required><small class="ledger-section-message">保存后会显示在交易时间所属月份。</small></div>
         <div class="form-group"><label for="ledger-merchant">商户或备注</label><input id="ledger-merchant" type="text" name="merchant" maxlength="140" placeholder="食堂、地铁、超市"></div>
       </div>
       <div class="buttons">

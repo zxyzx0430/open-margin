@@ -49,6 +49,8 @@ try {
             'merchant'=>mb_substr($merchant,0,140,'UTF-8'),
         ];
         ledger_request('POST','manual',$payload);
+        // Show the saved record in its actual calendar month, not the month being browsed.
+        $month=substr($date,0,7);
         $notice='added';
     } elseif ($action==='budget') {
         $amountText=trim((string)($_POST['budget_amount']??''));
@@ -95,6 +97,27 @@ try {
     error_log('[Wallos daily-ledger] Failed expense action '.get_class($e));
     $notice='failed';
 }
-$target='expenses.php';
-header('Location: '.$target.'?month='.rawurlencode($month).'&notice='.$notice,true,303);
+$query=['month'=>$month,'notice'=>$notice];
+if ($action!=='add') {
+    // Restore the original list context after editing, reviewing or budgeting.
+    // All return values are independent of the edited category/merchant fields.
+    $returnFields=['day','category','direction','q'];
+    foreach($returnFields as $key) {
+        $value=$_POST['return_'.$key]??'';
+        if (!is_string($value) || $value==='') continue;
+        if($key==='day' && (!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/D',$value) || substr($value,0,7)!==$month))continue;
+        if($key==='category' && !preg_match('/^[A-Z_]{1,30}$/D',$value))continue;
+        if($key==='direction' && !in_array($value,['EXPENSE','INCOME'],true))continue;
+        if($key==='q')$value=mb_substr($value,0,80,'UTF-8');
+        $query[$key]=$value;
+    }
+    $offset=filter_var($_POST['return_offset']??0,FILTER_VALIDATE_INT,['options'=>['min_range'=>0,'max_range'=>1000000]]);
+    if($offset!==false && $offset>0)$query['offset']=$offset;
+}
+$anchor='';
+if (in_array($action,['edit','duplicate','review'],true)) {
+    $entryId=filter_var($_POST['entry_id']??null,FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);
+    if($entryId!==false && $entryId!==null)$anchor='#transaction-'.$entryId;
+}
+header('Location: expenses.php?'.http_build_query($query,'','&',PHP_QUERY_RFC3986).$anchor,true,303);
 exit;

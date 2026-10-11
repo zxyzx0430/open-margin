@@ -26,6 +26,7 @@ def spending_summary(start_ms:int,end_ms:int) -> dict:
         rows=db.execute("""SELECT currency,direction,category,COUNT(*) AS count,
           SUM(amount_cents) AS amount_cents FROM transactions WHERE timestamp_ms >=?
           AND timestamp_ms <? AND review_status NOT IN ('excluded','transfer','refund')
+          AND category<>'TRANSFER'
           GROUP BY currency,direction,category ORDER BY currency,category""",(start_ms,end_ms)).fetchall()
     return {"start_ms":start_ms,"end_ms":end_ms,"groups":[dict(r) for r in rows],
       "caveat":"Captured transactions may be incomplete or duplicated until verified against exports."}
@@ -43,7 +44,7 @@ def get_recurring_expense_candidates() -> dict:
     from collections import defaultdict
     import app as core
     with core.db_connection() as db:
-        rows=db.execute("SELECT * FROM transactions WHERE direction='EXPENSE' ORDER BY timestamp_ms").fetchall()
+        rows=db.execute("SELECT * FROM transactions WHERE direction='EXPENSE' AND category<>'TRANSFER' AND review_status NOT IN ('excluded','transfer','refund') ORDER BY timestamp_ms").fetchall()
     groups=defaultdict(list)
     for row in rows:
         if row["merchant"]:groups[(row["merchant"].strip().lower(),row["amount_cents"],row["currency"])].append(row)

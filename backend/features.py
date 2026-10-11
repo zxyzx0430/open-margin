@@ -78,6 +78,7 @@ def attach(api, core):
             rows=db.execute("""SELECT * FROM transactions
                     WHERE direction='EXPENSE' AND timestamp_ms>=?
                     AND review_status NOT IN ('excluded','transfer','refund')
+                    AND category<>'TRANSFER'
                     ORDER BY timestamp_ms""",(earliest,)).fetchall()
         by_merchant=defaultdict(list)
         for row in rows:
@@ -149,6 +150,7 @@ def attach(api, core):
             totals=db.execute("""SELECT currency,direction,COUNT(*) AS count,SUM(amount_cents) AS cents
                FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<=?
                AND review_status NOT IN ('excluded','transfer','refund')
+               AND category<>'TRANSFER'
                GROUP BY currency,direction""",(start_ms,end_ms)).fetchall()
             recent=db.execute("SELECT * FROM transactions ORDER BY timestamp_ms DESC LIMIT 25").fetchall()
         from wallos_api import get_all, WallosError

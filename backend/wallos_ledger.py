@@ -90,7 +90,7 @@ def month_view(
     today_ms=int(today.timestamp()*1000)
     tomorrow_ms=int((today+timedelta(days=1)).timestamp()*1000)
     trailing_ms=int((today-timedelta(days=6)).timestamp()*1000)
-    valid="review_status NOT IN ('excluded','transfer','refund')"
+    valid="review_status NOT IN ('excluded','transfer','refund') AND category<>'TRANSFER'"
     conditions=["timestamp_ms>=?","timestamp_ms<?"]
     params=[start_ms,end_ms]
     if day:

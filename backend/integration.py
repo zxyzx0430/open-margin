@@ -21,7 +21,7 @@ from config import LOCAL_TIMEZONE
 
 router=APIRouter(prefix="/api/v1/wallos-ledger",dependencies=[Depends(require_wallos_token)])
 TZ=ZoneInfo(LOCAL_TIMEZONE)
-VALID="review_status NOT IN ('excluded','transfer','refund')"
+VALID="review_status NOT IN ('excluded','transfer','refund') AND category<>'TRANSFER'"
 
 def schema(db: sqlite3.Connection):
     db.execute("""CREATE TABLE IF NOT EXISTS tx_subscription_links(
@@ -136,7 +136,7 @@ def candidate_matches(db, month, schedule):
     events=db.execute("""SELECT t.id,t.timestamp_ms,t.amount_cents,t.currency,t.merchant,t.source,
        t.review_status FROM transactions t LEFT JOIN tx_subscription_links l ON l.tx_id=t.id
        WHERE t.timestamp_ms>=? AND t.timestamp_ms<? AND t.direction='EXPENSE'
-       AND t.review_status NOT IN ('excluded','transfer','refund') AND l.tx_id IS NULL""",(a,b)).fetchall()
+       AND t.review_status NOT IN ('excluded','transfer','refund') AND t.category<>'TRANSFER' AND l.tx_id IS NULL""",(a,b)).fetchall()
     out=[]
     invalid={"","未知","其他","微信支付","支付宝","paid","payment","付款成功"}
     for row in events:
@@ -182,7 +182,7 @@ def snapshot(month:str):
               JOIN transactions t ON t.id=r.refund_tx_id
               JOIN transactions o ON o.id=r.original_tx_id
               WHERE t.timestamp_ms>=? AND t.timestamp_ms<?
-              AND o.review_status NOT IN ('excluded','transfer','refund')
+              AND o.review_status NOT IN ('excluded','transfer','refund') AND o.category<>'TRANSFER'
               GROUP BY t.currency""",(a,b)).fetchall()
         refund_map={r["currency"]:r["cents"] for r in refunds}
         refund_records=[dict(r) for r in db.execute("""SELECT r.refund_tx_id,r.original_tx_id,
@@ -219,7 +219,7 @@ def snapshot(month:str):
                 LEFT JOIN tx_subscription_links l ON l.tx_id=t.id
                 WHERE t.direction='EXPENSE' AND t.currency=? AND t.id!=?
                   AND t.review_status NOT IN ('excluded','transfer','refund')
-                  AND l.tx_id IS NULL
+                  AND t.category<>'TRANSFER' AND l.tx_id IS NULL
                   AND ABS(t.timestamp_ms-?)<=? AND ABS(t.amount_cents-?)<=? LIMIT 12""",
                   (matched["currency"],matched["transaction_id"],matched["due_ms"],4*86400000,
                    matched["amount_cents"],max(100,round(matched["amount_cents"]*.15)))).fetchall()
@@ -434,7 +434,7 @@ def trends(months:int=Query(12,ge=2,le=36)):
             FROM refund_links r JOIN transactions o ON o.id=r.original_tx_id
             JOIN transactions t ON t.id=r.refund_tx_id
             WHERE t.timestamp_ms>=? AND t.timestamp_ms<?
-            AND o.review_status NOT IN ('excluded','transfer','refund')""",
+            AND o.review_status NOT IN ('excluded','transfer','refund') AND o.category<>'TRANSFER'""",
             (int(start.timestamp()*1000),int((now+timedelta(days=1)).timestamp()*1000))).fetchall()
     totals=defaultdict(int)
     for r in rows:totals[(dt(r["timestamp_ms"]).strftime("%Y-%m"),r["currency"],r["direction"])]+=r["amount_cents"]

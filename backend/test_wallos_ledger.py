@@ -51,6 +51,31 @@ class WallosLedgerTests(unittest.TestCase):
         self.assertEqual(updated["totals"],[])
         self.assertEqual(updated["items"][0]["review_status"],"excluded")
         self.assertEqual(self.client.get("/api/v1/transactions",headers=self.headers).status_code,401)
+    def test_transfer_category_does_not_count_as_income_or_expense(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        month=datetime.fromtimestamp(self.timestamp/1000,ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
+        for category,direction,amount in [
+            ("TRANSFER","INCOME",1200), ("TRANSFER","EXPENSE",2500),
+            ("FOOD","EXPENSE",700)
+        ]:
+            payload=self.payload()
+            payload.update(category=category,direction=direction,
+                           amount_cents=amount,merchant="Synthetic")
+            response=self.client.post(self.url+"manual",headers=self.headers,json=payload)
+            self.assertEqual(response.status_code,200,response.text)
+        result=self.client.get(self.url+"month",params={"month":month},
+                               headers=self.headers).json()
+        self.assertEqual(result["month_count"],3)
+        self.assertEqual(len(result["items"]),3)
+        self.assertEqual([(x["category"],x["total_cents"]) for x in result["totals"]],
+                         [("FOOD",700)])
+        self.assertEqual(sum(x["total_cents"] for x in result["daily_totals"]),700)
+        transfer_only=self.client.get(self.url+"month",
+            params={"month":month,"category":"TRANSFER"},headers=self.headers).json()
+        self.assertEqual(len(transfer_only["items"]),2)
+        self.assertEqual(transfer_only["totals"],result["totals"])
+
     def test_daily_monthly_filters_and_literal_search(self):
         from datetime import datetime,timedelta
         from zoneinfo import ZoneInfo

@@ -39,6 +39,29 @@ class FinanceApiTest(unittest.TestCase):
         self.assertEqual(s["groups"][0]["total_cents"],1850)
         self.assertEqual(s["groups"][0]["currency"],"CNY")
 
+    def test_transfer_category_is_excluded_from_core_summary(self):
+        events=[]
+        for i,(direction,category,cents) in enumerate([
+            ("INCOME","TRANSFER",1200),("EXPENSE","TRANSFER",2500),
+            ("EXPENSE","FOOD",700)
+        ]):
+            events.append({
+                "event_id":f"test-category-transfer-{i}",
+                "timestamp_ms":1791800000000+i*60000,
+                "amount_cents":cents,"currency":"CNY",
+                "direction":direction,"source":"MANUAL",
+                "merchant":"Synthetic","category":category
+            })
+        result=self.client.post("/api/v1/transactions/batch",
+                headers={"X-Device-Token":"device-test-token"},json={"events":events})
+        self.assertEqual(result.status_code,200,result.text)
+        response=self.client.get("/api/v1/summary",
+            params={"start_ms":1791700000000,"end_ms":1792000000000},
+            headers={"X-Admin-Token":"admin-test-token"})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual([(r["category"],r["total_cents"]) for r in response.json()["groups"]],
+                         [("FOOD",700)])
+
     def test_fresh_ledger_cutoff_blocks_old_android_replay_and_raw_inserts(self):
         from datetime import datetime, timezone
         from zoneinfo import ZoneInfo
