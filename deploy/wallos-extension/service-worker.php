@@ -82,6 +82,7 @@ const staticAssets = [
     'scripts/i18n/zh_tw.js',
     'scripts/i18n/getlang.js',
     'scripts/libs/apexcharts.min.js',
+    'daily-spend-chart.js',
     'scripts/libs/sortable.min.js',
     'scripts/libs/qrcode.min.js',
     'images/icon/favicon.ico',

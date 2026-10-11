@@ -118,7 +118,12 @@ foreach($dailyTotals as $row) {
     $plot[$row['day']]=($plot[$row['day']]??0)+intval($row['total_cents']);
 }
 $lastDay=(int)date('t',strtotime($month.'-01'));
-$maxDaily=max([1,...array_values($plot)]);
+$dailyChartPoints=[];
+for($n=1;$n<=$lastDay;$n++) {
+    $dateKey=sprintf('%s-%02d',$month,$n);
+    $dailyChartPoints[]=['day'=>$dateKey,'cents'=>max(0,(int)($plot[$dateKey]??0))];
+}
+$hasDailySpend=array_sum(array_column($dailyChartPoints,'cents'))>0;
 $revision=hash('sha256',json_encode([$monthCount,$lastSynced,$totals,$dailyTotals,$budgetCny,$filters,$offset],JSON_UNESCAPED_UNICODE));
 $notice=$_GET['notice'] ?? '';
 ?>
@@ -157,11 +162,7 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-category-list{margin-top:15px}
 .wallos-ledger .ledger-category-list .subscription-item{cursor:default}
 .wallos-ledger .ledger-meta-pill{font-size:12px;color:var(--text-muted)}
-.wallos-ledger .ledger-chart{display:flex;gap:3px;align-items:end;width:100%;height:152px;padding:12px 0 4px;box-sizing:border-box;overflow-x:auto}
-.wallos-ledger .ledger-chart-day{flex:1;min-width:8px;max-width:36px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;text-decoration:none;color:var(--text-muted)}
-.wallos-ledger .ledger-chart-bar{width:75%;border-radius:4px 4px 0 0;min-height:2px;background:var(--main-color);opacity:.85;display:block}
-.wallos-ledger .ledger-chart-day:hover .ledger-chart-bar{opacity:1}
-.wallos-ledger .ledger-chart-label{display:block;height:20px;font-size:10px;line-height:20px}
+/* Calendar-accurate chart has dedicated ApexCharts layout below. */
 .wallos-ledger .ledger-search-form{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin:8px 0 16px}
 .wallos-ledger .ledger-search-form input,.wallos-ledger .ledger-search-form select{max-width:210px;min-width:115px;padding:11px;border-radius:9px;background:var(--input-background-color);color:var(--text-color);border:1px solid var(--input-border-color)}
 .wallos-ledger .ledger-sync{font-size:12px;color:var(--text-muted);margin:5px 0 16px}
@@ -171,7 +172,7 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-budget-form label{flex:1 1 100%}
 .wallos-ledger .ledger-budget-form input{flex:1 1 160px;height:48px;background:var(--input-background-color);color:var(--text-color);border:1px solid var(--input-border-color);border-radius:9px;padding:10px;font:inherit}
 
-@media(max-width:768px){.wallos-ledger .ledger-search-form input,.wallos-ledger .ledger-search-form select{max-width:none;flex:1 1 125px;min-width:0}.wallos-ledger .ledger-chart{gap:2px}.wallos-ledger .ledger-chart-label{font-size:9px}}
+@media(max-width:768px){.wallos-ledger .ledger-search-form input,.wallos-ledger .ledger-search-form select{max-width:none;flex:1 1 125px;min-width:0}}
 .wallos-ledger .ledger-dialog-backdrop{display:none;position:fixed;inset:0;background:#0008;z-index:19}
 .wallos-ledger .ledger-dialog-backdrop.open{display:block}
 .wallos-ledger .ledger-dialog{z-index:20}
@@ -226,10 +227,22 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-secondary-panel summary{cursor:pointer;color:var(--main-color);font-size:13px;font-weight:600;padding:8px 0}
 .wallos-ledger .ledger-secondary-panel .ledger-budget-form{margin-top:12px}
 .wallos-ledger .ledger-budget-form input{box-sizing:border-box}
-.wallos-ledger .ledger-chart{height:120px;gap:4px;border-bottom:1px solid var(--box-border-color);overflow-x:auto;padding-bottom:6px}
-.wallos-ledger .ledger-chart-day.is-zero .ledger-chart-bar{opacity:0;min-height:0}
-.wallos-ledger .ledger-chart-day:focus-visible{outline:2px solid var(--main-color);outline-offset:2px}
-.wallos-ledger .ledger-chart-day:hover .ledger-chart-bar{opacity:1}
+/* Accessible, scrollable monthly column chart. Keep the Y axis auto-scaled. */
+.wallos-ledger .ledger-chart-shell{max-width:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;border:1px solid var(--box-border-color);border-radius:12px;padding:10px 2px 1px;background:var(--box-background-color)}
+.wallos-ledger .ledger-apex-chart{min-width:620px;width:100%;height:248px}
+.wallos-ledger .ledger-chart-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0;font-size:13px;color:var(--text-muted)}
+.wallos-ledger .ledger-chart-controls label{font-weight:600}
+.wallos-ledger .ledger-chart-controls select{min-width:155px;max-width:100%;height:42px;border:1px solid var(--input-border-color);border-radius:9px;background:var(--input-background-color);color:var(--text-color);padding:0 12px;font:inherit}
+.wallos-ledger .ledger-chart-selection{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--box-background-color);border:1px solid var(--box-border-color);border-radius:12px;padding:12px 14px;margin:10px 0;font-size:14px;color:var(--text-color)}
+.wallos-ledger .ledger-chart-selection[hidden]{display:none!important}
+.wallos-ledger .ledger-chart-selection strong{font-variant-numeric:tabular-nums}
+.wallos-ledger .ledger-chart-selection a{margin-left:auto;color:var(--main-color);font-weight:600;text-decoration:underline}
+.wallos-ledger .ledger-chart-table{margin-top:12px}
+.wallos-ledger .ledger-chart-table summary{cursor:pointer;font-size:13px;color:var(--main-color);padding:8px 0}
+.wallos-ledger .ledger-chart-table table{width:100%;border-collapse:collapse;font-size:13px;color:var(--text-color)}
+.wallos-ledger .ledger-chart-table td,.wallos-ledger .ledger-chart-table th{text-align:left;border-bottom:1px solid var(--box-border-color);padding:8px 6px}
+.wallos-ledger .ledger-chart-table button{border:0;background:none;padding:4px 8px;color:var(--main-color);text-decoration:underline;cursor:pointer;font:inherit}
+@media(max-width:768px){.wallos-ledger .ledger-chart-shell{margin-right:0}.wallos-ledger .ledger-chart-selection a{margin-left:0}}
 .wallos-ledger .ledger-empty-chart{padding:20px;border:1px dashed var(--box-border-color);border-radius:12px;font-size:13px;color:var(--text-muted)}
 .wallos-ledger .ledger-empty-chart i{margin-right:7px}
 .wallos-ledger .ledger-search-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:end;gap:12px;margin:14px 0 22px}
@@ -335,27 +348,49 @@ $notice=$_GET['notice'] ?? '';
         </details>
       </div>
     </section>
-    <section class="stats-section">
+    <section class="stats-section" id="finance-daily-chart-section">
       <h2>每日消费趋势 · <?= ledger_escape($month) ?></h2>
       <?php if(!$hasDailySpend): ?>
-        <div class="ledger-empty-chart"><i class="fa-solid fa-chart-column"></i>该月暂无人民币消费记录，暂不显示趋势图。</div>
-      <?php else: ?>
-      <div class="ledger-chart" role="group" aria-label="本月人民币每日支出；点选日期可查看明细">
-       <?php for($n=1;$n<=$lastDay;$n++):
-          $dateKey=sprintf('%s-%02d',$month,$n);
-          $cents=intval($plot[$dateKey]??0);
-          $height=$cents>0?max(6,round(100*$cents/$maxDaily)):0;
-       ?>
-         <a class="ledger-chart-day <?=$cents===0?'is-zero':''?>" href="<?= ledger_escape(ledger_page_link($month,['day'=>$dateKey,'category'=>'','direction'=>'','q'=>''])) ?>"
-           title="<?= ledger_escape($dateKey.' · '.ledger_money($cents,'CNY')) ?>" aria-label="<?= ledger_escape($dateKey.'：'.ledger_money($cents,'CNY')) ?>">
-           <span class="ledger-chart-bar" style="height:<?= $height ?>%"></span>
-           <span class="ledger-chart-label"><?=($n===1 || $n%5===0 || $n===$lastDay)?$n:""?></span>
-         </a>
-       <?php endfor; ?>
-      </div>
+        <p class="ledger-section-message">该月尚无已记录的人民币支出。所有日期按 ¥0.00 展示。</p>
       <?php endif; ?>
-      <p class="ledger-section-message ledger-explainer">按北京时间展示已记录人民币支出，空白日期表示无已记录消费；点击日期筛选账单。</p>
+      <div class="ledger-chart-shell" tabindex="0" role="region" aria-label="每日消费柱状图，可左右滑动查看整月">
+        <div id="finance-daily-chart" class="ledger-apex-chart" role="img" aria-label="本月按公历日期排列的每日人民币实际支出图；可点击柱子选择日期"></div>
+      </div>
+      <div class="ledger-chart-controls">
+        <label for="finance-daily-date">查看指定日期</label>
+        <select id="finance-daily-date" aria-label="选择每日消费日期">
+          <option value="">选择日期</option>
+          <?php foreach($dailyChartPoints as $point): ?>
+            <option value="<?= ledger_escape($point['day']) ?>"><?= ledger_escape(substr($point['day'],8,2).' 日 · '.ledger_money($point['cents'],'CNY')) ?></option>
+          <?php endforeach; ?>
+        </select>
+        <span>柱子对应自然日，左右滑动可查看整月</span>
+      </div>
+      <div class="ledger-chart-selection" id="finance-daily-selection" role="status" aria-live="polite" hidden>
+        <span id="finance-daily-selected-date"></span>
+        <strong id="finance-daily-selected-amount"></strong>
+        <a id="finance-daily-detail-link" href="expenses.php">查看当日交易</a>
+      </div>
+      <details class="ledger-chart-table">
+        <summary>查看整月每日金额与明细（含零消费日期）</summary>
+        <table>
+          <thead><tr><th scope="col">日期（北京时间）</th><th scope="col">实际支出</th><th scope="col">操作</th></tr></thead>
+          <tbody>
+            <?php foreach($dailyChartPoints as $point): ?>
+              <tr>
+                <td><?= ledger_escape($point['day']) ?></td>
+                <td><?= ledger_escape(ledger_money($point['cents'],'CNY')) ?></td>
+                <td><a href="<?= ledger_escape(ledger_page_link($month,['day'=>$point['day'],'category'=>'','direction'=>'','q'=>''])) ?>">查看流水</a></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </details>
+      <p class="ledger-section-message ledger-explainer">依据 Finance 账本北京时间统计已记录人民币支出，未发生支出的日期按 ¥0.00 展示；退款、转账和排除交易不计入支出。</p>
     </section>
+    <script type="application/json" id="finance-daily-data"><?= json_encode($dailyChartPoints,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_UNICODE) ?></script>
+    <script src="scripts/libs/apexcharts.min.js"></script>
+    <script src="daily-spend-chart.js?v=<?= ledger_escape(filemtime(__DIR__.'/daily-spend-chart.js')) ?>"></script>
   <?php if($categoryExpense): ?>
   <section class="stats-section">
     <h2>支出分类 · 人民币</h2>
