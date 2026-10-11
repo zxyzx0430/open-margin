@@ -89,6 +89,22 @@ def main():
       except Exception:
         ERR.append("Daily backup timer unavailable")
 
+    # Every other non-root OS account on the VPS must not be able to read
+    # Wallos subscription metadata, setup token or password hashes. The
+    # service itself owns these files and retains full access (UID 82).
+    wallos_db_path=Path(os.getenv("FINANCE_WALLOS_DB",str(ROOT/"wallos/wallos.db")))
+    for private_path,label in (
+        (wallos_db_path.parent, "Wallos database directory"),
+        (wallos_db_path, "Wallos database"),
+        (wallos_db_path.parent/"setup_token.db", "Wallos setup token"),
+    ):
+        if private_path.exists():
+            try:
+                check(private_path.stat().st_mode & 0o077 == 0,
+                      label+" permissions allow group/other access")
+            except OSError:
+                ERR.append(label+" permission inspection unavailable")
+
     filesystem=shutil.disk_usage("/")
     check(filesystem.free>2*1024**3,"Disk free space under 2 GiB")
     check(filesystem.free/filesystem.total>0.10,"Disk has less than 10% free space")

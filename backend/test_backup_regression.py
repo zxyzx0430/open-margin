@@ -30,6 +30,24 @@ class BackupRegressionTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             backup.snapshot_one(self.root/"missing.sqlite3",self.root/"never.sqlite3")
         self.assertFalse((self.root/"never.sqlite3").exists())
+    def test_wal_mode_backup_is_standalone_without_orphan_sidecars(self):
+        # Real finance.sqlite3 uses WAL; never touch any live data in tests.
+        src=self.root/"synthetic-live-wal.sqlite3"
+        dest=self.root/"wal-archive.sqlite3"
+        with sqlite3.connect(src) as live:
+            self.assertEqual(live.execute("PRAGMA journal_mode=WAL").fetchone()[0],"wal")
+            live.execute("CREATE TABLE expense(id INTEGER PRIMARY KEY, cents INTEGER)")
+            live.execute("INSERT INTO expense(cents) VALUES(1886)")
+        backup.snapshot_one(src,dest)
+        self.assertEqual({p.name for p in self.root.glob("wal-archive.sqlite3*")},
+                         {"wal-archive.sqlite3"})
+        with sqlite3.connect(f"file:{dest}?mode=ro&immutable=1",uri=True) as restored:
+            self.assertEqual(restored.execute("PRAGMA journal_mode").fetchone()[0],"delete")
+            self.assertEqual(restored.execute("SELECT cents FROM expense").fetchone()[0],1886)
+            self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0],"ok")
+        with sqlite3.connect(src) as original:
+            self.assertEqual(original.execute("PRAGMA journal_mode").fetchone()[0],"wal")
+
     def test_30_day_retention_keeps_daily_sets(self):
         now=datetime.now(timezone.utc)
         for days,minute in [(0,0),(0,1),(0,2),(0,3),(1,0),(3,0),(31,0)]:

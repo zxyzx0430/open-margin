@@ -8,6 +8,7 @@
 """
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
+from contextlib import closing
 import os
 from configparser import ConfigParser
 import sqlite3
@@ -22,19 +23,29 @@ def snapshot_one(src:Path,dest:Path):
     if not src.is_file():
         raise FileNotFoundError("Required finance database missing: "+str(src))
     tmp=dest.with_name(dest.name+".partial")
-    tmp.unlink(missing_ok=True)
+    # The live source can be in WAL mode. An online SQLite backup copies its
+    # journal-mode header; convert ONLY the isolated backup to DELETE so the
+    # archived snapshot is a portable standalone database file. Otherwise,
+    # read-only verification creates .partial-wal / .partial-shm orphans.
+    temp_files=[tmp,tmp.with_name(tmp.name+"-wal"),tmp.with_name(tmp.name+"-shm")]
+    for part in temp_files:
+        part.unlink(missing_ok=True)
     try:
-        with sqlite3.connect(f"file:{src}?mode=ro",uri=True,timeout=20) as live:
-            with sqlite3.connect(tmp,timeout=20) as snapshot:
+        with closing(sqlite3.connect(f"file:{src}?mode=ro",uri=True,timeout=20)) as live:
+            with closing(sqlite3.connect(tmp,timeout=20)) as snapshot:
                 live.backup(snapshot, pages=100, sleep=0.05)
-        with sqlite3.connect(f"file:{tmp}?mode=ro",uri=True) as verify:
+                mode=snapshot.execute("PRAGMA journal_mode=DELETE").fetchone()
+                if not mode or mode[0].lower()!="delete":
+                    raise RuntimeError("Unable to finalize a standalone SQLite snapshot")
+        with closing(sqlite3.connect(f"file:{tmp}?mode=ro",uri=True)) as verify:
             result=verify.execute("PRAGMA integrity_check").fetchone()
             if not result or result[0]!="ok":
                 raise RuntimeError(f"SQLite integrity check failed: {src.name}")
         os.chmod(tmp,0o600)
         os.replace(tmp,dest)
     finally:
-        tmp.unlink(missing_ok=True)
+        for part in temp_files:
+            part.unlink(missing_ok=True)
 
 def retention(name:str,now:datetime,folder:Path):
     files=sorted(folder.glob(f"{name}-*.sqlite3"),reverse=True)
