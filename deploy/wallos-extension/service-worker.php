@@ -9,8 +9,8 @@ if (!headers_sent()) {
 // so every release invalidates stale precached assets automatically - a release
 // that changed JS/CSS without remembering to bump a hardcoded cache version
 // used to leave already-visited browsers stuck on old cached files indefinitely.
-const STATIC_CACHE = 'static-cache-<?= $version ?>-daily-select-v2';
-const PAGES_CACHE = 'pages-cache-v3-ui-retired';
+const STATIC_CACHE = 'static-cache-<?= $version ?>-live-chart-v3';
+const PAGES_CACHE = 'pages-cache-v4-live-chart';
 const LOGOS_CACHE = 'logos-cache-v2';
 
 // manifest.php is intentionally not precached here: it's per-user (theme
@@ -82,7 +82,7 @@ const staticAssets = [
     'scripts/i18n/zh_tw.js',
     'scripts/i18n/getlang.js',
     'scripts/libs/apexcharts.min.js',
-    'daily-spend-chart.js',
+    'daily-spend-chart-v2.js',
     'scripts/libs/sortable.min.js',
     'scripts/libs/qrcode.min.js',
     'images/icon/favicon.ico',
@@ -280,6 +280,21 @@ self.addEventListener('fetch', function (event) {
                     return networkResponse;
                 });
             })
+        );
+        return;
+    }
+
+    // Chart interaction code changes independently of Wallos's version.
+    // Never serve a stale cache-first copy; offline may use last good script.
+    if (url.pathname.endsWith('/daily-spend-chart-v2.js')) {
+        event.respondWith(
+            fetch(request, {cache: 'no-store'}).then(response => {
+                if (response.ok) {
+                    const copy = response.clone();
+                    caches.open(STATIC_CACHE).then(cache => cache.put(request, copy));
+                }
+                return response;
+            }).catch(() => caches.match(request, {ignoreSearch: true}))
         );
         return;
     }

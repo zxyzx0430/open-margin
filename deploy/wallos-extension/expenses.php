@@ -237,16 +237,16 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-chart-selection[hidden]{display:none!important}
 /* Day selection: distinct bar, date band and confirmed selection card. */
 .wallos-ledger .ledger-apex-chart{position:relative}
-.wallos-ledger .finance-daily-focus-band{position:absolute;z-index:0;pointer-events:none;border:1px solid var(--main-color);border-radius:7px;background:var(--main-color);opacity:.10;box-sizing:border-box;transition:opacity .18s ease}
+.wallos-ledger .finance-daily-focus-band{position:absolute;z-index:2;pointer-events:none;border:2px solid var(--main-color);border-radius:7px;background:var(--main-color);opacity:1;box-sizing:border-box;box-shadow:inset 0 0 0 1px var(--main-color),0 0 10px color-mix(in srgb,var(--main-color) 28%,transparent);background:color-mix(in srgb,var(--main-color) 17%,transparent);transition:opacity .2s ease}
 .wallos-ledger .finance-daily-focus-band[hidden]{display:none}
 .wallos-ledger .finance-daily-has-selection .apexcharts-bar-area:not(.finance-daily-bar-selected){opacity:.48;transition:opacity .18s ease}
-.wallos-ledger .apexcharts-bar-area.finance-daily-bar-selected{opacity:1!important;filter:brightness(1.15) drop-shadow(0px 0px 5px var(--main-color));transform-box:fill-box;transform-origin:center bottom;transform:scaleX(1.17) scaleY(1.06);transition:filter .18s ease,transform .18s ease}
-.wallos-ledger .finance-daily-bar-pop{animation:financeDailyBarPop .28s ease-out}
+.wallos-ledger .apexcharts-bar-area.finance-daily-bar-selected{opacity:1!important;filter:brightness(1.15) drop-shadow(0px 0px 5px var(--main-color));transform-box:fill-box;transform-origin:center bottom;transform:scaleX(1.27) scaleY(1.08);transition:filter .18s ease,transform .18s ease}
+.wallos-ledger .finance-daily-bar-pop{animation:financeDailyBarPop .48s ease-out}
 .wallos-ledger .ledger-chart-selection.is-active{border:2px solid var(--main-color);background:color-mix(in srgb,var(--main-color) 10%,var(--box-background-color));box-shadow:0 2px 13px color-mix(in srgb,var(--main-color) 20%,transparent);padding:11px 13px}
 .wallos-ledger .ledger-chart-selection.is-active strong{font-size:18px;color:var(--main-color)}
 .wallos-ledger .ledger-chart-selection .finance-daily-selected-label{font-weight:700;color:var(--main-color)}
-.wallos-ledger .ledger-chart-selection.finance-daily-selection-pop{animation:financeDailySelectionPop .30s ease-out}
-@keyframes financeDailyBarPop{0%{filter:brightness(1.4) drop-shadow(0px 0px 10px var(--main-color));transform:scaleX(1.3) scaleY(1.1)}100%{transform:scaleX(1.17) scaleY(1.06)}}
+.wallos-ledger .ledger-chart-selection.finance-daily-selection-pop{animation:financeDailySelectionPop .46s ease-out}
+@keyframes financeDailyBarPop{0%{filter:brightness(1.4) drop-shadow(0px 0px 10px var(--main-color));transform:scaleX(1.45) scaleY(1.14)}100%{transform:scaleX(1.27) scaleY(1.08)}}
 @keyframes financeDailySelectionPop{0%{transform:scale(.985)}65%{transform:scale(1.008)}100%{transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){.wallos-ledger .finance-daily-focus-band,.wallos-ledger .apexcharts-bar-area,.wallos-ledger .finance-daily-selection-pop,.wallos-ledger .finance-daily-bar-pop{animation:none!important;transition:none!important}}
 .wallos-ledger .ledger-chart-selection strong{font-variant-numeric:tabular-nums}
@@ -378,7 +378,7 @@ $notice=$_GET['notice'] ?? '';
             <option value="<?= ledger_escape($point['day']) ?>"><?= ledger_escape(substr($point['day'],8,2).' 日 · '.ledger_money($point['cents'],'CNY')) ?></option>
           <?php endforeach; ?>
         </select>
-        <span>柱子对应自然日，左右滑动可查看整月</span>
+        <span>点击柱子或图表日期区域，蓝色高亮表示已选中；左右滑动查看整月</span>
       </div>
       <div class="ledger-chart-selection" id="finance-daily-selection" role="status" aria-live="polite" hidden>
         <span class="finance-daily-selected-label">已选日期</span><span id="finance-daily-selected-date"></span>
@@ -404,7 +404,7 @@ $notice=$_GET['notice'] ?? '';
     </section>
     <script type="application/json" id="finance-daily-data"><?= json_encode($dailyChartPoints,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_UNICODE) ?></script>
     <script src="scripts/libs/apexcharts.min.js"></script>
-    <script src="daily-spend-chart.js?v=<?= ledger_escape(filemtime(__DIR__.'/daily-spend-chart.js')) ?>"></script>
+    <script src="daily-spend-chart-v2.js?v=<?= ledger_escape(filemtime(__DIR__.'/daily-spend-chart-v2.js')) ?>"></script>
   <?php if($categoryExpense): ?>
   <section class="stats-section">
     <h2>支出分类 · 人民币</h2>
@@ -559,7 +559,7 @@ function ledgerToggle(show) {
 document.addEventListener('keydown',e=>{if(e.key==='Escape') ledgerToggle(false)});
 // Refresh current view every 60 seconds. The finance DB is read directly on
 // each page fetch (no second synchronized transaction database).
-setInterval(async ()=>{
+async function ledgerRefreshCurrentView(){
   if(document.hidden || document.getElementById('ledger-dialog').classList.contains('is-open')) return;
   const focused=document.activeElement;
   if(focused && ['INPUT','SELECT','TEXTAREA'].includes(focused.tagName)) return;
@@ -570,10 +570,17 @@ setInterval(async ()=>{
     const oldView=document.getElementById('ledger-live');
     const newView=newDoc.getElementById('ledger-live');
     if(!oldView || !newView) return;
-    if(oldView.dataset.revision!==newView.dataset.revision) oldView.replaceWith(newView);
+    // A replaceWith destroys ApexCharts SVG state and all JS listeners.
+    // Rebuild the entire document only when the ledger really changed,
+    // so the versioned script initializes the new month/chart exactly once.
+    if(oldView.dataset.revision!==newView.dataset.revision) {
+      location.reload();
+      return;
+    }
     const stamp=document.getElementById('ledger-check-time');
     if(stamp) stamp.textContent='最近自动检查 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});
   }catch(_e) { /* preserve the currently displayed ledger when offline */ }
-},60000);
+}
+setInterval(ledgerRefreshCurrentView,60000);
 </script>
 <?php require_once 'includes/footer.php'; ?>

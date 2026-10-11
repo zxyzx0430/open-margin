@@ -3,7 +3,7 @@
 FROM bellamy/wallos@sha256:0006879778f31a962a3873f7682514b92a3c7665dcbc4764fcc241ad968eaccd
 
 COPY expenses.php /var/www/html/expenses.php
-COPY daily-spend-chart.js /var/www/html/daily-spend-chart.js
+COPY daily-spend-chart-v2.js /var/www/html/daily-spend-chart-v2.js
 COPY expenses-action.php /var/www/html/expenses-action.php
 COPY expenses-export.php /var/www/html/expenses-export.php
 COPY ledger-common.php /var/www/html/ledger-common.php

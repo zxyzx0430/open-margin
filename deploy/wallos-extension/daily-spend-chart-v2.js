@@ -163,6 +163,7 @@
   });
   chart.render().then(() => {
     root.dataset.chartReady = "true";
+    root.dataset.interactiveVersion = "v2";
     chartReady = true;
     paintSelection();
   }).catch(() => {

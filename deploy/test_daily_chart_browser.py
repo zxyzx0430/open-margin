@@ -16,7 +16,7 @@ import tempfile
 from playwright.sync_api import sync_playwright
 
 ROOT=Path(__file__).resolve().parents[1]
-CHART=ROOT/"deploy/wallos-extension/daily-spend-chart.js"
+CHART=ROOT/"deploy/wallos-extension/daily-spend-chart-v2.js"
 PHP=ROOT/"deploy/wallos-extension/expenses.php"
 APEX=Path(os.environ.get("PFS_APEXCHARTS_JS","/tmp/pfs-chart-test-assets/apexcharts.min.js"))
 EVIDENCE=Path(os.environ.get("PFS_CHART_EVIDENCE","/tmp/pfs-chart-evidence"))
@@ -70,7 +70,7 @@ def fixture(month, entries, css):
       <p class="ledger-section-message ledger-explainer">按北京时间展示已入库消费。不含退款、转账、排除的记录。</p>
       </section></main>
       <script id="finance-daily-data" type="application/json">{html.escape(json.dumps(entries,ensure_ascii=False),quote=False)}</script>
-      <script src="apexcharts.min.js"></script><script src="daily-spend-chart.js"></script>
+      <script src="apexcharts.min.js"></script><script src="daily-spend-chart-v2.js"></script>
     </body></html>'''
 
 def run():
@@ -82,7 +82,7 @@ def run():
     count=0
     with tempfile.TemporaryDirectory(prefix="pfs-daily-chart-") as td:
         folder=Path(td)
-        (folder/"daily-spend-chart.js").write_bytes(CHART.read_bytes())
+        (folder/"daily-spend-chart-v2.js").write_bytes(CHART.read_bytes())
         (folder/"apexcharts.min.js").write_bytes(APEX.read_bytes())
         for src in Path("/tmp/pfs-chart-test-assets/styles").rglob("*.css"):
             target=folder/"styles"/src.relative_to("/tmp/pfs-chart-test-assets/styles")
