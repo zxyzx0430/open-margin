@@ -42,6 +42,52 @@
   }
   host.addEventListener("click", event => selectIndex(indexFromPointer(event)));
   let chosen = -1;
+  let chartReady = false;
+  const barClass = "finance-daily-bar-selected";
+  function paintSelection() {
+    if (!chartReady || chosen < 0) return;
+    if (!focusBand.isConnected) host.append(focusBand);
+    const bars = host.querySelectorAll(".apexcharts-bar-area");
+    host.classList.add("finance-daily-has-selection");
+    bars.forEach((bar, i) => {
+      bar.classList.toggle(barClass, i === chosen);
+      bar.classList.remove("finance-daily-bar-pop");
+    });
+    const active = bars[chosen];
+    if (active) {
+      // Replaying the animation makes a repeat tap visibly register too.
+      void active.getBoundingClientRect();
+      active.classList.add("finance-daily-bar-pop");
+    }
+    const grid = host.querySelector(".apexcharts-grid");
+    const band = host.querySelector(".finance-daily-focus-band");
+    if (grid && band) {
+      const r = grid.getBoundingClientRect(), h = host.getBoundingClientRect();
+      const w = r.width / entries.length;
+      band.style.left = (r.left - h.left + chosen * w + 1) + "px";
+      band.style.top = (r.top - h.top) + "px";
+      band.style.width = Math.max(1, w - 2) + "px";
+      band.style.height = r.height + "px";
+      band.hidden = false;
+      // Selecting a distant day through the dropdown reveals its bar at once.
+      const viewport = root.querySelector(".ledger-chart-shell");
+      const left = parseFloat(band.style.left);
+      if (viewport && Number.isFinite(left)) {
+        const current = viewport.scrollLeft, right = current + viewport.clientWidth;
+        if (left < current + 14 || left + w > right - 14) {
+          const target = Math.max(0, Math.min(
+            viewport.scrollWidth - viewport.clientWidth,
+            left + w / 2 - viewport.clientWidth / 2));
+          viewport.scrollLeft = target;
+        }
+      }
+    }
+  }
+  // Date bands remain visible even when a ¥0 or subpixel SVG bar cannot be drawn.
+  const focusBand = document.createElement("span");
+  focusBand.className = "finance-daily-focus-band";
+  focusBand.setAttribute("aria-hidden", "true");
+  focusBand.hidden = true;
   function selectIndex(index) {
     if (!Number.isInteger(index) || index < 0 || index >= entries.length) return;
     chosen = index;
@@ -52,7 +98,12 @@
       "&day=" + encodeURIComponent(row.day);
     picker.value = row.day;
     selected.hidden = false;
+    selected.classList.add("is-active");
+    selected.classList.remove("finance-daily-selection-pop");
+    void selected.offsetWidth;
+    selected.classList.add("finance-daily-selection-pop");
     root.dataset.selectedDate = row.day;
+    paintSelection();
   }
   picker.addEventListener("change", () => {
     const idx = entries.findIndex(p => p.day === picker.value);
@@ -79,14 +130,9 @@
       type: "bar", height: 248, parentHeightOffset: 0, background: "transparent",
       foreColor: color("--text-muted", "#6b7280"),
       animations: {enabled: false}, toolbar: {show: false}, zoom: {enabled: false},
-      selection: {enabled: false},
-      events: {
-        dataPointSelection: (_event, _ctx, options) => selectIndex(options.dataPointIndex),
-        click: (event, _ctx, options) => {
-          if (options && options.dataPointIndex >= 0) selectIndex(options.dataPointIndex);
-          else selectIndex(indexFromPointer(event));
-        }
-      }
+      selection: {enabled: false}
+      // A single host click handler resolves date from geometry BEFORE scrolling.
+      // ApexCharts events would race it and re-select the wrong day on narrow screens.
     },
     series: [{name: "人民币实际支出", data: entries.map(p => p.cents / 100)}],
     plotOptions: {bar: {horizontal: false, columnWidth: "64%", borderRadius: 3}},
@@ -117,13 +163,16 @@
   });
   chart.render().then(() => {
     root.dataset.chartReady = "true";
+    chartReady = true;
+    paintSelection();
   }).catch(() => {
     host.textContent = "图表无法呈现，请使用下方日期明细表。";
   });
   new MutationObserver(() => {
     chart.updateOptions({theme: {mode: mode()},
       colors: [color("--main-color", "#4777e7")],
-      chart: {foreColor: color("--text-muted", "#6b7280")}}, false, false);
+      chart: {foreColor: color("--text-muted", "#6b7280")}}, false, false)
+      .then(() => paintSelection());
   }).observe(document.body, {attributes: true, attributeFilter: ["class"]});
   root.financeDailyChart = {selectIndex, entries};
 })();

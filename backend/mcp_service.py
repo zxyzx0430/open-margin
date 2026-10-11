@@ -75,7 +75,7 @@ def add_subscription(name:str, amount_cents:int, currency:str, cadence:str, next
     except WallosError as exc:
         return {"error":str(exc)}
 
-@mcp.tool()
+# Retired legacy subscription-reconciliation integration.
 def personal_finance_overview(month: str) -> dict:
     """Combine REAL spending with Wallos subscriptions, paid cycles, pending charges,
     current CNY budget/forecast, anomalies and suggested matches for YYYY-MM.
@@ -92,14 +92,14 @@ def personal_finance_long_term_trends(months: int=12) -> dict:
     if not 2<=months<=36:return {"error":"months must be 2..36"}
     return trends(months)
 
-@mcp.tool()
+# Retired legacy subscription-reconciliation integration.
 def personal_finance_recurring_discovery(months:int=12) -> dict:
     """Candidate recurring payments requiring confirmation before adding to Wallos."""
     from integration import discover
     if not 2<=months<=36:return {"error":"months must be 2..36"}
     return discover(months)
 
-@mcp.tool()
+# Retired legacy subscription-reconciliation integration.
 def confirm_subscription_payment(tx_id:int,subscription_id:int,cycle_key:str) -> dict:
     """Explicitly confirm that an existing payment belongs to this Wallos billing cycle.
     Does not create an additional expense or advance Wallos renewal dates.

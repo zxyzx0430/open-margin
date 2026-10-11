@@ -235,6 +235,20 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-chart-controls select{min-width:155px;max-width:100%;height:42px;border:1px solid var(--input-border-color);border-radius:9px;background:var(--input-background-color);color:var(--text-color);padding:0 12px;font:inherit}
 .wallos-ledger .ledger-chart-selection{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--box-background-color);border:1px solid var(--box-border-color);border-radius:12px;padding:12px 14px;margin:10px 0;font-size:14px;color:var(--text-color)}
 .wallos-ledger .ledger-chart-selection[hidden]{display:none!important}
+/* Day selection: distinct bar, date band and confirmed selection card. */
+.wallos-ledger .ledger-apex-chart{position:relative}
+.wallos-ledger .finance-daily-focus-band{position:absolute;z-index:0;pointer-events:none;border:1px solid var(--main-color);border-radius:7px;background:var(--main-color);opacity:.10;box-sizing:border-box;transition:opacity .18s ease}
+.wallos-ledger .finance-daily-focus-band[hidden]{display:none}
+.wallos-ledger .finance-daily-has-selection .apexcharts-bar-area:not(.finance-daily-bar-selected){opacity:.48;transition:opacity .18s ease}
+.wallos-ledger .apexcharts-bar-area.finance-daily-bar-selected{opacity:1!important;filter:brightness(1.15) drop-shadow(0px 0px 5px var(--main-color));transform-box:fill-box;transform-origin:center bottom;transform:scaleX(1.17) scaleY(1.06);transition:filter .18s ease,transform .18s ease}
+.wallos-ledger .finance-daily-bar-pop{animation:financeDailyBarPop .28s ease-out}
+.wallos-ledger .ledger-chart-selection.is-active{border:2px solid var(--main-color);background:color-mix(in srgb,var(--main-color) 10%,var(--box-background-color));box-shadow:0 2px 13px color-mix(in srgb,var(--main-color) 20%,transparent);padding:11px 13px}
+.wallos-ledger .ledger-chart-selection.is-active strong{font-size:18px;color:var(--main-color)}
+.wallos-ledger .ledger-chart-selection .finance-daily-selected-label{font-weight:700;color:var(--main-color)}
+.wallos-ledger .ledger-chart-selection.finance-daily-selection-pop{animation:financeDailySelectionPop .30s ease-out}
+@keyframes financeDailyBarPop{0%{filter:brightness(1.4) drop-shadow(0px 0px 10px var(--main-color));transform:scaleX(1.3) scaleY(1.1)}100%{transform:scaleX(1.17) scaleY(1.06)}}
+@keyframes financeDailySelectionPop{0%{transform:scale(.985)}65%{transform:scale(1.008)}100%{transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){.wallos-ledger .finance-daily-focus-band,.wallos-ledger .apexcharts-bar-area,.wallos-ledger .finance-daily-selection-pop,.wallos-ledger .finance-daily-bar-pop{animation:none!important;transition:none!important}}
 .wallos-ledger .ledger-chart-selection strong{font-variant-numeric:tabular-nums}
 .wallos-ledger .ledger-chart-selection a{margin-left:auto;color:var(--main-color);font-weight:600;text-decoration:underline}
 .wallos-ledger .ledger-chart-table{margin-top:12px}
@@ -367,7 +381,7 @@ $notice=$_GET['notice'] ?? '';
         <span>柱子对应自然日，左右滑动可查看整月</span>
       </div>
       <div class="ledger-chart-selection" id="finance-daily-selection" role="status" aria-live="polite" hidden>
-        <span id="finance-daily-selected-date"></span>
+        <span class="finance-daily-selected-label">已选日期</span><span id="finance-daily-selected-date"></span>
         <strong id="finance-daily-selected-amount"></strong>
         <a id="finance-daily-detail-link" href="expenses.php">查看当日交易</a>
       </div>
@@ -412,7 +426,6 @@ $notice=$_GET['notice'] ?? '';
       <h2 style="flex:1;margin-bottom:14px">交易流水 · <?= ledger_escape($month) ?></h2>
       <a href="expenses-export.php?month=<?= ledger_escape($month) ?>" class="button secondary-button tiny"><i class="fa-solid fa-file-csv"></i> 导出 CSV</a>
       <a href="subscriptions.php" class="button secondary-button tiny"><i class="fa-solid fa-rotate"></i> 订阅管理</a>
-      <a href="integration.php?month=<?= ledger_escape($month) ?>" class="button secondary-button tiny"><i class="fa-solid fa-link"></i> 订阅对账与分析</a>
     </div>
     <form method="get" action="expenses.php" class="ledger-search-form" aria-label="筛选消费流水">
       <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">
@@ -490,7 +503,7 @@ $notice=$_GET['notice'] ?? '';
                     <option value="<?= ledger_escape($state) ?>" <?= $status===$state?'selected':'' ?>><?= ledger_escape($title) ?></option>
                   <?php endforeach; ?>
                   <?php if($status==='possible_duplicate'): ?><option value="possible_duplicate" selected>疑似重复</option><?php endif; ?>
-                  <?php if($status==='refund'): ?><option value="refund" selected>已关联退款（在对账页面管理）</option><?php endif; ?>
+                  <?php if($status==='refund'): ?><option value="refund" selected>已关联退款</option><?php endif; ?>
                 </select>
               </form>
             </div>

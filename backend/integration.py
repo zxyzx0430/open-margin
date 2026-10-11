@@ -244,7 +244,7 @@ def snapshot(month:str):
          "budget_remaining_after_forecast_cny_cents":(budget-net_cny-reserved) if budget else None,
          "note":"Expected subscriptions are forecasts only; actual ledger counts matched payments once."}
 
-@router.get("/integration")
+# Retired subscription/payment reconciliation route: @router.get("/integration")
 def integration(month:str=Query(...)):
     return snapshot(month)
 
@@ -253,7 +253,7 @@ class Link(BaseModel):
     subscription_id:int=Field(gt=0)
     cycle_key:str=Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
 
-@router.post("/integration/link")
+# Retired subscription/payment reconciliation route: @router.post("/integration/link")
 def link(t:Link):
     import app as core
     try:subs=get_all()
@@ -280,7 +280,7 @@ def link(t:Link):
         db.execute("UPDATE transactions SET category='SUBSCRIPTION' WHERE id=? AND category='OTHER'",(t.tx_id,))
     return {"ok":True,"matched":True,"counted_as_expense_once":True}
 
-@router.delete("/integration/link/{tx_id}")
+# Retired subscription/payment reconciliation route: @router.delete("/integration/link/{tx_id}")
 def unlink(tx_id:int):
     import app as core
     with core.db_connection() as db:
@@ -420,7 +420,7 @@ def mark_duplicate(tx_id:int):
         db.execute("DELETE FROM tx_subscription_links WHERE tx_id=?",(tx_id,))
     return {"ok":True,"excluded":True}
 
-@router.get("/integration/trends")
+# Retired subscription/payment reconciliation route: @router.get("/integration/trends")
 def trends(months:int=Query(12,ge=2,le=36)):
     import app as core
     now=datetime.now(TZ)
@@ -443,7 +443,7 @@ def trends(months:int=Query(12,ge=2,le=36)):
              for (m,c,d),v in sorted(totals.items())],
             "note":"Refunds are separate deductions and are attributed to the month the money was received (cash-flow basis)."}
 
-@router.get("/integration/discover")
+# Retired subscription/payment reconciliation route: @router.get("/integration/discover")
 def discover(months:int=Query(12,ge=2,le=36)):
     """Suggest possible recurring services, NEVER create a Wallos subscription."""
     import app as core
@@ -495,7 +495,7 @@ class NewSubscription(BaseModel):
     cadence:Literal["weekly","monthly","quarterly","yearly"]
     next_due_ms:int=Field(gt=946684800000,lt=4102444800000)
 
-@router.post("/integration/subscribe")
+# Retired subscription/payment reconciliation route: @router.post("/integration/subscribe")
 def create_discovered_subscription(t:NewSubscription):
     """Only an explicit user action may create a Wallos subscription."""
     from wallos_api import add

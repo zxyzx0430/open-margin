@@ -4,7 +4,6 @@ FROM bellamy/wallos@sha256:0006879778f31a962a3873f7682514b92a3c7665dcbc4764fcc24
 
 COPY expenses.php /var/www/html/expenses.php
 COPY daily-spend-chart.js /var/www/html/daily-spend-chart.js
-COPY integration.php /var/www/html/integration.php
 COPY expenses-action.php /var/www/html/expenses-action.php
 COPY expenses-export.php /var/www/html/expenses-export.php
 COPY ledger-common.php /var/www/html/ledger-common.php
@@ -14,3 +13,6 @@ COPY service-worker.php /var/www/html/service-worker.php
 
 LABEL org.opencontainers.image.title="Wallos + self-hosted daily expense extension" \
       org.opencontainers.image.description="Wallos vendor UI with custom expense ledger endpoint. Two separate databases."
+
+# The retired subscription/payment reconciliation page must stay unavailable.
+RUN rm -f /var/www/html/integration.php

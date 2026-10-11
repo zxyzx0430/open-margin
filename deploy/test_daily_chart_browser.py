@@ -63,7 +63,7 @@ def fixture(month, entries, css):
       <select id="finance-daily-date"><option value="">选择日期</option>{opts}</select>
       <span>柱子对应自然日，左右滑动可查看整月</span></div>
       <div id="finance-daily-selection" class="ledger-chart-selection" role="status" aria-live="polite" hidden>
-      <span id="finance-daily-selected-date"></span><strong id="finance-daily-selected-amount"></strong>
+      <span class="finance-daily-selected-label">已选日期</span><span id="finance-daily-selected-date"></span><strong id="finance-daily-selected-amount"></strong>
       <a id="finance-daily-detail-link" href="expenses.php">查看当日交易</a></div>
       <details class="ledger-chart-table"><summary>查看整月每日金额与明细（含零消费日期）</summary>
       <table><thead><tr><th>日期</th><th>实际支出</th><th>操作</th></tr></thead><tbody>{rows}</tbody></table></details>
@@ -90,7 +90,9 @@ def run():
             target.write_bytes(src.read_bytes())
         with sync_playwright() as p:
             browser=p.chromium.launch(executable_path="/usr/bin/chromium",headless=True,args=["--no-sandbox"])
+            only=set(filter(None,os.getenv("PFS_CHART_SCENARIOS","").split(",")))
             for key,(month,spent) in SCENARIOS.items():
+                if only and key not in only: continue
                 entries=points_for(month,spent)
                 assert sum(e["cents"] for e in entries)==sum(spent.values())
                 assert len(entries)==calendar.monthrange(*map(int,month.split("-")))[1]
@@ -122,8 +124,18 @@ def run():
                                 assert page.locator("#finance-daily-selected-date").inner_text()==row["day"]
                                 assert page.locator("#finance-daily-selected-amount").inner_text()==f'¥{row["cents"]/100:,.2f}'
                                 assert "day="+row["day"] in page.locator("#finance-daily-detail-link").get_attribute("href")
+                                assert page.locator("#finance-daily-selection.is-active").count()==1
+                                assert page.locator(".apexcharts-bar-area.finance-daily-bar-selected").count()==1, (key,width,"selected bar")
+                                assert page.locator(".finance-daily-focus-band:not([hidden])").count()==1, (key,width,"day highlight")
+                                selected=page.locator(".apexcharts-bar-area.finance-daily-bar-selected")
+                                assert selected.get_attribute("j")==str(index), (key,width,"bar selection mismatch")
+                                style=page.locator("#finance-daily-selection").evaluate("(e) => getComputedStyle(e).borderTopWidth")
+                                assert style=="2px", (key,width,"selected panel visual not active")
                             # Any day column must work, even beside a much taller expense bar.
                             if spent:
+                                # A native date selection may scroll far right.
+                                # Reposition only for this independent pointer test.
+                                page.locator(".ledger-chart-shell").evaluate("(el) => el.scrollLeft = 0")
                                 target=next(iter(spent))-1
                                 if width<768 and target>13: target=0
                                 bounds=page.locator(".apexcharts-grid").bounding_box()
