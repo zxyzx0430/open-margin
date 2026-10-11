@@ -237,6 +237,14 @@ $notice=$_GET['notice'] ?? '';
   <?php elseif ($notice==='budget'): ?><div class="ledger-section-message" role="status"><i class="fa-solid fa-circle-check"></i> 本月消费预算已保存。</div>
   <?php elseif ($notice==='failed'): ?><div class="error-box" role="alert">未能保存，请检查金额与日期。</div><?php endif; ?>
 
+  <?php if (!$ledgerLoaded): ?>
+  <section class="stats-section" role="alert" style="padding:16px 0">
+    <h2>账本连接暂时不可用</h2>
+    <p class="ledger-intro">未能取得实时交易，不显示任何可能误导的零元统计。你的已同步交易仍保存在服务器上。</p>
+    <a class="button" href="<?= ledger_escape(ledger_page_link($month,$filters,$offset)) ?>">重新读取本月账本</a>
+  </section>
+  <?php else: ?>
+  <p class="ledger-sync" role="status">实时账本：本月已同步 <?=intval($monthCount)?> 笔记录。每笔成功同步的消费立即计入当月，不需等到月底。<a href="<?=ledger_escape(ledger_page_link($month,$filters,$offset))?>">刷新</a></p>
   <div id="ledger-live" data-revision="<?= ledger_escape($revision) ?>">
     <section class="stats-section">
       <h2>消费概览 · <?= ledger_escape($month) ?></h2>
@@ -412,6 +420,7 @@ $notice=$_GET['notice'] ?? '';
     <p class="ledger-sync">最近一笔记录入库时间（UTC）：<?= ledger_escape($lastSynced?:'暂无记录') ?> · <span id="ledger-check-time">页面读取时间 <?= ledger_escape(date('H:i:s')) ?></span> · <a href="<?= ledger_escape(ledger_page_link($month,$filters,$offset)) ?>">立即刷新</a></p>
   </section>
   </div>
+  <?php endif; ?>
 
   <div id="ledger-backdrop" class="ledger-dialog-backdrop" onclick="ledgerToggle(false)"></div>
   <section id="ledger-dialog" class="subscription-form ledger-dialog" role="dialog" aria-modal="true" aria-label="新增消费记录">

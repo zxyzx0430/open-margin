@@ -33,11 +33,10 @@ object NotificationParser {
     // 收入关键词
     private val INCOME_KEYWORDS = listOf(
         "成功收款", "收款成功", "已收款", "您已收款",
-        "到账", "已到账", "到帐",
-        "收款", "收款￥", "入账",
-        "收到转账", "收到红包", "转账到账",
+        "已到账", "到账成功", "已存入零钱",
+        "收到转账", "转账到账",
         "向你付款", "向您付款",  // 别人付给你（微信）
-        "退款", "返现",
+        "收到退款", "退款到账", "退款成功",
     )
 
     // 支出关键词
@@ -48,6 +47,45 @@ object NotificationParser {
         "消费",
         "支出", "的支出",  // 支付宝："你有一笔 X 元的支出"
     )
+
+    // 只有真正完成的支付/入账才可记账。支付宝卡包等推广通知
+    // 常含 "14元红包今晚失效"、"未领取" 等金额，但不代表扣款。
+    private val PROMOTION_HINTS = listOf(
+        "红包", "卡包", "优惠券", "代金券", "优惠红包", "待领取",
+        "未领取", "点击领取", "今晚失效", "即将失效", "即将过期",
+        "领券", "优惠活动", "满减券", "返现券",
+    )
+    private val COMPLETED_EXPENSE_HINTS = listOf(
+        "付款成功", "成功付款", "已付款", "您已付款",
+        "支付成功", "已支付", "您已支付", "扣款成功", "已扣款", "扣费成功",
+        "你有一笔", "您有一笔",
+    )
+    private val COMPLETED_INCOME_HINTS = listOf(
+        "成功收款", "收款成功", "已收款", "您已收款",
+        "已到账", "到账成功", "收到转账", "向你付款", "向您付款",
+        "收到退款", "退款到账", "退款成功", "已存入零钱",
+    )
+    private val ENGLISH_PAID = Regex("""\bpaid\b""", RegexOption.IGNORE_CASE)
+
+    /** Fail closed on generic amount-only notifications and redemption prompts. */
+    internal fun isSettledPaymentNotification(full: String): Boolean {
+        val explicitExpense = COMPLETED_EXPENSE_HINTS.any { full.contains(it) } &&
+            !(full.contains("你有一笔") || full.contains("您有一笔")) ||
+            (full.contains("你有一笔") || full.contains("您有一笔")) &&
+                (full.contains("的支出") || full.contains("支出，") || full.contains("支出。"))
+        val explicitIncome = COMPLETED_INCOME_HINTS.any { full.contains(it) }
+        val payToMerchant = PAY_TO_MERCHANT_REGEX.containsMatchIn(full)
+        val englishPaid = ENGLISH_PAID.containsMatchIn(full)
+        val confirmed = explicitExpense || explicitIncome || payToMerchant || englishPaid
+        if (!confirmed) return false
+        if (PROMOTION_HINTS.any { full.contains(it) } &&
+            !explicitExpense && !explicitIncome && !payToMerchant && !englishPaid) return false
+        // "红包" must not be taken as a credit merely because a notification
+        // says "收到红包"; opening/settlement is checked by the UI extractor.
+        if (full.contains("红包") && !explicitExpense && !explicitIncome &&
+            !payToMerchant && !englishPaid) return false
+        return true
+    }
 
     // "向 商户名 付款" 模式（区分于"向你/您 付款"）= 支出
     private val PAY_TO_MERCHANT_REGEX = Regex("""向\s*(?!你|您)(\S+?)\s*付款""")
@@ -88,6 +126,7 @@ object NotificationParser {
         timestampMs: Long,
     ): TransactionEntity? {
         if (full.isBlank()) return null
+        if (!isSettledPaymentNotification(full)) return null
 
         // 1. 提金额
         val amountCents = extractAmountCents(full) ?: return null

@@ -48,11 +48,13 @@ class WechatRedPacketExtractor : AccessibilityExtractor {
 
     companion object {
         private val INCOME_HINTS = listOf(
-            "已存入零钱", "已存入", "拆到", "领取了", "领到", "微信红包",
+            "已存入零钱", "已存入", "拆到了", "领取了红包", "领到红包", "已领取红包",
         )
         // 自己发出的红包页面也带金额，需排除
         private val EXPENSE_NEGATIVES = listOf(
             "发出红包", "塞钱进红包", "支付成功",
+            "未领取", "待领取", "请领取", "点击领取", "即将失效", "已失效",
+            "已过期", "待拆开", "尚未领取",
         )
     }
 }

@@ -27,6 +27,43 @@ class MoneySyncRegressionTest {
         assertEquals("EXPENSE", tx.type)
     }
 
+    @Test fun alipayPromotionalRedPacketIsNotACharge() {
+        val time=1791635098455L
+        assertNull(NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "支付宝卡包",
+            "你有淘宝闪购14元红包今晚失效", time))
+        assertNull(NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "支付宝",
+            "未领取18.86元红包，点击领取", time))
+        assertNull(NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "支付宝",
+            "14.00元优惠券即将失效", time))
+        assertNull(NotificationParser.parse(
+            "com.tencent.mm", "微信红包", "领取14.00元红包", time))
+    }
+
+    @Test fun paymentsRemainCapturedEvenWhenRewardAdvertised() {
+        val time=1791635098455L
+        val paid=NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "付款成功",
+            "支付成功18.86元，恭喜领取3元电费红包", time)
+        assertNotNull(paid)
+        assertEquals("EXPENSE",paid!!.type)
+        assertEquals(1886L,paid.amountCents)
+        val spend=NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "交易提醒",
+            "你有一笔58.00元的支出，点此查看详情",time)
+        assertEquals(5800L,spend!!.amountCents)
+    }
+
+    @Test fun genericAmountWithoutSettlementIsIgnored() {
+        val time=1791635098455L
+        assertNull(NotificationParser.parse("com.eg.android.AlipayGphone",
+            "账户提醒", "你的余额是500.00元",time))
+        assertNull(NotificationParser.parse("com.eg.android.AlipayGphone",
+            "领取优惠", "红包可抵扣14.00元",time))
+    }
+
     @Test fun smsExactCentsAndNoFalseOtp() {
         val bank="【招商银行】尾号1234消费人民币25.81元，余额1234.56元"
         val tx=SmsParser.parse(null,bank,1791512160000L)

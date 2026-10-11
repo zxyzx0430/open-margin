@@ -9,6 +9,7 @@ COPY expenses-export.php /var/www/html/expenses-export.php
 COPY ledger-common.php /var/www/html/ledger-common.php
 COPY header.php /var/www/html/includes/header.php
 COPY index.php /var/www/html/index.php
+COPY service-worker.php /var/www/html/service-worker.php
 
 LABEL org.opencontainers.image.title="Wallos + self-hosted daily expense extension" \
       org.opencontainers.image.description="Wallos vendor UI with custom expense ledger endpoint. Two separate databases."

@@ -21,37 +21,48 @@ function ledger_request(string $method, string $path, ?array $body = null): arra
         throw new RuntimeException('FINANCE_LEDGER_API_URL is missing or invalid');
     }
     $url=rtrim($endpoint,'/').'/'.$path;
-    $ch=curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER=>true,
-        CURLOPT_CONNECTTIMEOUT=>3,
-        CURLOPT_TIMEOUT=>10,
-        CURLOPT_HTTPHEADER=>[
-            'X-Wallos-Ledger-Token: '.$token,
-            'Content-Type: application/json',
-            'Accept: application/json',
-        ],
-        CURLOPT_SSL_VERIFYPEER=>true,
-        CURLOPT_SSL_VERIFYHOST=>2,
-        CURLOPT_FOLLOWLOCATION=>false,
-        CURLOPT_CUSTOMREQUEST=>$method,
-    ]);
-    if ($body !== null) {
-        curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR));
+    // Read-only UI requests may be retried on transient proxy/network errors.
+    // Never retry writes: POST/PATCH must remain single-execution operations.
+    $tries=$method==='GET' ? 3 : 1;
+    $http=0; $error=''; $raw=false; $curlCode=0;
+    for($attempt=0;$attempt<$tries;$attempt++) {
+        $ch=curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER=>true,
+            CURLOPT_CONNECTTIMEOUT=>3,
+            CURLOPT_TIMEOUT=>10,
+            CURLOPT_HTTPHEADER=>[
+                'X-Wallos-Ledger-Token: '.$token,
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            CURLOPT_SSL_VERIFYPEER=>true,
+            CURLOPT_SSL_VERIFYHOST=>2,
+            CURLOPT_FOLLOWLOCATION=>false,
+            CURLOPT_CUSTOMREQUEST=>$method,
+            CURLOPT_NOSIGNAL=>true,
+        ]);
+        if ($body !== null) {
+            curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR));
+        }
+        $raw=curl_exec($ch);
+        $http=curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+        $error=curl_error($ch);
+        $curlCode=curl_errno($ch);
+        curl_close($ch);
+        if ($raw!==false && $http===200) {
+            $data=json_decode($raw,true);
+            if (is_array($data)) return $data;
+        }
+        if ($method!=='GET' || ($http>=400 && $http<500 && $http!==429)) break;
+        if ($attempt+1<$tries) usleep(($attempt+1)*150000);
     }
-    $raw=curl_exec($ch);
-    $http=curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
-    $error=curl_error($ch);
-    curl_close($ch);
-    if ($raw===false || $http!==200) {
-        error_log('[Wallos daily-ledger] HTTP '.$http.' '.substr($error,0,100));
-        throw new RuntimeException('Ledger request failed ('.$http.')');
-    }
-    $data=json_decode($raw,true);
-    if (!is_array($data)) {
-        throw new RuntimeException('Ledger response was invalid');
-    }
-    return $data;
+    // No raw response or token: errors can include private financial data.
+    error_log('[Wallos daily-ledger] unavailable path_class='.
+        (strpos($path,'integration')===0?'integration':'ledger').
+        ' http='.$http.' curl_errno='.$curlCode.
+        ' response_invalid='.($raw!==false && $http===200?'yes':'no'));
+    throw new RuntimeException('Ledger request failed ('.$http.')');
 }
 function ledger_require_owner(): void {
     $settings = @parse_ini_file('/run/secrets/wallos-ledger.env', false, INI_SCANNER_RAW);

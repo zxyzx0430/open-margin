@@ -54,11 +54,12 @@ class WechatTransferExtractor : AccessibilityExtractor {
 
     companion object {
         private val INCOME_HINTS = listOf(
-            "已收钱", "已收款", "已存入零钱", "已存入", "对方已收钱", "转账成功",
-            "待确认收款", "请收钱", "收钱",
+            "已收钱", "已收款", "已存入零钱", "已存入",
         )
         private val EXPENSE_NEGATIVES = listOf(
             "转账给", "你发起", "等待对方", "未领取",
+            "对方已收钱", "待确认收款", "请收钱", "待领取",
+            "未确认", "已退回", "待收款",
         )
     }
 }
