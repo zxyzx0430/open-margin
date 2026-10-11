@@ -1,3 +1,5 @@
+> **Historical document (retired 2026-10-11).** The optional subscription/payment reconciliation dashboard and matching actions have been removed. References to `integration.php` below describe old behavior only; they are not current features. Native Wallos subscription management and the actual Finance ledger remain available.
+
 # Wallos finance UI polish · V1.5
 
 The Wallos-native daily ledger and subscription reconciliation pages now share

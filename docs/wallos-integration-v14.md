@@ -1,3 +1,5 @@
+> **Historical document (retired 2026-10-11).** The optional subscription/payment reconciliation dashboard and matching actions have been removed. References to `integration.php` below describe old behavior only; they are not current features. Native Wallos subscription management and the actual Finance ledger remain available.
+
 # Wallos × Daily Ledger integration (v1.4, 2026-10-09)
 
 Two sources remain **separate**: Wallos owns subscription schedules, billing amounts, categories and payment methods; the personal finance SQLite database owns actual observed payments, transactions and corrections. Never create a fictional payment when adding or renewing a Wallos subscription.

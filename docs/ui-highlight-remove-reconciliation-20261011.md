@@ -29,3 +29,12 @@ Actual signed-in Wallos browser screenshot may not be available with existing cr
 ## Synthetic visual result
 
 [390px light: selected day 13, enlarged glowing bar and selected expense card](assets/selected-day-390-light.png). This contains fixture-only values; no user transaction data.
+
+## Verified release outcome (2026-10-11)
+
+- Production backend regression: 34 passing tests; open-source backend regression: 35 passing tests.
+- Playwright Chromium: 88/88 passing synthetic cases, plus 16/16 targeted cases after improving date auto-scroll. Tested 320, 390, 768, and 1440px, dark/light, zero and sparse days, outlier values, partial month, February, 30/31-day months and year boundary.
+- Screenshot and pixel-geometry inspection verified that selected bar and vertical date band match for days 1, 13 and 31 (including horizontal scrolling).
+- Pinned Wallos image rebuilt; PHP/JS assets match committed sources. The deprecated PHP file is absent and its public URL and corresponding retired Finance matching routes return HTTP 404.
+- Finance API and Wallos remain healthy. Finance PHP worker's authenticated daily and monthly CNY totals match. No production transactions were changed or financial details printed.
+- No authenticated live-user browser screenshot was taken; visual evidence is from synthetic Chromium fixtures.
