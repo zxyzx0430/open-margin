@@ -109,6 +109,10 @@ def run():
                                 page.locator("#dark-theme").evaluate("(el) => el.disabled = false")
                             assert page.locator(".apexcharts-bar-area").count()==len(entries),(key,width,"bar count",page.locator(".apexcharts-bar-area").count(),len(entries))
                             assert page.locator("#finance-daily-date option").count()==len(entries)+1
+                            # Adjacent 30/31 tick labels overlap around tablet widths.
+                            axis_labels=page.locator(".apexcharts-xaxis-label").all_text_contents()
+                            if len(entries)==31:
+                                assert "30日" not in axis_labels,(key,width,axis_labels)
                             assert not errors,(key,width,errors)
                             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"),(key,width,"page horizontal overflow")
                             # Validate category alignment and amount by selecting a zero/non-zero

@@ -25,7 +25,9 @@
   const formatAmount = cents => "¥" + (cents / 100).toLocaleString("zh-CN", {minimumFractionDigits:2, maximumFractionDigits:2});
   const tickDay = value => {
     const n = Number(value);
-    return (n === 1 || n === entries.length || n % 5 === 0) ? String(n) + "日" : "";
+    // Never print 30日 directly beside 31日 on a 31-day month.
+    return (n === 1 || n === entries.length ||
+      (n % 5 === 0 && entries.length - n >= 3)) ? String(n) + "日" : "";
   };
   const allZero = entries.every(p => p.cents === 0);
   // Make even subpixel bars selectable by tapping their whole date column.
