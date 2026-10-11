@@ -57,13 +57,14 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 
 **Credentials:** `secrets/` is mode **0700**, `secrets/backend.env` is **0600**, and `secrets/wallos-ledger.env` is **0644 inside that non-traversable directory**, because the non-root PHP worker must be able to read the file inside its container. All are ignored by Git. Keep the private parent directory restricted and never commit/share these files. Changing a device upload token requires updating the phone. The Wallos browser never receives the backend ledger token.
 
-## Wallos × actual payment integration (v1.4)
+## Subscriptions and actual expenses
 
-- A native Wallos **Subscriptions × Spending** screen reconciles expected subscription billing cycles against existing Android transactions, without inventing payments.
-- Suggested matches require human confirmation; one transaction cannot be linked to multiple billing periods. Linked real expenses are counted **once**.
-- Supports refund reconciliation, transaction corrections with an audit log, merchant-category rules, recurrence discovery, estimated remaining budgets, anomaly cards and up to 36 months of separate-currency trends.
-- The private Wallos API, background mobile ingestion and OAuth MCP tools expose the same data model. Write tools require a finance:write grant.
-- Access: /finance/wallos/integration.php (after Wallos owner login). See [technical guide](docs/wallos-integration-v14.md).
+- Wallos manages subscription plans and renewal reminders; the Finance ledger records real transaction events separately. A planned subscription charge is **never** counted as a completed payment.
+- The daily spending screen lives at `/finance/wallos/expenses.php` and supports month/day filtering, manual entries, classification, review, export, budget tracking, and an interactive CNY daily bar chart.
+- Click or tap a day to highlight its bar and show the exact date, amount, and a link to that day's recorded transactions; keyboard selection and a daily table remain available.
+- The old **subscription-to-payment reconciliation** dashboard was retired on 2026-10-11. Its page and payment-cycle matching entry points are no longer available. Wallos's normal subscription management, ledger editing and refund controls remain in the underlying system.
+
+[Preview: daily expense selection on mobile (synthetic data)](docs/assets/selected-day-390-light.png)
 
 ## Daily workflow
 
