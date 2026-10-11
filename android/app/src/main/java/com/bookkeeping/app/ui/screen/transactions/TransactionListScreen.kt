@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,8 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -36,6 +41,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -65,6 +72,7 @@ fun TransactionListScreen(
     val monthlyIncome by viewModel.monthlyIncomeCents.collectAsState()
     val selectedCategory by viewModel.categoryFilter.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
 
     // 监听 Activity 生命周期：每次回到前台时重新检查两类权限状态
     val context = LocalContext.current
@@ -134,10 +142,25 @@ fun TransactionListScreen(
                 // 按日期分组渲染
                 GroupedTransactionList(
                     transactions = transactions,
-                    onDelete = viewModel::delete,
+                    onDelete = { pendingDelete = it },
                 )
             }
         }
+    }
+
+    pendingDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除这笔本机记录？") },
+            text = { Text("删除后无法在手机上恢复。本机删除不会自动排除 VPS / Wallos 中已同步的交易；如果是误识别，需在 Wallos 中同时标记为「不计入」。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.delete(entry)
+                    pendingDelete = null
+                }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+        )
     }
 
     if (showAddDialog) {
@@ -152,73 +175,46 @@ fun TransactionListScreen(
 }
 
 @Composable
-private fun MonthlySummaryCard(
-    monthlyExpenseCents: Long,
-    monthlyIncomeCents: Long,
-) {
-    val balanceCents = monthlyIncomeCents - monthlyExpenseCents
+private fun MonthlySummaryCard(monthlyExpenseCents: Long, monthlyIncomeCents: Long) {
+    val diff = monthlyIncomeCents - monthlyExpenseCents
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("本月收支差额", style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer)
             Text(
-                text = "本月结余",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-            Text(
-                text = "${if (balanceCents >= 0) "+" else "−"}¥${"%.2f".format(kotlin.math.abs(balanceCents) / 100.0)}",
-                style = MaterialTheme.typography.displaySmall,
+                (if (diff >= 0) "+" else "−") + "¥" +
+                    "%.2f".format(Locale.CHINA, kotlin.math.abs(diff) / 100.0),
+                style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp)
-            ) {
-                SummaryStat(
-                    label = "收入",
-                    amount = "+¥${"%.2f".format(monthlyIncomeCents / 100.0)}",
-                    color = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.weight(1f)
-                )
-                SummaryStat(
-                    label = "支出",
-                    amount = "−¥${"%.2f".format(monthlyExpenseCents / 100.0)}",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.weight(1f)
-                )
+            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.13f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                SummaryStat("已记录收入", "+¥" + "%.2f".format(Locale.CHINA, monthlyIncomeCents / 100.0),
+                    Modifier.weight(1f))
+                SummaryStat("已记录支出", "−¥" + "%.2f".format(Locale.CHINA, monthlyExpenseCents / 100.0),
+                    Modifier.weight(1f))
             }
+            Text("本机交易 · 不是账户余额，尚需对照官方账单",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
         }
     }
 }
 
 @Composable
-private fun SummaryStat(
-    label: String,
-    amount: String,
-    color: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
-        )
-        Text(
-            text = amount,
-            style = MaterialTheme.typography.titleMedium,
+private fun SummaryStat(label: String, amount: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f))
+        Text(amount, style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
-            color = color
-        )
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -261,7 +257,7 @@ private fun GroupedTransactionList(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         groups.forEach { (dayKey, dayItems) ->
@@ -279,90 +275,92 @@ private fun GroupedTransactionList(
 
 @Composable
 private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
-    val expense = items.filter { it.type == TransactionType.EXPENSE.name }.sumOf { it.amountCents }
-    val income = items.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = dayLabel(dayKey),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        if (income > 0) {
-            Text(
-                text = "+¥${"%.2f".format(income / 100.0)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.padding(end = 12.dp)
-            )
-        }
-        if (expense > 0) {
-            Text(
-                text = "−¥${"%.2f".format(expense / 100.0)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.error
-            )
-        }
+    val expense = items.filter { it.type == "EXPENSE" }.sumOf { it.amountCents }
+    val income = items.filter { it.type == "INCOME" }.sumOf { it.amountCents }
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(dayLabel(dayKey), style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val total = if (expense > 0L) "支出 ¥" + "%.2f".format(Locale.CHINA, expense / 100.0)
+                    else "收入 ¥" + "%.2f".format(Locale.CHINA, income / 100.0)
+        Text(total, style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun TransactionItem(
-    transaction: TransactionEntity,
-    onDelete: () -> Unit,
-) {
+private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit) {
     val type = runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE)
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
-    val amount = "%.2f".format(transaction.amountCents / 100.0)
-    val sign = if (type == TransactionType.INCOME) "+" else "−"
-    val amountColor =
-        if (type == TransactionType.INCOME) MaterialTheme.colorScheme.tertiary
-        else MaterialTheme.colorScheme.error
+    var expanded by remember(transaction.id) { mutableStateOf(false) }
+    val amount = "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
+    val sourceName = when (transaction.source) {
+        "ALIPAY" -> "支付宝"
+        "WECHAT" -> "微信"
+        "BANK_SMS" -> "银行短信"
+        "MANUAL" -> "手动"
+        else -> "其他来源"
+    }
+    val title = transaction.merchant.ifBlank { category.displayName }
+    val noteSummary = transaction.note
+        .removePrefix("[自动抓取] ")
+        .removePrefix("[银行短信] ")
+        .trim()
+    val amountColor = if (type == TransactionType.INCOME)
+        MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = category.displayName +
-                        if (transaction.merchant.isNotBlank()) " · ${transaction.merchant}" else "",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-                if (transaction.note.isNotBlank()) {
-                    Text(
-                        text = transaction.note,
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis)
+                    Text(sourceName + " · " + category.displayName + " · " +
+                        timeOnlyFormat.format(Date(transaction.timestamp)),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text(
-                    text = timeOnlyFormat.format(Date(transaction.timestamp)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text((if (type == TransactionType.INCOME) "+" else "−") + "¥" + amount,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = amountColor, maxLines = 1)
             }
-            Text(
-                text = "$sign¥$amount",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = amountColor
-            )
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.outline)
+            if (noteSummary.isNotBlank() && !expanded) {
+                Text(noteSummary, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (expanded) {
+                if (noteSummary.isNotBlank()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Text(noteSummary, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End) {
+                    Text("仅删除本机记录", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error)
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "展开详情",
+                        tint = MaterialTheme.colorScheme.outline)
+                }
             }
         }
     }

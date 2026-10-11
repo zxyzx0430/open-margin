@@ -213,6 +213,51 @@ $notice=$_GET['notice'] ?? '';
  .wallos-ledger .ledger-entry .ledger-edit-details .ledger-budget-form{display:grid;grid-template-columns:1fr}
  .wallos-ledger .ledger-entry .ledger-edit-details form input,.wallos-ledger .ledger-entry .ledger-edit-details form select,.wallos-ledger .ledger-entry .ledger-edit-details form button{width:100%;max-width:none}
 }
+/* v1.5.1 financial hierarchy and responsive mobile controls */
+.wallos-ledger{--finance-gap:14px}
+.wallos-ledger .ledger-live-state{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 13px;margin:18px 0;border:1px solid var(--box-border-color);border-radius:12px;background:var(--box-background-color);font-size:13px;color:var(--text-muted)}
+.wallos-ledger .ledger-live-state b{color:var(--text-color)}
+.wallos-ledger .ledger-live-state a{margin-left:auto;color:var(--main-color);font-weight:600}
+.wallos-ledger .ledger-live-dot{width:8px;height:8px;flex:0 0 8px;border-radius:100%;background:#38a169}
+.wallos-ledger .stats-section{margin-bottom:24px}
+.wallos-ledger .stats-section h2{font-size:16px;margin-bottom:12px;font-weight:650}
+.wallos-ledger .ledger-explainer{font-size:12px;line-height:1.55;opacity:.85;max-width:690px}
+.wallos-ledger .ledger-secondary-panel{margin-top:16px;border-top:1px solid var(--box-border-color);padding-top:12px}
+.wallos-ledger .ledger-secondary-panel summary{cursor:pointer;color:var(--main-color);font-size:13px;font-weight:600;padding:8px 0}
+.wallos-ledger .ledger-secondary-panel .ledger-budget-form{margin-top:12px}
+.wallos-ledger .ledger-budget-form input{box-sizing:border-box}
+.wallos-ledger .ledger-chart{height:120px;gap:4px;border-bottom:1px solid var(--box-border-color);overflow-x:auto;padding-bottom:6px}
+.wallos-ledger .ledger-chart-day.is-zero .ledger-chart-bar{opacity:0;min-height:0}
+.wallos-ledger .ledger-chart-day:focus-visible{outline:2px solid var(--main-color);outline-offset:2px}
+.wallos-ledger .ledger-chart-day:hover .ledger-chart-bar{opacity:1}
+.wallos-ledger .ledger-empty-chart{padding:20px;border:1px dashed var(--box-border-color);border-radius:12px;font-size:13px;color:var(--text-muted)}
+.wallos-ledger .ledger-empty-chart i{margin-right:7px}
+.wallos-ledger .ledger-search-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:end;gap:12px;margin:14px 0 22px}
+.wallos-ledger .ledger-filter-field{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:12px;font-weight:600;color:var(--text-muted)}
+.wallos-ledger .ledger-filter-field input,.wallos-ledger .ledger-filter-field select{box-sizing:border-box;flex:0 0 auto!important;height:46px;min-height:46px;min-width:0;max-width:none;width:100%;font-size:14px}
+.wallos-ledger .ledger-search-form>.button{min-height:43px;display:inline-flex;justify-content:center;align-items:center}
+.wallos-ledger .ledger-entry{margin-bottom:9px}
+.wallos-ledger .ledger-entry .subscription{border-radius:12px}
+.wallos-ledger .ledger-entry .ledger-name{max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+.wallos-ledger .ledger-entry .ledger-details{line-height:1.45}
+.wallos-ledger .ledger-entry .ledger-review{border-top:1px solid var(--box-border-color);padding-top:10px;margin-top:10px}
+.wallos-ledger .ledger-inline{gap:8px}
+.wallos-ledger .ledger-inline>.button{display:inline-flex;align-items:center;gap:6px}
+@media(max-width:768px){
+ .wallos-ledger .ledger-search-form{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+ .wallos-ledger .ledger-search-form .ledger-filter-field input,.wallos-ledger .ledger-search-form .ledger-filter-field select{max-width:none;min-width:0;flex:0 0 46px!important}
+ .wallos-ledger .ledger-search-form>.button{min-width:0;max-width:none}
+ .wallos-ledger .ledger-inline{align-items:center;justify-content:flex-start}
+ .wallos-ledger .ledger-inline>h2{flex:1 1 100%!important}
+ .wallos-ledger .ledger-inline>.button{font-size:12px;max-width:100%}
+ .wallos-ledger .ledger-entry .subscription-main{flex-wrap:wrap}
+ .wallos-ledger .ledger-entry .ledger-amount{margin-left:auto}
+ .wallos-ledger .ledger-live-state a{margin-left:0}
+}
+@media(max-width:345px){
+ .wallos-ledger .ledger-search-form{grid-template-columns:1fr}
+ .wallos-ledger .ledger-inline>.button{flex:1 1 100%}
+}
 </style>
 <section class="contain dashboard wallos-ledger">
   <div class="ledger-heading">
@@ -230,7 +275,7 @@ $notice=$_GET['notice'] ?? '';
       </button>
     </div>
   </div>
-  <p class="ledger-intro">此页记录已经发生的消费；Wallos 的订阅金额只是预计支出，不会自动计入消费流水。通知识别可能漏记或重复，请定期核对。</p>
+  <p class="ledger-intro">按月实时汇总已同步交易。Wallos 订阅计划不会重复计入实际支出。</p>
   <?php if($error): ?><div class="error-box" role="alert"><i class="fa-solid fa-circle-exclamation"></i> <?= ledger_escape($error) ?></div><?php endif; ?>
   <?php if ($notice==='added'): ?><div class="ledger-section-message" role="status"><i class="fa-solid fa-circle-check"></i> 已成功记录交易。</div>
   <?php elseif ($notice==='reviewed'): ?><div class="ledger-section-message" role="status"><i class="fa-solid fa-circle-check"></i> 已更新核对状态。</div>
@@ -244,7 +289,7 @@ $notice=$_GET['notice'] ?? '';
     <a class="button" href="<?= ledger_escape(ledger_page_link($month,$filters,$offset)) ?>">重新读取本月账本</a>
   </section>
   <?php else: ?>
-  <p class="ledger-sync" role="status">实时账本：本月已同步 <?=intval($monthCount)?> 笔记录。每笔成功同步的消费立即计入当月，不需等到月底。<a href="<?=ledger_escape(ledger_page_link($month,$filters,$offset))?>">刷新</a></p>
+  <div class="ledger-live-state" role="status"><span class="ledger-live-dot" aria-hidden="true"></span>本月已记录 <b><?=intval($monthCount)?></b> 笔，实时更新 <a href="<?=ledger_escape(ledger_page_link($month,$filters,$offset))?>">刷新数据</a></div>
   <div id="ledger-live" data-revision="<?= ledger_escape($revision) ?>">
     <section class="stats-section">
       <h2>消费概览 · <?= ledger_escape($month) ?></h2>
@@ -256,8 +301,7 @@ $notice=$_GET['notice'] ?? '';
         <div class="statistic"><span><?= ledger_escape(ledger_money((int)$avgCny,'CNY')) ?></span><div class="title">本月人民币日均支出</div></div>
         <div class="statistic"><span><?= $monthCount ?></span><div class="title">本月记录笔数</div></div>
       </div>
-      <p class="ledger-section-message">均为已录入交易，未包含尚未扣款的订阅；不同币种分别列示，不使用未经核实的汇率。今天、近 7 天按北京时间计算。</p>
-      <p class="ledger-section-message">上月人民币支出：<?= ledger_escape(ledger_money($previousCny,'CNY')) ?>；本月已记：<?= ledger_escape(ledger_money($monthCny,'CNY')) ?>。<?= $month===date('Y-m')?'本月尚未结束，不直接按月度总额评价变化。':'' ?></p>
+      <p class="ledger-section-message ledger-explainer">仅统计已录入交易，未经官方账单确认的记录可能存在遗漏或误识别；跨币种不合并。</p>
     </section>
     <section class="stats-section">
       <h2>消费预算 · 人民币</h2>
@@ -276,6 +320,8 @@ $notice=$_GET['notice'] ?? '';
           </div>
           <p class="ledger-section-message">已使用 <?= ledger_escape($usedPercent) ?>%<?php if($usedPercent>100): ?> · 超出预算 <?= ledger_escape(ledger_money($monthCny-$budgetCny,'CNY')) ?><?php endif; ?></p>
         <?php else: ?><p class="ledger-section-message">尚未设置日常消费预算。此预算独立于 Wallos 的会员订阅预算。</p><?php endif; ?>
+        <details class="ledger-secondary-panel">
+          <summary>修改本月预算</summary>
         <form method="post" action="expenses-action.php" class="ledger-budget-form">
           <input type="hidden" name="csrf" value="<?= ledger_escape($csrf) ?>">
           <input type="hidden" name="action" value="budget">
@@ -286,24 +332,29 @@ $notice=$_GET['notice'] ?? '';
                maxlength="12" value="<?= $budgetCny!==null?ledger_escape(number_format($budgetCny/100,2,'.','')):'' ?>">
           <button type="submit" class="button secondary-button thin">保存预算</button>
         </form>
+        </details>
       </div>
     </section>
     <section class="stats-section">
       <h2>每日消费趋势 · <?= ledger_escape($month) ?></h2>
-      <div class="ledger-chart" role="img" aria-label="本月人民币每天的支出柱状图">
+      <?php if(!$hasDailySpend): ?>
+        <div class="ledger-empty-chart"><i class="fa-solid fa-chart-column"></i>该月暂无人民币消费记录，暂不显示趋势图。</div>
+      <?php else: ?>
+      <div class="ledger-chart" role="group" aria-label="本月人民币每日支出；点选日期可查看明细">
        <?php for($n=1;$n<=$lastDay;$n++):
           $dateKey=sprintf('%s-%02d',$month,$n);
           $cents=intval($plot[$dateKey]??0);
-          $height=$cents>0?max(5,round(100*$cents/$maxDaily)):2;
+          $height=$cents>0?max(6,round(100*$cents/$maxDaily)):0;
        ?>
-         <a class="ledger-chart-day" href="<?= ledger_escape(ledger_page_link($month,['day'=>$dateKey,'category'=>'','direction'=>'','q'=>''])) ?>"
+         <a class="ledger-chart-day <?=$cents===0?'is-zero':''?>" href="<?= ledger_escape(ledger_page_link($month,['day'=>$dateKey,'category'=>'','direction'=>'','q'=>''])) ?>"
            title="<?= ledger_escape($dateKey.' · '.ledger_money($cents,'CNY')) ?>" aria-label="<?= ledger_escape($dateKey.'：'.ledger_money($cents,'CNY')) ?>">
            <span class="ledger-chart-bar" style="height:<?= $height ?>%"></span>
-           <span class="ledger-chart-label"><?= $n ?></span>
+           <span class="ledger-chart-label"><?=($n===1 || $n%5===0 || $n===$lastDay)?$n:""?></span>
          </a>
        <?php endfor; ?>
       </div>
-      <p class="ledger-section-message">仅显示人民币支出；点击日期查看当天交易。零消费日也会显示。</p>
+      <?php endif; ?>
+      <p class="ledger-section-message ledger-explainer">按北京时间展示已记录人民币支出，空白日期表示无已记录消费；点击日期筛选账单。</p>
     </section>
   <?php if($categoryExpense): ?>
   <section class="stats-section">
@@ -330,15 +381,15 @@ $notice=$_GET['notice'] ?? '';
     </div>
     <form method="get" action="expenses.php" class="ledger-search-form" aria-label="筛选消费流水">
       <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">
-      <input type="date" name="day" aria-label="按日期" value="<?= ledger_escape($filters['day']) ?>">
-      <select name="category" aria-label="按类别"><option value="">全部分类</option>
+      <label class="ledger-filter-field"><span>交易日期</span><input type="date" name="day" aria-label="按日期" value="<?= ledger_escape($filters['day']) ?>"></label>
+      <label class="ledger-filter-field"><span>消费分类</span><select name="category" aria-label="按类别"><option value="">全部分类</option>
         <?php foreach($labels as $key=>$label): ?><option value="<?= ledger_escape($key) ?>" <?= $filters['category']===$key?'selected':'' ?>><?= ledger_escape($label) ?></option><?php endforeach; ?>
-      </select>
-      <select name="direction" aria-label="按收支"><option value="">收入和支出</option>
+      </select></label>
+      <label class="ledger-filter-field"><span>收支方向</span><select name="direction" aria-label="按收支"><option value="">收入和支出</option>
         <option value="EXPENSE" <?= $filters['direction']==='EXPENSE'?'selected':'' ?>>仅支出</option>
         <option value="INCOME" <?= $filters['direction']==='INCOME'?'selected':'' ?>>仅收入</option>
-      </select>
-      <input name="q" aria-label="搜索商户" placeholder="搜索商户" maxlength="80" value="<?= ledger_escape($filters['q']) ?>">
+      </select></label>
+      <label class="ledger-filter-field"><span>商户名称</span><input name="q" aria-label="搜索商户" placeholder="搜索商户" maxlength="80" value="<?= ledger_escape($filters['q']) ?>"></label>
       <button class="button secondary-button thin" type="submit"><i class="fa-solid fa-magnifying-glass"></i> 筛选</button>
       <a class="button secondary-button thin" href="<?= ledger_escape(ledger_page_link($month,['day'=>'','category'=>'','direction'=>'','q'=>''])) ?>">重置</a>
     </form>
@@ -365,15 +416,15 @@ $notice=$_GET['notice'] ?? '';
             <div class="subscription-main">
               <div class="ledger-mark"><i class="fa-solid <?= ledger_escape($icon) ?>"></i></div>
               <div class="ledger-text">
-                <div class="ledger-name"><?= ledger_escape($entry['merchant']?:($labels[$category]??'未填写')) ?></div>
-                <div class="ledger-details"><?= ledger_escape($date) ?> · <?= ledger_escape($labels[$category]??$category) ?> · <?= ledger_escape($entry['source']) ?></div>
+                <div class="ledger-name"><?= ledger_escape($entry['merchant']?:($sourceNames[$entry['source']]??'交易记录')) ?></div>
+                <div class="ledger-details"><?= ledger_escape($date) ?> · <?= ledger_escape($labels[$category]??$category) ?> · <?= ledger_escape($sourceNames[$entry['source']]??$entry['source']) ?></div>
               </div>
               <div class="ledger-amount ledger-money">
                 <?= $entry['direction']==='INCOME'?'+':'−' ?><?= ledger_escape(ledger_money(intval($entry['amount_cents']),$entry['currency'])) ?>
               </div>
             </div>
             <details class="ledger-section-message ledger-edit-details">
-              <summary>修改交易 / 排除重复</summary>
+              <summary>调整分类、金额或排除重复</summary>
               <form method="post" action="expenses-action.php" class="ledger-budget-form" style="margin-bottom:10px">
                 <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">
                 <input type="hidden" name="month" value="<?=ledger_escape($month)?>">
