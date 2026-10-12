@@ -127,12 +127,44 @@ if ($ConfigureTailscale) {
       }
     }
   }
-  $ours=$serveJson -match '127\.0\.0\.1:18768'
-  $oursFull=(Test-Path $marker) -and $ExposureMode -eq "PrivateFull" -and
-    $serveJson -match '127\.0\.0\.1:8767' -and
-    $serveJson -match '127\.0\.0\.1:18082'
-  if ($nonempty -and -not ($ours -or $oursFull)) {
-    throw "Tailscale Serve already has routes. No overwrite attempted; audit them and migrate explicitly."
+  # Do not accept a foreign route just because our port appears somewhere.
+  # Check every configured web handler and TCP listener before touching Serve.
+  if ($nonempty) {
+    if ($ExposureMode -eq "ApiOnly") {
+      $allowedRoutes=@{"/"="http://127.0.0.1:18768"}
+    } else {
+      $allowedRoutes=@{
+        "/finance"="http://127.0.0.1:8767"
+        "/finance/wallos"="http://127.0.0.1:18082"
+      }
+    }
+    $seen=0
+    if ($null -ne $serveData.Services -and
+        $serveData.Services.PSObject.Properties.Count -gt 0) {
+      throw "Other Tailscale Services exist; do not modify Serve automatically."
+    }
+    foreach ($listener in @($serveData.TCP.PSObject.Properties)) {
+      if ($listener.Name -ne "443" -or -not $listener.Value.HTTPS) {
+        throw "Foreign TCP listener exists; Serve configuration unchanged."
+      }
+    }
+    foreach ($site in @($serveData.Web.PSObject.Properties)) {
+      foreach ($route in @($site.Value.Handlers.PSObject.Properties)) {
+        if (-not $allowedRoutes.ContainsKey($route.Name) -or
+            $route.Value.Proxy -ne $allowedRoutes[$route.Name]) {
+          throw "Unknown Tailscale Serve route exists; will not overwrite another app."
+        }
+        $seen++
+      }
+    }
+    if ($seen -ne $allowedRoutes.Count) {
+      throw "Existing Tailscale Serve configuration is not owned by this mode."
+    }
+    if ($null -ne $serveData.AllowFunnel) {
+      foreach ($item in @($serveData.AllowFunnel.PSObject.Properties)) {
+        if ($item.Value) { throw "Funnel exposure detected; refusing changes." }
+      }
+    }
   }
   if ($ExposureMode -eq "ApiOnly") {
     # Root proxy is safe ONLY because the local gateway defaults to deny.
