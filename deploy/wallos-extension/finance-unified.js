@@ -75,9 +75,14 @@
       const status=tx.review_status||"unverified";
       const statusOptions=Object.entries(labels).filter(([k])=>k!=="refund").map(([k,v])=>
         '<option value="'+esc(k)+'"'+(k===status?' selected':'')+'>'+esc(v)+'</option>').join("");
+      const excluded=["excluded","transfer","refund"].includes(status)||category==="TRANSFER";
       return '<section class="finance-day-entry" data-finance-transaction="'+Number(tx.id)+'">'+
-        '<div class="finance-day-entry-title"><b>'+esc(tx.merchant||"未填写商户")+'</b><strong>'+
+        '<div class="finance-day-entry-title"><div class="finance-day-entry-meta"><b>'+
+        esc(tx.merchant||"未填写商户")+'</b><span class="finance-entry-badge'+
+        (excluded?' is-excluded':'')+'">'+esc(category==="TRANSFER"?"转账 · 不计入":labels[status]||"待核对")+
+        ' · '+esc(categories[category]||category)+'</span></div><strong>'+
         money(tx.amount_cents)+'</strong></div>'+
+        '<details class="finance-entry-edit"><summary>编辑交易或核对状态</summary><div class="finance-entry-controls">'+
         '<form class="finance-tx-edit" data-finance-id="'+Number(tx.id)+'">'+
         '<label>金额（元）</label><input aria-label="编辑金额" inputmode="decimal" name="amount" value="'+esc(value)+'" required>'+
         '<label>分类</label><select aria-label="编辑交易分类" name="category">'+opts+'</select>'+
@@ -85,7 +90,7 @@
         '<span></span><button type="submit">保存交易</button></form>'+
         '<div class="finance-status"><label>核对状态 <select aria-label="更改核对状态" data-finance-status="'+Number(tx.id)+'">'+statusOptions+'</select></label>'+
         '<button type="button" data-finance-review="'+Number(tx.id)+'">保存状态</button></div>'+
-        '</section>';
+        '</div></details></section>';
     }).join("");
   }
   async function openTransactions({day=null,category="",direction="",append=false,offset=0}={}) {

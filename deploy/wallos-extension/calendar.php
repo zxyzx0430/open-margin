@@ -281,8 +281,11 @@ else echo '<section class="finance-unavailable">Finance 交易暂不可用，原
               <?php if (!empty($paymentsByDay[$day])) { ?>
                 <div class="calendar-cell-content">
                   <?php foreach ($paymentsByDay[$day] as $payment) { ?>
-                    <div class="calendar-event" onClick="showSubscriptionDetails(event, <?= $payment['id'] ?>)"
-                      title="<?= htmlspecialchars($payment['name']) ?>">
+                    <div class="calendar-event" role="button" tabindex="0"
+                      onClick="showSubscriptionDetails(event, <?= $payment['id'] ?>)"
+                      onKeyDown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showSubscriptionDetails(event, <?= $payment['id'] ?>)}"
+                      aria-label="查看订阅 <?= htmlspecialchars($payment['name'],ENT_QUOTES,'UTF-8') ?>"
+                      title="<?= htmlspecialchars($payment['name'],ENT_QUOTES,'UTF-8') ?>">
                       <?= htmlspecialchars($payment['name']) ?>
                     </div>
                   <?php } ?>
@@ -316,7 +319,7 @@ else echo '<section class="finance-unavailable">Finance 交易暂不可用，原
 
     <div class="calendar-monthly-stats">
       <div class="calendar-monthly-stats-header">
-        <h3><?= translate("stats", $i18n) ?></h3>
+        <h3>Wallos 订阅日历统计</h3>
       </div>
       <div class="statistics">
         <div class="statistic">
