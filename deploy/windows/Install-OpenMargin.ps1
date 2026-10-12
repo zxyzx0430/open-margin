@@ -3,6 +3,7 @@
 param(
   [string]$PublicBase="https://local.openmargin.invalid/finance",
   [switch]$ConfigureTailscale,
+  [ValidateSet("ApiOnly","PrivateFull")][string]$ExposureMode="ApiOnly",
   [int]$OwnerId=1
 )
 $ErrorActionPreference="Stop"
@@ -12,8 +13,12 @@ if ($PublicBase -notmatch '^https://[a-zA-Z0-9.-]+/finance/?$') {
   throw "PublicBase must look like https://windows-pc.example.ts.net/finance"
 }
 $PublicBase=$PublicBase.TrimEnd('/')
-if ($ConfigureTailscale -and $PublicBase -eq "https://local.openmargin.invalid/finance") {
-  throw "Specify your Tailscale HTTPS address with -PublicBase before enabling phone sync."
+# A local-only installation needs neither a Tailscale address nor a domain.
+# Only enforce a real Tailscale host when explicitly enabling the remote entry.
+if ($ConfigureTailscale -and
+    ($PublicBase -eq "https://local.openmargin.invalid/finance" -or
+     ([uri]$PublicBase).Host -notlike "*.ts.net")) {
+  throw "To enable private Tailscale Serve use a real *.ts.net HTTPS /finance address."
 }
 if ($OwnerId -lt 1) { throw "OwnerId must be positive" }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -34,8 +39,10 @@ if (-not $PSBoundParameters.ContainsKey("PublicBase") -and (Test-Path $backend))
   if ($existingUrl) { $PublicBase=$existingUrl.Line.Substring("FINANCE_PUBLIC_URL=".Length).TrimEnd('/') }
 }
 if ($PublicBase -notmatch '^https://[a-zA-Z0-9.-]+/finance/?$' -or
-    ($ConfigureTailscale -and $PublicBase -eq "https://local.openmargin.invalid/finance")) {
-  throw "Use a real private HTTPS /finance URL to enable phone sync."
+    ($ConfigureTailscale -and
+      ($PublicBase -eq "https://local.openmargin.invalid/finance" -or
+       ([uri]$PublicBase).Host -notlike "*.ts.net"))) {
+  throw "Use a real *.ts.net HTTPS /finance URL to enable phone sync."
 }
 if ((Test-Path $backend) -xor (Test-Path $ledger)) {
   throw "Only one secret exists. Stop to avoid overwriting existing data."
@@ -96,7 +103,11 @@ if (-not (Test-Path $envFile)) {
 }
 & docker compose config --quiet
 if ($LASTEXITCODE -ne 0) { throw "Compose configuration invalid" }
-& docker compose up -d --build
+if ($ExposureMode -eq "ApiOnly") {
+  & docker compose --profile windows-private-sync up -d --build
+} else {
+  & docker compose up -d --build
+}
 if ($LASTEXITCODE -ne 0) { throw "Docker Compose failed" }
 & docker compose ps
 Write-Host "Windows local dashboard: http://127.0.0.1:18082/"
@@ -116,10 +127,88 @@ if ($ConfigureTailscale) {
   if ($LASTEXITCODE -ne 0) {
     throw "Register the first Wallos owner on http://127.0.0.1:18082/ before enabling Tailscale."
   }
-  & $ts serve --bg --https=443 --set-path=/finance http://127.0.0.1:8767
-  if ($LASTEXITCODE -ne 0) { throw "Failed serving API; check tailscale serve status" }
-  & $ts serve --bg --https=443 --set-path=/finance/wallos http://127.0.0.1:18082
-  if ($LASTEXITCODE -ne 0) { throw "Failed serving Wallos; check tailscale serve status" }
+  # Tailscale Serve is node-wide. Never reset or overwrite another app's
+  # routes, including routes from an older Open Margin install.
+  $marker=Join-Path $secretPath "tailscale-exposure-mode.txt"
+  if (Test-Path $marker) {
+    $prior=(Get-Content $marker -Raw).Trim()
+    if ($prior -ne $ExposureMode) {
+      throw "Existing mode is $prior. Switching exposure requires an explicit migration; existing Serve routes unchanged."
+    }
+  }
+  $serveJson=((& $ts serve status --json 2>$null) -join "")
+  if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect existing Tailscale Serve config; refusing changes."
+  }
+  # Empty Serve output may still contain empty Web/TCP objects.
+  $serveData=$null
+  if ($serveJson.Trim() -notin @("","null")) {
+    try { $serveData=$serveJson | ConvertFrom-Json }
+    catch { throw "Invalid Tailscale Serve JSON; refusing changes." }
+  }
+  $nonempty=$false
+  if ($null -ne $serveData) {
+    foreach ($field in @("TCP","Web","Services")) {
+      $entry=$serveData.PSObject.Properties[$field]
+      if ($null -ne $entry -and $null -ne $entry.Value) {
+        $value=$entry.Value
+        if (($value -is [array] -and $value.Count -gt 0) -or
+            ($value.PSObject.Properties.Count -gt 0)) { $nonempty=$true }
+      }
+    }
+  }
+  # Do not accept a foreign route just because our port appears somewhere.
+  # Check every configured web handler and TCP listener before touching Serve.
+  if ($nonempty) {
+    if ($ExposureMode -eq "ApiOnly") {
+      $allowedRoutes=@{"/"="http://127.0.0.1:18768"}
+    } else {
+      $allowedRoutes=@{
+        "/finance"="http://127.0.0.1:8767"
+        "/finance/wallos"="http://127.0.0.1:18082"
+      }
+    }
+    $seen=0
+    if ($null -ne $serveData.Services -and
+        $serveData.Services.PSObject.Properties.Count -gt 0) {
+      throw "Other Tailscale Services exist; do not modify Serve automatically."
+    }
+    foreach ($listener in @($serveData.TCP.PSObject.Properties)) {
+      if ($listener.Name -ne "443" -or -not $listener.Value.HTTPS) {
+        throw "Foreign TCP listener exists; Serve configuration unchanged."
+      }
+    }
+    foreach ($site in @($serveData.Web.PSObject.Properties)) {
+      foreach ($route in @($site.Value.Handlers.PSObject.Properties)) {
+        if (-not $allowedRoutes.ContainsKey($route.Name) -or
+            $route.Value.Proxy -ne $allowedRoutes[$route.Name]) {
+          throw "Unknown Tailscale Serve route exists; will not overwrite another app."
+        }
+        $seen++
+      }
+    }
+    if ($seen -ne $allowedRoutes.Count) {
+      throw "Existing Tailscale Serve configuration is not owned by this mode."
+    }
+    if ($null -ne $serveData.AllowFunnel) {
+      foreach ($item in @($serveData.AllowFunnel.PSObject.Properties)) {
+        if ($item.Value) { throw "Funnel exposure detected; refusing changes." }
+      }
+    }
+  }
+  if ($ExposureMode -eq "ApiOnly") {
+    # Root proxy is safe ONLY because the local gateway defaults to deny.
+    & $ts serve --bg --https=443 http://127.0.0.1:18768
+    if ($LASTEXITCODE -ne 0) { throw "Failed to enable private API gateway" }
+  } else {
+    & $ts serve --bg --https=443 --set-path=/finance http://127.0.0.1:8767
+    if ($LASTEXITCODE -ne 0) { throw "Failed serving API" }
+    & $ts serve --bg --https=443 --set-path=/finance/wallos http://127.0.0.1:18082
+    if ($LASTEXITCODE -ne 0) { throw "Failed serving Wallos" }
+  }
+  [IO.File]::WriteAllText($marker,$ExposureMode+$nl,$utf8)
   & $ts serve status
-  Write-Host "Verify the URL on Android with Tailscale enabled."
+  Write-Host "Verify /finance/health and authenticated /finance/api/v2/sync/changes on Android."
+  Write-Host "ApiOnly forbids remote Wallos; browser management stays at localhost:18082."
+
 }
