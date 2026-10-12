@@ -105,6 +105,8 @@ class Record(BaseModel):
     source: Literal["WECHAT","ALIPAY","BANK_SMS","MANUAL","OTHER"]
     category: str = Field(min_length=1,max_length=45)
     merchant: str = Field(default="",max_length=140)
+    # Refund links are managed by the dedicated server workflow, not a naked flag.
+    review_status: Literal["unverified","confirmed","excluded","transfer","possible_duplicate"] | None = None
 
 
 class Mutation(BaseModel):
@@ -197,23 +199,29 @@ def push(body:Mutations):
                         linked=db.execute("""SELECT 1 FROM refund_links
                           WHERE original_tx_id=? OR refund_tx_id=? LIMIT 1""",
                           (existing["id"],existing["id"])).fetchone()
+                        requested_status=record.review_status or existing["review_status"]
                         if linked and (existing["amount_cents"]!=record.amount_cents
                                 or existing["currency"]!=record.currency
-                                or existing["direction"]!=record.direction):
+                                or existing["direction"]!=record.direction
+                                or existing["review_status"]!=requested_status):
                             results.append({"mutation_id":operation.mutation_id,
                                             "status":"linked_refund"})
                             continue
                         # Never erase Wallos review / refund status from a phone edit.
                         db.execute("""UPDATE transactions SET timestamp_ms=?,amount_cents=?,
-                          currency=?,direction=?,category=?,merchant=? WHERE event_id=?""",
+                          currency=?,direction=?,category=?,merchant=?,review_status=?
+                          WHERE event_id=?""",
                           (record.timestamp_ms,record.amount_cents,record.currency,
-                           record.direction,record.category,record.merchant,operation.event_id))
+                           record.direction,record.category,record.merchant,
+                           requested_status,operation.event_id))
                     else:
                         db.execute("""INSERT INTO transactions(event_id,timestamp_ms,amount_cents,
-                          currency,direction,source,category,merchant) VALUES(?,?,?,?,?,?,?,?)""",
+                          currency,direction,source,category,merchant,review_status)
+                          VALUES(?,?,?,?,?,?,?,?,?)""",
                           (operation.event_id,record.timestamp_ms,record.amount_cents,
                            record.currency,record.direction,record.source,
-                           resolve_category(db,record.merchant,record.category),record.merchant))
+                           resolve_category(db,record.merchant,record.category),record.merchant,
+                           record.review_status or "unverified"))
                 else:
                     existing=db.execute("SELECT id FROM transactions WHERE event_id=?",
                                         (operation.event_id,)).fetchone()

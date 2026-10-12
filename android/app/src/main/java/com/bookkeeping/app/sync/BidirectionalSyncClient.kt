@@ -160,6 +160,10 @@ internal class BidirectionalSyncClient(
         put("source",row.source)
         put("category",row.category)
         put("merchant",row.merchant.take(140))
+        if(row.remoteReviewStatus in setOf(
+                "unverified","confirmed","excluded","transfer","possible_duplicate")) {
+            put("review_status",row.remoteReviewStatus)
+        }
     }
 
     private suspend fun send(row:TransactionEntity,overrideRevision:Long?=null):JSONObject? {
