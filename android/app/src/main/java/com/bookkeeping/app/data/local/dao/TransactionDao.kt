@@ -49,15 +49,19 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun getById(id: Long): TransactionEntity?
 
+    // Legacy v1 uploader handles untouched rows only. A newly captured record
+    // edited/deleted before its first upload belongs to the versioned v2
+    // mutation queue; uploading its old snapshot through v1 first would
+    // create a false base-revision conflict and potentially discard edits.
     @Query("""SELECT * FROM transactions WHERE id > :lastId AND remoteEventId IS NULL
-        AND syncDeleted = 0 ORDER BY id ASC LIMIT :count""")
+        AND syncDeleted = 0 AND syncDirty = 0 ORDER BY id ASC LIMIT :count""")
     suspend fun getUnsynced(lastId: Long, count: Int): List<TransactionEntity>
 
     @Query("SELECT * FROM transactions WHERE remoteEventId = :eventId LIMIT 1")
     suspend fun getByRemoteEventId(eventId: String): TransactionEntity?
 
-    @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs, id LIMIT :count")
-    suspend fun getPendingMutations(count: Int): List<TransactionEntity>
+    @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs, id LIMIT :count OFFSET :offset")
+    suspend fun getPendingMutations(count: Int, offset: Int = 0): List<TransactionEntity>
 
     @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs DESC, id DESC LIMIT 100")
     fun observePendingMutations(): Flow<List<TransactionEntity>>

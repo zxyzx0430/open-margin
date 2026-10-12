@@ -192,8 +192,9 @@ internal class BidirectionalSyncClient(
 
     private suspend fun push():Pair<Boolean,Set<String>> {
         val conflictIds=mutableSetOf<String>()
+        var skipped=0
         repeat(1000){
-            val pending=dao.getPendingMutations(50)
+            val pending=dao.getPendingMutations(50,skipped)
             if(pending.isEmpty())return true to conflictIds
             var progress=false
             for(row in pending){
@@ -272,7 +273,7 @@ internal class BidirectionalSyncClient(
                     else->Unit
                 }
             }
-            if(!progress)return true to conflictIds
+            if(progress) skipped=0 else skipped+=pending.size
         }
         return false to conflictIds
     }
