@@ -274,7 +274,7 @@ function finance_render_panel(string $view,array $model):void {
         <?php endif; ?>
         <div class="finance-chart-section"><div class="finance-line">
           <strong>消费趋势</strong><div class="finance-switch"><button type="button" data-finance-range="7">7 天</button><button type="button" class="is-current" data-finance-range="30">整月</button></div>
-        </div><div class="finance-chart" role="img" aria-label="人民币实际消费每日金额柱状图"></div></div>
+        </div><div class="finance-chart" role="group" aria-label="人民币实际消费每日金额柱状图与日期选择"></div></div>
       </div>
       <?php endif; ?>
       <?php if($view==='stats'): ?>

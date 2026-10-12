@@ -3,6 +3,10 @@
   "use strict";
   const roots = [...document.querySelectorAll(".finance-native[data-finance-view]")];
   if (!roots.length) return;
+  // Wallos layouts can include this bundle more than once. One root must
+  // never acquire duplicate charts, handlers or selected-day controls.
+  if(window.__pfsFinanceNativeInitialized)return;
+  window.__pfsFinanceNativeInitialized=true;
   const money = cents => cents === null || cents === undefined ? "未设置" :
     (cents < 0 ? "−" : "") + "¥" +
     (Math.abs(cents)/100).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -17,6 +21,38 @@
     return Number(whole)*100 + Number((fraction+"00").slice(0,2));
   };
   const state = new Map();
+  // Install capture handling before any asynchronous chart construction.
+  document.addEventListener("click",event=>{
+    const plot=event.target.closest?.(".finance-trend-plot");
+    if(!plot)return;
+    const chart=plot.closest(".finance-chart");
+    const entries=chart?.financeTrend?.getEntries();
+    if(!entries?.length)return;
+    const bar=event.target.closest?.(".apexcharts-bar-area");
+    let index=-1;
+    if(bar){
+      const j=Number(bar.getAttribute("j"));
+      index=Number.isInteger(j)&&j>=0&&j<entries.length
+        ?j:[...chart.querySelectorAll(".apexcharts-bar-area")].indexOf(bar);
+    }else{
+      const grid=chart.querySelector(".apexcharts-grid")?.getBoundingClientRect();
+      if(!grid||!grid.width||event.clientX<grid.left||event.clientX>grid.right||
+         event.clientY<grid.top||event.clientY>grid.bottom)return;
+      index=Math.floor((event.clientX-grid.left)/grid.width*entries.length);
+    }
+    if(index>=0&&index<entries.length){
+      const day=entries[index].date;
+      requestAnimationFrame(()=>{
+        // Capture the stable container before ApexCharts potentially detaches
+        // and replaces the clicked SVG subtree.
+        const live=chart.isConnected?chart:document.querySelector(
+          ".finance-native[data-finance-view=stats] .finance-chart");
+        const active=live?.financeTrend?.getEntries()||[];
+        const current=active.findIndex(item=>item.date===day);
+        if(current>=0)live.financeTrend.selectIndex(current);
+      });
+    }
+  },{capture:true});
   const csrf = document.querySelector("[data-finance-csrf]")?.value ?? "";
   const modal = document.createElement("dialog");
   modal.className = "finance-day-dialog";
@@ -177,41 +213,215 @@
     }catch(error){feedback(error.message,true);}
     finally{button.disabled=false;}
   });
-  const daysForRange=(model,range)=>range===7?
-    model.days.slice(-7):model.days;
+  // Current month means the seven calendar days ending TODAY (Beijing time),
+  // not the last seven entries of the 31-day array, many of which are future.
+  // For historic months, end at the last day of that month.
+  const beijingToday=()=>new Date().toLocaleDateString("sv-SE",{timeZone:"Asia/Shanghai"});
+  const daysForRange=(model,range)=>{
+    const today=beijingToday();
+    const last=model.month===today.slice(0,7)?today:model.month<today.slice(0,7)
+      ?model.days[model.days.length-1].date:null;
+    const available=last?model.days.filter(row=>row.date<=last):[];
+    return range===7?available.slice(-7):model.days;
+  };
   function drawChart(root,model,range) {
     const host=root.querySelector(".finance-chart");
     if(!host)return;
     const series=daysForRange(model,range);
+    const old=state.get(root).chart;
+    if(old)old.destroy();
+    // The date controls live outside ApexCharts to survive SVG redraws,
+    // but they must be removed when switching 7 days / full month.
+    host.parentElement.querySelectorAll(":scope > .finance-trend-controls").forEach(el=>el.remove());
+    host.replaceChildren();
+    host.removeAttribute("data-finance-selected-day");
+    host.removeAttribute("data-finance-chart-ready");
+    host.dataset.financeChartRange=String(range);
     if(typeof window.ApexCharts!=="function") {
       host.textContent="图表暂时不可用，可以使用日历或完整流水。";
       return;
     }
-    const old=state.get(root).chart;
-    if(old)old.destroy();
-    host.textContent="";
-    const chart=new ApexCharts(host,{
+    const visual=document.createElement("div");
+    visual.className="finance-trend-visual";
+    const plot=document.createElement("div");
+    plot.className="finance-trend-plot";
+    plot.setAttribute("role","img");
+    plot.setAttribute("aria-label",(range===7?"近七天":"整月")+"真实消费金额柱状图，按北京时间显示");
+    const focus=document.createElement("span");
+    focus.className="finance-trend-focus";
+    focus.setAttribute("aria-hidden","true");
+    focus.hidden=true;
+    const controls=document.createElement("div");
+    controls.className="finance-trend-controls";
+    controls.innerHTML='<label>查看指定日期 <select class="finance-trend-date" aria-label="选择消费趋势日期">'+
+      '<option value="">选择日期</option>'+series.map(row=>
+      '<option value="'+esc(row.date)+'">'+esc(row.date.slice(-2))+
+      ' 日 · '+money(row.expense_cents)+'</option>').join("")+'</select></label>'+
+      '<div class="finance-trend-selected" role="status" aria-live="polite" hidden>'+
+      '<span>已选日期 <b class="finance-trend-selected-date"></b></span>'+
+      '<strong class="finance-trend-selected-amount"></strong>'+
+      '<button type="button" class="finance-trend-detail">查看当日流水</button></div>';
+    visual.append(plot,focus);
+    host.append(visual);
+    // Keep the date controls outside the ApexCharts-rendered host subtree:
+    // internal chart refreshes must never reset its hidden selected-day card.
+    host.insertAdjacentElement("afterend",controls);
+    const picker=controls.querySelector(".finance-trend-date");
+    const card=controls.querySelector(".finance-trend-selected");
+    const detail=controls.querySelector(".finance-trend-detail");
+    let chosen=-1;
+    let ready=false;
+    const noMotion=window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const numeric=(row)=>row.expense_cents/100;
+    function paint() {
+      if(!host.querySelector(".apexcharts-bar-area")||chosen<0||chosen>=series.length)return;
+      const bars=[...host.querySelectorAll(".apexcharts-bar-area")];
+      bars.forEach((bar,i)=>{
+        bar.classList.toggle("finance-trend-selected-bar",i===chosen);
+        bar.classList.remove("finance-trend-bar-drop");
+      });
+      // ApexCharts or a redraw may replace our original visual subtree.
+      // Always use the live focus node currently attached to this chart.
+      const liveVisual=host.querySelector(".finance-trend-visual");
+      let marker=liveVisual.querySelector(".finance-trend-focus");
+      if(!marker){
+        marker=document.createElement("span");
+        marker.className="finance-trend-focus";
+        marker.setAttribute("aria-hidden","true");
+        marker.hidden=true;
+        liveVisual.append(marker);
+      }
+      marker.classList.remove("finance-trend-focus-drop");
+      const active=bars[chosen];
+      const box=host.querySelector(".finance-trend-visual").getBoundingClientRect();
+      // The actual bar SVG is authoritative. ApexCharts may temporarily lack
+      // an exposed grid node while recomputing its internal drawing groups.
+      const plotRect=host.querySelector(".finance-trend-plot").getBoundingClientRect();
+      const gridRect=host.querySelector(".apexcharts-grid")?.getBoundingClientRect();
+      const grid=gridRect&&gridRect.width>0&&gridRect.height>0?gridRect:plotRect;
+      const bar=active?.getBoundingClientRect();
+      const actual=series[chosen].expense_cents>0 && bar && bar.height>0 && bar.width>0;
+      if(actual){
+        marker.classList.remove("finance-trend-focus-zero");
+        marker.style.left=(bar.left-box.left-1)+"px";
+        marker.style.top=(bar.top-box.top-1)+"px";
+        marker.style.width=(bar.width+2)+"px";
+        marker.style.height=(bar.height+2)+"px";
+        const startScale=Math.min(8,Math.max(1.12,grid.height*.83/bar.height));
+        marker.style.setProperty("--finance-trend-initial-scale",startScale);
+        active.style.setProperty("--finance-trend-initial-scale",startScale);
+      }else{
+        marker.classList.add("finance-trend-focus-zero");
+        marker.style.left=(grid.left-box.left+(chosen+.5)*grid.width/series.length-4)+"px";
+        marker.style.top=(grid.bottom-box.top-5)+"px";
+        marker.style.width="8px";
+        marker.style.height="5px";
+      }
+      marker.hidden=false;
+      host.dataset.debugOverlay="done-connected-"+marker.isConnected+"-hidden-"+marker.hidden+"-same-"+(focus===host.querySelector(".finance-trend-focus"));
+      if(actual&&!noMotion){
+        void marker.offsetWidth;
+        marker.classList.add("finance-trend-focus-drop");
+        active.classList.add("finance-trend-bar-drop");
+      }
+    }
+    function reflectSelection() {
+      if(chosen<0)return;
+      const row=series[chosen];
+      const livePicker=controls.querySelector(".finance-trend-date");
+      const liveCard=controls.querySelector(".finance-trend-selected");
+      if(livePicker&&livePicker.value!==row.date)livePicker.value=row.date;
+      if(liveCard){
+        if(liveCard.hidden)liveCard.hidden=false;
+        const label=liveCard.querySelector(".finance-trend-selected-date");
+        const amount=liveCard.querySelector(".finance-trend-selected-amount");
+        if(label&&label.textContent!==row.date)label.textContent=row.date;
+        const value=money(row.expense_cents);
+        if(amount&&amount.textContent!==value)amount.textContent=value;
+      }
+    }
+    function select(index) {
+      if(!host.querySelector(".apexcharts-bar-area")||!Number.isInteger(index)||index<0||index>=series.length)return;
+      chosen=index;
+      host.dataset.financeSelectedDay=series[index].date;
+      state.get(root).trendDay=series[index].date;
+      reflectSelection();
+      paint();
+      requestAnimationFrame(()=>{
+        if(chosen!==index)return;
+        reflectSelection();
+        if(host.querySelector(".finance-trend-focus")?.hidden ||
+           !host.querySelector(".finance-trend-selected-bar"))paint();
+      });
+      setTimeout(()=>{
+        if(chosen!==index)return;
+        reflectSelection();
+        if(host.querySelector(".finance-trend-focus")?.hidden ||
+           !host.querySelector(".finance-trend-selected-bar"))paint();
+      },180);
+    }
+    controls.addEventListener("change",event=>{
+      if(event.target.matches(".finance-trend-date"))
+        select(series.findIndex(x=>x.date===event.target.value));
+    });
+    controls.addEventListener("click",event=>{
+      if(event.target.closest(".finance-trend-detail") && chosen>=0)
+        openTransactions({day:series[chosen].date});
+    });
+    // Use original pointer coordinates against the CURRENT chart grid.
+    // ApexCharts dataPointSelection and its built-in tooltip previously
+    // reported "01日 ¥0" when touching a bar near October 11.
+    const chart=new ApexCharts(plot,{
       chart:{type:"bar",height:214,toolbar:{show:false},
-        animations:{enabled:!matchMedia("(prefers-reduced-motion: reduce)").matches},
-        events:{dataPointSelection:(_,__,config)=>{
-          const day=series[config.dataPointIndex]?.date;
-          if(day)openTransactions({day});
-        }}},
-      series:[{name:"实际支出",data:series.map(d=>d.expense_cents/100)}],
+        animations:{enabled:false},selection:{enabled:false},zoom:{enabled:false}},
+      series:[{name:"实际支出",data:series.map(numeric)}],
       colors:[getComputedStyle(root).getPropertyValue("--main-color").trim()||"#4777e7"],
       plotOptions:{bar:{columnWidth:"62%",borderRadius:3}},
       dataLabels:{enabled:false},
       xaxis:{categories:series.map(d=>d.date.slice(-2)+"日"),
+        tooltip:{enabled:false},
         labels:{rotate:0,style:{fontSize:"10px"},formatter:v=>{
           const n=Number(String(v).slice(0,2));
           return range===7 || n===1||n%5===0||n===series.length?v:"";
         }}},
       yaxis:{min:0,labels:{formatter:v=>"¥"+Math.round(v)}},
-      tooltip:{y:{formatter:v=>"¥"+Number(v).toFixed(2)}},
+      tooltip:{enabled:false},
       grid:{borderColor:getComputedStyle(root).getPropertyValue("--box-border-color").trim()||"#dde3eb"}
     });
-    chart.render().catch(()=>{host.textContent="趋势图暂时不可用";});
     state.get(root).chart=chart;
+    chart.render().then(()=>{
+      if(state.get(root)?.chart!==chart)return;
+      ready=true;
+      host.dataset.financeChartReady="true";
+      // A refresh can preserve the chosen day, but switching range must not
+      // silently pick the first (zero-amount) day.
+      const restored=state.get(root).trendDay;
+      if(restored)select(series.findIndex(row=>row.date===restored));
+    }).catch(()=>{host.textContent="趋势图暂时不可用";});
+    // ApexCharts may recreate bar SVG nodes during its own pointer handling.
+    // The external focus marker stays mounted in `visual`, while the active
+    // SVG class is restored on the next frame following child-node changes.
+    let repaintScheduled=false;
+    function repaintAfterApex() {
+      if(!host.querySelector(".apexcharts-bar-area")||chosen<0||repaintScheduled)return;
+      repaintScheduled=true;
+      requestAnimationFrame(()=>{
+        repaintScheduled=false;
+        if(host.querySelector(".apexcharts-bar-area")&&chosen>=0){
+          reflectSelection();
+          paint();
+        }
+      });
+    }
+    new MutationObserver(repaintAfterApex).observe(plot,{childList:true,subtree:true});
+    // Wallos/third-party scripts may replace the controls subtree after a
+    // selection; recover the visible card, without relying on stale references.
+
+    host.financeTrend={selectIndex:index=>{
+      select(index);
+      if(chosen>=0)state.get(root).trendDay=series[chosen].date;
+    },getEntries:()=>series};
+
   }
   function draw(root) {
     const entry=state.get(root);if(!entry)return;
@@ -302,7 +512,7 @@
     }catch(_){root.insertAdjacentHTML("beforeend",'<p class="finance-unavailable">财务数据解析失败，请重新加载。</p>');return;}
     root.addEventListener("click",e=>{
       const range=e.target.closest("[data-finance-range]");
-      if(range){state.get(root).range=Number(range.dataset.financeRange);draw(root);return;}
+      if(range){state.get(root).range=Number(range.dataset.financeRange);state.get(root).trendDay=null;draw(root);return;}
       const tab=e.target.closest("[data-finance-tab]");
       if(tab){
         const active=tab.dataset.financeTab;

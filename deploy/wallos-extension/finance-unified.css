@@ -99,3 +99,56 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
 .finance-subscription-monthly-value{font-weight:700;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;flex-shrink:0;}
 .finance-subscription span{font-size:12px;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere;}
 @media(max-width:390px){.finance-subscription-monthly-row{padding:10px 8px;}.finance-subscription-monthly-value{font-size:12px;}.finance-subscription span{font-size:11px;}}
+
+/* Native Finance trend: each selected day's glow is bound to the actual SVG bar. */
+.finance-native .finance-trend-visual{position:relative;min-height:214px;isolation:isolate}
+.finance-native .finance-trend-plot{min-height:214px}
+.finance-native .finance-trend-plot .apexcharts-bar-area.finance-trend-selected-bar{
+  opacity:1!important;filter:brightness(1.13) drop-shadow(0 0 7px var(--fin-accent));
+  transform-box:fill-box;transform-origin:center bottom;
+}
+.finance-native .finance-trend-plot .apexcharts-bar-area:not(.finance-trend-selected-bar){opacity:.60}
+.finance-native .finance-trend-focus{
+  position:absolute;z-index:2;box-sizing:border-box;pointer-events:none;
+  border:2px solid var(--fin-accent);border-radius:5px;
+  background:color-mix(in srgb,var(--fin-accent) 16%,transparent);
+  box-shadow:0 0 10px color-mix(in srgb,var(--fin-accent) 48%,transparent);
+  transform-origin:center bottom;
+}
+.finance-native .finance-trend-focus[hidden]{display:none;}
+.finance-native .finance-trend-focus-zero{border-radius:50%;background:var(--fin-accent)}
+.finance-native .finance-trend-bar-drop{animation:financeTrendBarDrop .52s cubic-bezier(.22,1,.36,1) both;}
+.finance-native .finance-trend-focus-drop{animation:financeTrendFocusDrop .52s cubic-bezier(.22,1,.36,1) both;}
+@keyframes financeTrendBarDrop{
+  from{transform:scaleY(var(--finance-trend-initial-scale,1.15));filter:drop-shadow(0 0 9px var(--fin-accent))}
+  to{transform:scaleY(1)}
+}
+@keyframes financeTrendFocusDrop{
+  from{transform:scaleY(var(--finance-trend-initial-scale,1.15));opacity:.78}
+  to{transform:scaleY(1);opacity:1}
+}
+.finance-native .finance-trend-controls{display:flex;flex-direction:column;gap:9px;margin:6px 0 0}
+.finance-native .finance-trend-controls label{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12px;color:var(--fin-muted)}
+.finance-native .finance-trend-date{
+  max-width:100%;min-height:35px;padding:5px 10px;border:1px solid var(--fin-border);
+  border-radius:8px;background:var(--fin-panel);color:var(--fin-fg);font:inherit;
+}
+.finance-native .finance-trend-selected{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  border:2px solid var(--fin-accent);border-radius:11px;
+  padding:10px 12px;background:color-mix(in srgb,var(--fin-accent) 10%,var(--fin-panel));
+  box-shadow:0 3px 12px color-mix(in srgb,var(--fin-accent) 18%,transparent);
+  font-size:13px;
+}
+.finance-native .finance-trend-selected[hidden]{display:none!important;}
+.finance-native .finance-trend-selected strong{color:var(--fin-accent);font-size:18px;font-variant-numeric:tabular-nums}
+.finance-native .finance-trend-selected button{
+  border:0;background:transparent;color:var(--fin-accent);font:inherit;
+  font-weight:650;text-decoration:underline;cursor:pointer;
+}
+@media(prefers-reduced-motion:reduce){
+  .finance-native .finance-trend-bar-drop,.finance-native .finance-trend-focus-drop{animation:none!important}
+}
+
+/* Other Wallos charts may use tooltips; this chart only uses the explicit selected-day card. */
+.finance-native .finance-trend-plot .apexcharts-tooltip,.finance-native .finance-trend-plot .apexcharts-xaxistooltip{display:none!important;}
