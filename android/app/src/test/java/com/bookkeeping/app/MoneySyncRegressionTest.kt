@@ -81,6 +81,13 @@ class MoneySyncRegressionTest {
         assertNotNull(promoThenActual)
         assertEquals(2000L,promoThenActual!!.amountCents)
 
+        val doubleFormatCoupon=NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "付款成功",
+            "有一张优惠券¥5.00元，付款成功¥18.86元",time
+        )
+        assertNotNull(doubleFormatCoupon)
+        assertEquals(1886L,doubleFormatCoupon!!.amountCents)
+
         val balanceThenPaid=NotificationParser.parse(
             "com.eg.android.AlipayGphone", "支付提醒",
             "余额￥500.00，支付成功¥12.30",time

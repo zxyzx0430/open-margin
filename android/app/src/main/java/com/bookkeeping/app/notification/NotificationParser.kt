@@ -176,7 +176,13 @@ object NotificationParser {
     )
 
     private fun extractAmountCents(text: String): Long? {
-        val matches = (AMOUNT_REGEX_SYMBOL.findAll(text) + AMOUNT_REGEX_YUAN.findAll(text))
+        // "¥5.00元" 两个正则都会命中同一笔金额，第二条不能绕过
+        // 第一条的“优惠券 / 红包”排除判断。
+        val withSymbol = AMOUNT_REGEX_SYMBOL.findAll(text).toList()
+        val withoutSymbolOverlap = AMOUNT_REGEX_YUAN.findAll(text).filterNot { yuan ->
+            withSymbol.any { symbol -> yuan.range.first in symbol.range }
+        }
+        val matches = (withSymbol.asSequence() + withoutSymbolOverlap)
             .sortedBy { it.range.first }
         for (match in matches) {
             val before = text.substring((match.range.first - 18).coerceAtLeast(0), match.range.first)
