@@ -8,7 +8,7 @@ FILES="${FINANCE_WALLOS_SOURCE_DIR:-$ROOT/project/deploy/wallos-extension}"
 NAME=finance-wallos
 TOKEN="${FINANCE_WALLOS_SECRET_FILE:?Set path to secret file}"
 STAMP="$(date +%Y%m%d%H%M%S)"
-for f in Dockerfile expenses.php daily-spend-chart-v2.js expenses-action.php expenses-export.php ledger-common.php header.php index.php service-worker.php mobile-menu-expenses.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css; do
+for f in Dockerfile expenses.php daily-spend-chart-v2.js expenses-action.php expenses-export.php ledger-common.php header.php index.php manifest.php service-worker.php mobile-menu-expenses.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css; do
     test -r "$FILES/$f"
 done
 test -r "$TOKEN"
@@ -17,7 +17,7 @@ test -r "$TOKEN"
 # unnecessary image rebuilds or container restarts.
 overlay_hash="$(
   cd "$FILES"
-  sha256sum Dockerfile expenses.php daily-spend-chart-v2.js expenses-action.php expenses-export.php ledger-common.php header.php index.php service-worker.php mobile-menu-expenses.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css | sha256sum | cut -c1-16
+  sha256sum Dockerfile expenses.php daily-spend-chart-v2.js expenses-action.php expenses-export.php ledger-common.php header.php index.php manifest.php service-worker.php mobile-menu-expenses.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css | sha256sum | cut -c1-16
 )"
 IMAGE="finance-wallos-extension:$overlay_hash"
 running_id="$(docker inspect "$NAME" --format '{{.Image}}' 2>/dev/null || true)"
@@ -47,7 +47,7 @@ fi
 # Always compare baked code against source, not only a Docker tag/image ID.
 # This guards against a stale image accidentally carrying a new hash tag.
 verify_baked_assets() {
-    for asset in expenses.php daily-spend-chart-v2.js service-worker.php images/siteicons/svg/mobile-menu/expenses.php includes/header.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css; do
+    for asset in expenses.php daily-spend-chart-v2.js service-worker.php images/siteicons/svg/mobile-menu/expenses.php includes/header.php manifest.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css; do
         local expected actual
         local source="$FILES/$asset"
         if [[ "$asset" == "includes/header.php" ]]; then source="$FILES/header.php"; fi
@@ -125,7 +125,7 @@ if [ "$ready" -ne 1 ]; then
     echo "Health check failed" >&2
     exit 6
 fi
-for php in expenses.php expenses-action.php expenses-export.php ledger-common.php includes/header.php index.php service-worker.php images/siteicons/svg/mobile-menu/expenses.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php; do
+for php in expenses.php expenses-action.php expenses-export.php ledger-common.php includes/header.php index.php manifest.php service-worker.php images/siteicons/svg/mobile-menu/expenses.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php; do
     docker exec "$NAME" php -l "/var/www/html/$php" >/dev/null
 done
 verify_baked_assets

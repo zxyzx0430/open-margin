@@ -9,8 +9,8 @@ if (!headers_sent()) {
 // so every release invalidates stale precached assets automatically - a release
 // that changed JS/CSS without remembering to bump a hardcoded cache version
 // used to leave already-visited browsers stuck on old cached files indefinitely.
-const STATIC_CACHE = 'static-cache-<?= $version ?>-finance-native-v9';
-const PAGES_CACHE = 'pages-cache-v10-finance-native';
+const STATIC_CACHE = 'static-cache-<?= $version ?>-finance-native-v10';
+const PAGES_CACHE = 'pages-cache-v11-finance-native';
 const LOGOS_CACHE = 'logos-cache-v2';
 
 // manifest.php is intentionally not precached here: it's per-user (theme
@@ -360,11 +360,11 @@ self.addEventListener('push', function (event) {
         try {
             data = event.data.json();
         } catch (e) {
-            data = { title: 'Wallos', body: event.data.text() };
+            data = { title: '清衡', body: event.data.text() };
         }
     }
 
-    const title = data.title || 'Wallos';
+    const title = data.title || '清衡';
     const options = {
         body: data.body || '',
         icon: 'images/icon/android-chrome-192x192.png',

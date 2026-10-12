@@ -89,8 +89,8 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Wallos - Subscription Tracker</title>
-  <meta name="apple-mobile-web-app-title" content="Wallos">
+  <title>清衡 · Open Margin</title>
+  <meta name="apple-mobile-web-app-title" content="清衡">
   <meta name="theme-color" content="<?= $theme == "light" ? "#FFFFFF" : "#12151C" ?>" id="theme-color" />
   <meta name="referrer" content="no-referrer">
   <link rel="icon" type="image/png" href="images/icon/favicon.ico" sizes="16x16">
@@ -106,6 +106,15 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
   <link rel="stylesheet" href="styles/themes/yellow.css?<?= $version ?>" id="yellow-theme" <?= $colorTheme != "yellow" ? "disabled" : "" ?>>
   <link rel="stylesheet" href="styles/themes/purple.css?<?= $version ?>" id="purple-theme" <?= $colorTheme != "purple" ? "disabled" : "" ?>>
   <link rel="stylesheet" href="styles/barlow.css">
+  <style>
+    /* A text wordmark, compatible with Wallos's existing 134 × 50 header slot. */
+    header .logo .margin-brand{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
+      height:50px;min-width:122px;gap:2px;color:var(--text-color);white-space:nowrap}
+    header .logo .margin-brand-cn{font-size:25px;line-height:1.1;letter-spacing:.10em;font-weight:650}
+    header .logo .margin-brand-en{font-family:inherit;font-size:9px;letter-spacing:.13em;
+      line-height:1.25;opacity:.70;font-weight:550}
+    header .logo a{text-decoration:none}
+  </style>
   <link rel="stylesheet" href="styles/font-awesome.min.css">
   <link rel="stylesheet" href="styles/brands.css">
   <script type="text/javascript" src="scripts/all.js?<?= $version ?>"></script>
@@ -173,8 +182,11 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
     <div class="contain">
       <div class="logo">
         <a href=".">
-          <div class="logo-image" title="Wallos - Subscription Tracker">
-            <?php include "images/siteicons/svg/logo.php"; ?>
+          <div class="logo-image" title="清衡 · Open Margin">
+            <span class="margin-brand" aria-label="清衡 · Open Margin">
+              <span class="margin-brand-cn">清衡</span>
+              <span class="margin-brand-en">OPEN MARGIN</span>
+            </span>
           </div>
         </a>
       </div>

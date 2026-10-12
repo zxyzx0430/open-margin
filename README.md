@@ -1,6 +1,8 @@
-# Personal Finance System
+# 清衡 · Open Margin
 
-**Self-hosted personal finance bridge:** Android payment-notification collector → HTTPS → SQLite → Wallos subscriptions & daily expenses → ChatGPT / MCP.
+**Open Margin** (清衡) is a self-hosted personal finance system. Based on Wallos and Seamless Bookkeeping, it combines Android transaction capture, budgets, expenses, subscriptions and MCP.
+
+**System architecture:** Android payment-notification collector → HTTPS → SQLite → Wallos subscriptions & daily expenses → ChatGPT / MCP.
 
 This is an **integration project**, built on existing open-source software. The goal is to own your transaction data, avoid manually retyping payments, and make spending and subscriptions queryable from an AI client.
 

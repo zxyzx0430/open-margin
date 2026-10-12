@@ -4,7 +4,7 @@
 
 ## 目标
 
-- **唯一代码源：** `zxyzx0430/personal-finance-system-oss`，未来所有 Android、Finance API、Wallos 扩展、文档与测试的代码只提交到这里。
+- **唯一代码源：** `zxyzx0430/open-margin`，未来所有 Android、Finance API、Wallos 扩展、文档与测试的代码只提交到这里。
 - **运行环境：** VPS 从这一个仓库的确定提交部署。真实数据和机器专有配置始终保存在仓库以外，不能纳入公共 Git 历史。
 - **历史仓库：** `personal-finance-system` 保留私有归档、历史问题记录与紧急回滚用途；切换完成后不再向它提交业务代码；不把其历史合并到公开仓库。
 - **数据库：** Wallos 订阅数据库和 Finance 交易数据库继续彼此独立。此处只合并 Git 仓库，不合并两种不同职责的数据库。
