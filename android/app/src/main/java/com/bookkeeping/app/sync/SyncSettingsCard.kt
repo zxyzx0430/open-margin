@@ -35,6 +35,7 @@ fun SyncSettingsCard() {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("清衡 · 双向同步（Windows / VPS）")
             Text("手机和服务器会双向同步交易新增、修改和删除。服务器在线时下载更新，离线先保存在本机；不上传短信全文、银行卡号或个人备注。")
+            Text("Windows 和 VPS 二选一：已成功同步的手机不能直接更换服务器地址；迁移需备份原服务数据。")
             OutlinedTextField(value = url, onValueChange = { url=it }, label = { Text("HTTPS 服务器地址") }, singleLine = true)
             OutlinedTextField(value = token, onValueChange = { token=it }, label = { Text("设备同步密钥") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             Switch(checked=enabled, onCheckedChange={ enabled=it })
@@ -42,8 +43,8 @@ fun SyncSettingsCard() {
                 try {
                     TransactionSyncWorker.configure(context, url, token, enabled)
                     message = if (enabled) "已保存：后台自动同步已开启" else "已关闭同步"
-                } catch (_: IllegalArgumentException) {
-                    message = "需要 HTTPS 地址及至少16位的密钥"
+                } catch (error: IllegalArgumentException) {
+                    message = error.message ?: "同步配置未通过校验"
                 }
             }) { Text("保存设置") }
             if (enabled) {

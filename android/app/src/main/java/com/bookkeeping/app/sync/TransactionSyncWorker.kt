@@ -207,9 +207,20 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         }
 
         fun configure(context: Context, url: String, token: String, enabled: Boolean) {
-            require(!enabled || (url.startsWith("https://") && token.length >= 16))
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString("url", url.trimEnd('/')).putString("token", token)
+            val normalized = url.trim().trimEnd('/')
+            require(!enabled || (normalized.startsWith("https://") && token.length >= 16)) {
+                "需要有效 HTTPS 地址及至少16位的设备密钥"
+            }
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            require(SyncEndpointPolicy.canChangeServer(
+                prefs.getString("url", "") ?: "", normalized,
+                prefs.getLong("last_synced_id", 0L),
+                prefs.getLong("last_pull_revision", 0L),
+                prefs.getLong("last_success_ms", 0L)
+            )) {
+                "已同步账本不能直接更换服务器；请先迁移数据库，避免跨服务器丢失或重复交易"
+            }
+            prefs.edit().putString("url", normalized).putString("token", token)
                 .putBoolean("enabled", enabled).apply()
             val wm = WorkManager.getInstance(context)
             if (!enabled) {

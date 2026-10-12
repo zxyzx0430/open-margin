@@ -88,11 +88,52 @@ check(r.status_code==303 and "notice=added" in r.headers.get("Location",""),
       "Native PHP manual expense saved")
 r=session.get(wallos+"/expenses.php?month=2026-10",timeout=25)
 check("12.34" in r.text,"Manually added transaction visible")
-integrated=session.get(wallos+"/integration.php?month=2026-10",timeout=30)
-check(integrated.status_code==200 and "订阅 × 消费对账" in integrated.text,
-      "Wallos-native subscription reconciliation page renders")
-check("综合月度概览" in integrated.text and "商户自动分类规则" in integrated.text,
-      "Unified forecast, matching and merchant-rule panels available")
+# The old subscription-to-payment reconciliation page is deliberately retired.
+# Verify the integrated native Wallos statistics/calendar and v2 two-way changes.
+for native in ("stats.php","calendar.php"):
+    view=session.get(wallos+"/"+native+"?finance_month=2026-10",timeout=25)
+    check(view.status_code==200 and "finance" in view.text.lower(),
+          "Native "+native+" remains available")
+syncurl=finance+"/api/v2/sync"
+denied=requests.get(syncurl+"/changes",timeout=12)
+check(denied.status_code==401,"Device sync pull denies anonymous access")
+feed=requests.get(syncurl+"/changes",params={"since":0,"limit":100},
+                  headers=headers,timeout=12)
+check(feed.status_code==200 and len(feed.json()["items"])>=1,
+      "Server-to-phone feed includes existing expenses")
+# Use an independent synthetic item; do not mutate demo payment used for CSV assertions.
+seed_event="android:smoke-sync:example"
+sync_record={
+    "timestamp_ms":event["timestamp_ms"],"amount_cents":2650,"currency":"CNY",
+    "direction":"EXPENSE","source":"WECHAT","category":"FOOD","merchant":"Sync demo"
+}
+def mutate(op_id,revision,action,record=sync_record):
+    op={"mutation_id":op_id,"event_id":seed_event,"base_revision":revision,
+        "action":action}
+    if action=="upsert":op["record"]=record
+    ans=requests.post(syncurl+"/push",headers=headers,json={"operations":[op]},timeout=12)
+    check(ans.status_code==200,"Bidirectional "+action+" request accepted")
+    return ans.json()["results"][0]
+created=mutate("smoke-sync-create-001",0,"upsert")
+check(created["status"]=="applied","Phone-created transaction stored with revision")
+replay=mutate("smoke-sync-create-001",0,"upsert")
+check(replay["revision"]==created["revision"],"Mutation retries are idempotent")
+manual_ledger=requests.post(finance+"/api/v1/wallos-ledger/manual",
+    json={"idempotency_key":str(uuid.uuid4()),"timestamp_ms":event["timestamp_ms"],
+          "amount_cents":100,"currency":"CNY","direction":"EXPENSE",
+          "category":"OTHER","merchant":"Remote simulated edit"},
+    headers={"X-Wallos-Ledger-Token":cfg["FINANCE_WALLOS_LEDGER_TOKEN"]},timeout=12)
+check(manual_ledger.status_code==200,"Server-side Wallos entry creation")
+changes=requests.get(syncurl+"/changes",params={"since":created["revision"]},
+                     headers=headers,timeout=12)
+check(changes.status_code==200 and len(changes.json()["items"])>=1,
+      "Server-native changes appear in Android download stream")
+removed=mutate("smoke-sync-delete-002",created["revision"],"delete")
+check(removed["status"]=="applied","Phone deletion recorded with tombstone")
+retry_old=requests.post(finance+"/api/v1/transactions/batch",
+   headers=headers,json={"events":[{**sync_record,"event_id":seed_event}]},timeout=12)
+check(retry_old.status_code==200 and retry_old.json()["inserted"]==0,
+      "Old offline phone replay cannot resurrect tombstoned transaction")
 
 # Export and PHP budget save test, both same Wallos login.
 export=session.get(wallos+"/expenses-export.php?month=2026-10",timeout=25)
