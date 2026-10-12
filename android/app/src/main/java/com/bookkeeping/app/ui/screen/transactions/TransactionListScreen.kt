@@ -73,6 +73,7 @@ fun TransactionListScreen(
     val selectedCategory by viewModel.categoryFilter.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
+    var editing by remember { mutableStateOf<TransactionEntity?>(null) }
 
     // 监听 Activity 生命周期：每次回到前台时重新检查两类权限状态
     val context = LocalContext.current
@@ -143,6 +144,7 @@ fun TransactionListScreen(
                 GroupedTransactionList(
                     transactions = transactions,
                     onDelete = { pendingDelete = it },
+                    onEdit = { editing = it },
                 )
             }
         }
@@ -151,8 +153,8 @@ fun TransactionListScreen(
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除这笔本机记录？") },
-            text = { Text("删除后无法在手机上恢复。本机删除不会自动排除 VPS / Wallos 中已同步的交易；如果是误识别，需在 Wallos 中同时标记为「不计入」。") },
+            title = { Text("删除这笔交易？") },
+            text = { Text("删除将在电脑或 VPS 在线后双向同步；其他设备也会删除该笔交易。若只是误识别或退款，建议在网站标记为不计入或退款。") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.delete(entry)
@@ -160,6 +162,17 @@ fun TransactionListScreen(
                 }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+        )
+    }
+
+    editing?.let { entry ->
+        AddTransactionDialog(
+            initial = entry,
+            onDismiss = { editing = null },
+            onConfirm = { amount,type,category,merchant,note ->
+                viewModel.updateTransaction(entry,amount,type,category,merchant,note)
+                editing = null
+            }
         )
     }
 
@@ -249,6 +262,7 @@ private fun CategoryFilterRow(
 private fun GroupedTransactionList(
     transactions: List<TransactionEntity>,
     onDelete: (TransactionEntity) -> Unit,
+    onEdit: (TransactionEntity) -> Unit,
 ) {
     // 按 dayKey 分组（同一天 = 同一组）。LinkedHashMap 保留插入顺序（即时间倒序）
     val groups = remember(transactions) {
@@ -267,7 +281,8 @@ private fun GroupedTransactionList(
             }
             // 该组内的交易项
             items(dayItems, key = { it.id }) { tx ->
-                TransactionItem(transaction = tx, onDelete = { onDelete(tx) })
+                TransactionItem(transaction = tx, onDelete = { onDelete(tx) },
+                                onEdit = { onEdit(tx) })
             }
         }
     }
@@ -275,8 +290,10 @@ private fun GroupedTransactionList(
 
 @Composable
 private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
-    val expense = items.filter { it.type == "EXPENSE" }.sumOf { it.amountCents }
-    val income = items.filter { it.type == "INCOME" }.sumOf { it.amountCents }
+    val valid=items.filter { it.remoteReviewStatus !in setOf("excluded","transfer","refund") }
+    val expense = valid.filter { it.type == "EXPENSE" && it.category!="TRANSFER" }
+        .sumOf { it.amountCents }
+    val income = valid.filter { it.type == "INCOME" }.sumOf { it.amountCents }
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(dayLabel(dayKey), style = MaterialTheme.typography.titleSmall,
@@ -290,7 +307,8 @@ private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
 }
 
 @Composable
-private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit) {
+private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit,
+                            onEdit: () -> Unit) {
     val type = runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE)
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
     var expanded by remember(transaction.id) { mutableStateOf(false) }
@@ -347,9 +365,10 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End) {
-                    Text("仅删除本机记录", style = MaterialTheme.typography.labelSmall,
+                    Text("修改会双向同步", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f))
+                    TextButton(onClick = onEdit) { Text("编辑") }
                     TextButton(onClick = onDelete) {
                         Icon(Icons.Default.Delete, contentDescription = null,
                             tint = MaterialTheme.colorScheme.error)

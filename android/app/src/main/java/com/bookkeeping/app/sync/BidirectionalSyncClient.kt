@@ -169,10 +169,11 @@ internal class BidirectionalSyncClient(
                         val serverMs=current.optLong("changed_at_ms",0L)
                         val phoneMs=live.syncModifiedMs
                         val serverRevision=current.getLong("revision")
-                        val clockOk=phoneMs>0 && serverMs>0 &&
-                            phoneMs<=System.currentTimeMillis()+300000
-                        val choice=prefs.getString("conflict_resolution","auto")
-                        if(choice=="keep_phone" || (choice=="auto" && clockOk && phoneMs>serverMs+2000)){
+                        val decision=SyncConflictPolicy.decide(
+                            phoneMs,serverMs,System.currentTimeMillis(),
+                            prefs.getString("conflict_resolution","auto") ?: "auto"
+                        )
+                        if(decision==SyncConflictPolicy.Decision.KEEP_PHONE){
                             val retry=send(live,serverRevision)
                             if(retry?.optString("status")=="applied"){
                                 dao.update(live.copy(remoteEventId=id,
@@ -180,7 +181,7 @@ internal class BidirectionalSyncClient(
                                     syncDirty=false,syncMutationId=null))
                                 progress=true
                             }else conflicts++
-                        }else if(choice=="keep_server" || (choice=="auto" && clockOk && serverMs>phoneMs+2000)){
+                        }else if(decision==SyncConflictPolicy.Decision.KEEP_SERVER){
                             val updated=serverValue(live,id,serverRevision,
                                 current.getString("action"),current.optJSONObject("record"))
                             if(updated!=null){dao.update(updated);progress=true}

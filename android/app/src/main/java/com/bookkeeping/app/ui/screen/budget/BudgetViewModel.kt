@@ -31,7 +31,9 @@ class BudgetViewModel @Inject constructor(
     val expenseByCategory: StateFlow<Map<TransactionCategory, Long>> =
         transactionRepository.observeBetween(monthRange.first, monthRange.second)
             .map { txs ->
-                txs.filter { it.type == TransactionType.EXPENSE.name }
+                txs.filter { it.type == TransactionType.EXPENSE.name &&
+                    it.remoteReviewStatus !in setOf("excluded","transfer","refund") &&
+                    it.category != "TRANSFER" }
                     .groupBy {
                         runCatching { TransactionCategory.valueOf(it.category) }
                             .getOrDefault(TransactionCategory.OTHER)

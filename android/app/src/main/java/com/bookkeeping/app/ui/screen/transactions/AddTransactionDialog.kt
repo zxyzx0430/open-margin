@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.MoneyAmount
 
@@ -35,6 +36,7 @@ import com.bookkeeping.app.data.MoneyAmount
 @Composable
 fun AddTransactionDialog(
     onDismiss: () -> Unit,
+    initial: TransactionEntity? = null,
     onConfirm: (
         amountCents: Long,
         type: TransactionType,
@@ -44,18 +46,29 @@ fun AddTransactionDialog(
     ) -> Unit,
 ) {
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
-    var amountText by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
-    var selectedCategory by remember { mutableStateOf(TransactionCategory.FOOD) }
-    var merchant by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+    var amountText by remember(initial?.id) {
+        mutableStateOf(initial?.let {
+            (it.amountCents / 100).toString() + "." +
+                (it.amountCents % 100).toString().padStart(2,'0')
+        } ?: "")
+    }
+    var selectedType by remember(initial?.id) {
+        mutableStateOf(runCatching { TransactionType.valueOf(initial?.type ?: "EXPENSE") }
+            .getOrDefault(TransactionType.EXPENSE))
+    }
+    var selectedCategory by remember(initial?.id) {
+        mutableStateOf(runCatching { TransactionCategory.valueOf(initial?.category ?: "FOOD") }
+            .getOrDefault(TransactionCategory.OTHER))
+    }
+    var merchant by remember(initial?.id) { mutableStateOf(initial?.merchant ?: "") }
+    var note by remember(initial?.id) { mutableStateOf(initial?.note ?: "") }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
 
     val amountValid = MoneyAmount.cents(amountText) != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建账单") },
+        title = { Text(if(initial==null)"新建账单" else "编辑账单（将同步）") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // 收入 / 支出 切换
