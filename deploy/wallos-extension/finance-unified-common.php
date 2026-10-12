@@ -146,6 +146,12 @@ function finance_plan_month(SQLite3 $db,int $uid,string $month):array {
     ];
 }
 function finance_unified_model(SQLite3 $db,int $uid,string $month):array {
+    $config=@parse_ini_file('/run/secrets/wallos-ledger.env',false,INI_SCANNER_RAW);
+    $owner=(int)($config['FINANCE_WALLOS_OWNER_ID']??1);
+    if($owner<1 || $uid!==$owner || !isset($_SESSION['userId']) ||
+       (int)$_SESSION['userId']!==$owner) {
+        throw new RuntimeException('Finance ledger only available to configured owner');
+    }
     $month=finance_month($month);
     $raw=ledger_request('GET','month?month='.$month);
     $plan=finance_plan_month($db,$uid,$month);

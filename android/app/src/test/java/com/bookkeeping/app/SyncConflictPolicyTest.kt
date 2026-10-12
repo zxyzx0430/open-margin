@@ -7,10 +7,10 @@ import org.junit.Test
 class SyncConflictPolicyTest {
     private val now=1791791400000L
 
-    @Test fun clearOrderingUsesLatestEditTime() {
-        assertEquals(SyncConflictPolicy.Decision.KEEP_PHONE,
+    @Test fun deviceClockOrderingNeverAutoResolvesRevisionConflict() {
+        assertEquals(SyncConflictPolicy.Decision.HOLD,
             SyncConflictPolicy.decide(now-10000,now-30000,now))
-        assertEquals(SyncConflictPolicy.Decision.KEEP_SERVER,
+        assertEquals(SyncConflictPolicy.Decision.HOLD,
             SyncConflictPolicy.decide(now-30000,now-10000,now))
     }
 

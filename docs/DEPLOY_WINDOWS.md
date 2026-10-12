@@ -13,11 +13,13 @@
     git clone https://github.com/zxyzx0430/open-margin.git
     cd open-margin
 
-第一次运行（替换示例域名，暂不开放外部 HTTPS）：
+第一次只在 Windows 本机部署（**不需要 Tailscale、域名或 HTTPS 证书**）：
 
-    powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1 -PublicBase "https://desk-01.example-tailnet.ts.net/finance"
+    powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
 
-访问本机 http://127.0.0.1:18082/ ，注册第一位 Wallos 用户。之后：
+本地部署只提供 Web 管理；Android 仍可离线记账，但要让手机与电脑同步，必须随后配置私有 HTTPS 入口。
+
+访问本机 http://127.0.0.1:18082/ ，注册第一位 Wallos 用户。只有需要手机同步时，再在电脑和手机安装、登录 Tailscale，然后执行：
 
     powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1 -PublicBase "https://desk-01.example-tailnet.ts.net/finance" -ConfigureTailscale
 

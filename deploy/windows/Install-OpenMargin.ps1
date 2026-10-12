@@ -1,6 +1,7 @@
-# Run from root: powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1 -PublicBase https://YOUR-PC.YOUR-TAILNET.ts.net/finance
+# Local-only: powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
+# Optional phone sync: rerun with -PublicBase https://YOUR-PC.YOUR-TAILNET.ts.net/finance -ConfigureTailscale
 param(
-  [Parameter(Mandatory=$true)][string]$PublicBase,
+  [string]$PublicBase="https://local.openmargin.invalid/finance",
   [switch]$ConfigureTailscale,
   [int]$OwnerId=1
 )
@@ -11,6 +12,9 @@ if ($PublicBase -notmatch '^https://[a-zA-Z0-9.-]+/finance/?$') {
   throw "PublicBase must look like https://windows-pc.example.ts.net/finance"
 }
 $PublicBase=$PublicBase.TrimEnd('/')
+if ($ConfigureTailscale -and $PublicBase -eq "https://local.openmargin.invalid/finance") {
+  throw "Specify your Tailscale HTTPS address with -PublicBase before enabling phone sync."
+}
 if ($OwnerId -lt 1) { throw "OwnerId must be positive" }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   throw "Install Docker Desktop, enable Linux containers and start Docker Desktop."
@@ -25,6 +29,14 @@ New-Item -ItemType Directory -Force $secretPath | Out-Null
 $backend=Join-Path $secretPath "backend.env"
 $ledger=Join-Path $secretPath "wallos-ledger.env"
 $envFile=Join-Path $root ".env"
+if (-not $PSBoundParameters.ContainsKey("PublicBase") -and (Test-Path $backend)) {
+  $existingUrl=Select-String -Path $backend -Pattern '^FINANCE_PUBLIC_URL=' | Select-Object -First 1
+  if ($existingUrl) { $PublicBase=$existingUrl.Line.Substring("FINANCE_PUBLIC_URL=".Length).TrimEnd('/') }
+}
+if ($PublicBase -notmatch '^https://[a-zA-Z0-9.-]+/finance/?$' -or
+    ($ConfigureTailscale -and $PublicBase -eq "https://local.openmargin.invalid/finance")) {
+  throw "Use a real private HTTPS /finance URL to enable phone sync."
+}
 if ((Test-Path $backend) -xor (Test-Path $ledger)) {
   throw "Only one secret exists. Stop to avoid overwriting existing data."
 }
@@ -58,8 +70,23 @@ if (-not (Test-Path $backend)) {
   Write-Host "Created private configuration: keep secrets/backend.env outside Git."
 } else {
   $current=Select-String -Path $backend -Pattern '^FINANCE_PUBLIC_URL=' | Select-Object -First 1
-  if (-not $current -or $current.Line -ne "FINANCE_PUBLIC_URL=$PublicBase") {
-    throw "Existing setup uses another URL. Do not overwrite old secrets."
+  if (-not $current) { throw "Missing FINANCE_PUBLIC_URL in existing private configuration." }
+  if ($current.Line -ne "FINANCE_PUBLIC_URL=$PublicBase") {
+    # The ONLY automatic URL promotion is local-only first-run -> explicitly
+    # requested Tailscale address. Preserve the device/admin/ledger tokens.
+    if ($current.Line -ne "FINANCE_PUBLIC_URL=https://local.openmargin.invalid/finance" -or
+        -not $ConfigureTailscale) {
+      throw "Existing setup uses another URL. Do not overwrite existing server identity."
+    }
+    $lines=[IO.File]::ReadAllLines($backend)
+    $replaced=0
+    $lines=@($lines | ForEach-Object {
+      if ($_ -eq $current.Line) { $replaced++; "FINANCE_PUBLIC_URL=$PublicBase" }
+      else { $_ }
+    })
+    if ($replaced -ne 1) { throw "Unexpected private configuration layout." }
+    [IO.File]::WriteAllText($backend,($lines -join $nl)+$nl,$utf8)
+    Write-Host "Promoted local deployment to requested private HTTPS address."
   }
   Write-Host "Using existing credentials and persistent SQLite Docker volumes."
 }

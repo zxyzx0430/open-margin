@@ -6,6 +6,7 @@ Never sync SMS bodies, local notes or bank credentials.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
@@ -37,8 +38,11 @@ def schema(db: sqlite3.Connection) -> None:
     db.execute("""CREATE TABLE IF NOT EXISTS sync_mutations(
       mutation_id TEXT PRIMARY KEY,
       event_id TEXT NOT NULL,
-      revision INTEGER NOT NULL
+      revision INTEGER NOT NULL,
+      request_hash TEXT
     )""")
+    if not any(col[1]=="request_hash" for col in db.execute("PRAGMA table_info(sync_mutations)")):
+        db.execute("ALTER TABLE sync_mutations ADD COLUMN request_hash TEXT")
     # Stable ledger identity. URLs can remain the same even after a local
     # reinstall or replacing Docker volumes; a persisted UUID prevents a
     # device's old download cursor from silently targeting a different DB.
@@ -139,12 +143,20 @@ def changes(since: int=Query(0,ge=0),limit:int=Query(100,ge=1,le=500)):
         }
 
 
+def mutation_hash(operation:Mutation) -> str:
+    """Bind a retry ID to exactly one operation and payload."""
+    canonical=json.dumps(operation.model_dump(),sort_keys=True,separators=(",",":"),
+                         ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def push(body:Mutations):
     import app as core
     from integration import resolve_category
     results=[]
     with core.db_connection() as db:
         for operation in body.operations:
+            request_hash=mutation_hash(operation)
             with db:
                 # Serialize the version check AND mutation. A deferred SQLite
                 # transaction does not start when latest() SELECTs. Without a
@@ -154,11 +166,13 @@ def push(body:Mutations):
                 # performs the revision comparison against its committed state.
                 db.execute("BEGIN IMMEDIATE")
                 cutoff=core.ledger_start_ms(db)
-                prior=db.execute("SELECT revision,event_id FROM sync_mutations WHERE mutation_id=?",
+                prior=db.execute("SELECT revision,event_id,request_hash FROM sync_mutations WHERE mutation_id=?",
                                  (operation.mutation_id,)).fetchone()
                 if prior is not None:
-                    if prior["event_id"] != operation.event_id:
-                        raise HTTPException(409,"Mutation ID was reused for another event")
+                    if prior["event_id"] != operation.event_id or (
+                        prior["request_hash"] is not None and prior["request_hash"]!=request_hash
+                    ):
+                        raise HTTPException(409,"Mutation ID was reused with a different operation")
                     results.append({"mutation_id":operation.mutation_id,"status":"applied",
                                     "revision":prior["revision"],"replayed":True})
                     continue
@@ -219,8 +233,8 @@ def push(body:Mutations):
                           VALUES(?,'delete',NULL,?)""",(operation.event_id,int(time.time()*1000)))
                 updated=latest(db,operation.event_id)
                 assert updated is not None
-                db.execute("INSERT INTO sync_mutations(mutation_id,event_id,revision) VALUES(?,?,?)",
-                           (operation.mutation_id,operation.event_id,updated["revision"]))
+                db.execute("INSERT INTO sync_mutations(mutation_id,event_id,revision,request_hash) VALUES(?,?,?,?)",
+                           (operation.mutation_id,operation.event_id,updated["revision"],request_hash))
                 results.append({"mutation_id":operation.mutation_id,"status":"applied",
                                 "revision":updated["revision"]})
     return {"results":results}

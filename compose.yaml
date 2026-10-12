@@ -50,6 +50,7 @@ services:
     command: ["python", "/scripts/backup.py"]
     environment:
       FINANCE_DB: /data/finance/finance.sqlite3
+      FINANCE_OAUTH_DB: /data/finance/oauth.sqlite3
       FINANCE_WALLOS_DB: /data/wallos/wallos.db
       FINANCE_BACKUP_DIR: /data/backups
     volumes:

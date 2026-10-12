@@ -118,6 +118,25 @@ class SyncV2Tests(unittest.TestCase):
         last=self.pull(accepted["revision"])["items"][-1]
         self.assertEqual(last["record"]["review_status"],"confirmed")
 
+    def test_mutation_id_cannot_be_reused_with_changed_payload(self):
+        first=self.push("op-hash-stable-001")
+        self.assertEqual(first["status"],"applied")
+        self.assertEqual(self.push("op-hash-stable-001"),{
+            "mutation_id":"op-hash-stable-001",
+            "status":"applied","revision":first["revision"],"replayed":True
+        })
+        updated={**self.event,"merchant":"A different edit"}
+        record={k:v for k,v in updated.items() if k!="event_id"}
+        response=self.client.post(f"{self.path}/push",json={"operations":[{
+            "mutation_id":"op-hash-stable-001","event_id":updated["event_id"],
+            "base_revision":0,"action":"upsert","record":record
+        }]},headers=self.headers)
+        self.assertEqual(response.status_code,409)
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT merchant FROM transactions").fetchone()[0],
+                             self.event["merchant"])
+
     def test_phone_delete_tombstone_and_legacy_replay(self):
         first=self.push("op-create-0004")
         deletion=self.push("op-delete-0005",action="delete",revision=first["revision"])
