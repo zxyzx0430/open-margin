@@ -64,6 +64,79 @@ class MoneySyncRegressionTest {
             "领取优惠", "红包可抵扣14.00元",time))
     }
 
+    @Test fun notificationUsesActualPaymentNotFirstCurrencySymbolOrCoupon() {
+        val time=1791512160000L
+        val couponFirst=NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "付款成功",
+            "你有一张￥5.00优惠券，实际付款成功18.86元",time
+        )
+        assertNotNull(couponFirst)
+        assertEquals(1886L,couponFirst!!.amountCents)
+        assertEquals("EXPENSE",couponFirst.type)
+
+        val promoThenActual=NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "支付提醒",
+            "14.00元红包今晚失效，付款成功￥20.00",time
+        )
+        assertNotNull(promoThenActual)
+        assertEquals(2000L,promoThenActual!!.amountCents)
+
+        val balanceThenPaid=NotificationParser.parse(
+            "com.eg.android.AlipayGphone", "支付提醒",
+            "余额￥500.00，支付成功¥12.30",time
+        )
+        assertNotNull(balanceThenPaid)
+        assertEquals(1230L,balanceThenPaid!!.amountCents)
+    }
+
+    @Test fun notificationPreservesIncomeRefundMerchantAndLegacyCapture() {
+        val time=1791512160000L
+        val income=NotificationParser.parse(
+            "com.tencent.mm","微信支付","向你付款 100.00 元",time
+        )
+        assertEquals("INCOME",income!!.type)
+        assertEquals(10000L,income.amountCents)
+        val expense=NotificationParser.parse(
+            "com.tencent.mm","微信支付","向 麦当劳 付款 12.30 元",time
+        )
+        assertEquals("EXPENSE",expense!!.type)
+        assertEquals(1230L,expense.amountCents)
+        val refunded=NotificationParser.parse(
+            "com.eg.android.AlipayGphone","支付宝","退款成功 18.86 元",time
+        )
+        // Intentionally retain existing INCOME serialization for compatibility;
+        // proper refund/exclusion semantics need an explicit schema change.
+        assertEquals("INCOME",refunded!!.type)
+        assertEquals(1886L,refunded.amountCents)
+        assertNull(NotificationParser.parse(
+            "com.some.unrelated.app","付款成功","¥12.30",time
+        ))
+    }
+
+    @Test fun bankSmsChoosesTransactionAmountOverBalance() {
+        val time=1791512160000L
+        val tx=SmsParser.parse("95555",
+            "【招商银行】账户当前余额人民币500.00元，尾号1234已支付人民币12.30元",time)
+        assertNotNull(tx)
+        assertEquals(1230L,tx!!.amountCents)
+        assertEquals("EXPENSE",tx.type)
+        assertEquals("BANK_SMS",tx.source)
+    }
+
+    @Test fun bankSmsUsesNearestDirectionAndKeepsPostAmountKeywords() {
+        val time=1791512160000L
+        val mixed=SmsParser.parse("95555",
+            "【招商银行】工资入账提醒，尾号1234消费人民币25.81元，余额200.00元",time)
+        assertEquals("EXPENSE",mixed!!.type)
+        assertEquals(2581L,mixed.amountCents)
+        val postAmount=SmsParser.parse("95566",
+            "【中国银行】尾号1234人民币100.00元已转入账户",time)
+        assertEquals("INCOME",postAmount!!.type)
+        assertEquals(10000L,postAmount.amountCents)
+        assertNull(SmsParser.parse("95555",
+            "【招商银行】尾号1234可用余额300.00元，今日转入和转出请查看详情",time))
+    }
+
     @Test fun smsExactCentsAndNoFalseOtp() {
         val bank="【招商银行】尾号1234消费人民币25.81元，余额1234.56元"
         val tx=SmsParser.parse(null,bank,1791512160000L)

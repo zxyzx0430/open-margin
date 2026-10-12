@@ -56,8 +56,8 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         ) ?: return
 
         // 在后台协程里入库（IO 不能在主线程）。
-        // insertIfNotDuplicate：60s 内同来源同金额视为重复，跳过。覆盖
-        // "通知/SMS/无障碍可能抓到同一笔" 的场景。
+        // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
+        // 不跨来源自动合并，避免把独立的支付误删。
         scope.launch {
             val id = repository.insertIfNotDuplicate(parsed)
             if (id == null) {

@@ -75,14 +75,12 @@ object SmsParser {
         val bank = detectBank(body) ?: return null
 
         // 2. 提金额
-        val amountCents = extractAmountCents(body) ?: return null
+        val amount = findTransactionAmount(body) ?: return null
+        val amountCents = MoneyAmount.cents(amount.groupValues[1]) ?: return null
 
-        // 3. 判收支方向。无法确定时返回 null（避免误入库验证码等）
-        val type = when {
-            INCOME_KEYWORDS.any { body.contains(it) } -> TransactionType.INCOME
-            EXPENSE_KEYWORDS.any { body.contains(it) } -> TransactionType.EXPENSE
-            else -> return null
-        }
+        // 3. 银行短信常同时含“转入”和“转出”（以及余额、历史交易等）。
+        // 先看交易金额之前最近的动词；只有单方向关键词时才保留原兜底。
+        val type = directionNearAmount(body, amount.range.first) ?: return null
 
         // 4. 提卡尾号，组装账户名
         val cardLast4 = CARD_NO_REGEX.find(body)?.groupValues?.get(1).orEmpty()
@@ -110,9 +108,41 @@ object SmsParser {
         return null
     }
 
-    private fun extractAmountCents(body: String): Long? {
-        // 找所有金额，取第一个（通常第一个就是交易金额，"余额"在后面）
-        val raw = AMOUNT_REGEX.find(body)?.groupValues?.get(1) ?: return null
-        return MoneyAmount.cents(raw)
+    // 余额有时排在交易金额前面：只过滤紧贴“余额 / 额度”的金额，
+    // 不改变不带这些前缀的原有短信识别行为。
+    private val NON_TRANSACTION_AMOUNT_PREFIX = Regex(
+        """(?:账户余额|当前余额|可用余额|剩余余额|余额|信用额度|可用额度|剩余额度)\s*[：:]?\s*$"""
+    )
+
+    private fun findTransactionAmount(body: String): MatchResult? =
+        AMOUNT_REGEX.findAll(body).firstOrNull { match ->
+            val before = body.substring((match.range.first - 20).coerceAtLeast(0), match.range.first)
+            !NON_TRANSACTION_AMOUNT_PREFIX.containsMatchIn(before)
+        }
+
+    private fun directionNearAmount(body: String, amountStart: Int): TransactionType? {
+        fun nearest(words: List<String>): Int =
+            words.maxOfOrNull { body.lastIndexOf(it, startIndex = amountStart) } ?: -1
+
+        val income = nearest(INCOME_KEYWORDS)
+        val expense = nearest(EXPENSE_KEYWORDS)
+        if (income < 0 && expense < 0) {
+            // 少数银行把交易动词放在金额后面：兼容现有抓取能力，
+            // 但收支同时出现且无法靠近金额判别时，宁可跳过而非猜测。
+            val hasIncome = INCOME_KEYWORDS.any { body.contains(it) }
+            val hasExpense = EXPENSE_KEYWORDS.any { body.contains(it) }
+            return when {
+                hasIncome && !hasExpense -> TransactionType.INCOME
+                hasExpense && !hasIncome -> TransactionType.EXPENSE
+                else -> null
+            }
+        }
+        // 兼容旧规则：短信仅包含单一方向时，仍按原方向自动入库。
+        if (income < 0) return TransactionType.EXPENSE
+        if (expense < 0) return TransactionType.INCOME
+        // 两种方向同时出现，按当前金额附近最后一项有效动词判断；
+        // 避免整条短信中任何一个“收入”字眼都覆盖实际消费。
+        if (income == expense) return null
+        return if (income > expense) TransactionType.INCOME else TransactionType.EXPENSE
     }
 }

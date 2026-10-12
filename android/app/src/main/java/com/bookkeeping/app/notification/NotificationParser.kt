@@ -163,11 +163,32 @@ object NotificationParser {
         )
     }
 
+    // 按通知的真实文本顺序遍历 ￥ 金额和“元”金额，而非一律先找 ￥。
+    // 营销活动可能在付款前展示优惠券；这类金额不能代替实际成交额。
+    private val NON_TRANSACTION_AMOUNT_BEFORE = Regex(
+        """(?:余额|可用余额|优惠券|红包|代金券|抵扣券|立减券|满减券|奖励|优惠金额)\s*[：:]?\s*$"""
+    )
+    private val NON_TRANSACTION_AMOUNT_AFTER = Regex(
+        """^\s*(?:元)?\s*(?:优惠券|红包|代金券|抵扣券|立减券|满减券|优惠券红包)"""
+    )
+    private val TRANSACTION_AMOUNT_BEFORE = Regex(
+        """(?:付款成功|支付成功|成功付款|成功支付|已付款|已支付|成功收款|收款成功|收到退款|退款到账|到账成功|已到账|的支出|付款|收款|扣款|扣费)\s*[：:]?\s*$"""
+    )
+
     private fun extractAmountCents(text: String): Long? {
-        val raw = AMOUNT_REGEX_SYMBOL.find(text)?.groupValues?.get(1)
-            ?: AMOUNT_REGEX_YUAN.find(text)?.groupValues?.get(1)
-            ?: return null
-        return MoneyAmount.cents(raw)
+        val matches = (AMOUNT_REGEX_SYMBOL.findAll(text) + AMOUNT_REGEX_YUAN.findAll(text))
+            .sortedBy { it.range.first }
+        for (match in matches) {
+            val before = text.substring((match.range.first - 18).coerceAtLeast(0), match.range.first)
+            val after = text.substring(match.range.last + 1, (match.range.last + 13).coerceAtMost(text.length))
+            val isConfirmed = TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before)
+            val appearsPromotional = NON_TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before) ||
+                NON_TRANSACTION_AMOUNT_AFTER.containsMatchIn(after)
+            if (appearsPromotional && !isConfirmed) continue
+            val cents = MoneyAmount.cents(match.groupValues[1])
+            if (cents != null) return cents
+        }
+        return null
     }
 
     private fun extractMerchant(text: String): String {
