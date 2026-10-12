@@ -32,6 +32,7 @@ SCENARIOS={
   "leap_february":("2024-02",{29:1234}),
   "year_boundary":("2025-12",{31:9800}),
   "refund_transfer_excluded":("2026-10",{3:1500,6:1886}),
+  "tall_short_animation":("2026-10",{11:9136,12:1230}),
 }
 VIEWPORTS=[320,390,768,1440]
 
@@ -134,10 +135,36 @@ def run():
                                 else:
                                     assert page.locator("#finance-daily-selected-excluded").is_hidden()
                                 assert page.locator("#finance-daily-selection.is-active").count()==1
+                                page.wait_for_function("""() =>
+                                  document.querySelectorAll('.apexcharts-bar-area.finance-daily-bar-selected').length===1
+                                """,timeout=2000)
                                 assert page.locator(".apexcharts-bar-area.finance-daily-bar-selected").count()==1, (key,width,"selected bar")
                                 assert page.locator(".finance-daily-focus-band:not([hidden])").count()==1, (key,width,"day highlight")
                                 selected=page.locator(".apexcharts-bar-area.finance-daily-bar-selected")
                                 assert selected.get_attribute("j")==str(index), (key,width,"bar selection mismatch")
+                                # The focus outline must match the selected real SVG bar,
+                                # never the plot's entire height for small expenses.
+                                if key=="tall_short_animation" and index in (10,11):
+                                    page.wait_for_timeout(620)
+                                    geometry=page.evaluate("""() => {
+                                      const a=document.querySelector('.finance-daily-bar-selected');
+                                      const b=document.querySelector('.finance-daily-focus-band');
+                                      const grid=document.querySelector('.apexcharts-grid');
+                                      const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect(),
+                                        gr=grid.getBoundingClientRect();
+                                      return {barTop:ar.top,barHeight:ar.height,
+                                        outlineTop:br.top,outlineHeight:br.height,gridHeight:gr.height}
+                                    }""")
+                                    assert abs(geometry["barHeight"]-geometry["outlineHeight"])<4,(key,width,index,geometry)
+                                    assert abs(geometry["barTop"]-geometry["outlineTop"])<4,(key,width,index,geometry)
+                                    if index==11:
+                                        assert geometry["outlineHeight"] < geometry["gridHeight"]*.5,geometry
+                                    if width==390 and not dark:
+                                        page.screenshot(path=str(EVIDENCE/f"tall-short-{'11' if index==10 else '12'}-selected-390.png"),full_page=True)
+                                    # Re-selecting the same bar visibly replays its animation.
+                                    page.locator("#finance-daily-date").evaluate("(el)=>{el.dispatchEvent(new Event('change',{bubbles:true}))}")
+                                    assert page.locator(".finance-daily-focus-drop").count()==1
+                                    assert page.locator(".finance-daily-bar-pop").count()==1
                                 style=page.locator("#finance-daily-selection").evaluate("(e) => getComputedStyle(e).borderTopWidth")
                                 assert style=="2px", (key,width,"selected panel visual not active")
                             # Any day column must work, even beside a much taller expense bar.

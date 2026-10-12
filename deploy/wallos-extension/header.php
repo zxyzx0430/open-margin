@@ -192,7 +192,8 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
               <?php include "images/siteicons/svg/mobile-menu/subscriptions.php"; ?>
               <?= translate('subscriptions', $i18n) ?></a>
             <a href="expenses.php" class="mobileNavigationHideOnMobile">
-  <i class="fa-solid fa-wallet"></i> 日常消费</a>
+              <?php include "images/siteicons/svg/mobile-menu/expenses.php"; ?>
+              日常消费</a>
             <a href="calendar.php" class="mobileNavigationHideOnMobile">
                 <?php include "images/siteicons/svg/mobile-menu/calendar.php"; ?>
                 <?= translate('calendar', $i18n) ?></a>

@@ -253,11 +253,13 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-chart-selection[hidden]{display:none!important}
 /* Day selection: distinct bar, date band and confirmed selection card. */
 .wallos-ledger .ledger-apex-chart{position:relative}
-.wallos-ledger .finance-daily-focus-band{position:absolute;z-index:2;pointer-events:none;border:2px solid var(--main-color);border-radius:7px;background:var(--main-color);opacity:1;box-sizing:border-box;box-shadow:inset 0 0 0 1px var(--main-color),0 0 10px color-mix(in srgb,var(--main-color) 28%,transparent);background:color-mix(in srgb,var(--main-color) 17%,transparent);transition:opacity .2s ease}
+.wallos-ledger .finance-daily-focus-band{position:absolute;z-index:2;pointer-events:none;border:1.5px solid var(--main-color);border-radius:5px;opacity:1;box-sizing:border-box;background:color-mix(in srgb,var(--main-color) 9%,transparent);box-shadow:0 0 9px color-mix(in srgb,var(--main-color) 33%,transparent);transform-origin:center bottom}
 .wallos-ledger .finance-daily-focus-band[hidden]{display:none}
+.wallos-ledger .finance-daily-focus-band.finance-daily-focus-zero{border-radius:5px;background:var(--main-color)}
 .wallos-ledger .finance-daily-has-selection .apexcharts-bar-area:not(.finance-daily-bar-selected){opacity:.48;transition:opacity .18s ease}
-.wallos-ledger .apexcharts-bar-area.finance-daily-bar-selected{opacity:1!important;filter:brightness(1.15) drop-shadow(0px 0px 5px var(--main-color));transform-box:fill-box;transform-origin:center bottom;transform:scaleX(1.27) scaleY(1.08);transition:filter .18s ease,transform .18s ease}
-.wallos-ledger .finance-daily-bar-pop{animation:financeDailyBarPop .48s ease-out}
+.wallos-ledger .apexcharts-bar-area.finance-daily-bar-selected{opacity:1!important;filter:brightness(1.16) drop-shadow(0 0 5px var(--main-color));transform-box:fill-box;transform-origin:center bottom;transform:scaleX(1.16) scaleY(1);transition:filter .18s ease}
+.wallos-ledger .apexcharts-bar-area.finance-daily-bar-pop{animation:financeDailyBarPop .54s cubic-bezier(.22,1,.36,1) both}
+.wallos-ledger .finance-daily-focus-band.finance-daily-focus-drop{animation:financeDailyFocusDrop .54s cubic-bezier(.22,1,.36,1) both}
 .wallos-ledger .ledger-chart-selection.is-active{border:2px solid var(--main-color);background:color-mix(in srgb,var(--main-color) 10%,var(--box-background-color));box-shadow:0 2px 13px color-mix(in srgb,var(--main-color) 20%,transparent);padding:11px 13px}
 .wallos-ledger .ledger-chart-selection.is-active strong{font-size:18px;color:var(--main-color)}
 .wallos-ledger .ledger-chart-selection .finance-daily-selected-label{font-weight:700;color:var(--main-color)}
@@ -265,7 +267,8 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-chart-table table{min-width:480px}
 
 .wallos-ledger .ledger-chart-selection.finance-daily-selection-pop{animation:financeDailySelectionPop .46s ease-out}
-@keyframes financeDailyBarPop{0%{filter:brightness(1.4) drop-shadow(0px 0px 10px var(--main-color));transform:scaleX(1.45) scaleY(1.14)}100%{transform:scaleX(1.27) scaleY(1.08)}}
+@keyframes financeDailyBarPop{0%{filter:brightness(1.25) drop-shadow(0 0 9px var(--main-color));transform:scaleX(1.16) scaleY(var(--finance-daily-start-scale,1.12))}100%{transform:scaleX(1.16) scaleY(1)}}
+@keyframes financeDailyFocusDrop{0%{transform:scaleY(var(--finance-daily-start-scale,1.12));opacity:.83}100%{transform:scaleY(1);opacity:1}}
 @keyframes financeDailySelectionPop{0%{transform:scale(.985)}65%{transform:scale(1.008)}100%{transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){.wallos-ledger .finance-daily-focus-band,.wallos-ledger .apexcharts-bar-area,.wallos-ledger .finance-daily-selection-pop,.wallos-ledger .finance-daily-bar-pop{animation:none!important;transition:none!important}}
 .wallos-ledger .ledger-chart-selection strong{font-variant-numeric:tabular-nums}

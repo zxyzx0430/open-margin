@@ -15,6 +15,7 @@ COPY expenses-action.php /var/www/html/expenses-action.php
 COPY expenses-export.php /var/www/html/expenses-export.php
 COPY ledger-common.php /var/www/html/ledger-common.php
 COPY header.php /var/www/html/includes/header.php
+COPY mobile-menu-expenses.php /var/www/html/images/siteicons/svg/mobile-menu/expenses.php
 COPY index.php /var/www/html/index.php
 COPY service-worker.php /var/www/html/service-worker.php
 

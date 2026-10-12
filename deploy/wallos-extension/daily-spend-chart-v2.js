@@ -55,33 +55,53 @@
       bar.classList.toggle(barClass, i === chosen);
       bar.classList.remove("finance-daily-bar-pop");
     });
+    focusBand.classList.remove("finance-daily-focus-drop");
+    const grid = host.querySelector(".apexcharts-grid");
+    if (!grid) return;
+    const r = grid.getBoundingClientRect();
+    const h = host.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const column = r.width / entries.length;
     const active = bars[chosen];
-    if (active) {
-      // Replaying the animation makes a repeat tap visibly register too.
-      void active.getBoundingClientRect();
+    // Measure the SVG bar *before* applying the enter animation. An entire
+    // column outline would falsely make ¥12 look as tall as ¥91.
+    const rect = active?.getBoundingClientRect();
+    const realBar = entries[chosen].cents > 0 && rect &&
+      rect.height > 0 && rect.width > 0;
+    if (realBar) {
+      focusBand.classList.remove("finance-daily-focus-zero");
+      focusBand.style.left = (rect.left - h.left - 1) + "px";
+      focusBand.style.top = (rect.top - h.top - 1) + "px";
+      focusBand.style.width = (rect.width + 2) + "px";
+      focusBand.style.height = (rect.height + 2) + "px";
+    } else {
+      // A zero or sub-pixel day still has a visible, selectable baseline marker.
+      focusBand.classList.add("finance-daily-focus-zero");
+      focusBand.style.left = (r.left - h.left + (chosen + .5) * column - 4) + "px";
+      focusBand.style.top = (r.bottom - h.top - 4) + "px";
+      focusBand.style.width = "8px";
+      focusBand.style.height = "4px";
+    }
+    focusBand.hidden = false;
+    const ratio = realBar ? Math.min(10, Math.max(1.12, r.height * .86 / rect.height)) : 1;
+    focusBand.style.setProperty("--finance-daily-start-scale", ratio);
+    if (active) active.style.setProperty("--finance-daily-start-scale", ratio);
+    // Restart both animations together. Their FINAL geometry always equals
+    // the real ApexCharts amount; selecting a low bar cannot leave a tall shell.
+    if (realBar && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      void focusBand.offsetWidth;
+      focusBand.classList.add("finance-daily-focus-drop");
       active.classList.add("finance-daily-bar-pop");
     }
-    const grid = host.querySelector(".apexcharts-grid");
-    const band = host.querySelector(".finance-daily-focus-band");
-    if (grid && band) {
-      const r = grid.getBoundingClientRect(), h = host.getBoundingClientRect();
-      const w = r.width / entries.length;
-      band.style.left = (r.left - h.left + chosen * w + 1) + "px";
-      band.style.top = (r.top - h.top) + "px";
-      band.style.width = Math.max(1, w - 2) + "px";
-      band.style.height = r.height + "px";
-      band.hidden = false;
-      // Selecting a distant day through the dropdown reveals its bar at once.
-      const viewport = root.querySelector(".ledger-chart-shell");
-      const left = parseFloat(band.style.left);
-      if (viewport && Number.isFinite(left)) {
-        const current = viewport.scrollLeft, right = current + viewport.clientWidth;
-        if (left < current + 14 || left + w > right - 14) {
-          const target = Math.max(0, Math.min(
-            viewport.scrollWidth - viewport.clientWidth,
-            left + w / 2 - viewport.clientWidth / 2));
-          viewport.scrollLeft = target;
-        }
+    // Selecting a distant day through the dropdown reveals its actual bar.
+    const viewport = root.querySelector(".ledger-chart-shell");
+    const left = parseFloat(focusBand.style.left);
+    if (viewport && Number.isFinite(left)) {
+      const current = viewport.scrollLeft, right = current + viewport.clientWidth;
+      if (left < current + 14 || left + column > right - 14) {
+        viewport.scrollLeft = Math.max(0, Math.min(
+          viewport.scrollWidth - viewport.clientWidth,
+          left + column / 2 - viewport.clientWidth / 2));
       }
     }
   }
@@ -184,5 +204,19 @@
       chart: {foreColor: color("--text-muted", "#6b7280")}}, false, false)
       .then(() => paintSelection());
   }).observe(document.body, {attributes: true, attributeFilter: ["class"]});
+  // ApexCharts can replace SVG paths during a layout/theme redraw.
+  // Restore the chosen day after that redraw instead of leaving a stale card
+  // next to an unhighlighted plot. Observe child nodes, not animation classes.
+  let redrawQueued = false;
+  new MutationObserver(() => {
+    if (!chartReady || chosen < 0 || redrawQueued) return;
+    const bar = host.querySelector(".apexcharts-bar-area.finance-daily-bar-selected");
+    if (bar && focusBand.isConnected) return;
+    redrawQueued = true;
+    requestAnimationFrame(() => {
+      redrawQueued = false;
+      if (chartReady && chosen >= 0) paintSelection();
+    });
+  }).observe(host, {childList: true, subtree: true});
   root.financeDailyChart = {selectIndex, entries};
 })();
