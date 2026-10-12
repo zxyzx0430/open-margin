@@ -33,7 +33,7 @@ class StatsViewModel @Inject constructor(
             _viewingType,
         ) { transactions, type ->
             // 1. 按 type 过滤
-            val filtered = transactions.filter { it.type == type.name &&
+            val filtered = transactions.filter { it.type == type.name && it.currency == "CNY" &&
                 it.remoteReviewStatus !in setOf("excluded","transfer","refund") &&
                 (it.type=="INCOME" || it.category!="TRANSFER") }
             if (filtered.isEmpty()) return@combine emptyList()
@@ -67,7 +67,7 @@ class StatsViewModel @Inject constructor(
             repository.observeBetween(start, end),
             _viewingType,
         ) { transactions, type ->
-            val filtered = transactions.filter { it.type == type.name &&
+            val filtered = transactions.filter { it.type == type.name && it.currency == "CNY" &&
                 it.remoteReviewStatus !in setOf("excluded","transfer","refund") &&
                 (it.type=="INCOME" || it.category!="TRANSFER") }
             val byDay = filtered.groupBy {

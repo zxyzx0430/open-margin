@@ -36,13 +36,13 @@ interface TransactionDao {
     fun observeBetween(startMs: Long, endMs: Long): Flow<List<TransactionEntity>>
 
     // 统计某段时间内的总支出（单位:分）。COALESCE 处理"没数据时返回 0 而不是 null"
-    @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'EXPENSE' AND syncDeleted = 0
+    @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'EXPENSE' AND currency = 'CNY' AND syncDeleted = 0
               AND remoteReviewStatus NOT IN ('excluded','transfer','refund')
               AND category <> 'TRANSFER' AND timestamp >= :startMs AND timestamp < :endMs""")
     fun observeTotalExpenseBetween(startMs: Long, endMs: Long): Flow<Long>
 
     // 总收入（单位:分）
-    @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'INCOME' AND syncDeleted = 0
+    @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'INCOME' AND currency = 'CNY' AND syncDeleted = 0
               AND remoteReviewStatus NOT IN ('excluded','transfer','refund') AND timestamp >= :startMs AND timestamp < :endMs""")
     fun observeTotalIncomeBetween(startMs: Long, endMs: Long): Flow<Long>
 

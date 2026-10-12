@@ -21,6 +21,9 @@ class SyncConflictPolicyTest {
             SyncConflictPolicy.decide(now-10000,0,now))
         assertEquals(SyncConflictPolicy.Decision.HOLD,
             SyncConflictPolicy.decide(now+600000,now-30000,now))
+        // A wrong server clock must not silently replace valid phone edits.
+        assertEquals(SyncConflictPolicy.Decision.HOLD,
+            SyncConflictPolicy.decide(now-30000,now+600000,now))
     }
 
     @Test fun ExplicitUserChoiceOverridesClockAmbiguity() {

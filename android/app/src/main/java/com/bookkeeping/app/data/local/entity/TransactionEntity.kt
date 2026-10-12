@@ -37,6 +37,11 @@ data class TransactionEntity(
     // 时间戳（毫秒），用于排序、按月统计
     val timestamp: Long,
 
+    // Original currency is retained for remote transactions. Do not sum
+    // unconverted USD/EUR cents into the CNY budget or totals.
+    @ColumnInfo(defaultValue = "'CNY'")
+    val currency: String = "CNY",
+
     // Added in Room v2. Local rows retain their IDs; remote records have a
     // stable server event ID. Neither token nor raw SMS text is synchronized.
     val remoteEventId: String? = null,

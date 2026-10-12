@@ -12,7 +12,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
     entities = [TransactionEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -24,6 +24,14 @@ abstract class BookkeepingDatabase : RoomDatabase() {
 
         // Must never fall back to destructive migration: user's unsynced
         // payment notifications and manually entered expenses live here.
+        // Non-destructive: v1/v2 rows are local CNY; new remote rows preserve
+        // their original denomination instead of silently becoming yuan.
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN currency TEXT NOT NULL DEFAULT 'CNY'")
+            }
+        }
+
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE transactions ADD COLUMN remoteEventId TEXT")

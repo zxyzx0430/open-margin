@@ -290,7 +290,10 @@ private fun GroupedTransactionList(
 
 @Composable
 private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
-    val valid=items.filter { it.remoteReviewStatus !in setOf("excluded","transfer","refund") }
+    // This daily summary is denominated in CNY. Non-CNY entries remain in
+    // the list below with an explicit currency label, but are not falsely added.
+    val valid=items.filter { it.currency == "CNY" &&
+        it.remoteReviewStatus !in setOf("excluded","transfer","refund") }
     val expense = valid.filter { it.type == "EXPENSE" && it.category!="TRANSFER" }
         .sumOf { it.amountCents }
     val income = valid.filter { it.type == "INCOME" }.sumOf { it.amountCents }
@@ -299,7 +302,9 @@ private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
         Text(dayLabel(dayKey), style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val total = if (expense > 0L) "支出 ¥" + "%.2f".format(Locale.CHINA, expense / 100.0)
+        val total = if (valid.isEmpty() && items.any { it.currency != "CNY" })
+                        "仅外币 · 未换算"
+                    else if (expense > 0L) "支出 ¥" + "%.2f".format(Locale.CHINA, expense / 100.0)
                     else "收入 ¥" + "%.2f".format(Locale.CHINA, income / 100.0)
         Text(total, style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -313,6 +318,7 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
     var expanded by remember(transaction.id) { mutableStateOf(false) }
     val amount = "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
+    val currencyLabel = if (transaction.currency == "CNY") "¥" else transaction.currency + " "
     val sourceName = when (transaction.source) {
         "ALIPAY" -> "支付宝"
         "WECHAT" -> "微信"
@@ -347,7 +353,7 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Text((if (type == TransactionType.INCOME) "+" else "−") + "¥" + amount,
+                Text((if (type == TransactionType.INCOME) "+" else "−") + currencyLabel + amount,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = amountColor, maxLines = 1)

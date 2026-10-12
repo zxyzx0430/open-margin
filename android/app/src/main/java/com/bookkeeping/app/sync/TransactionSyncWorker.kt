@@ -35,7 +35,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
             prefs.edit().putString("installation_id", it).commit()
         }
         val db = Room.databaseBuilder(applicationContext, BookkeepingDatabase::class.java, BookkeepingDatabase.DB_NAME)
-            .addMigrations(BookkeepingDatabase.MIGRATION_1_2).build()
+            .addMigrations(BookkeepingDatabase.MIGRATION_1_2, BookkeepingDatabase.MIGRATION_2_3).build()
         try {
             if (!auditLegacyAmounts(db, prefs, base, token, installation)) return Result.retry()
             var cursor = prefs.getLong("last_synced_id", 0L)
@@ -60,7 +60,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                         put("event_id", "android:$installation:${t.id}")
                         put("timestamp_ms", t.timestamp)
                         put("amount_cents", t.amountCents)
-                        put("currency", "CNY")
+                        put("currency", t.currency)
                         put("direction", t.type)
                         put("source", source)
                         put("category", t.category)
@@ -80,9 +80,23 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     prefs.edit().putString("last_result", "服务器返回 ${response.first}，稍后重试").apply()
                     return if (response.first in 400..499) Result.failure() else Result.retry()
                 }
-                if (JSONObject(response.second).optInt("accepted", -1) != events.length()) {
-                    prefs.edit().putString("last_result", "服务器确认条数不一致，将重试").apply()
-                    return Result.retry()
+                val confirmation = JSONObject(response.second)
+                // Accepted != persisted: old API counts ignored pre-ledger-start
+                // events as accepted. Never acknowledge a rejected local record.
+                when (LegacyUploadAckPolicy.decide(
+                    events.length(), confirmation.optInt("accepted", -1),
+                    confirmation.optInt("ignored_before_start", 0)
+                )) {
+                    LegacyUploadAckPolicy.Decision.RETRY -> {
+                        prefs.edit().putString("last_result", "服务器确认条数不一致，将重试").apply()
+                        return Result.retry()
+                    }
+                    LegacyUploadAckPolicy.Decision.REJECTED_BY_LEDGER_START -> {
+                        prefs.edit().putString("last_result",
+                            "有交易早于服务器账本起始日，被拒绝上传；请检查日期和账本设置，记录仍保留在手机").apply()
+                        return Result.failure()
+                    }
+                    LegacyUploadAckPolicy.Decision.ADVANCE_CURSOR -> Unit
                 }
                 cursor = batch.last().id
                 if (!prefs.edit().putLong("last_synced_id", cursor)

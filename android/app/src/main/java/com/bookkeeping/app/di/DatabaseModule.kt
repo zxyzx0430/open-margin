@@ -28,7 +28,7 @@ object DatabaseModule {
             BookkeepingDatabase::class.java,
             BookkeepingDatabase.DB_NAME
         )
-            .addMigrations(BookkeepingDatabase.MIGRATION_1_2)
+            .addMigrations(BookkeepingDatabase.MIGRATION_1_2, BookkeepingDatabase.MIGRATION_2_3)
             .build()
     }
 

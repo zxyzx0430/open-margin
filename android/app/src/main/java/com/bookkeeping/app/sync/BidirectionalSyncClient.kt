@@ -66,6 +66,7 @@ internal class BidirectionalSyncClient(
         return TransactionEntity(
             id=row?.id ?: 0,
             amountCents=payload.getLong("amount_cents"),
+            currency=payload.optString("currency", "CNY"),
             type=direction,
             category=payload.optString("category","OTHER"),
             merchant=payload.optString("merchant",""),
@@ -118,7 +119,7 @@ internal class BidirectionalSyncClient(
     private fun payload(row:TransactionEntity)=JSONObject().apply {
         put("timestamp_ms",row.timestamp)
         put("amount_cents",row.amountCents)
-        put("currency","CNY")
+        put("currency",row.currency)
         put("direction",row.type)
         put("source",row.source)
         put("category",row.category)
@@ -189,9 +190,11 @@ internal class BidirectionalSyncClient(
                         }else conflicts++
                     }
                     "before_start"->{
-                        dao.update(live.copy(remoteEventId=id,
-                            syncDirty=false,syncMutationId=null))
-                        progress=true
+                        // Server explicitly rejected this row due to the configured
+                        // ledger start date. Keep the unsent mutation visible and
+                        // retryable; acknowledging it would silently diverge the
+                        // phone totals from the server and lose the user's edit.
+                        conflicts++
                     }
                     else->conflicts++
                 }
