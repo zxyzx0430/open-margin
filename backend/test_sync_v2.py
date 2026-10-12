@@ -1,0 +1,129 @@
+"""Transactional tests for v2 replication and legacy-client replay safety."""
+import tempfile
+import unittest
+from pathlib import Path
+from fastapi.testclient import TestClient
+import app as core
+
+
+class SyncV2Tests(unittest.TestCase):
+    def setUp(self):
+        self.folder=tempfile.TemporaryDirectory(prefix="pfs-bidirectional-")
+        self.old_db=core.DB
+        self.old_token=core.DEVICE_TOKEN
+        core.DB=Path(self.folder.name)/"finance.sqlite3"
+        core.DEVICE_TOKEN="synthetic-device-token"
+        self.client=TestClient(core.app)
+        self.headers={"X-Device-Token":"synthetic-device-token"}
+        self.path="/api/v2/sync"
+        self.event={
+            "event_id":"android:fake-device:101",
+            "timestamp_ms":1791791400000,"amount_cents":1230,
+            "currency":"CNY","direction":"EXPENSE","source":"WECHAT",
+            "category":"FOOD","merchant":"Demo cafe"
+        }
+
+    def tearDown(self):
+        self.client.close()
+        core.DB=self.old_db
+        core.DEVICE_TOKEN=self.old_token
+        self.folder.cleanup()
+
+    def pull(self,since=0,limit=100):
+        response=self.client.get(f"{self.path}/changes",
+                                 params={"since":since,"limit":limit},headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        return response.json()
+
+    def push(self,mutation_id,action="upsert",revision=0,event=None):
+        record={k:v for k,v in (event or self.event).items() if k!="event_id"}
+        op={"mutation_id":mutation_id,"event_id":(event or self.event)["event_id"],
+            "base_revision":revision,"action":action}
+        if action=="upsert":op["record"]=record
+        response=self.client.post(f"{self.path}/push",json={"operations":[op]},
+                                  headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        return response.json()["results"][0]
+
+    def test_security_bootstrap_and_paginated_pull(self):
+        self.assertEqual(self.client.get(f"{self.path}/changes").status_code,401)
+        with core.db_connection() as db:
+            db.execute("""INSERT INTO transactions(event_id,timestamp_ms,amount_cents,currency,
+                direction,source,category,merchant)
+                VALUES(?,?,?,?,?,?,?,?)""",tuple(self.event[k] for k in
+                  ["event_id","timestamp_ms","amount_cents","currency","direction","source","category","merchant"]))
+        first=self.pull()
+        self.assertEqual(len(first["items"]),1)
+        self.assertEqual(first["items"][0]["record"]["amount_cents"],1230)
+        revision=first["cursor"]
+        # Both server UI reviews and explicit database edits must generate deltas.
+        with core.db_connection() as db:
+            db.execute("UPDATE transactions SET amount_cents=?,review_status='confirmed' WHERE event_id=?",
+                       (1886,self.event["event_id"]))
+        second=self.pull(revision)
+        self.assertEqual(second["items"][0]["record"]["review_status"],"confirmed")
+        self.assertEqual(second["items"][0]["record"]["amount_cents"],1886)
+        self.assertEqual(self.pull(second["cursor"])["items"],[])
+
+    def test_push_idempotent_conflict_and_server_wins_when_stale(self):
+        first=self.push("op-create-0001")
+        self.assertEqual(first["status"],"applied")
+        revision=first["revision"]
+        self.assertEqual(self.push("op-create-0001")["revision"],revision)
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],1)
+            db.execute("UPDATE transactions SET merchant='Server edit' WHERE event_id=?",
+                       (self.event["event_id"],))
+        current=self.pull(revision)["items"][-1]
+        self.assertEqual(current["record"]["merchant"],"Server edit")
+        conflict=self.push("op-stale-0002",revision=revision,
+                           event={**self.event,"amount_cents":9999})
+        self.assertEqual(conflict["status"],"conflict")
+        self.assertEqual(conflict["current"]["record"]["merchant"],"Server edit")
+        self.assertEqual(conflict["current"]["revision"],current["revision"])
+        accepted=self.push("op-current-0003",revision=current["revision"],
+                           event={**self.event,"amount_cents":9999})
+        self.assertEqual(accepted["status"],"applied")
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT amount_cents FROM transactions").fetchone()[0],9999)
+            # Server review status must not be reset by phone updates.
+            db.execute("UPDATE transactions SET review_status='confirmed'")
+        last=self.pull(accepted["revision"])["items"][-1]
+        self.assertEqual(last["record"]["review_status"],"confirmed")
+
+    def test_phone_delete_tombstone_and_legacy_replay(self):
+        first=self.push("op-create-0004")
+        deletion=self.push("op-delete-0005",action="delete",revision=first["revision"])
+        self.assertEqual(deletion["status"],"applied")
+        self.assertEqual(self.pull(first["revision"])["items"][-1]["action"],"delete")
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],0)
+        old=self.client.post("/api/v1/transactions/batch",
+            json={"events":[self.event]},headers=self.headers)
+        self.assertEqual(old.status_code,200)
+        self.assertEqual(old.json()["inserted"],0)
+        self.assertEqual(old.json()["already_present"],1)
+        again=self.push("op-delete-0005",action="delete",revision=first["revision"])
+        self.assertEqual(again["status"],"applied")
+        self.assertEqual(again["revision"],deletion["revision"])
+        # Tombstoned records cannot be re-added without an explicit resolution.
+        self.assertEqual(self.push("op-old-resurrection-0006")["status"],"conflict")
+
+    def test_delete_before_upload_and_genuine_server_insert(self):
+        tomb=self.push("op-delete-first-7",action="delete",revision=0)
+        self.assertEqual(tomb["status"],"applied")
+        self.assertEqual(self.pull()["items"][0]["action"],"delete")
+        with core.db_connection() as db:
+            db.execute("""INSERT INTO transactions(event_id,timestamp_ms,amount_cents,currency,
+                direction,source,category,merchant)
+                VALUES('wallos:manual:integration-test',1791791400000,2500,'CNY',
+                       'EXPENSE','MANUAL','OTHER','Server manual')""")
+        all_changes=self.pull(limit=1)
+        self.assertTrue(all_changes["has_more"])
+        more=self.pull(all_changes["cursor"],1)
+        self.assertFalse(more["has_more"])
+        self.assertEqual(more["items"][0]["event_id"],"wallos:manual:integration-test")
+
+
+if __name__=="__main__":
+    unittest.main()

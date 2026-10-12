@@ -34,15 +34,19 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         val installation = prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
             prefs.edit().putString("installation_id", it).commit()
         }
-        val db = Room.databaseBuilder(applicationContext, BookkeepingDatabase::class.java, BookkeepingDatabase.DB_NAME).build()
+        val db = Room.databaseBuilder(applicationContext, BookkeepingDatabase::class.java, BookkeepingDatabase.DB_NAME)
+            .addMigrations(BookkeepingDatabase.MIGRATION_1_2).build()
         try {
             if (!auditLegacyAmounts(db, prefs, base, token, installation)) return Result.retry()
             var cursor = prefs.getLong("last_synced_id", 0L)
             repeat(30) {
                 val batch = db.transactionDao().getUnsynced(cursor, 100)
                 if (batch.isEmpty()) {
-                    prefs.edit().putString("last_result", "同步成功，暂无待上传交易")
-                        .putLong("last_success_ms", System.currentTimeMillis()).apply()
+                    val ok=BidirectionalSyncClient(db,prefs,base,token,installation).run()
+                    if (!ok) {
+                        prefs.edit().putString("last_result", "双向同步暂不可用，将自动重试").apply()
+                        return Result.retry()
+                    }
                     return Result.success()
                 }
                 val events = JSONArray()
@@ -83,7 +87,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 cursor = batch.last().id
                 if (!prefs.edit().putLong("last_synced_id", cursor)
                     .putLong("last_success_ms", System.currentTimeMillis())
-                    .putString("last_result", "已成功上传至 VPS").commit()) return Result.retry()
+                    .putString("last_result", "已上传，正在拉取最新变更").commit()) return Result.retry()
             }
             return Result.retry()
         } catch (_: Exception) {

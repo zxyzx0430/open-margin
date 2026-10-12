@@ -28,26 +28,36 @@ interface TransactionDao {
     // 查所有交易，按时间倒序。
     // Flow<List<...>> 表示"响应式":数据库变了，订阅者自动收到新列表。
     // 嵌入式类比：寄存器变化时自动触发中断给上层。
-    @Query("SELECT * FROM transactions ORDER BY timestamp DESC")
+    @Query("SELECT * FROM transactions WHERE syncDeleted = 0 ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<TransactionEntity>>
 
     // 查指定时间范围内的（用于"本月"统计等）
-    @Query("SELECT * FROM transactions WHERE timestamp >= :startMs AND timestamp < :endMs ORDER BY timestamp DESC")
+    @Query("SELECT * FROM transactions WHERE syncDeleted = 0 AND timestamp >= :startMs AND timestamp < :endMs ORDER BY timestamp DESC")
     fun observeBetween(startMs: Long, endMs: Long): Flow<List<TransactionEntity>>
 
     // 统计某段时间内的总支出（单位:分）。COALESCE 处理"没数据时返回 0 而不是 null"
-    @Query("SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'EXPENSE' AND timestamp >= :startMs AND timestamp < :endMs")
+    @Query("SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'EXPENSE' AND syncDeleted = 0 AND timestamp >= :startMs AND timestamp < :endMs")
     fun observeTotalExpenseBetween(startMs: Long, endMs: Long): Flow<Long>
 
     // 总收入（单位:分）
-    @Query("SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'INCOME' AND timestamp >= :startMs AND timestamp < :endMs")
+    @Query("SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'INCOME' AND syncDeleted = 0 AND timestamp >= :startMs AND timestamp < :endMs")
     fun observeTotalIncomeBetween(startMs: Long, endMs: Long): Flow<Long>
 
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun getById(id: Long): TransactionEntity?
 
-    @Query("SELECT * FROM transactions WHERE id > :lastId ORDER BY id ASC LIMIT :count")
+    @Query("""SELECT * FROM transactions WHERE id > :lastId AND remoteEventId IS NULL
+        AND syncDeleted = 0 ORDER BY id ASC LIMIT :count""")
     suspend fun getUnsynced(lastId: Long, count: Int): List<TransactionEntity>
+
+    @Query("SELECT * FROM transactions WHERE remoteEventId = :eventId LIMIT 1")
+    suspend fun getByRemoteEventId(eventId: String): TransactionEntity?
+
+    @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs, id LIMIT :count")
+    suspend fun getPendingMutations(count: Int): List<TransactionEntity>
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE syncDirty = 1")
+    suspend fun pendingCount(): Int
 
     // One-time audit after upgrading from the floating-point parser.
     // No raw notification text is uploaded; this check runs only on-device.
@@ -58,7 +68,7 @@ interface TransactionDao {
     // 命中即认为是重复（同一笔交易被通知/无障碍/SMS 多个通道抓到了）。
     @Query("""
         SELECT * FROM transactions
-        WHERE source = :source AND merchant = :merchant AND amountCents = :amountCents
+        WHERE syncDeleted = 0 AND source = :source AND merchant = :merchant AND amountCents = :amountCents
           AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
         LIMIT 1
     """)
