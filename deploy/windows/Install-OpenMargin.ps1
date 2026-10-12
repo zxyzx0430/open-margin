@@ -84,6 +84,11 @@ if ($ConfigureTailscale) {
     if (Test-Path $candidate) { $ts=$candidate }
   }
   if (-not $ts) { throw "Install and sign in to Tailscale on Windows and Android first." }
+  # The first user must be registered over localhost, before sharing on the tailnet.
+  & docker compose exec -T wallos php -r '$db=new SQLite3("/var/www/html/db/wallos.db");$count=$db->querySingle("SELECT COUNT(*) FROM user");exit(($count>=1)?0:1);'
+  if ($LASTEXITCODE -ne 0) {
+    throw "Register the first Wallos owner on http://127.0.0.1:18082/ before enabling Tailscale."
+  }
   & $ts serve --bg --https=443 --set-path=/finance http://127.0.0.1:8767
   if ($LASTEXITCODE -ne 0) { throw "Failed serving API; check tailscale serve status" }
   & $ts serve --bg --https=443 --set-path=/finance/wallos http://127.0.0.1:18082

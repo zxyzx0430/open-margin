@@ -29,9 +29,18 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 - This project is a **single-owner design**. The daily ledger, OAuth, and MCP are restricted to the configured Wallos owner ID; additional Wallos accounts must not be given access to private ledger data.
 - Android → server sync is **one way**. Clearing a phone record will not delete server data. Device notifications may be missing or duplicate.
 
+## Deployment choices
+
+The same application runs in either environment (no feature fork):
+
+- **Windows local host:** Docker Desktop / WSL2 with private HTTPS through Tailscale; see [Windows deployment](docs/DEPLOY_WINDOWS.md). The phone stores transactions offline while the computer is shut down.
+- **VPS / Linux host:** Docker Engine + Docker Compose with a valid HTTPS domain; see [VPS deployment](docs/DEPLOY_VPS.md).
+
+Android v2 transaction sync supports pull + push (including edits and deletion tombstones) and cross-device conflict handling; Wallos subscription schedules and server-side budgets remain managed by the website. An old pre-v2 phone deletion cannot be reconstructed retroactively.
+
 ## Requirements
 
-- Linux with Docker Engine and Docker Compose v2.
+- Windows with Docker Desktop or Linux with Docker Engine, plus Docker Compose v2.
 - A hostname under your control with valid HTTPS and Nginx (or equivalent reverse proxy).
 - Android 8+ with notification listener support to use the optional collector.
 - Optional: ChatGPT-compatible OAuth/MCP client.

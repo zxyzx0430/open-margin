@@ -169,7 +169,8 @@ internal class BidirectionalSyncClient(
                         val serverMs=current.optLong("changed_at_ms",0L)
                         val phoneMs=live.syncModifiedMs
                         val serverRevision=current.getLong("revision")
-                        val clockOk=phoneMs>0 && phoneMs<=System.currentTimeMillis()+300000
+                        val clockOk=phoneMs>0 && serverMs>0 &&
+                            phoneMs<=System.currentTimeMillis()+300000
                         val choice=prefs.getString("conflict_resolution","auto")
                         if(choice=="keep_phone" || (choice=="auto" && clockOk && phoneMs>serverMs+2000)){
                             val retry=send(live,serverRevision)
@@ -205,7 +206,10 @@ internal class BidirectionalSyncClient(
         if(!success)return@withContext false
         if(!pull())return@withContext false
         val waiting=dao.pendingCount()
-        prefs.edit().putInt("pending_sync_conflicts",waiting).putString("last_result",
+        prefs.edit().putInt("pending_sync_conflicts",waiting)
+            .putString("conflict_resolution",if(waiting==0)"auto"
+                       else prefs.getString("conflict_resolution","auto"))
+            .putString("last_result",
             if(waiting>0 || conflicts>0)
                 "已同步无冲突交易；仍有 $waiting 笔修改待核对，请不要卸载应用"
             else "双向同步成功：手机和服务器交易已更新"

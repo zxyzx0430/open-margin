@@ -46,7 +46,7 @@ def schema(db: sqlite3.Connection) -> None:
               VALUES(?,'upsert',?,?)""", (row["event_id"], json.dumps({
                 key:row[key] for key in ("event_id","timestamp_ms","amount_cents","currency",
                                        "direction","source","category","merchant","review_status")
-            }, ensure_ascii=False),int(time.time()*1000)))
+            }, ensure_ascii=False),0))  # old records have no trustworthy last-edit time
         db.execute("INSERT INTO ledger_settings(key,value) VALUES('sync_v2_seeded','1')")
 
     db.execute(f"""CREATE TRIGGER IF NOT EXISTS sync_journal_insert
@@ -158,6 +158,17 @@ def push(body:Mutations):
                     existing=db.execute("SELECT * FROM transactions WHERE event_id=?",
                                         (operation.event_id,)).fetchone()
                     if existing:
+                        # Preserve refund accounting constraints: edits to linked
+                        # amounts/direction/currency must first unlink the refund.
+                        linked=db.execute("""SELECT 1 FROM refund_links
+                          WHERE original_tx_id=? OR refund_tx_id=? LIMIT 1""",
+                          (existing["id"],existing["id"])).fetchone()
+                        if linked and (existing["amount_cents"]!=record.amount_cents
+                                or existing["currency"]!=record.currency
+                                or existing["direction"]!=record.direction):
+                            results.append({"mutation_id":operation.mutation_id,
+                                            "status":"linked_refund"})
+                            continue
                         # Never erase Wallos review / refund status from a phone edit.
                         db.execute("""UPDATE transactions SET timestamp_ms=?,amount_cents=?,
                           currency=?,direction=?,category=?,merchant=? WHERE event_id=?""",
