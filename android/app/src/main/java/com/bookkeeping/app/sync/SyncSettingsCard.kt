@@ -11,19 +11,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import org.json.JSONObject
 
 @Composable
 fun SyncSettingsCard() {
     val context = LocalContext.current
+    val pendingViewModel: PendingSyncViewModel = hiltViewModel()
+    val pendingRows by pendingViewModel.pending.collectAsState()
     val prefs = remember { context.getSharedPreferences(TransactionSyncWorker.PREFS, 0) }
     var enabled by remember { mutableStateOf(prefs.getBoolean("enabled", false)) }
     var url by remember { mutableStateOf(prefs.getString("url", "") ?: "") }
     var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
     var message by remember { mutableStateOf(prefs.getString("last_result", "同步关闭或尚未执行") ?: "") }
     var lastSuccess by remember { mutableStateOf(prefs.getLong("last_success_ms", 0L)) }
+    var conflictIds by remember {
+        mutableStateOf(prefs.getStringSet("pending_conflict_event_ids",emptySet())?.toSet() ?: emptySet())
+    }
     fun updateStatus() {
         message = prefs.getString("last_result", "尚未执行同步") ?: ""
         lastSuccess = prefs.getLong("last_success_ms", 0L)
+        conflictIds = prefs.getStringSet("pending_conflict_event_ids",emptySet())?.toSet() ?: emptySet()
     }
     LaunchedEffect(Unit) {
         while (true) {
@@ -56,19 +64,61 @@ fun SyncSettingsCard() {
             }
             val conflicts=prefs.getInt("pending_sync_conflicts",0)
             if (conflicts>0) {
-                Text("有 $conflicts 笔本地修改尚未确认。遇到双方几乎同时修改的交易时，请选择优先版本。")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
-                        prefs.edit().putString("conflict_resolution","keep_phone").apply()
-                        TransactionSyncWorker.requestImmediate(context)
-                        message="已选择本机修改优先，正在尝试同步"
-                    }) { Text("使用本机") }
-                    OutlinedButton(onClick = {
-                        prefs.edit().putString("conflict_resolution","keep_server").apply()
-                        TransactionSyncWorker.requestImmediate(context)
-                        message="已选择服务器修改优先，正在尝试同步"
-                    }) { Text("使用服务器") }
+                Text("还有 $conflicts 笔本地修改未同步，详情请查看同步状态。")
+            }
+            if (conflictIds.isNotEmpty()) {
+                Text("以下交易存在版本冲突，请逐笔决定。每个按钮只影响对应的一笔交易。")
+                val installation=prefs.getString("installation_id","").orEmpty()
+                val matching=pendingRows.filter { row ->
+                    val eventId=row.remoteEventId ?: ("android:$installation:" + row.id)
+                    eventId in conflictIds
                 }
+                matching.take(5).forEach { row ->
+                    val eventId=row.remoteEventId ?: ("android:$installation:" + row.id)
+                    val preview=runCatching {
+                        prefs.getString("conflict_server_preview:$eventId",null)
+                            ?.let { JSONObject(it) }
+                    }.getOrNull()
+                    val serverRecord=preview?.optJSONObject("record")
+                    val serverDescription=when {
+                        preview==null -> "服务器版本正在加载"
+                        preview.optString("action")=="delete" -> "服务器已删除这笔记录"
+                        serverRecord!=null -> {
+                            val amount=serverRecord.optLong("amount_cents",0L)/100.0
+                            (serverRecord.optString("merchant","").ifBlank { "交易" }) +
+                                " · " + serverRecord.optString("currency","CNY") +
+                                " " + "%.2f".format(Locale.CHINA,amount)
+                        }
+                        else -> "服务器版本待核对"
+                    }
+                    val revision=preview?.optLong("revision",-1L) ?: -1L
+                    Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Text("本机：" + (row.merchant.ifBlank { row.source }) + " · " +
+                            row.currency + " " + "%.2f".format(Locale.CHINA,row.amountCents/100.0))
+                        Text("服务器：" + serverDescription)
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(enabled=revision>=0,onClick={
+                                prefs.edit()
+                                    .putString("conflict_choice:$eventId","keep_phone")
+                                    .putLong("conflict_choice_revision:$eventId",revision)
+                                    .putLong("conflict_choice_local_modified_ms:$eventId",row.syncModifiedMs)
+                                    .apply()
+                                TransactionSyncWorker.requestImmediate(context)
+                                message="只为这笔交易选择了本机版本，正在同步"
+                            }) { Text("保留本机") }
+                            OutlinedButton(enabled=revision>=0,onClick={
+                                prefs.edit()
+                                    .putString("conflict_choice:$eventId","keep_server")
+                                    .putLong("conflict_choice_revision:$eventId",revision)
+                                    .putLong("conflict_choice_local_modified_ms:$eventId",row.syncModifiedMs)
+                                    .apply()
+                                TransactionSyncWorker.requestImmediate(context)
+                                message="只为这笔交易选择了服务器版本，正在同步"
+                            }) { Text("采用服务器") }
+                        }
+                    }
+                }
+                if (matching.size>5) Text("还有 " + (matching.size-5) + " 笔，请处理当前项目后继续查看。")
             }
             Text("最近成功：" + if (lastSuccess > 0L) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(lastSuccess)) else "尚无")
             Text("状态：$message")

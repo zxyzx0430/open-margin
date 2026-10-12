@@ -145,14 +145,23 @@ internal class BidirectionalSyncClient(
         return answer.second.getJSONArray("results").getJSONObject(0)
     }
 
-    private suspend fun push():Pair<Boolean,Int> {
-        var conflicts=0
+    private fun clearConflictApproval(eventId:String) {
+        prefs.edit()
+            .remove("conflict_choice:$eventId")
+            .remove("conflict_choice_revision:$eventId")
+            .remove("conflict_choice_local_modified_ms:$eventId")
+            .remove("conflict_server_preview:$eventId")
+            .apply()
+    }
+
+    private suspend fun push():Pair<Boolean,Set<String>> {
+        val conflictIds=mutableSetOf<String>()
         repeat(1000){
             val pending=dao.getPendingMutations(50)
-            if(pending.isEmpty())return true to conflicts
+            if(pending.isEmpty())return true to conflictIds
             var progress=false
             for(row in pending){
-                val result=send(row) ?: return false to conflicts
+                val result=send(row) ?: return false to conflictIds
                 val live=dao.getById(row.id) ?: continue
                 if(live.syncModifiedMs!=row.syncModifiedMs ||
                    (row.syncMutationId!=null && live.syncMutationId!=row.syncMutationId))continue
@@ -162,17 +171,35 @@ internal class BidirectionalSyncClient(
                         dao.update(live.copy(remoteEventId=id,
                             remoteRevision=result.getLong("revision"),
                             syncDirty=false,syncMutationId=null))
+                        clearConflictApproval(id)
+                        conflictIds.remove(id)
                         progress=true
                     }
                     "conflict"->{
                         val current=result.optJSONObject("current")
-                        if(current==null){conflicts++;continue}
+                        if(current==null){conflictIds.add(id);continue}
                         val serverMs=current.optLong("changed_at_ms",0L)
                         val phoneMs=live.syncModifiedMs
                         val serverRevision=current.getLong("revision")
-                        val decision=SyncConflictPolicy.decide(
+                        // Show this exact server revision in the settings UI.
+                        // If either side changes after the user taps a decision,
+                        // do not silently apply that old choice to new contents.
+                        prefs.edit().putString("conflict_server_preview:$id",
+                            current.toString()).apply()
+                        val explicitChoice=prefs.getString("conflict_choice:$id",null)
+                        val hasChoice=explicitChoice in setOf("keep_phone","keep_server")
+                        val validChoice=SyncConflictApproval.valid(
+                            explicitChoice,
+                            prefs.getLong("conflict_choice_revision:$id",-1L),
+                            serverRevision,
+                            prefs.getLong("conflict_choice_local_modified_ms:$id",-1L),
+                            phoneMs
+                        )
+                        val decision=if(hasChoice && !validChoice)
+                            SyncConflictPolicy.Decision.HOLD
+                        else SyncConflictPolicy.decide(
                             phoneMs,serverMs,System.currentTimeMillis(),
-                            prefs.getString("conflict_resolution","auto") ?: "auto",
+                            if(validChoice) explicitChoice ?: "auto" else "auto",
                             serverDeleted=current.optString("action")=="delete",
                             phoneDeleted=live.syncDeleted
                         )
@@ -182,41 +209,48 @@ internal class BidirectionalSyncClient(
                                 dao.update(live.copy(remoteEventId=id,
                                     remoteRevision=retry.getLong("revision"),
                                     syncDirty=false,syncMutationId=null))
+                                clearConflictApproval(id)
+                                conflictIds.remove(id)
                                 progress=true
-                            }else conflicts++
+                            }else conflictIds.add(id)
                         }else if(decision==SyncConflictPolicy.Decision.KEEP_SERVER){
                             val updated=serverValue(live,id,serverRevision,
                                 current.getString("action"),current.optJSONObject("record"))
-                            if(updated!=null){dao.update(updated);progress=true}
-                            else conflicts++
-                        }else conflicts++
+                            if(updated!=null){
+                                dao.update(updated)
+                                clearConflictApproval(id)
+                                conflictIds.remove(id)
+                                progress=true
+                            }
+                            else conflictIds.add(id)
+                        }else conflictIds.add(id)
                     }
                     "before_start"->{
                         // Server explicitly rejected this row due to the configured
                         // ledger start date. Keep the unsent mutation visible and
                         // retryable; acknowledging it would silently diverge the
                         // phone totals from the server and lose the user's edit.
-                        conflicts++
+                        // A ledger-start rejection needs a server setting review,
+                        // not an optimistic-conflict overwrite choice.
                     }
-                    else->conflicts++
+                    else->Unit
                 }
             }
-            if(!progress)return true to conflicts
+            if(!progress)return true to conflictIds
         }
-        return false to conflicts
+        return false to conflictIds
     }
 
     suspend fun run():Boolean=withContext(Dispatchers.IO){
         if(!pull())return@withContext false
-        val (success,conflicts)=push()
+        val (success,conflictIds)=push()
         if(!success)return@withContext false
         if(!pull())return@withContext false
         val waiting=dao.pendingCount()
         prefs.edit().putInt("pending_sync_conflicts",waiting)
-            .putString("conflict_resolution",if(waiting==0)"auto"
-                       else prefs.getString("conflict_resolution","auto"))
+            .putStringSet("pending_conflict_event_ids",conflictIds.toSet())
             .putString("last_result",
-            if(waiting>0 || conflicts>0)
+            if(waiting>0 || conflictIds.isNotEmpty())
                 "已同步无冲突交易；仍有 $waiting 笔修改待核对，请不要卸载应用"
             else "双向同步成功：手机和服务器交易已更新"
         ).putLong("last_success_ms",System.currentTimeMillis()).apply()

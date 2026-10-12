@@ -38,6 +38,15 @@ class SyncConflictPolicyTest {
                 choice="keep_server",serverDeleted=true,phoneDeleted=false))
     }
 
+    @Test fun concurrentPhoneDeletionVersusServerEditNeedsPerRecordApproval() {
+        assertEquals(SyncConflictPolicy.Decision.HOLD,
+            SyncConflictPolicy.decide(now-1000,now-20000,now,
+                serverDeleted=false,phoneDeleted=true))
+        assertEquals(SyncConflictPolicy.Decision.KEEP_PHONE,
+            SyncConflictPolicy.decide(now-1000,now-20000,now,
+                choice="keep_phone",serverDeleted=false,phoneDeleted=true))
+    }
+
     @Test fun ExplicitUserChoiceOverridesClockAmbiguity() {
         assertEquals(SyncConflictPolicy.Decision.KEEP_PHONE,
             SyncConflictPolicy.decide(now,now,now,"keep_phone"))

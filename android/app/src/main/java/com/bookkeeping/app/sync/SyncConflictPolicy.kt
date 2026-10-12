@@ -19,7 +19,9 @@ internal object SyncConflictPolicy {
         if(choice=="keep_server")return Decision.KEEP_SERVER
         // A deletion is not an ordinary value edit. Never resurrect a server
         // tombstone merely because an offline phone has a newer clock value.
-        if(serverDeleted && !phoneDeleted)return Decision.HOLD
+        // Deletion is destructive. Either side deleting while the other
+        // edits must require explicit per-record user confirmation.
+        if(serverDeleted != phoneDeleted)return Decision.HOLD
         if(phoneModifiedMs<=0 || serverModifiedMs<=0 ||
            phoneModifiedMs>nowMs+300_000 ||
            serverModifiedMs>nowMs+300_000)return Decision.HOLD

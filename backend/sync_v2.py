@@ -131,9 +131,16 @@ def push(body:Mutations):
     from integration import resolve_category
     results=[]
     with core.db_connection() as db:
-        cutoff=core.ledger_start_ms(db)
         for operation in body.operations:
             with db:
+                # Serialize the version check AND mutation. A deferred SQLite
+                # transaction does not start when latest() SELECTs. Without a
+                # writer reservation, two devices can observe the same revision
+                # and both overwrite one another while reporting "applied".
+                # BEGIN IMMEDIATE waits for the first writer to commit, then
+                # performs the revision comparison against its committed state.
+                db.execute("BEGIN IMMEDIATE")
+                cutoff=core.ledger_start_ms(db)
                 prior=db.execute("SELECT revision,event_id FROM sync_mutations WHERE mutation_id=?",
                                  (operation.mutation_id,)).fetchone()
                 if prior is not None:

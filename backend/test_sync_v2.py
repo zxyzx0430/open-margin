@@ -1,6 +1,10 @@
 """Transactional tests for v2 replication and legacy-client replay safety."""
 import tempfile
 import unittest
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 from pathlib import Path
 from fastapi.testclient import TestClient
 import app as core
@@ -108,6 +112,58 @@ class SyncV2Tests(unittest.TestCase):
         self.assertEqual(again["revision"],deletion["revision"])
         # Tombstoned records cannot be re-added without an explicit resolution.
         self.assertEqual(self.push("op-old-resurrection-0006")["status"],"conflict")
+
+    def test_concurrent_writes_on_same_revision_return_one_conflict(self):
+        """Two offline clients cannot both overwrite the same base revision."""
+        first=self.push("seed-concurrent-001")
+        revision=first["revision"]
+        barrier=threading.Barrier(2)
+        original_latest=__import__("sync_v2").latest
+        seen=threading.local()
+
+        def slow_read(db,event_id):
+            row=original_latest(db,event_id)
+            if event_id==self.event["event_id"] and not getattr(seen,"waited",False):
+                seen.waited=True
+                # Widen read-to-write gap to deterministically exercise the
+                # race previously accepted as two successful mutations.
+                time.sleep(0.13)
+            return row
+
+        def concurrent_edit(mid,merchant):
+            barrier.wait(timeout=10)
+            operation={
+                "mutation_id":mid,
+                "event_id":self.event["event_id"],
+                "base_revision":revision,
+                "action":"upsert",
+                "record":{k:v for k,v in {**self.event,"merchant":merchant}.items()
+                          if k!="event_id"}
+            }
+            client=TestClient(core.app)
+            try:
+                response=client.post(f"{self.path}/push",
+                    json={"operations":[operation]},headers=self.headers)
+                self.assertEqual(response.status_code,200,response.text)
+                return response.json()["results"][0]
+            finally:
+                client.close()
+
+        with patch("sync_v2.latest",side_effect=slow_read):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures=[
+                    pool.submit(concurrent_edit,"concurrent-phone-002","phone"),
+                    pool.submit(concurrent_edit,"concurrent-web-003","web")
+                ]
+                results=[future.result(timeout=15) for future in futures]
+        self.assertEqual(sorted(r["status"] for r in results),["applied","conflict"])
+        winner=next(r for r in results if r["status"]=="applied")
+        loser=next(r for r in results if r["status"]=="conflict")
+        self.assertEqual(loser["current"]["revision"],winner["revision"])
+        with core.db_connection() as db:
+            count=db.execute("SELECT COUNT(*) FROM sync_journal WHERE event_id=?",
+                (self.event["event_id"],)).fetchone()[0]
+            self.assertEqual(count,2)  # initial revision + exactly one accepted edit
 
     def test_delete_before_upload_and_genuine_server_insert(self):
         tomb=self.push("op-delete-first-7",action="delete",revision=0)
