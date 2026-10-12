@@ -81,7 +81,7 @@ class WallosLedgerTests(unittest.TestCase):
         self.assertEqual(sum(x["total_cents"] for x in output["totals"]),7800)
         self.assertEqual(len(output["items"]),3)
 
-    def test_transfer_category_does_not_count_as_income_or_expense(self):
+    def test_incoming_transfer_counts_as_inflow_but_outgoing_transfer_does_not_count(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
         month=datetime.fromtimestamp(self.timestamp/1000,ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
@@ -98,9 +98,12 @@ class WallosLedgerTests(unittest.TestCase):
                                headers=self.headers).json()
         self.assertEqual(result["month_count"],3)
         self.assertEqual(len(result["items"]),3)
-        self.assertEqual([(x["category"],x["total_cents"]) for x in result["totals"]],
-                         [("FOOD",700)])
-        self.assertEqual(sum(x["total_cents"] for x in result["daily_totals"]),700)
+        self.assertEqual([(x["direction"],x["category"],x["total_cents"]) for x in result["totals"]],
+                         [("EXPENSE","FOOD",700),("INCOME","TRANSFER",1200)])
+        self.assertEqual(sum(x["total_cents"] for x in result["daily_totals"]
+                             if x["direction"]=="EXPENSE"),700)
+        self.assertEqual(sum(x["total_cents"] for x in result["daily_totals"]
+                             if x["direction"]=="INCOME"),1200)
         transfer_only=self.client.get(self.url+"month",
             params={"month":month,"category":"TRANSFER"},headers=self.headers).json()
         self.assertEqual(len(transfer_only["items"]),2)

@@ -21,7 +21,7 @@ from config import LOCAL_TIMEZONE
 
 router=APIRouter(prefix="/api/v1/wallos-ledger",dependencies=[Depends(require_wallos_token)])
 TZ=ZoneInfo(LOCAL_TIMEZONE)
-VALID="review_status NOT IN ('excluded','transfer','refund') AND category<>'TRANSFER'"
+VALID="review_status NOT IN ('excluded','transfer','refund') AND (direction='INCOME' OR category<>'TRANSFER')"
 
 def schema(db: sqlite3.Connection):
     db.execute("""CREATE TABLE IF NOT EXISTS tx_subscription_links(

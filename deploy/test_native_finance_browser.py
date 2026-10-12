@@ -66,6 +66,7 @@ def run():
                         first.locator(".finance-calendar-amount").wait_for(timeout=7000)
                         first.locator(".day").click()
                         page.locator("dialog.finance-day-dialog[open]").wait_for(timeout=16000)
+                        page.locator(".finance-day-amounts strong").first.wait_for(timeout=12000)
                         assert page.locator(".finance-day-amounts strong").count()==3
                         page.locator("[data-finance-close]").click()
                     elif url=="stats.php":

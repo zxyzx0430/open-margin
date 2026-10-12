@@ -26,7 +26,7 @@ def spending_summary(start_ms:int,end_ms:int) -> dict:
         rows=db.execute("""SELECT currency,direction,category,COUNT(*) AS count,
           SUM(amount_cents) AS amount_cents FROM transactions WHERE timestamp_ms >=?
           AND timestamp_ms <? AND review_status NOT IN ('excluded','transfer','refund')
-          AND category<>'TRANSFER'
+          AND (direction='INCOME' OR category<>'TRANSFER')
           GROUP BY currency,direction,category ORDER BY currency,category""",(start_ms,end_ms)).fetchall()
     return {"start_ms":start_ms,"end_ms":end_ms,"groups":[dict(r) for r in rows],
       "caveat":"Captured transactions may be incomplete or duplicated until verified against exports."}

@@ -26,33 +26,70 @@ function finance_categories():array {
       'HEALTH'=>'医疗','EDUCATION'=>'教育','SUBSCRIPTION'=>'订阅',
       'OTHER'=>'其他','SALARY'=>'工资','TRANSFER'=>'转账'];
 }
+/**
+ * Wallos stores the amount of currency received for one base-CNY unit.
+ * Main currency in this installation is CNY. Use the saved rates; do not
+ * silently count an unconverted USD/HKD amount as CNY.
+ */
+function finance_to_cny_cents(float $price,float $storedRate):?int {
+    if(!is_finite($price)||$price<0||!is_finite($storedRate)||$storedRate<=0) return null;
+    $cents=round($price*100/$storedRate);
+    if(!is_finite($cents)||$cents>100000000000)return null;
+    return (int)$cents;
+}
+function finance_subscription_months(int $cycle,int $frequency):?float {
+    if($frequency<1)return null;
+    return match($cycle) {
+        1=>$frequency/(365.2425/12.0),
+        2=>($frequency*7)/(365.2425/12.0),
+        3=>(float)$frequency,
+        4=>12.0*$frequency,
+        default=>null
+    };
+}
 function finance_plan_month(SQLite3 $db,int $uid,string $month):array {
     finance_month($month);
     $zone=new DateTimeZone('Asia/Shanghai');
     $start=new DateTimeImmutable($month.'-01 00:00:00',$zone);
     $end=$start->modify('+1 month');
     $query=$db->prepare('SELECT s.id,s.name,s.price,s.next_payment,s.cycle,s.frequency,s.start_date,
-                          c.code AS currency
+                          c.code AS currency, c.rate AS stored_fx_rate
         FROM subscriptions s JOIN currencies c ON c.id=s.currency_id
-        WHERE s.user_id=:uid AND s.inactive=0 AND s.next_payment IS NOT NULL');
+        WHERE s.user_id=:uid AND s.inactive=0 AND s.next_payment IS NOT NULL
+        ORDER BY s.id');
     if(!$query)throw new RuntimeException('Subscription query unavailable');
     $query->bindValue(':uid',$uid,SQLITE3_INTEGER);
     $rows=$query->execute();
-    $events=[];$cny=0;$foreign=[];$monthlyEquivalent=0;
+    if(!$rows)throw new RuntimeException('Subscription read unavailable');
+    $fxRefreshDate=$db->querySingle('SELECT date FROM last_exchange_update WHERE user_id='.(int)$uid.' LIMIT 1');
+    $events=[];$dueCny=0;$unconverted=[];$monthlyExact=0.0;
+    $monthlyItems=[];$rates=[];$missingMonthly=[];
     while($r=$rows->fetchArray(SQLITE3_ASSOC)) {
-        try { $date=new DateTimeImmutable((string)$r['next_payment'],$zone); }
+        try {$date=new DateTimeImmutable((string)$r['next_payment'],$zone);}
         catch(Throwable $e){continue;}
-        $cycle=(int)$r['cycle'];$frequency=max(1,min(365,(int)$r['frequency']));
-        if((string)$r['currency']==='CNY') {
-            $months=match($cycle) {
-                1=>$frequency/(365.2425/12),
-                2=>($frequency*7)/(365.2425/12),
-                3=>(float)$frequency,
-                4=>12.0*$frequency,
-                default=>0.0
-            };
-            if($months>0)$monthlyEquivalent+=(int)round(((float)$r['price']*100)/$months);
+        $cycle=(int)$r['cycle'];
+        $frequency=(int)$r['frequency'];
+        if($frequency<1||$frequency>365)continue;
+        $currency=(string)$r['currency'];
+        $price=(float)$r['price'];
+        $rate=filter_var($r['stored_fx_rate'],FILTER_VALIDATE_FLOAT);
+        $rate=$rate===false||$rate<=0?0.0:(float)$rate;
+        $cny=finance_to_cny_cents($price,$rate);
+        if($rate>0)$rates[$currency]=$rate;
+        $months=finance_subscription_months($cycle,$frequency);
+        $originalCents=(int)round($price*100);
+        $monthCny=$months===null||$cny===null?null:(int)round($price*100/($rate*$months));
+        // Sum unrounded amounts once; this avoids systematic per-subscription rounding.
+        if($months!==null) {
+            if($cny===null)$missingMonthly[]=$currency;
+            else $monthlyExact+=$price*100/($rate*$months);
         }
+        $monthlyItems[]=[
+            'id'=>(int)$r['id'],'name'=>(string)$r['name'],'currency'=>$currency,
+            'price_cents'=>$originalCents,'converted_cny_cents'=>$cny,
+            'monthly_cny_cents'=>$monthCny,'cycle'=>$cycle,'frequency'=>$frequency,
+            'next_payment'=>$date->format('Y-m-d'),'fx_rate'=>$rate>0?$rate:null
+        ];
         $interval=match($cycle) {
             1=>new DateInterval('P'.$frequency.'D'),
             2=>new DateInterval('P'.$frequency.'W'),
@@ -61,9 +98,7 @@ function finance_plan_month(SQLite3 $db,int $uid,string $month):array {
             5=>null,
             default=>null
         };
-        if($cycle!==5 && $interval===null)continue;
-        // The projection is based on the CURRENT schedule. Never label past
-        // occurrences as verified payments. Cap the iteration to stay bounded.
+        if($cycle!==5&&$interval===null)continue;
         $limit=0;
         if($interval!==null) {
             while($date >= $end && $limit++ < 600) {
@@ -84,13 +119,12 @@ function finance_plan_month(SQLite3 $db,int $uid,string $month):array {
                     if($date<$begin) {if($interval===null)break;$date=$date->add($interval);continue;}
                 }catch(Throwable $e){}
             }
-            $currency=(string)$r['currency'];
-            $price=(int)round((float)$r['price']*100);
             $event=['date'=>$date->format('Y-m-d'),'id'=>(int)$r['id'],
-                'name'=>(string)$r['name'],'cents'=>$price,'currency'=>$currency];
+                'name'=>(string)$r['name'],'cents'=>$originalCents,'currency'=>$currency,
+                'cny_cents'=>$cny,'rate'=>$rate>0?$rate:null];
             $events[]=$event;
-            if($currency==='CNY')$cny+=$price;
-            else $foreign[$currency]=($foreign[$currency]??0)+$price;
+            if($cny!==null)$dueCny+=$cny;
+            else $unconverted[$currency]=($unconverted[$currency]??0)+$originalCents;
             if($interval===null)break;
             $next=$date->add($interval);
             if($next <= $date)break;
@@ -98,9 +132,18 @@ function finance_plan_month(SQLite3 $db,int $uid,string $month):array {
         }
     }
     $rows->finalize();
-    return ['events'=>$events,'due_cny_cents'=>$cny,
-      'monthly_equivalent_cny_cents'=>$monthlyEquivalent,
-      'other_currency_cents'=>$foreign];
+    return [
+        'events'=>$events,
+        'due_cny_cents'=>$unconverted?null:$dueCny,
+        'convertible_due_cny_cents'=>$dueCny,
+        'monthly_equivalent_cny_cents'=>$missingMonthly?null:(int)round($monthlyExact),
+        'convertible_monthly_equivalent_cny_cents'=>(int)round($monthlyExact),
+        'monthly_items'=>$monthlyItems,
+        'fx_rates'=>$rates,
+        'fx_last_updated'=>is_string($fxRefreshDate)?$fxRefreshDate:null,
+        'other_currency_cents'=>$unconverted,
+        'monthly_unconverted_currencies'=>array_values(array_unique($missingMonthly))
+    ];
 }
 function finance_unified_model(SQLite3 $db,int $uid,string $month):array {
     $month=finance_month($month);
@@ -159,7 +202,13 @@ function finance_unified_model(SQLite3 $db,int $uid,string $month):array {
         'actual_subscription_share_pct'=>$expense>0?round(100*$actualSubs/$expense,1):null,
         'planned_subscription_cents'=>$plan['due_cny_cents'],
         'monthly_subscription_equivalent_cents'=>$plan['monthly_equivalent_cny_cents'],
-        'planned_budget_share_pct'=>$budget!==null&&$budget>0?round(100*$plan['due_cny_cents']/$budget,1):null,
+        'convertible_planned_subscription_cents'=>$plan['convertible_due_cny_cents'],
+        'convertible_monthly_subscription_equivalent_cents'=>$plan['convertible_monthly_equivalent_cny_cents'],
+        'subscription_monthly_items'=>$plan['monthly_items'],
+        'subscription_fx_rates'=>$plan['fx_rates'],
+        'subscription_fx_last_updated'=>$plan['fx_last_updated'],
+        'subscription_monthly_unconverted'=>$plan['monthly_unconverted_currencies'],
+        'planned_budget_share_pct'=>$budget!==null&&$budget>0&&$plan['due_cny_cents']!==null?round(100*$plan['due_cny_cents']/$budget,1):null,
         'other_currency_plans'=>$plan['other_currency_cents'],
         'category_totals'=>$categories,'category_labels'=>finance_categories(),
         'days'=>$calendar,'subscription_events'=>$plan['events'],
@@ -181,7 +230,7 @@ function finance_render_panel(string $view,array $model):void {
     $budget=finance_money($model['budget_cents']);
     $remaining=finance_money($model['remaining_cents']);
     $actual=finance_money($model['actual_subscription_cents']);
-    $planned=finance_money($model['planned_subscription_cents']);
+    $planned=$model['planned_subscription_cents']===null?'汇率缺失':finance_money($model['planned_subscription_cents']);
     ?>
     <link rel="stylesheet" href="finance-unified.css?v=<?=filemtime(__DIR__.'/finance-unified.css')?>">
     <input type="hidden" data-finance-csrf value="<?=ledger_escape($_SESSION['finance_csrf'])?>">
@@ -205,7 +254,7 @@ function finance_render_panel(string $view,array $model):void {
       <div class="finance-panel" data-finance-panel="overview">
         <div class="finance-metric-grid">
           <button type="button" class="finance-metric" data-finance-detail="expense"><small>本月实际支出</small><strong data-finance-value="expense_cents"><?= $expense ?></strong></button>
-          <button type="button" class="finance-metric" data-finance-detail="income"><small>本月实际收入</small><strong data-finance-value="income_cents"><?= $income ?></strong></button>
+          <button type="button" class="finance-metric" data-finance-detail="income"><small>本月已记录收入（含转账入账）</small><strong data-finance-value="income_cents"><?= $income ?></strong></button>
           <div class="finance-metric"><small>净现金流</small><strong data-finance-value="net_cents"><?= $net ?></strong></div>
           <div class="finance-metric"><small>预算剩余</small><strong data-finance-value="remaining_cents"><?= $remaining ?></strong></div>
         </div>
@@ -242,11 +291,16 @@ function finance_render_panel(string $view,array $model):void {
           <div class="finance-metric"><small>本月计划到期</small><strong data-finance-value="planned_subscription_cents"><?= $planned ?></strong><span>占预算 <b data-finance-share="planned"><?= $model['planned_budget_share_pct']===null?'未设预算':$model['planned_budget_share_pct'].'%' ?></b></span></div>
         </div>
         <div class="finance-comparison"><strong>当前订阅折合月均成本</strong>
-          <span data-finance-value="monthly_subscription_equivalent_cents"><?=finance_money($model['monthly_subscription_equivalent_cents'])?></span>
+          <span data-finance-value="monthly_subscription_equivalent_cents"><?= $model['monthly_subscription_equivalent_cents']===null?'汇率缺失':finance_money($model['monthly_subscription_equivalent_cents']) ?></span>
           <small>按当前周期折算，非实际扣费；一次性订阅不折算。历史月份也仅表示当前配置的月均负担。</small>
         </div>
+        <p class="finance-hint" data-finance-fx-status>Wallos 汇率数据读取中</p>
+        <p class="finance-hint">实际订阅支出只统计 Finance 中归类为“订阅”的有效账单。未分类的已扣款不会自动算作订阅；如需计入，可在流水中调整分类。</p>
+        <h3 class="finance-list-heading">全部有效订阅 · 月均成本明细</h3>
+        <div class="finance-subscription-monthly"></div>
+        <h3 class="finance-list-heading">本月计划续费</h3>
         <div class="finance-subscriptions"></div>
-        <p class="finance-hint">计划扣费不等于已扣款；年付、季付等计划按本月到期日展示。不支持可靠换算的币种独立标明。</p>
+        <p class="finance-hint">外币按 Wallos 已保存汇率换算为人民币，仅供预算参考，不是银行卡实际结算价。计划续费不等于已扣款；实际订阅支出仅来自 Finance 中有效的订阅分类交易。若汇率缺失会显示“无法完整计算”，不把缺失项目当作零。</p>
       </div>
       <?php endif; ?>
       <?php if($view==='calendar'): ?>

@@ -75,11 +75,11 @@
       const status=tx.review_status||"unverified";
       const statusOptions=Object.entries(labels).filter(([k])=>k!=="refund").map(([k,v])=>
         '<option value="'+esc(k)+'"'+(k===status?' selected':'')+'>'+esc(v)+'</option>').join("");
-      const excluded=["excluded","transfer","refund"].includes(status)||category==="TRANSFER";
+      const excluded=["excluded","transfer","refund"].includes(status)||(category==="TRANSFER"&&tx.direction==="EXPENSE");
       return '<section class="finance-day-entry" data-finance-transaction="'+Number(tx.id)+'">'+
         '<div class="finance-day-entry-title"><div class="finance-day-entry-meta"><b>'+
         esc(tx.merchant||"未填写商户")+'</b><span class="finance-entry-badge'+
-        (excluded?' is-excluded':'')+'">'+esc(category==="TRANSFER"?"转账 · 不计入":labels[status]||"待核对")+
+        (excluded?' is-excluded':'')+'">'+esc(["excluded","transfer","refund"].includes(status)?"不计入":category==="TRANSFER"?(tx.direction==="INCOME"?"转账入账 · 已计入":"转账 · 不计入"):labels[status]||"待核对")+
         ' · '+esc(categories[category]||category)+'</span></div><strong>'+
         money(tx.amount_cents)+'</strong></div>'+
         '<details class="finance-entry-edit"><summary>编辑交易或核对状态</summary><div class="finance-entry-controls">'+
@@ -221,7 +221,8 @@
     if(month)month.value=model.month;
     all(root,"[data-finance-value]").forEach(el=>{
       const key=el.dataset.financeValue;
-      el.textContent=money(model[key]);
+      el.textContent=model[key]===null && ["planned_subscription_cents","monthly_subscription_equivalent_cents"].includes(key)
+        ?"汇率缺失":money(model[key]);
     });
     const budget=root.querySelector("[data-finance-budget-caption]");
     const used=model.budget_cents>0?100*model.expense_cents/model.budget_cents:null;
@@ -245,14 +246,42 @@
         esc(model.category_labels[code]||code)+'</span><span class="finance-category-track"><span class="finance-category-fill" style="width:'+Math.round(cents/max*100)+'%"></span></span><strong>'+money(cents)+'</strong></button>').join(""):
         '<p class="finance-day-empty">本月暂无已计入支出。</p>';
     }
+    const fxLabel=root.querySelector("[data-finance-fx-status]");
+    if(fxLabel) {
+      const updated=model.subscription_fx_last_updated;
+      const today=new Date().toLocaleDateString("sv-SE",{timeZone:"Asia/Shanghai"});
+      const stale=!updated || (Date.parse(today+"T00:00:00Z")-Date.parse(updated+"T00:00:00Z")>86400000);
+      fxLabel.textContent=updated
+        ?"汇率来源：Wallos 每日自动更新 · 最近更新 "+updated+
+         (stale?" · 汇率可能过期，换算仅供参考":" · 当日同步")
+        :"Wallos 尚无汇率更新时间 · 换算仅供参考";
+    }
+    const monthly=root.querySelector(".finance-subscription-monthly");
+    if(monthly) {
+      const cycleName=(cycle,freq)=>({1:"每 "+freq+" 天",2:"每 "+freq+" 周",3:"每 "+freq+" 月",
+        4:"每 "+freq+" 年",5:"一次性"})[cycle]||"周期未知";
+      const rows=model.subscription_monthly_items||[];
+      monthly.innerHTML=rows.length?rows.map(x=>
+        '<div class="finance-subscription-monthly-row">'+
+        '<div class="finance-subscription-monthly-meta"><b>'+esc(x.name)+'</b>'+
+        '<small>'+esc(x.currency)+' '+(x.price_cents/100).toFixed(2)+
+        ' / '+esc(cycleName(x.cycle,x.frequency))+
+        (x.converted_cny_cents===null?' · 汇率缺失':' · 本期约 '+money(x.converted_cny_cents))+
+        '</small></div><div class="finance-subscription-monthly-value">'+
+        (x.monthly_cny_cents===null?(x.cycle===5?'不折算':'无法换算'):money(x.monthly_cny_cents)+'/月')+
+        '</div></div>').join(""):
+        '<p class="finance-day-empty">暂无有效订阅。</p>';
+    }
     const subs=root.querySelector(".finance-subscriptions");
     if(subs) {
       const other=Object.entries(model.other_currency_plans||{});
-      subs.innerHTML=(model.subscription_events||[]).slice(0,30).map(x=>
+      subs.innerHTML=(model.subscription_events||[]).slice(0,40).map(x=>
         '<div class="finance-subscription"><button type="button" data-finance-sub="'+Number(x.id)+'">'+
         esc(x.name)+'</button><span>'+esc(x.date.slice(5))+' · '+esc(x.currency)+' '+
-        (Number(x.cents)/100).toFixed(2)+'</span></div>').join("")+
-        (other.length?'<p class="finance-hint">其他币种计划（未换算）：'+
+        (Number(x.cents)/100).toFixed(2)+
+        (x.cny_cents===null?' · 无法换算':' ≈ '+money(x.cny_cents))+
+        '</span></div>').join("")+
+        (other.length?'<p class="finance-hint">未能换算的币种：'+
           other.map(([k,v])=>esc(k)+' '+(Number(v)/100).toFixed(2)).join(' / ')+'</p>':'')+
         (!model.subscription_events?.length?'<p class="finance-day-empty">本月没有计划中的订阅到期。</p>':'');
     }

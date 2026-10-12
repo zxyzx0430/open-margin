@@ -526,11 +526,11 @@ $notice=$_GET['notice'] ?? '';
               </form>
             </details>
             <div class="ledger-review">
-              <small class="ledger-review-state <?= (in_array($status,['excluded','transfer','refund'],true)||$category==='TRANSFER')?'is-excluded':'' ?>"><?= ledger_escape($category==='TRANSFER'?'转账 · 不计入':match($status) {
+              <small class="ledger-review-state <?= (in_array($status,['excluded','transfer','refund'],true)||($category==='TRANSFER'&&$direction==='EXPENSE'))?'is-excluded':'' ?>"><?= ledger_escape(in_array($status,['excluded','transfer','refund'],true)?'不计入统计':($category==='TRANSFER'?($direction==='INCOME'?'转账入账 · 已计入':'转账 · 不计入'):match($status) {
                 'confirmed'=>'已确认', 'excluded'=>'不计入统计', 'transfer'=>'转账 · 不计入',
                 'refund'=>'退款 · 不计入', 'possible_duplicate'=>'疑似重复 · 待核对',
                 default=>'待核对'
-              }) ?></small>
+              })) ?></small>
               <form method="post" action="expenses-action.php">
                 <input type="hidden" name="csrf" value="<?= ledger_escape($csrf) ?>">
                 <input type="hidden" name="month" value="<?= ledger_escape($month) ?>">

@@ -89,3 +89,13 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
   .calendar .finance-calendar-day .calendar-event::after{content:"●";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px}
   .calendar .finance-calendar-amount{font-size:10px;letter-spacing:-.02em;margin:3px 0}
 }
+
+.finance-list-heading{font-size:14px;margin:18px 0 10px;}
+.finance-subscription-monthly{display:flex;flex-direction:column;gap:7px;}
+.finance-subscription-monthly-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 12px;border:1px solid var(--fin-border);border-radius:9px;min-width:0;}
+.finance-subscription-monthly-meta{min-width:0;display:flex;flex-direction:column;gap:3px;}
+.finance-subscription-monthly-meta b{font-size:13px;overflow-wrap:anywhere;}
+.finance-subscription-monthly-meta small{font-size:11px;color:var(--fin-muted);overflow-wrap:anywhere;}
+.finance-subscription-monthly-value{font-weight:700;font-size:14px;font-variant-numeric:tabular-nums;text-align:right;flex-shrink:0;}
+.finance-subscription span{font-size:12px;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere;}
+@media(max-width:390px){.finance-subscription-monthly-row{padding:10px 8px;}.finance-subscription-monthly-value{font-size:12px;}.finance-subscription span{font-size:11px;}}
