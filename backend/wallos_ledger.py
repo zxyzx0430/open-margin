@@ -11,14 +11,13 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from config import LOCAL_TIMEZONE
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/v1/wallos-ledger")
-LOCAL = ZoneInfo(LOCAL_TIMEZONE)
+LOCAL = ZoneInfo("Asia/Shanghai")
 
 CATEGORIES = {
     "FOOD": "餐饮", "TRANSPORT": "交通", "SHOPPING": "购物",
@@ -115,20 +114,10 @@ def month_view(
                 SUM(amount_cents) AS total_cents
                 FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<? AND {valid}
                 GROUP BY currency,direction,category""",(start_ms,end_ms)).fetchall()
-        # Group by the configured IANA timezone, not a hard-coded UTC offset.
-        # This also handles daylight-saving transitions correctly.
-        daily_points=db.execute(f"""SELECT timestamp_ms,currency,direction,amount_cents
+        daily=db.execute(f"""SELECT date(timestamp_ms/1000,'unixepoch','+8 hours') AS day,
+                currency,direction,SUM(amount_cents) AS total_cents, COUNT(*) AS count
                 FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<? AND {valid}
-                ORDER BY timestamp_ms""",(start_ms,end_ms)).fetchall()
-        daily_groups={}
-        for event in daily_points:
-            local_day=datetime.fromtimestamp(event["timestamp_ms"]/1000,LOCAL).strftime("%Y-%m-%d")
-            key=(local_day,event["currency"],event["direction"])
-            group=daily_groups.setdefault(key,{"day":local_day,"currency":event["currency"],
-                                                 "direction":event["direction"],"total_cents":0,"count":0})
-            group["total_cents"]+=event["amount_cents"]
-            group["count"]+=1
-        daily=[daily_groups[key] for key in sorted(daily_groups)]
+                GROUP BY day,currency,direction ORDER BY day ASC""",(start_ms,end_ms)).fetchall()
         # Reconciliation only: show excluded CNY spending separately.
         # The actual daily totals above already exclude these rows.
         daily_excluded=db.execute("""SELECT date(timestamp_ms/1000,'unixepoch','+8 hours') AS day,
@@ -147,6 +136,13 @@ def month_view(
         previous_end=start
         previous_start=datetime(year-1,12,1,tzinfo=LOCAL) if mon==1 else datetime(year,mon-1,1,tzinfo=LOCAL)
         previous_month_totals=period_total(int(previous_start.timestamp()*1000),int(previous_end.timestamp()*1000))
+        # A month in progress should compare against the SAME number of days
+        # in the previous month; historical months compare complete months.
+        same_period_end=previous_end
+        if month==now.strftime("%Y-%m"):
+            same_period_end=min(previous_end,previous_start+timedelta(days=now.day))
+        previous_same_period_totals=period_total(int(previous_start.timestamp()*1000),
+                                                 int(same_period_end.timestamp()*1000))
         monthly_count=db.execute("SELECT COUNT(*) FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<?",(start_ms,end_ms)).fetchone()[0]
         last_synced=db.execute("SELECT MAX(created_at) FROM transactions").fetchone()[0]
         budget=db.execute("SELECT amount_cents FROM expense_budgets WHERE month=?",(month,)).fetchone()
@@ -158,6 +154,7 @@ def month_view(
         "today_totals":today_totals,
         "last7_totals":last7_totals,
         "previous_month_totals":previous_month_totals,
+        "previous_same_period_totals":previous_same_period_totals,
         "daily_totals":[dict(r) for r in daily],
         "daily_excluded_totals":[dict(r) for r in daily_excluded],
         "count_in_page":min(len(rows),100),

@@ -1,10 +1,4 @@
 <?php
-/**
- * Modified Wallos file for Personal Finance System (2026-10-09).
- * Adds daily-spending integration to upstream Wallos UI.
- * Original project: https://github.com/ellite/Wallos (GPL-3.0).
- * Retains the original Wallos license and attribution.
- */
 
 require_once 'includes/header.php';
 
@@ -105,6 +99,9 @@ $upcomingCancellations = get_upcoming_cancellations($db, $userId);
 $hasUpcomingCancellations = !empty($upcomingCancellations);
 
 require_once 'includes/stats_calculations.php';
+require_once 'finance-unified-common.php';
+$financeMonthKey=finance_active_month();
+
 
 // Get AI Recommendations for user
 $stmt = $db->prepare("SELECT * FROM ai_recommendations WHERE user_id = :userId");
@@ -158,13 +155,16 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
     ?>
     <h1><?= translate('hello', $i18n) ?> <?= htmlspecialchars($first_name) ?></h1>
 
-    <div class="dashboard-subscriptions-container" style="margin:8px 0 12px">
-    <div class="dashboard-subscriptions-list">
-      <a href="expenses.php" class="subscription-item thin" style="width:100%;height:auto;min-height:92px;text-decoration:none;color:var(--text-color);">
-        <p class="subscription-item-title"><i class="fa-solid fa-wallet" style="color:var(--main-color)"></i> 日常消费</p>
-        <p class="subscription-item-date" style="color:var(--text-muted);font-size:14px">查看交易流水 / 手动记一笔 <i class="fa-solid fa-arrow-right" style="color:var(--main-color)"></i></p>
-      </a>
-    </div></div>
+<?php
+try {
+    $financeModel=finance_unified_model($db,(int)$userId,$financeMonthKey);
+    finance_render_panel('dashboard',$financeModel);
+} catch(Throwable $e) {
+    error_log('[Finance unified] page render unavailable '.get_class($e));
+    echo '<section class="finance-unavailable">Finance 实际消费暂时不可用，请刷新后重试；此处不把错误显示为零元。</section>';
+}
+?>
+
 
 
     <?php
@@ -331,7 +331,7 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
         <?php if (isset($totalCostPerMonth)) { ?>
             <div class="budget-subscriptions">
-                <h2><?= translate('monthly_budget', $i18n) ?></h2>
+                <h2>订阅预算 · Wallos</h2>
                 <div class="dashboard-subscriptions-container">
                     <div class="dashboard-subscriptions-list">
                         <div class="subscription-item thin">
@@ -387,7 +387,7 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
 
         <?php if (isset($periodBudget) && $periodBudget > 0) { ?>
             <div class="budget-subscriptions">
-                <h2><?= translate('period_budget', $i18n) ?></h2>
+                <h2>周期订阅预算 · Wallos</h2>
                 <?php if (isset($budgetPeriodLabel)) { ?>
                     <p class="header-subtitle"><?= translate('current_period', $i18n) ?>: <?= htmlspecialchars($budgetPeriodLabel, ENT_QUOTES, 'UTF-8') ?></p>
                 <?php } ?>
@@ -534,6 +534,8 @@ require_once 'includes/subscription_details_popup.php';
 
 <script src="scripts/dashboard.js?<?= $version ?>"></script>
 
+<script src="scripts/libs/apexcharts.min.js"></script>
+<script src="finance-unified.js?v=<?=filemtime(__DIR__."/finance-unified.js")?>"></script>
 <?php
 require_once 'includes/footer.php';
 ?>

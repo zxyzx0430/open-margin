@@ -106,6 +106,30 @@ class WallosLedgerTests(unittest.TestCase):
         self.assertEqual(len(transfer_only["items"]),2)
         self.assertEqual(transfer_only["totals"],result["totals"])
 
+    def test_previous_month_same_period_vs_complete_month(self):
+        from datetime import datetime,timedelta
+        from zoneinfo import ZoneInfo
+        tz=ZoneInfo("Asia/Shanghai")
+        today=datetime.now(tz)
+        first=datetime(today.year,today.month,1,tzinfo=tz)
+        prev_end=first
+        prev_last=prev_end-timedelta(days=1)
+        prev_first=prev_last.replace(day=1)
+        earlier=prev_first+timedelta(days=1,hours=12)
+        later=prev_first+timedelta(days=24,hours=12)
+        for timestamp,cents in [(earlier,900),(later,1500)]:
+            p=self.payload()
+            p.update(timestamp_ms=int(timestamp.timestamp()*1000),amount_cents=cents)
+            response=self.client.post(self.url+"manual",headers=self.headers,json=p)
+            self.assertEqual(response.status_code,200,response.text)
+        month=today.strftime("%Y-%m")
+        stats=self.client.get(self.url+"month",params={"month":month},headers=self.headers).json()
+        complete=sum(x["total_cents"] for x in stats["previous_month_totals"])
+        same=sum(x["total_cents"] for x in stats["previous_same_period_totals"])
+        self.assertEqual(complete,2400)
+        expected=2400 if today.day>=25 else (900 if today.day>=2 else 0)
+        self.assertEqual(same,expected)
+
     def test_daily_monthly_filters_and_literal_search(self):
         from datetime import datetime,timedelta
         from zoneinfo import ZoneInfo

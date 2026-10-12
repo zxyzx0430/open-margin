@@ -9,8 +9,8 @@ if (!headers_sent()) {
 // so every release invalidates stale precached assets automatically - a release
 // that changed JS/CSS without remembering to bump a hardcoded cache version
 // used to leave already-visited browsers stuck on old cached files indefinitely.
-const STATIC_CACHE = 'static-cache-<?= $version ?>-live-chart-v3';
-const PAGES_CACHE = 'pages-cache-v4-live-chart';
+const STATIC_CACHE = 'static-cache-<?= $version ?>-finance-native-v5';
+const PAGES_CACHE = 'pages-cache-v6-finance-native';
 const LOGOS_CACHE = 'logos-cache-v2';
 
 // manifest.php is intentionally not precached here: it's per-user (theme
@@ -83,6 +83,8 @@ const staticAssets = [
     'scripts/i18n/getlang.js',
     'scripts/libs/apexcharts.min.js',
     'daily-spend-chart-v2.js',
+    'finance-unified.js',
+    'finance-unified.css',
     'scripts/libs/sortable.min.js',
     'scripts/libs/qrcode.min.js',
     'images/icon/favicon.ico',
@@ -243,7 +245,12 @@ self.addEventListener('fetch', function (event) {
     // Never cache ledger HTML or return a stale zero-spend page offline.
     if (url.pathname.endsWith('/expenses.php') ||
         url.pathname.endsWith('/integration.php') ||
-        url.pathname.endsWith('/expenses-export.php')) {
+        url.pathname.endsWith('/expenses-export.php') ||
+        url.pathname.endsWith('/finance-unified-data.php') ||
+        url.pathname.endsWith('/index.php') ||
+        url.pathname.endsWith('/calendar.php') ||
+        url.pathname.endsWith('/stats.php') ||
+        url.pathname.endsWith('/')) {
         event.respondWith(
             fetch(request, { cache: 'no-store' }).catch(() =>
                 new Response('实时账本暂时无法连接，请恢复网络后刷新。', {
@@ -286,7 +293,7 @@ self.addEventListener('fetch', function (event) {
 
     // Chart interaction code changes independently of Wallos's version.
     // Never serve a stale cache-first copy; offline may use last good script.
-    if (url.pathname.endsWith('/daily-spend-chart-v2.js')) {
+    if (url.pathname.endsWith('/daily-spend-chart-v2.js') || url.pathname.endsWith('/finance-unified.js') || url.pathname.endsWith('/finance-unified.css')) {
         event.respondWith(
             fetch(request, {cache: 'no-store'}).then(response => {
                 if (response.ok) {
