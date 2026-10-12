@@ -90,6 +90,14 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    fun setReviewStatus(entity: TransactionEntity, status: String) {
+        if (status !in setOf("unverified","confirmed","excluded","transfer")) return
+        if (entity.remoteReviewStatus == "refund") return
+        viewModelScope.launch {
+            repository.update(entity.copy(remoteReviewStatus=status))
+        }
+    }
+
     fun delete(entity: TransactionEntity) {
         viewModelScope.launch { repository.delete(entity) }
     }

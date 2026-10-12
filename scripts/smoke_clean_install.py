@@ -10,14 +10,25 @@ from zoneinfo import ZoneInfo
 
 HOME=Path(__file__).resolve().parent.parent
 # Do not allow this synthetic-transaction integration test to touch production.
-local_env=(HOME/".env").read_text()
-assert "FINANCE_API_PORT=18767" in local_env and "WALLOS_PORT=18083" in local_env, "Staging-only ports required"
+local_env={}
+for line in (HOME/".env").read_text().splitlines():
+    if "=" in line and not line.lstrip().startswith("#"):
+        key,val=line.split("=",1)
+        local_env[key.strip()]=val.strip()
+api_port=int(local_env.get("FINANCE_API_PORT","8767"))
+wallos_port=int(local_env.get("WALLOS_PORT","18082"))
+# Never run a destructive synthetic-data smoke test against standard production ports.
+assert 1024<=api_port<=65535 and 1024<=wallos_port<=65535, "Invalid staging ports"
+assert api_port not in (8767,18082) and wallos_port not in (8767,18082), "Staging-only ports required"
+assert api_port!=wallos_port
 assert "FINANCE_PUBLIC_URL=https://finance.example.com/finance" in (HOME/"secrets/backend.env").read_text(), "Example-domain staging required"
 cfg={}
-for s in (HOME/"secrets/backend.env").read_text().splitlines():
-    if "=" in s: a,b=s.split("=",1);cfg[a]=b
-finance="http://127.0.0.1:18767"
-wallos="http://127.0.0.1:18083"
+for line in (HOME/"secrets/backend.env").read_text().splitlines():
+    if "=" in line:
+        a,b=line.split("=",1)
+        cfg[a]=b
+finance=f"http://127.0.0.1:{api_port}"
+wallos=f"http://127.0.0.1:{wallos_port}"
 assert "127.0.0.1" in finance and "127.0.0.1" in wallos
 owner="test-owner-"+secrets.token_hex(3)
 passphrase=secrets.token_urlsafe(25)

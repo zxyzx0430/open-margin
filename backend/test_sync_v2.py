@@ -118,6 +118,47 @@ class SyncV2Tests(unittest.TestCase):
         last=self.pull(accepted["revision"])["items"][-1]
         self.assertEqual(last["record"]["review_status"],"confirmed")
 
+    def test_phone_review_exclusion_is_bidirectional(self):
+        record={**self.event,"review_status":"excluded"}
+        first=self.push("review-excluded-001",event=record)
+        self.assertEqual(first["status"],"applied")
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT review_status FROM transactions").fetchone()[0],
+                             "excluded")
+        pulled=self.pull()
+        self.assertEqual(pulled["items"][-1]["record"]["review_status"],"excluded")
+        restored={**self.event,"review_status":"unverified"}
+        second=self.push("review-restored-002",revision=first["revision"],event=restored)
+        self.assertEqual(second["status"],"applied")
+        self.assertEqual(self.pull(first["revision"])["items"][-1]["record"]["review_status"],
+                         "unverified")
+        # A free-floating refund flag without a verified server refund link is invalid.
+        invalid=self.client.post(self.path+"/push",headers=self.headers,json={"operations":[{
+            "mutation_id":"review-invalid-refund-003","event_id":self.event["event_id"],
+            "base_revision":second["revision"],"action":"upsert",
+            "record":{**self.event,"review_status":"refund"}
+        }]})
+        self.assertEqual(invalid.status_code,422)
+
+    def test_mutation_id_cannot_be_reused_with_changed_payload(self):
+        first=self.push("op-hash-stable-001")
+        self.assertEqual(first["status"],"applied")
+        self.assertEqual(self.push("op-hash-stable-001"),{
+            "mutation_id":"op-hash-stable-001",
+            "status":"applied","revision":first["revision"],"replayed":True
+        })
+        updated={**self.event,"merchant":"A different edit"}
+        record={k:v for k,v in updated.items() if k!="event_id"}
+        response=self.client.post(f"{self.path}/push",json={"operations":[{
+            "mutation_id":"op-hash-stable-001","event_id":updated["event_id"],
+            "base_revision":0,"action":"upsert","record":record
+        }]},headers=self.headers)
+        self.assertEqual(response.status_code,409)
+        with core.db_connection() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT merchant FROM transactions").fetchone()[0],
+                             self.event["merchant"])
+
     def test_phone_delete_tombstone_and_legacy_replay(self):
         first=self.push("op-create-0004")
         deletion=self.push("op-delete-0005",action="delete",revision=first["revision"])

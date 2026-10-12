@@ -145,6 +145,7 @@ fun TransactionListScreen(
                     transactions = transactions,
                     onDelete = { pendingDelete = it },
                     onEdit = { editing = it },
+                    onReview = viewModel::setReviewStatus,
                 )
             }
         }
@@ -263,6 +264,7 @@ private fun GroupedTransactionList(
     transactions: List<TransactionEntity>,
     onDelete: (TransactionEntity) -> Unit,
     onEdit: (TransactionEntity) -> Unit,
+    onReview: (TransactionEntity, String) -> Unit,
 ) {
     // 按 dayKey 分组（同一天 = 同一组）。LinkedHashMap 保留插入顺序（即时间倒序）
     val groups = remember(transactions) {
@@ -282,7 +284,8 @@ private fun GroupedTransactionList(
             // 该组内的交易项
             items(dayItems, key = { it.id }) { tx ->
                 TransactionItem(transaction = tx, onDelete = { onDelete(tx) },
-                                onEdit = { onEdit(tx) })
+                                onEdit = { onEdit(tx) },
+                                onReview = { status -> onReview(tx,status) })
             }
         }
     }
@@ -313,7 +316,7 @@ private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
 
 @Composable
 private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit,
-                            onEdit: () -> Unit) {
+                            onEdit: () -> Unit, onReview: (String) -> Unit) {
     val type = runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE)
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
     var expanded by remember(transaction.id) { mutableStateOf(false) }
@@ -364,6 +367,20 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (expanded) {
+                if (transaction.remoteReviewStatus == "refund") {
+                    Text("已关联退款 · 请在网站管理退款关系",
+                        style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = {
+                            onReview(if (transaction.remoteReviewStatus == "excluded")
+                                "unverified" else "excluded")
+                        }) {
+                            Text(if (transaction.remoteReviewStatus == "excluded")
+                                "恢复计入统计" else "不计入统计")
+                        }
+                    }
+                }
                 if (noteSummary.isNotBlank()) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Text(noteSummary, style = MaterialTheme.typography.bodySmall,

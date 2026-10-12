@@ -18,6 +18,15 @@ SOURCES={
     "transactions":Path(os.getenv("FINANCE_DB", "/data/finance/finance.sqlite3")),
     "wallos":Path(os.getenv("FINANCE_WALLOS_DB", "/data/wallos/wallos.db")),
 }
+OAUTH_DB=Path(os.getenv("FINANCE_OAUTH_DB", "/data/finance/oauth.sqlite3"))
+
+def sources_for_backup() -> dict[str,Path]:
+    # A fresh install might not have initialized OAuth yet. Once it exists,
+    # it must travel with the ledger to preserve client grants on recovery.
+    sources=dict(SOURCES)
+    if OAUTH_DB.exists():
+        sources["oauth"]=OAUTH_DB
+    return sources
 
 def snapshot_one(src:Path,dest:Path):
     if not src.is_file():
@@ -66,13 +75,14 @@ def run():
     os.chmod(BACKUPS,0o700)
     missing=[str(p) for p in SOURCES.values() if not p.is_file()]
     if missing:raise FileNotFoundError("Missing required SQLite source(s): "+", ".join(missing))
+    sources=sources_for_backup()
     now=datetime.now(timezone.utc)
     stamp=now.strftime("%Y%m%d-%H%M%S")
     created=[]
     # Prefer all-or-nothing observable snapshots, even though the two stores
     # represent separate domains and do not need cross-database transactions.
     try:
-        for name,src in SOURCES.items():
+        for name,src in sources.items():
             dest=BACKUPS/f"{name}-{stamp}.sqlite3"
             snapshot_one(src,dest)
             created.append(dest)
@@ -80,9 +90,9 @@ def run():
         for dest in created:
             dest.unlink(missing_ok=True)
         raise
-    for name in SOURCES:
+    for name in sources:
         retention(name,now,BACKUPS)
-    print("Verified backups completed for both finance databases.")
+    print("Verified SQLite backups completed: " + ", ".join(sources) + "")
 
 if __name__=="__main__":
     run()

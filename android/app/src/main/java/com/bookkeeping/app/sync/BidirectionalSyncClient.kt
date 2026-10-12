@@ -160,6 +160,10 @@ internal class BidirectionalSyncClient(
         put("source",row.source)
         put("category",row.category)
         put("merchant",row.merchant.take(140))
+        if(row.remoteReviewStatus in setOf(
+                "unverified","confirmed","excluded","transfer","possible_duplicate")) {
+            put("review_status",row.remoteReviewStatus)
+        }
     }
 
     private suspend fun send(row:TransactionEntity,overrideRevision:Long?=null):JSONObject? {
@@ -186,6 +190,7 @@ internal class BidirectionalSyncClient(
             .remove("conflict_choice:$eventId")
             .remove("conflict_choice_revision:$eventId")
             .remove("conflict_choice_local_modified_ms:$eventId")
+            .remove("conflict_choice_mutation_id:$eventId")
             .remove("conflict_server_preview:$eventId")
             .apply()
     }
@@ -230,7 +235,9 @@ internal class BidirectionalSyncClient(
                             prefs.getLong("conflict_choice_revision:$id",-1L),
                             serverRevision,
                             prefs.getLong("conflict_choice_local_modified_ms:$id",-1L),
-                            phoneMs
+                            phoneMs,
+                            prefs.getString("conflict_choice_mutation_id:$id",null),
+                            live.syncMutationId
                         )
                         val decision=if(hasChoice && !validChoice)
                             SyncConflictPolicy.Decision.HOLD

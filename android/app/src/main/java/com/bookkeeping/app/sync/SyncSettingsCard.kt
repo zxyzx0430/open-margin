@@ -102,6 +102,7 @@ fun SyncSettingsCard() {
                                     .putString("conflict_choice:$eventId","keep_phone")
                                     .putLong("conflict_choice_revision:$eventId",revision)
                                     .putLong("conflict_choice_local_modified_ms:$eventId",row.syncModifiedMs)
+                                    .putString("conflict_choice_mutation_id:$eventId",row.syncMutationId)
                                     .apply()
                                 TransactionSyncWorker.requestImmediate(context)
                                 message="只为这笔交易选择了本机版本，正在同步"
@@ -111,6 +112,7 @@ fun SyncSettingsCard() {
                                     .putString("conflict_choice:$eventId","keep_server")
                                     .putLong("conflict_choice_revision:$eventId",revision)
                                     .putLong("conflict_choice_local_modified_ms:$eventId",row.syncModifiedMs)
+                                    .putString("conflict_choice_mutation_id:$eventId",row.syncMutationId)
                                     .apply()
                                 TransactionSyncWorker.requestImmediate(context)
                                 message="只为这笔交易选择了服务器版本，正在同步"

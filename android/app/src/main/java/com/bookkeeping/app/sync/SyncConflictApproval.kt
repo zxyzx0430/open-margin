@@ -10,7 +10,11 @@ internal object SyncConflictApproval {
         currentServerRevision: Long,
         approvedLocalModifiedMs: Long,
         currentLocalModifiedMs: Long,
+        approvedMutationId: String?,
+        currentMutationId: String?,
     ): Boolean = choice in setOf("keep_phone","keep_server") &&
         approvedServerRevision == currentServerRevision &&
-        approvedLocalModifiedMs == currentLocalModifiedMs
+        approvedLocalModifiedMs == currentLocalModifiedMs &&
+        !approvedMutationId.isNullOrBlank() &&
+        approvedMutationId == currentMutationId
 }
