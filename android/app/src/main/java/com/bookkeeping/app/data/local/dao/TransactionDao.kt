@@ -62,12 +62,6 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs DESC, id DESC LIMIT 100")
     fun observePendingMutations(): Flow<List<TransactionEntity>>
 
-    @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs DESC, id DESC LIMIT 100")
-    fun observePendingMutations(): Flow<List<TransactionEntity>>
-
-    @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs DESC, id DESC LIMIT 100")
-    fun observePendingMutations(): Flow<List<TransactionEntity>>
-
     @Query("SELECT COUNT(*) FROM transactions WHERE syncDirty = 1")
     suspend fun pendingCount(): Int
 

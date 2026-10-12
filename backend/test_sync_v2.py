@@ -49,6 +49,29 @@ class SyncV2Tests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         return response.json()["results"][0]
 
+    def test_stable_server_identity_and_rollback_head(self):
+        """Different DB volumes need distinct identities even at the same URL."""
+        first=self.pull()
+        server_id=first["server_id"]
+        self.assertEqual(len(server_id),32)
+        self.assertEqual(first["head_revision"],0)
+        created=self.push("server-id-test-create-001")
+        self.assertEqual(created["status"],"applied")
+        same=self.pull()
+        self.assertEqual(same["server_id"],server_id)
+        self.assertGreaterEqual(same["head_revision"],created["revision"])
+        old_db=core.DB
+        try:
+            core.DB=Path(self.folder.name)/"another-clean-volume.sqlite3"
+            different=self.pull()
+            self.assertNotEqual(different["server_id"],server_id)
+            self.assertEqual(different["head_revision"],0)
+        finally:
+            core.DB=old_db
+        again=self.pull()
+        self.assertEqual(again["server_id"],server_id)
+        self.assertEqual(again["head_revision"],same["head_revision"])
+
     def test_security_bootstrap_and_paginated_pull(self):
         self.assertEqual(self.client.get(f"{self.path}/changes").status_code,401)
         with core.db_connection() as db:

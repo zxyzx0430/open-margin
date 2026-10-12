@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,6 +39,12 @@ def schema(db: sqlite3.Connection) -> None:
       event_id TEXT NOT NULL,
       revision INTEGER NOT NULL
     )""")
+    # Stable ledger identity. URLs can remain the same even after a local
+    # reinstall or replacing Docker volumes; a persisted UUID prevents a
+    # device's old download cursor from silently targeting a different DB.
+    if db.execute("SELECT 1 FROM ledger_settings WHERE key='sync_v2_server_id'").fetchone() is None:
+        db.execute("INSERT OR IGNORE INTO ledger_settings(key,value) VALUES('sync_v2_server_id',?)",
+                   (uuid.uuid4().hex,))
     # Seed pre-existing transactions exactly once. This migration is safe for
     # online SQLite backups and does not change pre-existing ledger rows.
     if db.execute("SELECT 1 FROM ledger_settings WHERE key='sync_v2_seeded'").fetchone() is None:
@@ -114,7 +121,13 @@ def changes(since: int=Query(0,ge=0),limit:int=Query(100,ge=1,le=500)):
         rows=db.execute("""SELECT * FROM sync_journal WHERE revision>?
           ORDER BY revision LIMIT ?""",(since,limit+1)).fetchall()
         page=rows[:limit]
+        identity=db.execute(
+            "SELECT value FROM ledger_settings WHERE key='sync_v2_server_id'"
+        ).fetchone()[0]
+        head=db.execute("SELECT COALESCE(MAX(revision),0) FROM sync_journal").fetchone()[0]
         return {
+            "server_id":identity,
+            "head_revision":head,
             "items":[{
                 "revision":row["revision"],"event_id":row["event_id"],
                 "action":row["action"],

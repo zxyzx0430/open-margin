@@ -42,6 +42,41 @@ internal class BidirectionalSyncClient(
         finally{conn.disconnect()}
     }
 
+    private fun validateServerIdentity(document:JSONObject,cursor:Long):Boolean {
+        val remoteId=document.optString("server_id","")
+        val head=document.optLong("head_revision",-1L)
+        val existing=prefs.getString("sync_server_id",null)
+        val decision=SyncServerIdentityPolicy.evaluate(existing,cursor,remoteId,head)
+        if(decision!=SyncServerIdentityPolicy.Decision.ACCEPT) {
+            val message=when(decision) {
+                SyncServerIdentityPolicy.Decision.DIFFERENT_SERVER ->
+                    "服务器账本身份已变化：暂停同步，防止旧交易覆盖新数据库"
+                SyncServerIdentityPolicy.Decision.CURSOR_AHEAD ->
+                    "服务器数据可能回滚：同步游标超出日志末尾，暂停同步"
+                SyncServerIdentityPolicy.Decision.UNKNOWN_OLD_CURSOR ->
+                    "旧同步记录没有账本身份验证：需先核对数据库迁移"
+                else -> "服务器缺少账本身份信息，暂停同步以保护交易"
+            }
+            prefs.edit().putString("sync_security_blocker",message)
+                .putString("last_result",message).commit()
+            return false
+        }
+        if(existing.isNullOrBlank()) {
+            if(!prefs.edit().putString("sync_server_id",remoteId).commit())
+                return false
+        }
+        prefs.edit().remove("sync_security_blocker").apply()
+        return true
+    }
+
+    /** Guard every upload, including legacy v1 uploads and rounding repairs. */
+    fun verifyServerIdentity():Boolean {
+        val cursor=prefs.getLong("last_pull_revision",0L)
+        val response=request("GET","changes?since=$cursor&limit=1") ?: return false
+        if(response.first!=200)return false
+        return validateServerIdentity(response.second,cursor)
+    }
+
     private suspend fun local(eventId:String):TransactionEntity? {
         dao.getByRemoteEventId(eventId)?.let { return it }
         if(!eventId.startsWith(ownPrefix))return null
@@ -106,6 +141,7 @@ internal class BidirectionalSyncClient(
             val response=request("GET","changes?since=$cursor&limit=200") ?: return false
             if(response.first!=200)return false
             val doc=response.second
+            if(!validateServerIdentity(doc,cursor))return false
             val changes=doc.getJSONArray("items")
             for(i in 0 until changes.length())applyChange(changes.getJSONObject(i))
             cursor=doc.getLong("cursor")
