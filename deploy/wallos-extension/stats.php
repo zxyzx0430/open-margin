@@ -17,6 +17,24 @@ $code = $row['code'];
 
 require_once 'includes/stats_calculations.php';
 require_once 'includes/stats_extra_calculations.php';
+// Wallos uses "MMM yy" labels (e.g. "5月 27"), which mobile users can read
+// as May 27. The underlying 12-month forecast remains next Nov through Oct;
+// make the calendar year explicit in the summary and the plotted categories.
+$financeForecastStart = new DateTimeImmutable('first day of next month', new DateTimeZone('Asia/Shanghai'));
+$financeForecastPeakIndex = null;
+foreach ($projectionDataPoints as $financeForecastIndex => &$financeForecastPoint) {
+    $financeForecastDate = $financeForecastStart->modify('+'.(int)$financeForecastIndex.' months');
+    $financeForecastPoint['label'] = $financeForecastDate->format('y').'年'.(int)$financeForecastDate->format('n').'月';
+    if ($heaviestMonth !== null && $financeForecastPeakIndex === null
+        && abs((float)$financeForecastPoint['y']-(float)$heaviestMonth['total'])<0.005) {
+        $financeForecastPeakIndex = (int)$financeForecastIndex;
+    }
+}
+unset($financeForecastPoint);
+if ($heaviestMonth !== null && $financeForecastPeakIndex !== null) {
+    $heaviestMonth['label'] = $financeForecastStart->modify('+'.$financeForecastPeakIndex.' months')->format('Y').'年'
+        .(int)$financeForecastStart->modify('+'.$financeForecastPeakIndex.' months')->format('n').'月';
+}
 require_once 'includes/upcoming_cancellations.php';
 require_once 'finance-unified-common.php';
 $financeMonthKey=finance_active_month();
@@ -342,7 +360,7 @@ try {
             ?>
             <div class="statistic short">
               <span><?= CurrencyFormatter::format($heaviestMonth['total'], $code) ?></span>
-              <div class="title"><?= translate('heaviest_month', $i18n) ?></div>
+              <div class="title">未来12个月订阅计划扣费最高月份</div>
               <div class="subtitle capitalize"><?= $heaviestMonth['label'] ?></div>
             </div>
             <?php
@@ -378,7 +396,8 @@ try {
             ?>
             <section class="graph x2">
               <header>
-                <?= translate('projected_cost', $i18n) ?>
+                未来12个月预计订阅扣费（非真实消费）
+                <div class="sub-header">按当前 Wallos 订阅周期和参考汇率预估；从下个月起算，年付费用会集中到续费月份</div>
               </header>
               <div id="projectionChart" style="width: 100%;"></div>
             </section>
