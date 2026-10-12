@@ -128,3 +128,20 @@ def link_refund(original_tx_id:int,refund_tx_id:int,amount_cents:int) -> dict:
     """
     from integration import refund, Refund
     return refund(Refund(original_tx_id=original_tx_id,refund_tx_id=refund_tx_id,amount_cents=amount_cents))
+
+@mcp.tool()
+def finance_reconciliation_queue() -> dict:
+    """Return unresolved statement reconciliation items requiring review."""
+    import app as core
+    with core.db_connection() as db:
+        rows=db.execute("SELECT * FROM statement_rows WHERE matched_tx_id IS NULL ORDER BY id DESC LIMIT 100").fetchall()
+    return {"items":[dict(r) for r in rows]}
+
+@mcp.tool()
+def finance_duplicate_review(limit:int=50) -> dict:
+    """Return transactions flagged as possible duplicates."""
+    import app as core
+    limit=max(1,min(100,limit))
+    with core.db_connection() as db:
+        rows=db.execute("SELECT * FROM transactions WHERE review_status='possible_duplicate' ORDER BY timestamp_ms DESC LIMIT ?",(limit,)).fetchall()
+    return {"items":[dict(r) for r in rows]}

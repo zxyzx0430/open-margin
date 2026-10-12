@@ -15,7 +15,7 @@
 
 主要区别：
 
-1. 私有版包含当前 systemd 服务、VPS Nginx 配置和独立安装脚本；安装脚本硬编码 `/opt/personal-finance-system/project`。它们属于部署适配层，公开版需要用可配置路径和脱敏模板替换，不能将机器特定实例参数原样发布。
+1. 私有版包含当前 systemd 服务、VPS Nginx 配置和独立安装脚本；安装脚本硬编码 `<deployment-root>/project`。它们属于部署适配层，公开版需要用可配置路径和脱敏模板替换，不能将机器特定实例参数原样发布。
 2. 私有版 FastAPI 为 v1.5.0，包含 `backend/v15_reconciliation.py` 与相关导入、复核 API；公开版仍为 v1.4.1 且不包含这些接口。必须核对保留、迁移或正式退役，不能强行降级替换运行中的 API。
 3. 公开版有 `backend/config.py` 的环境参数化、单用户边界控制、`compose.yaml`、Dockerfile、首次安装脚本、公开版安全和第三方许可文档；这些比私有版硬编码更适合做主线。
 4. 公共与私有代码在 OAuth、MCP、Wallos 路由、账单入口和交易筛选方面也有实际实现差异，必须按功能测试逐项合并。生产数据已发生、即将到期未支付等财务口径绝不能发生回退。
@@ -38,7 +38,7 @@
 
 ### M2. 部署目录与生产服务切换
 
-- 新唯一代码目录建议 `/opt/personal-finance-system/app`（来自 OSS 唯一仓库）。
+- 新唯一代码目录建议 `<deployment-root>/app`（来自 OSS 唯一仓库）。
 - 预先复制并保留当前 systemd/Nginx 配置与容器镜像；以精确 Git commit 和产物哈希部署。
 - 先在隔离端口验证新 API、Wallos 登录、Android 上传协议、OAuth/MCP、支付记录排除、预算及订阅汇率；通过后再将 `finance-api.service` 的 `WorkingDirectory` 指向统一代码。
 - Wallos 使用同一工作树构建，数据库继续复用现有宿主机卷。禁止为合并而重新初始化数据库。

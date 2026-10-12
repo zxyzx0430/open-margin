@@ -93,12 +93,13 @@ def main():
     # Wallos subscription metadata, setup token or password hashes. The
     # service itself owns these files and retains full access (UID 82).
     wallos_db_path=Path(os.getenv("FINANCE_WALLOS_DB",str(ROOT/"wallos/wallos.db")))
+    strict_db_permissions=os.getenv("FINANCE_HEALTH_STRICT_DB_PERMISSIONS","1")=="1"
     for private_path,label in (
         (wallos_db_path.parent, "Wallos database directory"),
         (wallos_db_path, "Wallos database"),
         (wallos_db_path.parent/"setup_token.db", "Wallos setup token"),
     ):
-        if private_path.exists():
+        if strict_db_permissions and private_path.exists():
             try:
                 check(private_path.stat().st_mode & 0o077 == 0,
                       label+" permissions allow group/other access")

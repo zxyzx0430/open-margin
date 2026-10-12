@@ -8,13 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, UploadFile, File
 from pydantic import BaseModel, Field, field_validator
 
 from config import DB, PUBLIC_BASE
 DEVICE_TOKEN = os.getenv("FINANCE_DEVICE_TOKEN", "")
 ADMIN_TOKEN = os.getenv("FINANCE_ADMIN_TOKEN", "")
-app = FastAPI(title="Personal Finance API", version="1.4.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="Personal Finance API", version="1.5.0", docs_url=None, redoc_url=None)
 
 class Event(BaseModel):
     event_id: str = Field(min_length=8, max_length=130, pattern=r"^[a-zA-Z0-9_.:-]+$")
@@ -87,7 +87,9 @@ def db_connection():
             month TEXT PRIMARY KEY, amount_cents INTEGER NOT NULL
             CHECK(amount_cents>0))""")
         from integration import schema as integration_schema
+        from v15_reconciliation import schema as v15_schema
         integration_schema(db)
+        v15_schema(db)
         db.commit()
         yield db
         db.commit()
@@ -102,9 +104,53 @@ def ledger_start_ms(db: sqlite3.Connection) -> int:
     return int(row[0]) if row is not None else 0
 
 
+@app.get("/api/v1/reconciliation/status", dependencies=[Depends(admin_auth)])
+def reconciliation_status():
+    from v15_reconciliation import schema
+    with db_connection() as db:
+        return {"ok":True,
+                "statements":db.execute("select count(*) from imported_statements").fetchone()[0],
+                "statement_rows":db.execute("select count(*) from statement_rows").fetchone()[0],
+                "aliases":db.execute("select count(*) from merchant_aliases").fetchone()[0],
+                "splits":db.execute("select count(*) from transaction_splits").fetchone()[0]}
+
+from v15_reconciliation import import_standard_csv, reconcile
+
+@app.post("/api/v1/reconciliation/import-csv", dependencies=[Depends(admin_auth)])
+async def reconciliation_import(file: UploadFile = File(...)):
+    content=(await file.read()).decode("utf-8")
+    with db_connection() as db:
+        sid,count=import_standard_csv(db,content,"CSV",file.filename)
+    return {"statement_id":sid,"imported_rows":count}
+
+@app.get("/api/v1/reconciliation/review", dependencies=[Depends(admin_auth)])
+def reconciliation_review():
+    with db_connection() as db:
+        return {"items":reconcile(db)}
+
+@app.post("/api/v1/merchant-alias", dependencies=[Depends(admin_auth)])
+def merchant_alias(item: dict):
+    canonical=str(item.get("canonical","")).strip()
+    alias=str(item.get("alias","")).strip()
+    if not canonical or not alias: raise HTTPException(422,"canonical and alias required")
+    with db_connection() as db:
+        db.execute("INSERT OR REPLACE INTO merchant_aliases(canonical,alias) VALUES(?,?)",(canonical,alias))
+    return {"ok":True}
+
+@app.post("/api/v1/transactions/{tx_id}/split", dependencies=[Depends(admin_auth)])
+def transaction_split(tx_id:int, item:dict):
+    splits=item.get("splits",[])
+    with db_connection() as db:
+        tx=db.execute("SELECT amount_cents FROM transactions WHERE id=?",(tx_id,)).fetchone()
+        if not tx: raise HTTPException(404,"transaction not found")
+        if sum(int(x["amount_cents"]) for x in splits)!=tx["amount_cents"]: raise HTTPException(422,"split total mismatch")
+        db.execute("DELETE FROM transaction_splits WHERE transaction_id=?",(tx_id,))
+        for x in splits: db.execute("INSERT INTO transaction_splits(transaction_id,category,amount_cents) VALUES(?,?,?)",(tx_id,x["category"],x["amount_cents"]))
+    return {"ok":True,"count":len(splits)}
+
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "finance-api", "version": "1.4.1"}
+    return {"ok": True, "service": "finance-api", "version": "1.5.0"}
 
 @app.post("/api/v1/transactions/batch", dependencies=[Depends(device_auth)])
 def ingest(batch: Batch):

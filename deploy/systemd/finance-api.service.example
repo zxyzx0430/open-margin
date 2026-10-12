@@ -1,0 +1,14 @@
+# Example for a consolidated, single-code-source deployment.
+[Unit]
+Description=Personal Finance API (single source)
+After=network-online.target
+[Service]
+Type=simple
+User=financeapi
+WorkingDirectory=/srv/personal-finance/project/backend
+EnvironmentFile=/path/to/finance.env
+EnvironmentFile=/path/to/wallos-ledger.env
+ExecStart=/srv/personal-finance/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8767 --workers 1
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target

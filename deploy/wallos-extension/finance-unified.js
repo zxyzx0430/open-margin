@@ -318,7 +318,6 @@
         marker.style.height="5px";
       }
       marker.hidden=false;
-      host.dataset.debugOverlay="done-connected-"+marker.isConnected+"-hidden-"+marker.hidden+"-same-"+(focus===host.querySelector(".finance-trend-focus"));
       if(actual&&!noMotion){
         void marker.offsetWidth;
         marker.classList.add("finance-trend-focus-drop");

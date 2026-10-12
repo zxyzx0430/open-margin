@@ -18,7 +18,7 @@ if(!is_string($token)||strlen($token)<30) {
     http_response_code(503);exit('Export unavailable');
 }
 $endpoint = $settings['FINANCE_LEDGER_API_URL'] ?? '';
-if (!is_string($endpoint) || !preg_match('#^https?://[^/\s]+/api/v1/wallos-ledger/?$#', $endpoint)) {
+if (!is_string($endpoint) || !preg_match('#^https?://[^/\s]+(?:/[A-Za-z0-9._~-]+)*/api/v1/wallos-ledger/?$#', $endpoint)) {
     http_response_code(503);exit('Export unavailable');
 }
 $ch=curl_init(rtrim($endpoint,'/').'/export?month='.$month);
