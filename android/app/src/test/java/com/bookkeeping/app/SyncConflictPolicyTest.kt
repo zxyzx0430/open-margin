@@ -26,6 +26,18 @@ class SyncConflictPolicyTest {
             SyncConflictPolicy.decide(now-30000,now+600000,now))
     }
 
+    @Test fun newerOfflineEditDoesNotSilentlyResurrectServerDeletion() {
+        assertEquals(SyncConflictPolicy.Decision.HOLD,
+            SyncConflictPolicy.decide(now-1000,now-20000,now,
+                serverDeleted=true,phoneDeleted=false))
+        assertEquals(SyncConflictPolicy.Decision.KEEP_PHONE,
+            SyncConflictPolicy.decide(now-1000,now-20000,now,
+                choice="keep_phone",serverDeleted=true,phoneDeleted=false))
+        assertEquals(SyncConflictPolicy.Decision.KEEP_SERVER,
+            SyncConflictPolicy.decide(now-1000,now-20000,now,
+                choice="keep_server",serverDeleted=true,phoneDeleted=false))
+    }
+
     @Test fun ExplicitUserChoiceOverridesClockAmbiguity() {
         assertEquals(SyncConflictPolicy.Decision.KEEP_PHONE,
             SyncConflictPolicy.decide(now,now,now,"keep_phone"))

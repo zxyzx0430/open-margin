@@ -172,7 +172,9 @@ internal class BidirectionalSyncClient(
                         val serverRevision=current.getLong("revision")
                         val decision=SyncConflictPolicy.decide(
                             phoneMs,serverMs,System.currentTimeMillis(),
-                            prefs.getString("conflict_resolution","auto") ?: "auto"
+                            prefs.getString("conflict_resolution","auto") ?: "auto",
+                            serverDeleted=current.optString("action")=="delete",
+                            phoneDeleted=live.syncDeleted
                         )
                         if(decision==SyncConflictPolicy.Decision.KEEP_PHONE){
                             val retry=send(live,serverRevision)
