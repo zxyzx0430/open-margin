@@ -51,6 +51,8 @@ function ledger_request($method,$path,$payload=null){
                 'total_cents'=>5800,'count'=>1]],
     'daily_totals'=>[['day'=>'2026-10-05','currency'=>'CNY',
                       'direction'=>'EXPENSE','total_cents'=>5800,'count'=>1]],
+    'daily_excluded_totals'=>[['day'=>'2026-10-09','currency'=>'CNY',
+                          'direction'=>'EXPENSE','total_cents'=>1886,'count'=>1]],
     'today_totals'=>[], 'last7_totals'=>[], 'previous_month_totals'=>[],
     'month_count'=>3, 'budget_cny_cents'=>100000, 'next_offset'=>null,
     'last_synced_at_utc'=>'synthetic time'
@@ -121,6 +123,18 @@ class RenderedExpensePage(unittest.TestCase):
                             page.locator("#finance-daily-date").select_option("2026-10-05")
                             self.assertEqual(page.locator("#finance-daily-selected-amount").inner_text(),"¥58.00")
                             self.assertEqual(page.locator("#finance-daily-selection.is-active").count(),1)
+                            page.locator("#finance-daily-date").select_option("2026-10-09")
+                            self.assertEqual(page.locator("#finance-daily-selected-amount").inner_text(),"¥0.00")
+                            self.assertIn("¥18.86",page.locator("#finance-daily-selected-excluded").inner_text())
+                            self.assertIn("¥18.86",page.locator("#finance-daily-selected-excluded").inner_text())
+                            self.assertEqual(page.locator(".ledger-chart-table tbody td").count(),31*4)
+                            page.locator(".ledger-chart-table summary").click()
+                            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"),width)
+                            if width==320:
+                                assert page.locator(".ledger-chart-table").evaluate(
+                                    "(el) => el.scrollWidth > el.clientWidth"
+                                ), "Narrow screens must scroll the reconciliation table inside its card"
+                            page.locator(".ledger-chart-table summary").click()
                             if width==390 and not dark and os.getenv("PFS_UI_SCREENSHOT"):
                                 page.screenshot(path=os.environ["PFS_UI_SCREENSHOT"],full_page=True)
                             page.close()

@@ -37,6 +37,7 @@ $todayTotals=[];
 $weekTotals=[];
 $prevMonthTotals=[];
 $dailyTotals=[];
+$dailyExcludedTotals=[];
 $lastSynced=null;
 $monthCount=0;
 $budgetCny=null;
@@ -64,6 +65,7 @@ try {
     $weekTotals=$result['last7_totals'] ?? [];
     $prevMonthTotals=$result['previous_month_totals'] ?? [];
     $dailyTotals=$result['daily_totals'] ?? [];
+    $dailyExcludedTotals=$result['daily_excluded_totals'] ?? [];
     $monthCount=intval($result['month_count'] ?? count($items));
     $budgetCny=$result['budget_cny_cents']??null;
     $nextOffset=$result['next_offset']??null;
@@ -120,14 +122,22 @@ foreach($dailyTotals as $row) {
     if($row['currency']!=='CNY'||$row['direction']!=='EXPENSE')continue;
     $plot[$row['day']]=($plot[$row['day']]??0)+intval($row['total_cents']);
 }
+// Excluded totals never contribute to the chart's bar height.
+$excludedPlot=[];
+foreach($dailyExcludedTotals as $row) {
+    if($row['currency']!=='CNY'||$row['direction']!=='EXPENSE')continue;
+    $excludedPlot[$row['day']]=($excludedPlot[$row['day']]??0)+(int)$row['total_cents'];
+}
 $lastDay=(int)date('t',strtotime($month.'-01'));
 $dailyChartPoints=[];
 for($n=1;$n<=$lastDay;$n++) {
     $dateKey=sprintf('%s-%02d',$month,$n);
-    $dailyChartPoints[]=['day'=>$dateKey,'cents'=>max(0,(int)($plot[$dateKey]??0))];
+    $dailyChartPoints[]=['day'=>$dateKey,
+        'cents'=>max(0,(int)($plot[$dateKey]??0)),
+        'excluded_cents'=>max(0,(int)($excludedPlot[$dateKey]??0))];
 }
 $hasDailySpend=array_sum(array_column($dailyChartPoints,'cents'))>0;
-$revision=hash('sha256',json_encode([$monthCount,$lastSynced,$totals,$dailyTotals,$budgetCny,$filters,$offset],JSON_UNESCAPED_UNICODE));
+$revision=hash('sha256',json_encode([$monthCount,$lastSynced,$totals,$dailyTotals,$dailyExcludedTotals,$budgetCny,$filters,$offset],JSON_UNESCAPED_UNICODE));
 $notice=$_GET['notice'] ?? '';
 ?>
 <style>
@@ -251,13 +261,16 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-chart-selection.is-active{border:2px solid var(--main-color);background:color-mix(in srgb,var(--main-color) 10%,var(--box-background-color));box-shadow:0 2px 13px color-mix(in srgb,var(--main-color) 20%,transparent);padding:11px 13px}
 .wallos-ledger .ledger-chart-selection.is-active strong{font-size:18px;color:var(--main-color)}
 .wallos-ledger .ledger-chart-selection .finance-daily-selected-label{font-weight:700;color:var(--main-color)}
+.wallos-ledger .ledger-daily-excluded{font-size:12px;color:var(--text-muted);font-weight:600}
+.wallos-ledger .ledger-chart-table table{min-width:480px}
+
 .wallos-ledger .ledger-chart-selection.finance-daily-selection-pop{animation:financeDailySelectionPop .46s ease-out}
 @keyframes financeDailyBarPop{0%{filter:brightness(1.4) drop-shadow(0px 0px 10px var(--main-color));transform:scaleX(1.45) scaleY(1.14)}100%{transform:scaleX(1.27) scaleY(1.08)}}
 @keyframes financeDailySelectionPop{0%{transform:scale(.985)}65%{transform:scale(1.008)}100%{transform:scale(1)}}
 @media(prefers-reduced-motion:reduce){.wallos-ledger .finance-daily-focus-band,.wallos-ledger .apexcharts-bar-area,.wallos-ledger .finance-daily-selection-pop,.wallos-ledger .finance-daily-bar-pop{animation:none!important;transition:none!important}}
 .wallos-ledger .ledger-chart-selection strong{font-variant-numeric:tabular-nums}
 .wallos-ledger .ledger-chart-selection a{margin-left:auto;color:var(--main-color);font-weight:600;text-decoration:underline}
-.wallos-ledger .ledger-chart-table{margin-top:12px}
+.wallos-ledger .ledger-chart-table{margin-top:12px;max-width:100%;overflow-x:auto}
 .wallos-ledger .ledger-chart-table summary{cursor:pointer;font-size:13px;color:var(--main-color);padding:8px 0}
 .wallos-ledger .ledger-chart-table table{width:100%;border-collapse:collapse;font-size:13px;color:var(--text-color)}
 .wallos-ledger .ledger-chart-table td,.wallos-ledger .ledger-chart-table th{text-align:left;border-bottom:1px solid var(--box-border-color);padding:8px 6px}
@@ -393,24 +406,26 @@ $notice=$_GET['notice'] ?? '';
       <div class="ledger-chart-selection" id="finance-daily-selection" role="status" aria-live="polite" hidden>
         <span class="finance-daily-selected-label">已选日期</span><span id="finance-daily-selected-date"></span>
         <strong id="finance-daily-selected-amount"></strong>
-        <a id="finance-daily-detail-link" href="expenses.php">查看当日交易</a>
+        <span id="finance-daily-selected-excluded" class="ledger-daily-excluded" hidden></span>
+        <a id="finance-daily-detail-link" href="expenses.php">查看当日全部交易（含不计入）</a>
       </div>
       <details class="ledger-chart-table">
         <summary>查看整月每日金额与明细（含零消费日期）</summary>
         <table>
-          <thead><tr><th scope="col">日期（北京时间）</th><th scope="col">实际支出</th><th scope="col">操作</th></tr></thead>
+          <thead><tr><th scope="col">日期（北京时间）</th><th scope="col">实际支出</th><th scope="col">不计入</th><th scope="col">操作</th></tr></thead>
           <tbody>
             <?php foreach($dailyChartPoints as $point): ?>
               <tr>
                 <td><?= ledger_escape($point['day']) ?></td>
                 <td><?= ledger_escape(ledger_money($point['cents'],'CNY')) ?></td>
+                <td><?= ledger_escape(ledger_money($point['excluded_cents'],'CNY')) ?></td>
                 <td><a href="<?= ledger_escape(ledger_page_link($month,['day'=>$point['day'],'category'=>'','direction'=>'','q'=>''])) ?>">查看流水</a></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
       </details>
-      <p class="ledger-section-message ledger-explainer">依据 Finance 账本北京时间统计已记录人民币支出，未发生支出的日期按 ¥0.00 展示；退款、转账和排除交易不计入支出。</p>
+      <p class="ledger-section-message ledger-explainer">柱子显示 VPS 账本中已计入的人民币支出；下方可查看当日“不计入”的金额和全部交易。手机 App 删除本地记录目前不会自动在 VPS 上标记“不计入”；如发现两端不一致，请在此页面对应交易中选择“不计入”。退款、转账和排除交易不计入实际支出。</p>
     </section>
     <script type="application/json" id="finance-daily-data"><?= json_encode($dailyChartPoints,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_UNICODE) ?></script>
     <script src="scripts/libs/apexcharts.min.js"></script>

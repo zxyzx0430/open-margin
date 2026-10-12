@@ -49,8 +49,38 @@ class WallosLedgerTests(unittest.TestCase):
         self.assertEqual(review.status_code,200)
         updated=self.client.get(self.url+"month",params={"month":month},headers=self.headers).json()
         self.assertEqual(updated["totals"],[])
+        self.assertEqual(updated["daily_totals"],[])
+        self.assertEqual(sum(x["total_cents"] for x in updated["daily_excluded_totals"]
+                             if x["currency"]=="CNY" and x["direction"]=="EXPENSE"),100)
         self.assertEqual(updated["items"][0]["review_status"],"excluded")
         self.assertEqual(self.client.get("/api/v1/transactions",headers=self.headers).status_code,401)
+    def test_daily_spending_reconciles_included_and_excluded_rows(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        month=datetime.fromtimestamp(self.timestamp/1000,ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
+        for cents,category in ((5800,"FOOD"),(2000,"SHOPPING"),(1400,"SHOPPING")):
+            event=self.payload()
+            event.update(amount_cents=cents,category=category,merchant="Synthetic")
+            result=self.client.post(self.url+"manual",headers=self.headers,json=event)
+            self.assertEqual(result.status_code,200,result.text)
+            if cents==1400:
+                tx_id=result.json()["id"]
+                self.assertEqual(self.client.patch(
+                    self.url+f"review/{tx_id}",headers=self.headers,
+                    json={"status":"excluded"}).status_code,200)
+        day=datetime.fromtimestamp(self.timestamp/1000,ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
+        output=self.client.get(self.url+"month",headers=self.headers,
+                               params={"month":month,"day":day}).json()
+        actual=sum(r["total_cents"] for r in output["daily_totals"]
+                   if r["currency"]=="CNY" and r["direction"]=="EXPENSE" and r["day"]==day)
+        excluded=sum(r["total_cents"] for r in output["daily_excluded_totals"]
+                     if r["currency"]=="CNY" and r["direction"]=="EXPENSE" and r["day"]==day)
+        self.assertEqual(actual,7800)
+        self.assertEqual(excluded,1400)
+        self.assertEqual(actual+excluded,9200)
+        self.assertEqual(sum(x["total_cents"] for x in output["totals"]),7800)
+        self.assertEqual(len(output["items"]),3)
+
     def test_transfer_category_does_not_count_as_income_or_expense(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo

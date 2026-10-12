@@ -129,6 +129,14 @@ def month_view(
             group["total_cents"]+=event["amount_cents"]
             group["count"]+=1
         daily=[daily_groups[key] for key in sorted(daily_groups)]
+        # Reconciliation only: show excluded CNY spending separately.
+        # The actual daily totals above already exclude these rows.
+        daily_excluded=db.execute("""SELECT date(timestamp_ms/1000,'unixepoch','+8 hours') AS day,
+                currency,direction,SUM(amount_cents) AS total_cents, COUNT(*) AS count
+                FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<?
+                AND (review_status IN ('excluded','transfer','refund') OR category='TRANSFER')
+                GROUP BY day,currency,direction ORDER BY day ASC""",
+                (start_ms,end_ms)).fetchall()
         def period_total(a,b):
             return [dict(r) for r in db.execute(f"""SELECT currency,direction,
                 SUM(amount_cents) AS total_cents,COUNT(*) AS count
@@ -151,6 +159,7 @@ def month_view(
         "last7_totals":last7_totals,
         "previous_month_totals":previous_month_totals,
         "daily_totals":[dict(r) for r in daily],
+        "daily_excluded_totals":[dict(r) for r in daily_excluded],
         "count_in_page":min(len(rows),100),
         "month_count":monthly_count,
         "budget_cny_cents":budget[0] if budget else None,

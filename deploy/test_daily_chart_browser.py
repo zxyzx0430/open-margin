@@ -63,7 +63,7 @@ def fixture(month, entries, css):
       <select id="finance-daily-date"><option value="">选择日期</option>{opts}</select>
       <span>柱子对应自然日，左右滑动可查看整月</span></div>
       <div id="finance-daily-selection" class="ledger-chart-selection" role="status" aria-live="polite" hidden>
-      <span class="finance-daily-selected-label">已选日期</span><span id="finance-daily-selected-date"></span><strong id="finance-daily-selected-amount"></strong>
+      <span class="finance-daily-selected-label">已选日期</span><span id="finance-daily-selected-date"></span><strong id="finance-daily-selected-amount"></strong><span id="finance-daily-selected-excluded" hidden></span>
       <a id="finance-daily-detail-link" href="expenses.php">查看当日交易</a></div>
       <details class="ledger-chart-table"><summary>查看整月每日金额与明细（含零消费日期）</summary>
       <table><thead><tr><th>日期</th><th>实际支出</th><th>操作</th></tr></thead><tbody>{rows}</tbody></table></details>
@@ -94,6 +94,8 @@ def run():
             for key,(month,spent) in SCENARIOS.items():
                 if only and key not in only: continue
                 entries=points_for(month,spent)
+                if key=="refund_transfer_excluded":
+                    entries[2]["excluded_cents"]=2000
                 assert sum(e["cents"] for e in entries)==sum(spent.values())
                 assert len(entries)==calendar.monthrange(*map(int,month.split("-")))[1]
                 (folder/"fixture.html").write_text(fixture(month,entries,css))
@@ -124,6 +126,13 @@ def run():
                                 assert page.locator("#finance-daily-selected-date").inner_text()==row["day"]
                                 assert page.locator("#finance-daily-selected-amount").inner_text()==f'¥{row["cents"]/100:,.2f}'
                                 assert "day="+row["day"] in page.locator("#finance-daily-detail-link").get_attribute("href")
+                                if key=="refund_transfer_excluded" and index==2:
+                                    self_excluded=page.locator("#finance-daily-selected-excluded")
+                                    assert not self_excluded.is_hidden()
+                                    assert "¥20.00" in self_excluded.inner_text()
+                                    assert "¥35.00" in self_excluded.inner_text()
+                                else:
+                                    assert page.locator("#finance-daily-selected-excluded").is_hidden()
                                 assert page.locator("#finance-daily-selection.is-active").count()==1
                                 assert page.locator(".apexcharts-bar-area.finance-daily-bar-selected").count()==1, (key,width,"selected bar")
                                 assert page.locator(".finance-daily-focus-band:not([hidden])").count()==1, (key,width,"day highlight")

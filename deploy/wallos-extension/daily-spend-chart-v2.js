@@ -10,6 +10,7 @@
   const selected = document.querySelector("#finance-daily-selection");
   const dateLabel = document.querySelector("#finance-daily-selected-date");
   const amountLabel = document.querySelector("#finance-daily-selected-amount");
+  const excludedLabel = document.querySelector("#finance-daily-selected-excluded");
   const detailLink = document.querySelector("#finance-daily-detail-link");
   let entries;
   try {
@@ -17,6 +18,7 @@
     if (!Array.isArray(entries) || !entries.length ||
         entries.some((p, i) => !/^\d{4}-\d{2}-\d{2}$/.test(p.day) ||
           !Number.isSafeInteger(p.cents) || p.cents < 0 ||
+          (p.excluded_cents !== undefined && (!Number.isSafeInteger(p.excluded_cents) || p.excluded_cents < 0)) ||
           (i > 0 && p.day <= entries[i - 1].day))) throw Error("Invalid daily data");
   } catch (_) {
     host.textContent = "每日统计数据格式错误，请刷新页面。";
@@ -94,6 +96,13 @@
     const row = entries[index];
     dateLabel.textContent = row.day;
     amountLabel.textContent = formatAmount(row.cents);
+    if (excludedLabel) {
+      const excluded = row.excluded_cents || 0;
+      excludedLabel.hidden = excluded === 0;
+      excludedLabel.textContent = excluded
+        ? "本日已排除 " + formatAmount(excluded) + " · 原始支出 " + formatAmount(row.cents + excluded)
+        : "";
+    }
     detailLink.href = "expenses.php?month=" + encodeURIComponent(row.day.slice(0, 7)) +
       "&day=" + encodeURIComponent(row.day);
     picker.value = row.day;
