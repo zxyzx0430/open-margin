@@ -39,6 +39,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
 import com.bookkeeping.app.sync.SyncSettingsCard
+import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -119,7 +120,8 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 )
             }
 
-            item { SectionTitle("VPS 交易同步（可选）") }
+            item { SectionTitle("交易双向同步（Windows / VPS）") }
+            item { WindowsFirstConnectionWizard() }
             item { SyncSettingsCard() }
 
             item { SectionTitle("国产 ROM 后台白名单（重要）") }

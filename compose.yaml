@@ -44,6 +44,20 @@ services:
       - no-new-privileges:true
     networks: [finance-internal]
 
+  # Windows-only opt-in ingress; never started by ordinary VPS compose up.
+  private-sync-gateway:
+    image: nginx:1.28-alpine
+    profiles: [windows-private-sync]
+    restart: unless-stopped
+    depends_on: [finance-api]
+    volumes:
+      - ./deploy/windows/private-sync-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:18768:80"
+    security_opt:
+      - no-new-privileges:true
+    networks: [finance-internal]
+
   backup:
     image: python:3.11-slim
     profiles: [maintenance]
