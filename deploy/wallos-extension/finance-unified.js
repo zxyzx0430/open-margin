@@ -307,7 +307,7 @@
         marker.style.top=(bar.top-box.top-1)+"px";
         marker.style.width=(bar.width+2)+"px";
         marker.style.height=(bar.height+2)+"px";
-        const startScale=Math.min(8,Math.max(1.12,grid.height*.83/bar.height));
+        const startScale=Math.min(3.6,Math.max(1.08,grid.height*.66/bar.height));
         marker.style.setProperty("--finance-trend-initial-scale",startScale);
         active.style.setProperty("--finance-trend-initial-scale",startScale);
       }else{

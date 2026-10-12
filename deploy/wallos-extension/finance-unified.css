@@ -104,7 +104,7 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
 .finance-native .finance-trend-visual{position:relative;min-height:214px;isolation:isolate}
 .finance-native .finance-trend-plot{min-height:214px}
 .finance-native .finance-trend-plot .apexcharts-bar-area.finance-trend-selected-bar{
-  opacity:1!important;filter:brightness(1.13) drop-shadow(0 0 7px var(--fin-accent));
+  opacity:1!important;filter:brightness(1.09) drop-shadow(0 0 5px var(--fin-accent));
   transform-box:fill-box;transform-origin:center bottom;
 }
 .finance-native .finance-trend-plot .apexcharts-bar-area:not(.finance-trend-selected-bar){opacity:.60}
@@ -112,19 +112,19 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
   position:absolute;z-index:2;box-sizing:border-box;pointer-events:none;
   border:2px solid var(--fin-accent);border-radius:5px;
   background:color-mix(in srgb,var(--fin-accent) 16%,transparent);
-  box-shadow:0 0 10px color-mix(in srgb,var(--fin-accent) 48%,transparent);
+  box-shadow:0 0 11px color-mix(in srgb,var(--fin-accent) 32%,transparent);
   transform-origin:center bottom;
 }
 .finance-native .finance-trend-focus[hidden]{display:none;}
 .finance-native .finance-trend-focus-zero{border-radius:50%;background:var(--fin-accent)}
-.finance-native .finance-trend-bar-drop{animation:financeTrendBarDrop .52s cubic-bezier(.22,1,.36,1) both;}
-.finance-native .finance-trend-focus-drop{animation:financeTrendFocusDrop .52s cubic-bezier(.22,1,.36,1) both;}
+.finance-native .finance-trend-bar-drop{animation:financeTrendBarDrop .92s cubic-bezier(.16,.84,.24,1) both;}
+.finance-native .finance-trend-focus-drop{animation:financeTrendFocusDrop .92s cubic-bezier(.16,.84,.24,1) both;}
 @keyframes financeTrendBarDrop{
-  from{transform:scaleY(var(--finance-trend-initial-scale,1.15));filter:drop-shadow(0 0 9px var(--fin-accent))}
+  from{transform:scaleY(var(--finance-trend-initial-scale,1.08));filter:drop-shadow(0 0 7px var(--fin-accent))}
   to{transform:scaleY(1)}
 }
 @keyframes financeTrendFocusDrop{
-  from{transform:scaleY(var(--finance-trend-initial-scale,1.15));opacity:.78}
+  from{transform:scaleY(var(--finance-trend-initial-scale,1.08));opacity:.66}
   to{transform:scaleY(1);opacity:1}
 }
 .finance-native .finance-trend-controls{display:flex;flex-direction:column;gap:9px;margin:6px 0 0}
