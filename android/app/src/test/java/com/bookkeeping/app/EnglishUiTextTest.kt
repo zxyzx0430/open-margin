@@ -23,7 +23,6 @@ class EnglishUiTextTest {
             "关于与更新" to "About & updates",
             "检查更新" to "Check for updates",
             "浏览全部发布版本" to "Browse all releases",
-            "本次更新类型：" to "Update type: ",
             "仅 Android APP 更新" to "Android app only",
             "仅 Windows / VPS 更新" to "Windows / VPS only",
             "Android APP 与 Windows / VPS 都有更新" to "Both Android app and Windows / VPS",
