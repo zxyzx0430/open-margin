@@ -55,7 +55,7 @@ cd open-margin
 powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
 ~~~
 
-Open **http://127.0.0.1:18082** and register your first Wallos account, then log in. Data persists in named Docker volumes; do not run destructive volume removal commands. The Wallos UI binds to loopback by default. To sync a phone, set up a private HTTPS entry after local registration; follow [Windows Android-sync instructions](docs/DEPLOY_WINDOWS.md).
+Open **http://127.0.0.1:18082** and register your first Wallos account, then log in. Data persists in named Docker volumes; do not run destructive volume removal commands. The Wallos UI binds to loopback by default. To sync a phone, use the optional **Windows first-connection wizard** (Start-OpenMarginSetup.ps1); it defaults to the Tailscale **API-only** gateway, not remote Wallos. See [Windows Android-sync instructions](docs/DEPLOY_WINDOWS.md) and [three-step onboarding guide](docs/WINDOWS_PRIVATE_FIRST_CONNECTION.md).
 
 ## VPS/Linux quick start (clean installation)
 

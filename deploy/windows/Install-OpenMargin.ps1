@@ -79,10 +79,13 @@ if (-not (Test-Path $backend)) {
   $current=Select-String -Path $backend -Pattern '^FINANCE_PUBLIC_URL=' | Select-Object -First 1
   if (-not $current) { throw "Missing FINANCE_PUBLIC_URL in existing private configuration." }
   if ($current.Line -ne "FINANCE_PUBLIC_URL=$PublicBase") {
-    # The ONLY automatic URL promotion is local-only first-run -> explicitly
-    # requested Tailscale address. Preserve the device/admin/ledger tokens.
+    # A local-only install may opt into private HTTPS on a later day.
+    # The first wizard pass initializes containers without exposing Serve,
+    # so the explicitly requested new *.ts.net URL must be accepted then.
+    # Any previously configured real server URL stays immutable.
     if ($current.Line -ne "FINANCE_PUBLIC_URL=https://local.openmargin.invalid/finance" -or
-        -not $ConfigureTailscale) {
+        -not $PSBoundParameters.ContainsKey("PublicBase") -or
+        ([uri]$PublicBase).Host -notlike "*.ts.net") {
       throw "Existing setup uses another URL. Do not overwrite existing server identity."
     }
     $lines=[IO.File]::ReadAllLines($backend)
