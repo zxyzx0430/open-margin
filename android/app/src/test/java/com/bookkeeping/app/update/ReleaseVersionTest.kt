@@ -76,6 +76,27 @@ class ReleaseVersionTest {
             listOf(candidate.copy(hasSignedApk = false)), current, true))
     }
 
+    @Test fun androidAndServerReleasesCombineIntoBothAcrossMultipleTags() {
+        val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)!!
+        val announcements = listOf(
+            release("v1.2.0-rc.7", true, true, UpdateComponentScope.ANDROID_ONLY),
+            release("v1.2.0-rc.8", true, false, UpdateComponentScope.SERVER_ONLY),
+        )
+        val result = UpdateVersionPolicy.latestNewer(announcements, current, true)
+        assertEquals("v1.2.0-rc.8", result?.tag)
+        assertEquals(UpdateComponentScope.BOTH, result?.componentScope)
+    }
+
+    @Test fun unknownLegacyScopePreventsOverconfidentComponentAdvice() {
+        val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)!!
+        val announcements = listOf(
+            release("v1.2.0-rc.7", true, true, UpdateComponentScope.ANDROID_ONLY),
+            release("v1.2.0-rc.8", true, true, UpdateComponentScope.UNSPECIFIED),
+        )
+        assertEquals(UpdateComponentScope.UNSPECIFIED,
+            UpdateVersionPolicy.latestNewer(announcements, current, true)?.componentScope)
+    }
+
     @Test fun onlySignedApkNamesQualify() {
         assertTrue(UpdateVersionPolicy.isSignedApkName("open-margin-v1.2.0-signed.apk"))
         assertTrue(UpdateVersionPolicy.isSignedApkName("open-margin-v1.2.0-original-signature.apk"))

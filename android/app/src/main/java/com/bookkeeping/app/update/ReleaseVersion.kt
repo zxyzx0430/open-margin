@@ -81,16 +81,32 @@ object UpdateVersionPolicy {
         releases: List<PublishedRelease>,
         current: ReleaseVersion,
         includePrereleases: Boolean,
-    ): PublishedRelease? = releases.asSequence()
-        .filter { !it.prerelease || includePrereleases }
-        .filter { it.version > current }
-        .filter {
-            // Server-only releases legitimately have no APK. Android/both
-            // releases must have a signed APK, and legacy unlabelled releases
-            // are only discoverable if they contain a signed APK.
-            it.componentScope == UpdateComponentScope.SERVER_ONLY || it.hasSignedApk
+    ): PublishedRelease? {
+        val pending = releases.asSequence()
+            .filter { !it.prerelease || includePrereleases }
+            .filter { it.version > current }
+            .filter {
+                // Server-only releases legitimately have no APK. Android/both
+                // releases must have a signed APK, and legacy unlabelled releases
+                // are only discoverable if they contain a signed APK.
+                it.componentScope == UpdateComponentScope.SERVER_ONLY || it.hasSignedApk
+            }
+            .toList()
+        val latest = pending.maxByOrNull { it.version } ?: return null
+        // Aggregate the scopes of ALL pending announcements, not just the
+        // latest one. RC7 may be server-only while RC6 added an Android APK:
+        // a phone on RC5 must show BOTH updates, not only RC7's server scope.
+        val scopes = pending.map { it.componentScope }.toSet()
+        val combined = when {
+            UpdateComponentScope.UNSPECIFIED in scopes -> UpdateComponentScope.UNSPECIFIED
+            UpdateComponentScope.BOTH in scopes -> UpdateComponentScope.BOTH
+            UpdateComponentScope.ANDROID_ONLY in scopes &&
+                UpdateComponentScope.SERVER_ONLY in scopes -> UpdateComponentScope.BOTH
+            UpdateComponentScope.ANDROID_ONLY in scopes -> UpdateComponentScope.ANDROID_ONLY
+            else -> UpdateComponentScope.SERVER_ONLY
         }
-        .maxByOrNull { it.version }
+        return latest.copy(componentScope = combined)
+    }
 
     fun isSignedApkName(name: String): Boolean =
         name.endsWith("-signed.apk") || name.endsWith("-original-signature.apk")

@@ -56,3 +56,5 @@ PR #3 已将 v1.2.0 代码合并至 main，VPS 也已部署合并提交；此 UI
 Android 或双端发布必须有非空的、以 `-signed.apk` 或 `-original-signature.apk` 结尾的 APK 才提示该版本；server-only 发布无需 APK。仍不检查当前 Windows/VPS 真实部署 SHA、账本身份、版本，因此**更新范围不等于已安装服务端状态**，页面会明确提示这一限制。
 
 RC6 本身是 **android-only**：只增加显示更新类型的提示，不修改同步 API/数据库/Windows 部署内容，已经部署 v1.2.0 的 VPS 无须因 RC6 再部署。
+
+若同时存在多个更新（例如新 APK 后又发布 server-only 版本），检查器会合并**所有高于当前 APP 发布 tag 的待处理 Release 的更新范围**：APP+服务端显示“双端更新”；任何未注明范围的版本都会阻止作出过度确定的分类。此范围仍不等于远程服务器已安装版本的自动核验。
