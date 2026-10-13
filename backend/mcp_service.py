@@ -1,6 +1,7 @@
 """Read-mostly MCP interface for self-hosted transaction/recurring expense data."""
 from datetime import datetime, timezone, timedelta
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 from mcp.server.transport_security import TransportSecuritySettings
 from config import PUBLIC_HOST, PUBLIC_ORIGIN, LOCAL_TIMEZONE
 
@@ -9,7 +10,23 @@ mcp = FastMCP("Personal Finance", stateless_http=True, json_response=True, strea
         allowed_hosts=[PUBLIC_HOST, f"{PUBLIC_HOST}:*", "127.0.0.1:*", "localhost:*", "finance-api:*"],
         allowed_origins=[PUBLIC_ORIGIN, "http://127.0.0.1:*", "http://localhost:*"]))
 
-@mcp.tool()
+# These annotations describe observable behavior to ChatGPT. Authentication
+# and authorization are enforced separately by the API middleware.
+# All tools operate on this owner's bounded, private Finance / Wallos data.
+READ_ONLY = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+MUTATES_LEDGER = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,  # conservative: durable user financial changes
+    idempotentHint=False,
+    openWorldHint=False,
+)
+
+@mcp.tool(annotations=READ_ONLY)
 def list_recent_transactions(limit:int=30) -> dict:
     """Return up to 100 latest recorded payment events. Values are integer cents; unverified events are not bank-confirmed."""
     import app as core
@@ -17,7 +34,7 @@ def list_recent_transactions(limit:int=30) -> dict:
     with core.db_connection() as db:
         return {"items":[dict(r) for r in db.execute("SELECT * FROM transactions ORDER BY timestamp_ms DESC LIMIT ?",(limit,)).fetchall()]}
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 def spending_summary(start_ms:int,end_ms:int) -> dict:
     """Summarize spending, by currency and category, within an epoch-ms interval. Never combine currencies."""
     import app as core
@@ -31,14 +48,14 @@ def spending_summary(start_ms:int,end_ms:int) -> dict:
     return {"start_ms":start_ms,"end_ms":end_ms,"groups":[dict(r) for r in rows],
       "caveat":"Captured transactions may be incomplete or duplicated until verified against exports."}
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 def get_subscription_list() -> dict:
     """Retrieve current scheduled subscriptions directly from Wallos (not actual confirmed charges)."""
     from wallos_api import get_all, WallosError
     try: return {"items":get_all(),"source":"Wallos"}
     except WallosError as exc: return {"error":str(exc)}
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 def get_recurring_expense_candidates() -> dict:
     """Find likely recurring expenses; candidates require user confirmation."""
     from collections import defaultdict
@@ -55,7 +72,7 @@ def get_recurring_expense_candidates() -> dict:
         if hits:out.append({"merchant":name,"amount_cents":cents,"currency":currency,"monthly_intervals":hits,"requires_confirmation":True})
     return {"items":out}
 
-@mcp.tool()
+@mcp.tool(annotations=MUTATES_LEDGER)
 def add_subscription(name:str, amount_cents:int, currency:str, cadence:str, next_due_ms:int,
                      payment_channel:str="") -> dict:
     """Add a subscription schedule in Wallos. Does not initiate any real payment."""
@@ -86,7 +103,7 @@ def personal_finance_overview(month: str) -> dict:
     try:return snapshot(month)
     except Exception as exc:return {"error":str(exc)[:150]}
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 def personal_finance_long_term_trends(months: int=12) -> dict:
     """Historical monthly spending by currency, including linked refund deductions."""
     from integration import trends
@@ -108,20 +125,20 @@ def confirm_subscription_payment(tx_id:int,subscription_id:int,cycle_key:str) ->
     from integration import link, Link
     return link(Link(tx_id=tx_id,subscription_id=subscription_id,cycle_key=cycle_key))
 
-@mcp.tool()
+@mcp.tool(annotations=MUTATES_LEDGER)
 def edit_record(tx_id:int,amount_cents:int|None=None,merchant:str|None=None,category:str|None=None) -> dict:
     """Correct an existing ledger entry, recording an audit trail of edited fields."""
     from integration import edit_transaction, Edit
     values={k:v for k,v in {"amount_cents":amount_cents,"merchant":merchant,"category":category}.items() if v is not None}
     return edit_transaction(tx_id,Edit(**values))
 
-@mcp.tool()
+@mcp.tool(annotations=MUTATES_LEDGER)
 def register_merchant_rule(needle:str,category:str) -> dict:
     """After owner confirmation, classify future OTHER transactions from this merchant."""
     from integration import rule_add, Rule
     return rule_add(Rule(needle=needle,category=category))
 
-@mcp.tool()
+@mcp.tool(annotations=MUTATES_LEDGER)
 def link_refund(original_tx_id:int,refund_tx_id:int,amount_cents:int) -> dict:
     """Associate an existing income record with a previous expense as a refund.
     Never invent a payment or refund transaction.
@@ -129,7 +146,7 @@ def link_refund(original_tx_id:int,refund_tx_id:int,amount_cents:int) -> dict:
     from integration import refund, Refund
     return refund(Refund(original_tx_id=original_tx_id,refund_tx_id=refund_tx_id,amount_cents=amount_cents))
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 def finance_reconciliation_queue() -> dict:
     """Return unresolved statement reconciliation items requiring review."""
     import app as core
@@ -137,7 +154,7 @@ def finance_reconciliation_queue() -> dict:
         rows=db.execute("SELECT * FROM statement_rows WHERE matched_tx_id IS NULL ORDER BY id DESC LIMIT 100").fetchall()
     return {"items":[dict(r) for r in rows]}
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 def finance_duplicate_review(limit:int=50) -> dict:
     """Return transactions flagged as possible duplicates."""
     import app as core
