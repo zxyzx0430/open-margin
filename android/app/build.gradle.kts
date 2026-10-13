@@ -14,7 +14,8 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 6
+        // RC2 must upgrade both v1.1.3 (5) and v1.2.0 RC1 (6) without uninstall.
+        versionCode = 7
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
