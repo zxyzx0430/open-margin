@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,7 +35,7 @@ fun DailyBarChart(
     Column(modifier = modifier) {
         // 顶部刻度文字
         Text(
-            text = "最高 ¥${"%.2f".format(maxCents / 100.0)}",
+            text = "${tr("最高 ")}¥${"%.2f".format(maxCents / 100.0)}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),

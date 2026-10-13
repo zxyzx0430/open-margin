@@ -15,7 +15,7 @@ android {
         minSdk = 24
         targetSdk = 35
         // RC3 installs over v1.1.3 (5), RC1 (6) and RC2 (7) without uninstall.
-        versionCode = 8
+        versionCode = 9
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

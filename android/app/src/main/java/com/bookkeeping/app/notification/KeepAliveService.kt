@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.bookkeeping.app.MainActivity
 import com.bookkeeping.app.R
+import com.bookkeeping.app.i18n.AppLanguage
 
 // 前台保活服务。
 //
@@ -56,8 +57,8 @@ class KeepAliveService : Service() {
 
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("无感记账正在运行")
-            .setContentText("保持后台抓取支付宝/微信/银行短信")
+            .setContentTitle(AppLanguage.tr(context, "无感记账正在运行"))
+            .setContentText(AppLanguage.tr(context, "保持后台抓取支付宝/微信/银行短信"))
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -86,10 +87,10 @@ class KeepAliveService : Service() {
             if (manager.getNotificationChannel(CHANNEL_ID) != null) return
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "后台保活",
+                AppLanguage.tr(context, "后台保活"),
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "保持自动抓账服务在后台运行"
+                description = AppLanguage.tr(context, "保持自动抓账服务在后台运行")
                 setShowBadge(false)
             }
             manager.createNotificationChannel(channel)

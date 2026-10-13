@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.i18n.tr
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -19,6 +21,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -38,6 +41,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.sync.SyncSettingsCard
 import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 
@@ -63,7 +67,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("设置") }) }) { innerPadding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(tr("设置")) }) }) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -71,7 +75,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { SectionTitle("后台保活") }
+            item { SectionTitle(tr("后台保活")) }
             item {
                 KeepAliveCard(
                     enabled = keepAlive,
@@ -79,12 +83,15 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 )
             }
 
-            item { SectionTitle("权限授权") }
+            item { SectionTitle(tr("语言 / Language")) }
+            item { LanguageCard() }
+
+            item { SectionTitle(tr("权限授权")) }
             item {
                 PermissionCard(
-                    title = "通知使用权",
-                    desc = "用于抓取支付宝/微信支付通知。必须授权，否则自动记账无效。",
-                    buttonText = "去授权",
+                    title = tr("通知使用权"),
+                    desc = tr("用于抓取支付宝/微信支付通知。必须授权，否则自动记账无效。"),
+                    buttonText = tr("去授权"),
                     onClick = {
                         runCatching {
                             context.startActivity(
@@ -96,9 +103,9 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             }
             item {
                 PermissionCard(
-                    title = "短信权限",
-                    desc = "用于读取银行交易短信。如果你不使用银行卡或不需要银行通道，可以不开。",
-                    buttonText = "应用权限设置",
+                    title = tr("短信权限"),
+                    desc = tr("用于读取银行交易短信。如果你不使用银行卡或不需要银行通道，可以不开。"),
+                    buttonText = tr("应用权限设置"),
                     onClick = {
                         runCatching {
                             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -120,11 +127,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 )
             }
 
-            item { SectionTitle("交易双向同步（Windows / VPS）") }
+            item { SectionTitle(tr("交易双向同步（Windows / VPS）")) }
             item { WindowsFirstConnectionWizard() }
             item { SyncSettingsCard() }
 
-            item { SectionTitle("国产 ROM 后台白名单（重要）") }
+            item { SectionTitle(tr("国产 ROM 后台白名单（重要）")) }
             item { RomGuideCard() }
         }
     }
@@ -153,14 +160,14 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "常驻通知保活",
+                        text = tr("常驻通知保活"),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                     Text(
-                        text = if (enabled) "已开启：通知栏会有一条常驻提示"
-                               else "未开启：节省一条通知，但可能被国产 ROM 杀掉",
+                        text = if (enabled) tr("已开启：通知栏会有一条常驻提示")
+                               else tr("未开启：节省一条通知，但可能被国产 ROM 杀掉"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -172,9 +179,9 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
             )
             Text(
-                text = "原理：开启后 app 会启动一个前台 Service，挂在通知栏。" +
-                       "Android 系统不会随便杀正在运行前台服务的进程，从而保住通知监听不掉线。" +
-                       "代价是通知栏多一条常驻提示。",
+                text = tr("原理：开启后 app 会启动一个前台 Service，挂在通知栏。") +
+                       tr("Android 系统不会随便杀正在运行前台服务的进程，从而保住通知监听不掉线。") +
+                       tr("代价是通知栏多一条常驻提示。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
@@ -220,36 +227,36 @@ private fun AccessibilityCard(enabled: Boolean, onOpen: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = if (enabled) "无障碍兜底：已开启" else "无障碍兜底：未开启",
+                text = if (enabled) tr("无障碍兜底：已开启") else tr("无障碍兜底：未开启"),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
                 text = if (enabled)
-                    "微信转账/红包、支付宝转账入账等没有通知的场景会自动抓取。"
+                    tr("微信转账/红包、支付宝转账入账等没有通知的场景会自动抓取。")
                 else
-                    "微信转账、微信红包、支付宝转账入账等场景，通知里不含金额，必须靠无障碍服务兜底。" +
-                    "未开启会漏抓这些交易。",
+                    tr("微信转账、微信红包、支付宝转账入账等场景，通知里不含金额，必须靠无障碍服务兜底。") +
+                    tr("未开启会漏抓这些交易。"),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
 
             // 强提示：隐私边界
             Text(
-                text = "隐私说明",
+                text = tr("隐私说明"),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "无障碍权限会让本应用看到微信、支付宝两个 app 内的所有窗口内容。" +
-                       "我们已通过 packageNames 限定仅监听这两个包名（不会读取你打开的其他 app），" +
-                       "金额与商户信息默认只存在本机；若您主动开启 VPS 同步，则会上传结构化交易字段。",
+                text = tr("无障碍权限会让本应用看到微信、支付宝两个 app 内的所有窗口内容。") +
+                       tr("我们已通过 packageNames 限定仅监听这两个包名（不会读取你打开的其他 app），") +
+                       tr("金额与商户信息默认只存在本机；若您主动开启 VPS 同步，则会上传结构化交易字段。"),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
             )
 
             FilledTonalButton(onClick = onOpen) {
-                Text(if (enabled) "去无障碍设置（管理/关闭）" else "去无障碍设置（开启）")
+                Text(if (enabled) tr("去无障碍设置（管理/关闭）") else tr("去无障碍设置（开启）"))
             }
         }
     }
@@ -260,42 +267,42 @@ private fun RomGuideCard() {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "为什么需要？",
+                text = tr("为什么需要？"),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "小米、华为、OPPO、vivo 等国产 ROM 默认会激进省电，把不常用的 app 进程彻底杀掉，" +
-                       "导致支付通知到达时本应用没法被系统拉起，漏抓账单。" +
-                       "需要手动把本应用加进各家的「允许后台运行」/「自启动」白名单。",
+                text = tr("小米、华为、OPPO、vivo 等国产 ROM 默认会激进省电，把不常用的 app 进程彻底杀掉，") +
+                       tr("导致支付通知到达时本应用没法被系统拉起，漏抓账单。") +
+                       tr("需要手动把本应用加进各家的「允许后台运行」/「自启动」白名单。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
 
             RomEntry(
-                brand = "小米 / Redmi",
-                path = "设置 → 应用设置 → 应用管理 → 找到本应用 → 「自启动」打开 +「省电策略」选「无限制」",
+                brand = tr("小米 / Redmi"),
+                path = tr("设置 → 应用设置 → 应用管理 → 找到本应用 → 「自启动」打开 +「省电策略」选「无限制」"),
             )
             RomEntry(
-                brand = "华为 / 荣耀",
-                path = "设置 → 应用 → 应用启动管理 → 找到本应用 → 关闭「自动管理」→ 手动管理三项全开",
+                brand = tr("华为 / 荣耀"),
+                path = tr("设置 → 应用 → 应用启动管理 → 找到本应用 → 关闭「自动管理」→ 手动管理三项全开"),
             )
             RomEntry(
-                brand = "OPPO / 一加 / realme",
-                path = "设置 → 电池 → 应用耗电管理 → 找到本应用 → 允许后台运行 + 允许关联启动",
+                brand = tr("OPPO / 一加 / realme"),
+                path = tr("设置 → 电池 → 应用耗电管理 → 找到本应用 → 允许后台运行 + 允许关联启动"),
             )
             RomEntry(
                 brand = "vivo / iQOO",
-                path = "设置 → 电池 → 后台应用管理 → 找到本应用 → 允许后台运行",
+                path = tr("设置 → 电池 → 后台应用管理 → 找到本应用 → 允许后台运行"),
             )
             RomEntry(
-                brand = "三星",
-                path = "设置 → 设备维护 → 电池 → 未受监视应用 → 添加本应用",
+                brand = tr("三星"),
+                path = tr("设置 → 设备维护 → 电池 → 未受监视应用 → 添加本应用"),
             )
             RomEntry(
-                brand = "原生 Android (Pixel)",
-                path = "一般不用动。如有问题：设置 → 电池 → 电池优化 → 本应用 → 不优化",
+                brand = tr("原生 Android (Pixel)"),
+                path = tr("一般不用动。如有问题：设置 → 电池 → 电池优化 → 本应用 → 不优化"),
             )
         }
     }
@@ -316,5 +323,39 @@ private fun RomEntry(brand: String, path: String) {
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = 2.dp),
         )
+    }
+}
+
+/** Switch only presentation locale; no sync settings or transaction data change. */
+@Composable
+private fun LanguageCard() {
+    val context = LocalContext.current
+    var current by remember { mutableStateOf(AppLanguage.read(context)) }
+    var error by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(tr("界面语言"), style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    AppLanguage.CHINESE to "简体中文",
+                    AppLanguage.ENGLISH to "English"
+                ).forEach { (code, label) ->
+                    FilterChip(
+                        selected = current == code,
+                        onClick = {
+                            if (code != current) {
+                                if (AppLanguage.set(context, code)) {
+                                    current = code
+                                    (context as? Activity)?.recreate()
+                                } else error = true
+                            }
+                        },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            if (error) Text(tr("语言设置保存失败"),
+                color = MaterialTheme.colorScheme.error)
+        }
     }
 }

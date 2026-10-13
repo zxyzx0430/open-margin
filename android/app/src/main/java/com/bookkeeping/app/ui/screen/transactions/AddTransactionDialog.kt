@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,7 +69,7 @@ fun AddTransactionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if(initial==null)"新建账单" else "编辑账单（将同步）") },
+        title = { Text(if(initial==null)tr("新建账单") else tr("编辑账单（将同步）")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // 收入 / 支出 切换
@@ -76,19 +77,19 @@ fun AddTransactionDialog(
                     FilterChip(
                         selected = selectedType == TransactionType.EXPENSE,
                         onClick = { selectedType = TransactionType.EXPENSE },
-                        label = { Text("支出") }
+                        label = { Text(tr("支出")) }
                     )
                     FilterChip(
                         selected = selectedType == TransactionType.INCOME,
                         onClick = { selectedType = TransactionType.INCOME },
-                        label = { Text("收入") }
+                        label = { Text(tr("收入")) }
                     )
                 }
 
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("金额（元）") },
+                    label = { Text(tr("金额（元）")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     isError = amountText.isNotEmpty() && !amountValid,
@@ -101,10 +102,10 @@ fun AddTransactionDialog(
                     onExpandedChange = { categoryMenuExpanded = it }
                 ) {
                     OutlinedTextField(
-                        value = selectedCategory.displayName,
+                        value = tr(selectedCategory.displayName),
                         onValueChange = { },
                         readOnly = true,
-                        label = { Text("分类") },
+                        label = { Text(tr("分类")) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
@@ -114,7 +115,7 @@ fun AddTransactionDialog(
                     ) {
                         TransactionCategory.entries.forEach { cat ->
                             DropdownMenuItem(
-                                text = { Text(cat.displayName) },
+                                text = { Text(tr(cat.displayName)) },
                                 onClick = {
                                     selectedCategory = cat
                                     categoryMenuExpanded = false
@@ -127,7 +128,7 @@ fun AddTransactionDialog(
                 OutlinedTextField(
                     value = merchant,
                     onValueChange = { merchant = it },
-                    label = { Text("商户/对方（可选）") },
+                    label = { Text(tr("商户/对方（可选）")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -135,7 +136,7 @@ fun AddTransactionDialog(
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
-                    label = { Text("备注（可选）") },
+                    label = { Text(tr("备注（可选）")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -148,10 +149,10 @@ fun AddTransactionDialog(
                     onConfirm(amount, selectedType, selectedCategory, merchant, note)
                 },
                 enabled = amountValid
-            ) { Text("保存") }
+            ) { Text(tr("保存")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
 }
