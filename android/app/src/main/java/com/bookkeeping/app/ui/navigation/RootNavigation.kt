@@ -2,6 +2,7 @@ package com.bookkeeping.app.ui.navigation
 
 import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -15,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -49,8 +52,23 @@ fun RootNavigation() {
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(item.icon, contentDescription = tr(item.label)) },
-                        label = { Text(tr(item.label)) },
+                        icon = {
+                            Icon(
+                                item.icon,
+                                contentDescription = tr(item.label),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        },
+                        // Keep navigation compact at large system font sizes:
+                        // English "Transactions" previously wrapped to two lines.
+                        label = {
+                            Text(
+                                text = tr(item.label),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                     )
                 }
             }
