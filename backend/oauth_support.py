@@ -114,8 +114,15 @@ async def register(request: Request):
         "grant_types":["authorization_code","refresh_token"],
         "response_types":["code"],"token_endpoint_auth_method":"none"})
 
-def consent_page(request_id: str,client_name: str,msg: str="") -> HTMLResponse:
+def consent_page(request_id: str,client_name: str,msg: str="",scopes: str="finance:read") -> HTMLResponse:
     notice='<p class="warn">'+html.escape(msg)+'</p>' if msg else ''
+    granted=set(scopes.split())
+    if {"finance:read", "finance:write"} <= granted:
+        access_note="允许查询并修改清衡账本中的交易、分类规则和订阅信息（不会发起真实支付）。"
+    elif "finance:write" in granted:
+        access_note="只允许执行账本写入工具，不包含财务数据的查询权限（不会发起真实支付）。"
+    else:
+        access_note="只允许查询财务信息，不允许修改交易、分类规则或订阅。"
     body=f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta http-equiv="Cache-Control" content="no-store"><title>授权 Personal Finance</title>
@@ -126,8 +133,8 @@ def consent_page(request_id: str,client_name: str,msg: str="") -> HTMLResponse:
     button{{background:#165ac6;color:white;padding:12px;border:0;border-radius:8px;width:100%}}
     .muted{{color:#65728a;font-size:.9em}}.warn{{color:#a02d31}}</style></head><body>
     <main><h2>授权 ChatGPT 查询个人财务</h2><p>应用：{html.escape(client_name)}</p>
-    <p class="muted">允许访问你的交易、消费统计和订阅管理记录。授权后可能执行添加订阅等写操作，
-    不具备真实扣费权限。</p>{notice}
+    <p class="muted">{html.escape(access_note)}</p>
+    <p class="muted">本次授权权限：{html.escape(scopes)}</p>{notice}
     <form method="post" action="{ISSUER}/authorize" autocomplete="off">
       <input type="hidden" name="request_id" value="{html.escape(request_id)}">
       <label>Wallos 用户名</label><input name="username" autocomplete="username" required>
@@ -156,7 +163,7 @@ async def authorize(request:Request):
     if (q.get("response_type")!="code" or q.get("code_challenge_method")!="S256" or
         not re.fullmatch(r"[A-Za-z0-9_~-]{43,128}",challenge)):
         raise HTTPException(400,"Authorization code with PKCE S256 required")
-    scopes=set((q.get("scope") or "finance:read finance:write").split())
+    scopes=set((q.get("scope") or "finance:read").split())
     if not scopes or not scopes.issubset(SCOPES):
         raise HTTPException(400,"Unsupported scope")
     resource=q.get("resource",RESOURCE)
@@ -171,7 +178,7 @@ async def authorize(request:Request):
         db.execute("INSERT INTO pending VALUES (?,?,?,?,?,?,?,?)",
                    (request_id,client_id,redirect_uri,challenge,q.get("state"),
                     " ".join(sorted(scopes)),RESOURCE,int(time.time())+600))
-    return consent_page(request_id,row["client_name"])
+    return consent_page(request_id,row["client_name"],scopes=" ".join(sorted(scopes)))
 
 @router.post("/oauth/authorize")
 async def accept(request_id:str=Form(...),username:str=Form(...),password:str=Form(...)):
@@ -191,7 +198,7 @@ async def accept(request_id:str=Form(...),username:str=Form(...),password:str=Fo
               <p>这不代表账号密码错误。新的连接会生成新的一次性授权请求。</p>
               </body></html>""",status_code=410,headers={"Cache-Control":"no-store"})
         if not owner_ok(username,password):
-            return consent_page(request_id,row["client_name"],"Wallos 用户名或密码不正确。")
+            return consent_page(request_id,row["client_name"],"Wallos 用户名或密码不正确。",scopes=row["scope"])
         db.execute("DELETE FROM pending WHERE request_id=?",(request_id,))
         code=secrets.token_urlsafe(48)
         db.execute("INSERT INTO auth_codes VALUES (?,?,?,?,?,?,?)",

@@ -257,6 +257,7 @@ app.include_router(integration_router)
 from contextlib import asynccontextmanager
 from fastapi import Request
 from mcp_service import mcp
+from mcp_access import InvalidMCPCall, required_scope
 from oauth_support import router as oauth_router, verify_access_token
 app.include_router(oauth_router)
 
@@ -279,17 +280,19 @@ async def mcp_authentication(request: Request, call_next):
             return JSONResponse(status_code=401,content={"detail":"OAuth authorization required"},
               headers={"WWW-Authenticate": f'Bearer resource_metadata="{PUBLIC_BASE}/.well-known/oauth-protected-resource"'})
         if oauth_ok and not admin_ok and request.method == "POST":
-            # An OAuth read-only grant must not call a modifying MCP tool.
+            # Scope the specific tool call; never assume an unknown tool is read-only.
+            # MCP uses individual JSON-RPC messages (not batches).
+            from fastapi.responses import JSONResponse
             try:
                 payload = await request.json()
-                is_write = payload.get("method") == "tools/call" and payload.get("params",{}).get("name") in (
-                    "add_subscription","confirm_subscription_payment","edit_record",
-                    "register_merchant_rule","link_refund")
-            except (ValueError,AttributeError,TypeError):
-                is_write = False
-            if is_write and not verify_access_token(token,"finance:write"):
-                from fastapi.responses import JSONResponse
-                return JSONResponse(status_code=403,content={"detail":"finance:write scope required"})
+                scope = required_scope(payload)
+            except (ValueError, TypeError):
+                return JSONResponse(status_code=400, content={"detail": "Invalid MCP request"})
+            if scope is not None and not verify_access_token(token, scope):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": f"{scope} scope required"},
+                )
     return await call_next(request)
 
 app.mount("/mcp", mcp.streamable_http_app())
