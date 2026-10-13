@@ -10,7 +10,7 @@
 
 ## 本版整合功能
 
-1. Android Room v1→v2→v3 非破坏性迁移；原 applicationId，versionName 1.2.0，versionCode 6；离线交易、后台 WorkManager 同步。
+1. Android Room v1→v2→v3 非破坏性迁移；原 applicationId，versionName 1.2.0，当前 RC5 versionCode 10（RC4 为 9）；离线交易、后台 WorkManager 同步。
 2. Android 与 Finance API 交易双向新增、修改、删除；服务器修订号、幂等操作、删除墓碑、逐笔冲突人工确认、服务器身份与游标检查；手机端可以更新排除状态。
 3. 单一 Docker Compose 支持 Windows（Docker Desktop）与 Linux/VPS；Finance API、Wallos、SQLite 数据模型一致。
 4. Windows 本地仅 `127.0.0.1` 访问；可选 `windows-private-sync` Nginx 网关，API-only 私有 Tailscale Serve；显式 `PrivateFull` 模式。
@@ -37,7 +37,7 @@
 
 - [ ] 整合最终提交 Android 单元测试及 Release APK 构建通过。
 - [ ] Windows 10/11 Docker Desktop 空白环境，按公开 README 实际安装、注册、登录、配置 Tailscale、同步成功。
-- [ ] Android 真机 v1.1.3 → 1.2.0 **同证书签名**直接覆盖安装，Room、未同步交易和同步设置保留，校验 versionCode 6。
+- [ ] Android 真机 v1.1.3 → 1.2.0 **同证书签名**直接覆盖安装，Room、未同步交易和同步设置保留，校验新版本 versionCode 10 或最终发布更高的代码。
 - [ ] 退款关联、服务器数据库旧备份恢复后游标与身份一致性、手机离线恢复端到端验收。
 - [ ] 使用隔离生产数据副本对照旧版与新版汇总，完成生产全库在线备份及恢复演练；配置、证书、旧镜像及回滚路径均可用。
 - [ ] 完成 PR 审查、最新 CI、明确生产变更批准，合并 `main`，由原签名证书签署正式 APK 并上传 GitHub v1.2.0 Release。
