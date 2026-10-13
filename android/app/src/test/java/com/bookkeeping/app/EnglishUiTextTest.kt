@@ -19,9 +19,14 @@ class EnglishUiTextTest {
             "转账" to "Transfer",
             "同步关闭或尚未执行" to "Sync off or not yet run",
             "启用双向同步" to "Enable two-way sync",
+            "待更新组件：" to "Update components: ",
             "关于与更新" to "About & updates",
             "检查更新" to "Check for updates",
             "浏览全部发布版本" to "Browse all releases",
+            "仅 Android APP 更新" to "Android app only",
+            "仅 Windows / VPS 更新" to "Windows / VPS only",
+            "Android APP 与 Windows / VPS 都有更新" to "Both Android app and Windows / VPS",
+            "更新范围未注明" to "Update scope not specified",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
