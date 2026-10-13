@@ -57,6 +57,7 @@ fun WindowsFirstConnectionWizard() {
                             label = { Text("Tailscale HTTPS 地址") },
                             placeholder = { Text("https://电脑名.网络名.ts.net/finance") },
                             singleLine = true,
+                            enabled = !testing,
                             modifier = Modifier.fillMaxWidth()
                         )
                         OutlinedTextField(
@@ -65,6 +66,7 @@ fun WindowsFirstConnectionWizard() {
                             label = { Text("设备同步密钥（不会显示）") },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
+                            enabled = !testing,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Text("连接测试只读取账本身份与版本，不会创建或修改交易。")
@@ -89,20 +91,30 @@ fun WindowsFirstConnectionWizard() {
                                     message = "手机已有另一台服务器的账本，不能直接切换；请先完成备份和迁移。"
                                     return@Button
                                 }
+                                val checkedToken = token.trim()
+                                val checkedServer = prefs.getString("sync_server_id", null)
+                                val checkedCursor = prefs.getLong("last_pull_revision", 0L)
                                 testing = true
                                 message = "正在验证 HTTPS、设备密钥和服务器账本身份…"
                                 scope.launch {
                                     val probe = withContext(Dispatchers.IO) {
                                         probeWindowsServer(
-                                            address, token.trim(),
-                                            prefs.getString("sync_server_id", null),
-                                            prefs.getLong("last_pull_revision", 0L)
+                                            address, checkedToken, checkedServer, checkedCursor
                                         )
                                     }
                                     testing = false
-                                    testResult = probe.first
-                                    verifiedServer = probe.second
-                                    message = connectionExplanation(probe.first)
+                                    // Never accept a result from a request for previous
+                                    // credentials if inputs changed before it completed.
+                                    if (!WindowsConnectionPolicy.isSameAttempt(
+                                            address, checkedToken, url, token)) {
+                                        testResult = null
+                                        verifiedServer = ""
+                                        message = "连接参数已改变，请重新测试"
+                                    } else {
+                                        testResult = probe.first
+                                        verifiedServer = probe.second
+                                        message = connectionExplanation(probe.first)
+                                    }
                                 }
                             }) { Text("测试连接") }
                         }
@@ -176,11 +188,21 @@ private fun probeWindowsServer(
         val status = conn.responseCode
         if (status != 200) return WindowsConnectionPolicy.response(status, null) to ""
         val body = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        val remoteHead = (body.opt("head_revision") as? Number)?.toLong() ?: -1L
+        val remoteCursor = (body.opt("cursor") as? Number)?.toLong() ?: -1L
+        val items = body.optJSONArray("items")
+        val hasMore = body.opt("has_more") as? Boolean
+        if (!WindowsConnectionPolicy.isValidProbeEnvelope(
+                cursor, remoteCursor, remoteHead, items?.length(), hasMore)) {
+            return WindowsConnectionPolicy.Result.INVALID_RESPONSE to ""
+        }
         val identity = body.optString("server_id", "")
         val decision = SyncServerIdentityPolicy.evaluate(
-            expectedIdentity, cursor, identity, body.optLong("head_revision", -1L)
+            expectedIdentity, cursor, identity, remoteHead
         )
         return WindowsConnectionPolicy.response(status, decision) to identity
+    } catch (_: org.json.JSONException) {
+        return WindowsConnectionPolicy.Result.INVALID_RESPONSE to ""
     } catch (_: Exception) {
         return WindowsConnectionPolicy.Result.UNAVAILABLE to ""
     } finally {
