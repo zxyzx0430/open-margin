@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Original left-top A2 glass-pane artwork, directly cropped from user reference. -->
-    <background android:drawable="@drawable/ic_launcher_tile" />
-    <foreground android:drawable="@drawable/ic_launcher_empty" />
+    <!-- Keep the full A2 reference inside the Android 72/108dp visible mask.
+         Do not place artwork on the full-bleed background: that crops the blue panels. -->
+    <background android:drawable="@drawable/ic_launcher_bg_gradient" />
+    <foreground android:drawable="@drawable/ic_launcher_full_artwork" />
     <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>
