@@ -42,6 +42,10 @@ jobs:
             set -e
             chmod +x gradlew
             ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest
+            # Instrumentation tests may uninstall the app when they finish.
+            # Reinstall explicitly before the independent application-start check.
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell pm list packages | grep -F 'package:com.bookkeeping.app.sync2'
             adb shell am start -W -n com.bookkeeping.app.sync2/com.bookkeeping.app.MainActivity
             sleep 8
             adb shell pidof com.bookkeeping.app.sync2
