@@ -1,48 +1,52 @@
-# 清衡 Open Margin｜Windows 本地部署
+# 清衡 Open Margin｜v1.2.0 Windows 本地部署
 
-**不要求 VPS、固定公网 IP 或自己的域名。** Windows + Docker Desktop 运行 Finance API、Wallos 和 SQLite；Android 仍然本地记录，电脑上线后补传和下载。
+Windows 和 VPS 共用 `compose.yaml`、Finance API、Wallos、SQLite 结构及 Android 双向同步协议。区别只是连接入口。**默认 Web 仅可从 Windows 本机访问，远程同步接口需要单独开启。**
 
-## 必备
+## 方案 A：只在 Windows 本机使用（不需要 Tailscale）
 
-- Windows 10/11、Docker Desktop Linux containers / WSL2、Git、PowerShell 5.1+。
-- 手机需要同步时：Windows 与 Android 登录同一 Tailscale 网络，开启 MagicDNS 和 HTTPS 证书。
-- 避免抢注：第一次只能在本机 localhost 注册 Wallos 管理员；完成注册后再开启 Tailscale Serve。
+准备 Windows 10/11、Git、Docker Desktop（Linux containers / WSL2）、PowerShell 5.1+。Docker Desktop 启动后：
 
-## 安装命令（PowerShell）
+~~~powershell
+git clone https://github.com/zxyzx0430/open-margin.git
+cd open-margin
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
+~~~
 
-    git clone https://github.com/zxyzx0430/open-margin.git
-    cd open-margin
+打开 `http://127.0.0.1:18082/` 注册首位 Wallos 用户，并使用该账号登录。默认 Finance API 端口 `127.0.0.1:8767`、Wallos `127.0.0.1:18082`；API-only 网关 `127.0.0.1:18768` 使用同一 Compose 可选 profile，但**未启用 Tailscale Serve 时不对远端开放**。
 
-第一次只在 Windows 本机部署（**不需要 Tailscale、域名或 HTTPS 证书**）：
+## 方案 B：Windows + Android 私有双向同步（推荐 API-only）
 
-    powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
+Windows 和 Android 均安装并登录 Tailscale，加入同一 tailnet；Tailscale 管理台开启 MagicDNS 和 HTTPS。首位 Wallos 管理员必须先通过本机 `127.0.0.1:18082` 注册。
 
-本地部署只提供 Web 管理；Android 仍可离线记账，但要让手机与电脑同步，必须随后配置私有 HTTPS 入口。
+在项目根目录执行首次安装向导：
 
-访问本机 http://127.0.0.1:18082/ ，注册第一位 Wallos 用户。只有需要手机同步时，再在电脑和手机安装、登录 Tailscale，然后执行：
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\windows\Start-OpenMarginSetup.ps1
+~~~
 
-    powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1 -PublicBase "https://desk-01.example-tailnet.ts.net/finance" -ConfigureTailscale
+向导检查 Docker、Tailscale，识别 `*.ts.net` HTTPS 主机名，启动同一套 Docker Compose，并在注册成功且用户输入 `READY` 后才开启私有 Tailscale Serve。默认 `ApiOnly` 通过独立 Nginx 网关转发同步相关路径；**不会对手机开放 Wallos、OAuth、MCP 或财务管理 API**。
 
-该脚本用 Tailscale Serve（**不是公开的 Funnel**）将 HTTPS 的 /finance 映射到本机 8767 端口，/finance/wallos 映射到本机 18082 端口。先用手机浏览器验证以下网址能访问：
-- https://desk-01.example-tailnet.ts.net/finance/health
-- https://desk-01.example-tailnet.ts.net/finance/wallos/
+已有本机安装也可以明确执行：
 
-Android 设置 → 清衡双向同步：
-- **HTTPS 服务器地址：** https://desk-01.example-tailnet.ts.net/finance
-- **设备密钥：** secrets/backend.env 文件内的 FINANCE_DEVICE_TOKEN。
-- 开启双向同步，点击「立即同步」。若 HTTPS 路由返回 404，不要关闭证书校验；检查 tailscale serve status 与路径重写是否正确。
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1 -PublicBase "https://your-pc.your-tailnet.ts.net/finance" -ExposureMode ApiOnly -ConfigureTailscale
+~~~
 
-**不能直接填 http://192.168.1.100:8767。** Android 的同步客户端只允许 HTTPS；局域网 IP 会变化，Tailscale 节点域名更稳定。若执意使用局域网 IP，需要自己安装可被手机信任的 HTTPS 证书和反向代理。
+如果需要在 tailnet 内访问完整网站，只能在首次安装时明确选用 `-ExposureMode PrivateFull`。已有模式不允许无审计切换，安装器不会自动清空或覆盖其他应用的 Serve 路由；不要使用公开的 `tailscale funnel`。
 
-## 日常运行与备份
+Android 进入 **设置 → Windows 首次连接向导**，输入 `https://your-pc.your-tailnet.ts.net/finance` 和本机 `secrets/backend.env` 中 `FINANCE_DEVICE_TOKEN`。先做只读连接测试，核对服务器账本身份和同步游标，再确认启用。也可继续使用原 VPS 同步状态卡。
 
-- 电脑关闭 / Docker Desktop 停止：手机离线继续自动记账，编辑和删除保存为待同步操作；重新开机联网再同步。
-- WorkManager 后台任务约每 15 分钟尝试补偿同步，受 Android 省电系统影响。App 有「立即同步」按钮。
-- SQLite 在 Docker 命名卷里，升级源码不会主动删库。**严禁使用 docker compose down -v**。
-- 可运行：docker compose --profile maintenance run --rm backup。加密备份应另存到不同硬盘。
-- 旧版 Android 已经删除、但从未记录同步删除标记的交易无法自动还原当时删除时间。第一次开启双向同步应人工核对这些历史记录。
-- 如果两端对同一条交易的修改先后不明确，先保留待处理状态，在 App 设置里选「使用本机」或「使用服务器」。
-- 双向范围是交易记录；Wallos 订阅和预算仍由网站管理，不是 Android 本地的完整复制。
-- 签名不同的 APK 无法覆盖旧应用，不能为了更新直接卸载。
+**API-only 正常响应：** `/finance/health` → 200；`/finance/api/v2/sync/changes` 无设备密钥 → 401；`/finance/wallos/` → 404。不要因 404 而关闭 Android HTTPS 校验；这是隔离策略。
 
-Tailscale 官方：https://tailscale.com/docs/reference/tailscale-cli/serve
+## 备份、恢复与排障
+
+- Windows 关闭、Docker 停止或 Tailscale 离线时，Android Room 仍可继续记账，恢复网络后由 WorkManager 补传（后台约 15 分钟起，实际受系统限制）。
+- SQLite 使用 Docker 命名卷，源码更新不会主动清空它。**不要使用 `docker compose down -v`，不要删除旧 APK 以尝试升级。**
+- 运行 `docker compose --profile maintenance run --rm backup` 备份已初始化的 Finance、Wallos 与 OAuth SQLite。备份在宿主机外的独立介质保留更稳妥。
+- `docker compose ps` 检查容器；`docker compose logs --tail=100 finance-api` 排查后端；`tailscale serve status --json` 查看 Serve 路由；同时检查 Docker Desktop、手机 Tailscale 和证书。
+- 手机不能直接切换到另一份未经迁移的服务器账本；服务器版本、身份或游标不一致时停止并人工核对。
+- 手机与网站目前双向复制交易记录与排除状态，服务器管理退款关系和订阅预算。原 v1.1.3 已删除且未留下删除标记的记录无法从历史中自动重建。
+
+更完整的使用状态见 [Windows 首次连接详细文档](WINDOWS_PRIVATE_FIRST_CONNECTION.md)。Tailscale CLI 规则以 [官方 Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve) 为准。
+
+**验收约束：** 只有完成 Windows 实机从零安装、Android 首次连接和 v1.1.3 → v1.2.0 同签名无损升级后，才可将 v1.2.0 宣称为正式发布可用。

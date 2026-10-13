@@ -1,0 +1,45 @@
+name: Windows Install Script Syntax
+
+on:
+  push:
+    paths:
+      - 'deploy/windows/**'
+      - '.github/workflows/windows-script-validation.yml'
+  pull_request:
+    paths:
+      - 'deploy/windows/**'
+      - '.github/workflows/windows-script-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-parse:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse first-install and regular installer scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @(
+            'deploy/windows/Install-OpenMargin.ps1',
+            'deploy/windows/Start-OpenMarginSetup.ps1'
+          )
+          foreach ($path in $paths) {
+            $tokens = $null
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path).Path, [ref]$tokens, [ref]$errors
+            )
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$path : $($_.Message)" }
+              throw "PowerShell parse failed: $path"
+            }
+            Write-Host "PASS: $path"
+          }
+          if (Select-String -Path $paths -Pattern '^(<<<<<<<|=======|>>>>>>>)') {
+            throw 'Unresolved merge markers found'
+          }
+          Write-Host 'Windows PowerShell script syntax checks passed'
