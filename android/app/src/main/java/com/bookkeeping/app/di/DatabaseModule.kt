@@ -28,7 +28,7 @@ object DatabaseModule {
             BookkeepingDatabase::class.java,
             BookkeepingDatabase.DB_NAME
         )
-            // 开发阶段：升级时直接丢库重建。正式上线必须改为正式 migration。
+            .addMigrations(BookkeepingDatabase.MIGRATION_1_2, BookkeepingDatabase.MIGRATION_2_3)
             .build()
     }
 

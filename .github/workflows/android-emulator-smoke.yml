@@ -1,0 +1,68 @@
+name: Android Emulator Launch Smoke
+
+on:
+  push:
+    branches:
+      - fix/v1.2.0-adaptive-icon-padding-20261013
+      - 'fix/v1.2.0-*'
+      - integration/v1.2.0-final-20261013
+      - feat/v1.2.0-android-languages-20261013
+    paths:
+      - 'android/app/src/main/**'
+      - 'android/app/build.gradle.kts'
+      - 'android/app/src/androidTest/**'
+      - '.github/workflows/android-emulator-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Enable KVM for Android emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator instrumentation and application startup
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          working-directory: android
+          disable-animations: true
+          script: |
+            set -e
+            chmod +x gradlew
+            ./gradlew --no-daemon --stacktrace connectedDebugAndroidTest
+            # Instrumentation tests may uninstall the app when they finish.
+            # Reinstall explicitly before the independent application-start check.
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell pm list packages | grep -F 'package:com.bookkeeping.app.sync2'
+            adb shell am start -W -n com.bookkeeping.app.sync2/com.bookkeeping.app.MainActivity
+            sleep 8
+            adb shell pidof com.bookkeeping.app.sync2
+            mkdir -p emulator-proof
+            adb shell screencap -p /sdcard/openmargin_app_launch.png
+            adb pull /sdcard/openmargin_app_launch.png emulator-proof/app_launch.png
+            echo "EMULATOR_INSTRUMENTATION_AND_APP_START_PASS"
+      - name: Upload emulator run evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-launch-evidence
+          path: |
+            android/emulator-proof/*.png
+            android/app/build/reports/androidTests/connected/**
+          if-no-files-found: warn
+          retention-days: 7

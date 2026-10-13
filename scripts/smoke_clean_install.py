@@ -10,14 +10,25 @@ from zoneinfo import ZoneInfo
 
 HOME=Path(__file__).resolve().parent.parent
 # Do not allow this synthetic-transaction integration test to touch production.
-local_env=(HOME/".env").read_text()
-assert "FINANCE_API_PORT=18767" in local_env and "WALLOS_PORT=18083" in local_env, "Staging-only ports required"
+local_env={}
+for line in (HOME/".env").read_text().splitlines():
+    if "=" in line and not line.lstrip().startswith("#"):
+        key,val=line.split("=",1)
+        local_env[key.strip()]=val.strip()
+api_port=int(local_env.get("FINANCE_API_PORT","8767"))
+wallos_port=int(local_env.get("WALLOS_PORT","18082"))
+# Never run a destructive synthetic-data smoke test against standard production ports.
+assert 1024<=api_port<=65535 and 1024<=wallos_port<=65535, "Invalid staging ports"
+assert api_port not in (8767,18082) and wallos_port not in (8767,18082), "Staging-only ports required"
+assert api_port!=wallos_port
 assert "FINANCE_PUBLIC_URL=https://finance.example.com/finance" in (HOME/"secrets/backend.env").read_text(), "Example-domain staging required"
 cfg={}
-for s in (HOME/"secrets/backend.env").read_text().splitlines():
-    if "=" in s: a,b=s.split("=",1);cfg[a]=b
-finance="http://127.0.0.1:18767"
-wallos="http://127.0.0.1:18083"
+for line in (HOME/"secrets/backend.env").read_text().splitlines():
+    if "=" in line:
+        a,b=line.split("=",1)
+        cfg[a]=b
+finance=f"http://127.0.0.1:{api_port}"
+wallos=f"http://127.0.0.1:{wallos_port}"
 assert "127.0.0.1" in finance and "127.0.0.1" in wallos
 owner="test-owner-"+secrets.token_hex(3)
 passphrase=secrets.token_urlsafe(25)
@@ -88,11 +99,52 @@ check(r.status_code==303 and "notice=added" in r.headers.get("Location",""),
       "Native PHP manual expense saved")
 r=session.get(wallos+"/expenses.php?month=2026-10",timeout=25)
 check("12.34" in r.text,"Manually added transaction visible")
-integrated=session.get(wallos+"/integration.php?month=2026-10",timeout=30)
-check(integrated.status_code==200 and "订阅 × 消费对账" in integrated.text,
-      "Wallos-native subscription reconciliation page renders")
-check("综合月度概览" in integrated.text and "商户自动分类规则" in integrated.text,
-      "Unified forecast, matching and merchant-rule panels available")
+# The old subscription-to-payment reconciliation page is deliberately retired.
+# Verify the integrated native Wallos statistics/calendar and v2 two-way changes.
+for native in ("stats.php","calendar.php"):
+    view=session.get(wallos+"/"+native+"?finance_month=2026-10",timeout=25)
+    check(view.status_code==200 and "finance" in view.text.lower(),
+          "Native "+native+" remains available")
+syncurl=finance+"/api/v2/sync"
+denied=requests.get(syncurl+"/changes",timeout=12)
+check(denied.status_code==401,"Device sync pull denies anonymous access")
+feed=requests.get(syncurl+"/changes",params={"since":0,"limit":100},
+                  headers=headers,timeout=12)
+check(feed.status_code==200 and len(feed.json()["items"])>=1,
+      "Server-to-phone feed includes existing expenses")
+# Use an independent synthetic item; do not mutate demo payment used for CSV assertions.
+seed_event="android:smoke-sync:example"
+sync_record={
+    "timestamp_ms":event["timestamp_ms"],"amount_cents":2650,"currency":"CNY",
+    "direction":"EXPENSE","source":"WECHAT","category":"FOOD","merchant":"Sync demo"
+}
+def mutate(op_id,revision,action,record=sync_record):
+    op={"mutation_id":op_id,"event_id":seed_event,"base_revision":revision,
+        "action":action}
+    if action=="upsert":op["record"]=record
+    ans=requests.post(syncurl+"/push",headers=headers,json={"operations":[op]},timeout=12)
+    check(ans.status_code==200,"Bidirectional "+action+" request accepted")
+    return ans.json()["results"][0]
+created=mutate("smoke-sync-create-001",0,"upsert")
+check(created["status"]=="applied","Phone-created transaction stored with revision")
+replay=mutate("smoke-sync-create-001",0,"upsert")
+check(replay["revision"]==created["revision"],"Mutation retries are idempotent")
+manual_ledger=requests.post(finance+"/api/v1/wallos-ledger/manual",
+    json={"idempotency_key":str(uuid.uuid4()),"timestamp_ms":event["timestamp_ms"],
+          "amount_cents":100,"currency":"CNY","direction":"EXPENSE",
+          "category":"OTHER","merchant":"Remote simulated edit"},
+    headers={"X-Wallos-Ledger-Token":cfg["FINANCE_WALLOS_LEDGER_TOKEN"]},timeout=12)
+check(manual_ledger.status_code==200,"Server-side Wallos entry creation")
+changes=requests.get(syncurl+"/changes",params={"since":created["revision"]},
+                     headers=headers,timeout=12)
+check(changes.status_code==200 and len(changes.json()["items"])>=1,
+      "Server-native changes appear in Android download stream")
+removed=mutate("smoke-sync-delete-002",created["revision"],"delete")
+check(removed["status"]=="applied","Phone deletion recorded with tombstone")
+retry_old=requests.post(finance+"/api/v1/transactions/batch",
+   headers=headers,json={"events":[{**sync_record,"event_id":seed_event}]},timeout=12)
+check(retry_old.status_code==200 and retry_old.json()["inserted"]==0,
+      "Old offline phone replay cannot resurrect tombstoned transaction")
 
 # Export and PHP budget save test, both same Wallos login.
 export=session.get(wallos+"/expenses-export.php?month=2026-10",timeout=25)

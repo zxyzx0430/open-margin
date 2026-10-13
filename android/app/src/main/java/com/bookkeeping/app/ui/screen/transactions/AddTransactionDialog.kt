@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.MoneyAmount
 
@@ -35,6 +37,7 @@ import com.bookkeeping.app.data.MoneyAmount
 @Composable
 fun AddTransactionDialog(
     onDismiss: () -> Unit,
+    initial: TransactionEntity? = null,
     onConfirm: (
         amountCents: Long,
         type: TransactionType,
@@ -44,18 +47,29 @@ fun AddTransactionDialog(
     ) -> Unit,
 ) {
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
-    var amountText by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
-    var selectedCategory by remember { mutableStateOf(TransactionCategory.FOOD) }
-    var merchant by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
+    var amountText by remember(initial?.id) {
+        mutableStateOf(initial?.let {
+            (it.amountCents / 100).toString() + "." +
+                (it.amountCents % 100).toString().padStart(2,'0')
+        } ?: "")
+    }
+    var selectedType by remember(initial?.id) {
+        mutableStateOf(runCatching { TransactionType.valueOf(initial?.type ?: "EXPENSE") }
+            .getOrDefault(TransactionType.EXPENSE))
+    }
+    var selectedCategory by remember(initial?.id) {
+        mutableStateOf(runCatching { TransactionCategory.valueOf(initial?.category ?: "FOOD") }
+            .getOrDefault(TransactionCategory.OTHER))
+    }
+    var merchant by remember(initial?.id) { mutableStateOf(initial?.merchant ?: "") }
+    var note by remember(initial?.id) { mutableStateOf(initial?.note ?: "") }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
 
     val amountValid = MoneyAmount.cents(amountText) != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建账单") },
+        title = { Text(if(initial==null)tr("新建账单") else tr("编辑账单（将同步）")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 // 收入 / 支出 切换
@@ -63,19 +77,19 @@ fun AddTransactionDialog(
                     FilterChip(
                         selected = selectedType == TransactionType.EXPENSE,
                         onClick = { selectedType = TransactionType.EXPENSE },
-                        label = { Text("支出") }
+                        label = { Text(tr("支出")) }
                     )
                     FilterChip(
                         selected = selectedType == TransactionType.INCOME,
                         onClick = { selectedType = TransactionType.INCOME },
-                        label = { Text("收入") }
+                        label = { Text(tr("收入")) }
                     )
                 }
 
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("金额（元）") },
+                    label = { Text(tr("金额（元）")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     isError = amountText.isNotEmpty() && !amountValid,
@@ -88,10 +102,10 @@ fun AddTransactionDialog(
                     onExpandedChange = { categoryMenuExpanded = it }
                 ) {
                     OutlinedTextField(
-                        value = selectedCategory.displayName,
+                        value = tr(selectedCategory.displayName),
                         onValueChange = { },
                         readOnly = true,
-                        label = { Text("分类") },
+                        label = { Text(tr("分类")) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth()
                     )
@@ -101,7 +115,7 @@ fun AddTransactionDialog(
                     ) {
                         TransactionCategory.entries.forEach { cat ->
                             DropdownMenuItem(
-                                text = { Text(cat.displayName) },
+                                text = { Text(tr(cat.displayName)) },
                                 onClick = {
                                     selectedCategory = cat
                                     categoryMenuExpanded = false
@@ -114,7 +128,7 @@ fun AddTransactionDialog(
                 OutlinedTextField(
                     value = merchant,
                     onValueChange = { merchant = it },
-                    label = { Text("商户/对方（可选）") },
+                    label = { Text(tr("商户/对方（可选）")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -122,7 +136,7 @@ fun AddTransactionDialog(
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
-                    label = { Text("备注（可选）") },
+                    label = { Text(tr("备注（可选）")) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -135,10 +149,10 @@ fun AddTransactionDialog(
                     onConfirm(amount, selectedType, selectedCategory, merchant, note)
                 },
                 enabled = amountValid
-            ) { Text("保存") }
+            ) { Text(tr("保存")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
 }

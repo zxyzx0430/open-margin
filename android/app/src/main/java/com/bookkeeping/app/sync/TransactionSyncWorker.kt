@@ -34,15 +34,30 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         val installation = prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
             prefs.edit().putString("installation_id", it).commit()
         }
-        val db = Room.databaseBuilder(applicationContext, BookkeepingDatabase::class.java, BookkeepingDatabase.DB_NAME).build()
+        val db = Room.databaseBuilder(applicationContext, BookkeepingDatabase::class.java, BookkeepingDatabase.DB_NAME)
+            .addMigrations(BookkeepingDatabase.MIGRATION_1_2, BookkeepingDatabase.MIGRATION_2_3).build()
         try {
+            val sync=BidirectionalSyncClient(db,prefs,base,token,installation)
+            // Do not write even legacy v1 batches to a new/reset server at the
+            // same URL. The old cursor belongs to the original ledger only.
+            if (!sync.verifyServerIdentity()) {
+                if (prefs.getString("sync_security_blocker",null)!=null)
+                    return Result.failure()
+                prefs.edit().putString("last_result","无法验证服务器账本身份，将自动重试").apply()
+                return Result.retry()
+            }
             if (!auditLegacyAmounts(db, prefs, base, token, installation)) return Result.retry()
             var cursor = prefs.getLong("last_synced_id", 0L)
             repeat(30) {
                 val batch = db.transactionDao().getUnsynced(cursor, 100)
                 if (batch.isEmpty()) {
-                    prefs.edit().putString("last_result", "同步成功，暂无待上传交易")
-                        .putLong("last_success_ms", System.currentTimeMillis()).apply()
+                    val ok=sync.run()
+                    if (!ok) {
+                        if (prefs.getString("sync_security_blocker",null)!=null)
+                            return Result.failure()
+                        prefs.edit().putString("last_result", "双向同步暂不可用，将自动重试").apply()
+                        return Result.retry()
+                    }
                     return Result.success()
                 }
                 val events = JSONArray()
@@ -56,7 +71,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                         put("event_id", "android:$installation:${t.id}")
                         put("timestamp_ms", t.timestamp)
                         put("amount_cents", t.amountCents)
-                        put("currency", "CNY")
+                        put("currency", t.currency)
                         put("direction", t.type)
                         put("source", source)
                         put("category", t.category)
@@ -76,14 +91,28 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     prefs.edit().putString("last_result", "服务器返回 ${response.first}，稍后重试").apply()
                     return if (response.first in 400..499) Result.failure() else Result.retry()
                 }
-                if (JSONObject(response.second).optInt("accepted", -1) != events.length()) {
-                    prefs.edit().putString("last_result", "服务器确认条数不一致，将重试").apply()
-                    return Result.retry()
+                val confirmation = JSONObject(response.second)
+                // Accepted != persisted: old API counts ignored pre-ledger-start
+                // events as accepted. Never acknowledge a rejected local record.
+                when (LegacyUploadAckPolicy.decide(
+                    events.length(), confirmation.optInt("accepted", -1),
+                    confirmation.optInt("ignored_before_start", 0)
+                )) {
+                    LegacyUploadAckPolicy.Decision.RETRY -> {
+                        prefs.edit().putString("last_result", "服务器确认条数不一致，将重试").apply()
+                        return Result.retry()
+                    }
+                    LegacyUploadAckPolicy.Decision.REJECTED_BY_LEDGER_START -> {
+                        prefs.edit().putString("last_result",
+                            "有交易早于服务器账本起始日，被拒绝上传；请检查日期和账本设置，记录仍保留在手机").apply()
+                        return Result.failure()
+                    }
+                    LegacyUploadAckPolicy.Decision.ADVANCE_CURSOR -> Unit
                 }
                 cursor = batch.last().id
                 if (!prefs.edit().putLong("last_synced_id", cursor)
                     .putLong("last_success_ms", System.currentTimeMillis())
-                    .putString("last_result", "已成功上传至 VPS").commit()) return Result.retry()
+                    .putString("last_result", "已上传，正在拉取最新变更").commit()) return Result.retry()
             }
             return Result.retry()
         } catch (_: Exception) {
@@ -203,10 +232,29 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         }
 
         fun configure(context: Context, url: String, token: String, enabled: Boolean) {
-            require(!enabled || (url.startsWith("https://") && token.length >= 16))
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString("url", url.trimEnd('/')).putString("token", token)
-                .putBoolean("enabled", enabled).apply()
+            val normalized = url.trim().trimEnd('/')
+            require(!enabled || (normalized.startsWith("https://") && token.length >= 16)) {
+                "需要有效 HTTPS 地址及至少16位的设备密钥"
+            }
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val oldUrl=prefs.getString("url","")?.trim()?.trimEnd('/') ?: ""
+            require(SyncEndpointPolicy.canChangeServer(
+                prefs.getString("url", "") ?: "", normalized,
+                prefs.getLong("last_synced_id", 0L),
+                prefs.getLong("last_pull_revision", 0L),
+                prefs.getLong("last_success_ms", 0L)
+            )) {
+                "已同步账本不能直接更换服务器；请先迁移数据库，避免跨服务器丢失或重复交易"
+            }
+            val changesServer=oldUrl.isNotBlank() && oldUrl!=normalized
+            val edit=prefs.edit().putString("url", normalized).putString("token", token)
+                .putBoolean("enabled", enabled)
+            if(changesServer) {
+                // Safe only before any successful upload/download, as enforced
+                // by SyncEndpointPolicy above.
+                edit.remove("sync_server_id").remove("sync_security_blocker")
+            }
+            edit.apply()
             val wm = WorkManager.getInstance(context)
             if (!enabled) {
                 wm.cancelUniqueWork(PERIODIC)

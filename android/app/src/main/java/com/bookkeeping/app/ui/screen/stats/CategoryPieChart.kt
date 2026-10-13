@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -79,13 +80,13 @@ fun CategoryPieChart(
             stats.take(6).forEach { stat ->
                 LegendItem(
                     color = categoryColor(stat.category),
-                    label = stat.category.displayName,
+                    label = tr(stat.category.displayName),
                     percentage = stat.percentage,
                 )
             }
             if (stats.size > 6) {
                 val restPct = stats.drop(6).sumOf { it.percentage.toDouble() }.toFloat()
-                LegendItem(color = Color.Gray, label = "其他", percentage = restPct)
+                LegendItem(color = Color.Gray, label = tr("其他"), percentage = restPct)
             }
         }
     }

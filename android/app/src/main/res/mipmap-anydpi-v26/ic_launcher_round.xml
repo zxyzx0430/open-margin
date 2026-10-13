@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
-    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+    <!-- Keep the full A2 reference inside the Android 72/108dp visible mask.
+         Do not place artwork on the full-bleed background: that crops the blue panels. -->
+    <background android:drawable="@drawable/ic_launcher_bg_gradient" />
+    <foreground android:drawable="@drawable/ic_launcher_full_artwork" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

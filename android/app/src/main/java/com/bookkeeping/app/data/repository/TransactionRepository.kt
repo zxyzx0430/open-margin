@@ -10,6 +10,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.UUID
 
 // Repository：业务层与数据层的桥梁。
 // 上层（ViewModel）只跟 Repository 打交道，不直接接触 DAO/网络/SharedPreferences。
@@ -55,7 +56,18 @@ class TransactionRepository @Inject constructor(
         if (existing != null) null else insert(transaction)
     }
 
-    suspend fun update(transaction: TransactionEntity) = dao.update(transaction)
+    suspend fun update(transaction: TransactionEntity) {
+        dao.update(transaction.copy(syncDirty = true, syncModifiedMs = System.currentTimeMillis(),
+                                    syncMutationId = UUID.randomUUID().toString()))
+        TransactionSyncWorker.requestImmediate(context)
+    }
 
-    suspend fun delete(transaction: TransactionEntity) = dao.delete(transaction)
+    suspend fun delete(transaction: TransactionEntity) {
+        // Tombstone remains until the server acknowledges deletion; no stale
+        // offline device may resurrect it on the next network reconnect.
+        dao.update(transaction.copy(syncDeleted = true, syncDirty = true,
+                                    syncModifiedMs = System.currentTimeMillis(),
+                                    syncMutationId = UUID.randomUUID().toString()))
+        TransactionSyncWorker.requestImmediate(context)
+    }
 }

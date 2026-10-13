@@ -90,6 +90,8 @@ def db_connection():
         from v15_reconciliation import schema as v15_schema
         integration_schema(db)
         v15_schema(db)
+        from sync_v2 import schema as sync_schema
+        sync_schema(db)
         db.commit()
         yield db
         db.commit()
@@ -161,6 +163,12 @@ def ingest(batch: Batch):
             if e.timestamp_ms < cutoff:
                 ignored_before_start += 1
                 continue
+            # Deletion tombstones must defeat retries from pre-v2 Android apps.
+            tombstone=db.execute("""SELECT action FROM sync_journal WHERE event_id=?
+                    ORDER BY revision DESC LIMIT 1""",(e.event_id,)).fetchone()
+            if tombstone is not None and tombstone["action"]=="delete":
+                existed+=1
+                continue
             possible = db.execute("""SELECT id FROM transactions WHERE amount_cents=? AND currency=?
                   AND direction=? AND source<>? AND ABS(timestamp_ms-?)<=90000
                   AND review_status NOT IN ('excluded','transfer','refund') LIMIT 1""",
@@ -206,6 +214,11 @@ def correct_rounding(item: AmountCorrection):
             raise HTTPException(status_code=409, detail="Amount changed since capture")
         db.execute("UPDATE transactions SET amount_cents=? WHERE id=?", (item.corrected_cents,row["id"]))
     return {"ok": True, "corrected": True}
+
+from sync_v2 import router as sync_router, changes as sync_changes, push as sync_push
+sync_router.add_api_route("/changes",sync_changes,methods=["GET"],dependencies=[Depends(device_auth)])
+sync_router.add_api_route("/push",sync_push,methods=["POST"],dependencies=[Depends(device_auth)])
+app.include_router(sync_router)
 
 @app.get("/api/v1/transactions", dependencies=[Depends(admin_auth)])
 def transactions(limit: int = Query(50,ge=1,le=500), before_ms: int | None = None):

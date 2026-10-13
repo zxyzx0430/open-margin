@@ -27,16 +27,38 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 - **Wallos** manages subscriptions and future renewal estimates. An expected subscription charge is *not* treated as an actual completed payment.
 - The **transaction ledger** records observed payments, keeps independent currencies, and supports review/exclusion. It is not a second subscription database.
 - This project is a **single-owner design**. The daily ledger, OAuth, and MCP are restricted to the configured Wallos owner ID; additional Wallos accounts must not be given access to private ledger data.
-- Android → server sync is **one way**. Clearing a phone record will not delete server data. Device notifications may be missing or duplicate.
+- Android v1.2.0 ↔ server sync supports versioned additions, edits and deletion tombstones. Earlier v1.1.3 builds upload only; notification capture may still be incomplete or duplicate.
+- Android settings offer **简体中文 / English** under **Settings → Language** and **About & updates** with a local build number and manual GitHub signed-APK update check. Bottom navigation labels remain on one line. See [language](docs/ANDROID_LANGUAGE.md) and [updates](docs/ANDROID_UPDATES.md).
+
+## Deployment choices
+
+The same application runs in either environment (no feature fork):
+
+- **Windows local host:** Docker Desktop / WSL2; Tailscale private HTTPS is optional when you want phone sync. See [Windows deployment](docs/DEPLOY_WINDOWS.md). The phone stores transactions offline while the computer is shut down.
+- **VPS / Linux host:** Docker Engine + Docker Compose with a valid HTTPS domain; see [VPS deployment](docs/DEPLOY_VPS.md).
+
+Android v2 transaction sync supports pull + push (including edits and deletion tombstones) and cross-device conflict handling; Wallos subscription schedules and server-side budgets remain managed by the website. An old pre-v2 phone deletion cannot be reconstructed retroactively.
 
 ## Requirements
 
-- Linux with Docker Engine and Docker Compose v2.
-- A hostname under your control with valid HTTPS and Nginx (or equivalent reverse proxy).
+- Windows with Docker Desktop or Linux with Docker Engine, plus Docker Compose v2.
+- For remote Android sync: a valid HTTPS endpoint (a VPS domain or optional private Tailscale Serve on Windows). Local-only Windows does not require a domain or Nginx.
 - Android 8+ with notification listener support to use the optional collector.
 - Optional: ChatGPT-compatible OAuth/MCP client.
 
-## Quick start (clean installation)
+## Windows quick start (local-only)
+
+Install Git and Docker Desktop (Linux containers / WSL2), then in PowerShell:
+
+~~~powershell
+git clone https://github.com/zxyzx0430/open-margin.git
+cd open-margin
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
+~~~
+
+Open **http://127.0.0.1:18082** and register your first Wallos account, then log in. Data persists in named Docker volumes; do not run destructive volume removal commands. The Wallos UI binds to loopback by default. To sync a phone, use the optional **Windows first-connection wizard** (Start-OpenMarginSetup.ps1); it defaults to the Tailscale **API-only** gateway, not remote Wallos. See [Windows Android-sync instructions](docs/DEPLOY_WINDOWS.md) and [three-step onboarding guide](docs/WINDOWS_PRIVATE_FIRST_CONNECTION.md).
+
+## VPS/Linux quick start (clean installation)
 
 1. Clone this repository. Copy `.env.example` to `.env` and adjust host-local ports if needed.
 2. Generate new deployment credentials **locally** (no built-in shared tokens):
