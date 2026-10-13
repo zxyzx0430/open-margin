@@ -76,6 +76,28 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    fun updateTransaction(
+        original: TransactionEntity,
+        amountCents: Long,
+        type: TransactionType,
+        category: TransactionCategory,
+        merchant: String,
+        note: String,
+    ) {
+        viewModelScope.launch {
+            repository.update(original.copy(amountCents=amountCents,
+                type=type.name,category=category.name,merchant=merchant,note=note))
+        }
+    }
+
+    fun setReviewStatus(entity: TransactionEntity, status: String) {
+        if (status !in setOf("unverified","confirmed","excluded","transfer")) return
+        if (entity.remoteReviewStatus == "refund") return
+        viewModelScope.launch {
+            repository.update(entity.copy(remoteReviewStatus=status))
+        }
+    }
+
     fun delete(entity: TransactionEntity) {
         viewModelScope.launch { repository.delete(entity) }
     }

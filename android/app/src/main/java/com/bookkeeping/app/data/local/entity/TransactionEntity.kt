@@ -2,10 +2,12 @@ package com.bookkeeping.app.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
+import androidx.room.ColumnInfo
 
 // 一笔交易在数据库里的"行"。
 // @Entity 告诉 Room "这个类对应数据库表"，表名是 transactions。
-@Entity(tableName = "transactions")
+@Entity(tableName = "transactions", indices = [Index(value = ["remoteEventId"], unique = true)])
 data class TransactionEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -34,6 +36,26 @@ data class TransactionEntity(
 
     // 时间戳（毫秒），用于排序、按月统计
     val timestamp: Long,
+
+    // Original currency is retained for remote transactions. Do not sum
+    // unconverted USD/EUR cents into the CNY budget or totals.
+    @ColumnInfo(defaultValue = "'CNY'")
+    val currency: String = "CNY",
+
+    // Added in Room v2. Local rows retain their IDs; remote records have a
+    // stable server event ID. Neither token nor raw SMS text is synchronized.
+    val remoteEventId: String? = null,
+    @ColumnInfo(defaultValue = "0")
+    val remoteRevision: Long = 0,
+    @ColumnInfo(defaultValue = "0")
+    val syncDirty: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val syncDeleted: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val syncModifiedMs: Long = 0,
+    @ColumnInfo(defaultValue = "'unverified'")
+    val remoteReviewStatus: String = "unverified",
+    val syncMutationId: String? = null,
 )
 
 // 收入还是支出

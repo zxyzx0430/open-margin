@@ -4,6 +4,7 @@ ob_start();
 require_once 'includes/header.php';
 ob_end_clean();
 require_once 'finance-unified-common.php';
+ledger_require_owner();
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: private, no-store, max-age=0');
 try {

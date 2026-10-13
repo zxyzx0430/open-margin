@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Open Margin</string>
+    <string name="accessibility_service_description">Helps recognize WeChat transfers, red packets and incoming Alipay transfers when notifications do not contain an amount. The service is limited to WeChat and Alipay and does not inspect other apps. Transactions are stored on the phone unless you explicitly enable sync.</string>
 </resources>

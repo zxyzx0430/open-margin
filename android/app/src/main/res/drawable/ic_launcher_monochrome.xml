@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Monochrome interpretation of the two overlapping glass panels for Android 13 themed icons. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#000000"
+        android:pathData="M46,22 C46,18 49,17 53,19 L78,31 C81,33 82,35 82,39 L82,66 C82,71 79,74 74,72 L50,62 C47,61 46,58 46,55 Z" />
+    <path android:fillColor="#000000" android:fillAlpha="0.78"
+        android:pathData="M25,44 C25,40 28,38 32,40 L55,50 C58,51 59,54 59,58 L59,83 C59,88 56,90 52,88 L30,78 C27,77 25,74 25,70 Z" />
+</vector>

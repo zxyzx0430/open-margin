@@ -14,8 +14,10 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.1.3"
+        // RC5: original permanent signing key, upgrades all older release candidates.
+        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.5).
+        versionCode = 10
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

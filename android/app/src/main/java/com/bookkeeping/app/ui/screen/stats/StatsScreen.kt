@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +41,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
     val viewingType by viewModel.viewingType.collectAsState()
     val dailyTotals by viewModel.dailyTotals.collectAsState()
 
-    Scaffold(topBar = { TopAppBar(title = { Text("本月统计") }) }) { innerPadding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(tr("本月统计")) }) }) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -56,12 +57,12 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                 FilterChip(
                     selected = viewingType == TransactionType.EXPENSE,
                     onClick = { viewModel.setViewingType(TransactionType.EXPENSE) },
-                    label = { Text("支出") },
+                    label = { Text(tr("支出")) },
                 )
                 FilterChip(
                     selected = viewingType == TransactionType.INCOME,
                     onClick = { viewModel.setViewingType(TransactionType.INCOME) },
-                    label = { Text("收入") },
+                    label = { Text(tr("收入")) },
                 )
             }
 
@@ -83,7 +84,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "分类占比",
+                                    text = tr("分类占比"),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
                                 )
@@ -101,7 +102,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "每日趋势",
+                                    text = tr("每日趋势"),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
                                 )
@@ -128,7 +129,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
 @Composable
 private fun TotalCard(totalCents: Long, type: TransactionType) {
     val sign = if (type == TransactionType.INCOME) "+" else "−"
-    val label = if (type == TransactionType.INCOME) "本月总收入" else "本月总支出"
+    val label = if (type == TransactionType.INCOME) tr("本月总收入") else tr("本月总支出")
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -164,7 +165,7 @@ private fun CategoryStatRow(stat: CategoryStat, viewingType: TransactionType) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stat.category.displayName,
+                    text = tr(stat.category.displayName),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -198,7 +199,7 @@ private fun CategoryStatRow(stat: CategoryStat, viewingType: TransactionType) {
                     drawStopIndicator = {},
                 )
                 Text(
-                    text = "${stat.count} 笔",
+                    text = "${stat.count} ${tr("笔")}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 8.dp),
@@ -212,7 +213,7 @@ private fun CategoryStatRow(stat: CategoryStat, viewingType: TransactionType) {
 private fun EmptyStats(type: TransactionType) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Text(
-            text = if (type == TransactionType.INCOME) "本月还没有收入" else "本月还没有支出",
+            text = if (type == TransactionType.INCOME) tr("本月还没有收入") else tr("本月还没有支出"),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

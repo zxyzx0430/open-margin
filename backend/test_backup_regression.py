@@ -30,6 +30,37 @@ class BackupRegressionTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             backup.snapshot_one(self.root/"missing.sqlite3",self.root/"never.sqlite3")
         self.assertFalse((self.root/"never.sqlite3").exists())
+    def test_optional_oauth_snapshot_is_included_after_initialization(self):
+        original_oauth=backup.OAUTH_DB
+        original_sources=backup.SOURCES
+        original_backups=backup.BACKUPS
+        try:
+            finance=self.root/"finance.sqlite3"
+            wallos=self.root/"wallos.db"
+            oauth=self.root/"oauth.sqlite3"
+            for path in (finance,wallos):
+                with sqlite3.connect(path) as db:
+                    db.execute("CREATE TABLE fixture(value TEXT)")
+            backup.OAUTH_DB=oauth
+            backup.SOURCES={"transactions":finance,"wallos":wallos}
+            backup.BACKUPS=self.root/"backups"
+            self.assertNotIn("oauth",backup.sources_for_backup())
+            backup.run()
+            self.assertEqual(len(list(backup.BACKUPS.glob("*.sqlite3"))),2)
+            with sqlite3.connect(oauth) as db:
+                db.execute("CREATE TABLE grants(token TEXT)")
+                db.execute("INSERT INTO grants VALUES ('synthetic-grant')")
+            self.assertIn("oauth",backup.sources_for_backup())
+            backup.run()
+            snapshots=list(backup.BACKUPS.glob("oauth-*.sqlite3"))
+            self.assertEqual(len(snapshots),1)
+            with sqlite3.connect(snapshots[0]) as db:
+                self.assertEqual(db.execute("SELECT token FROM grants").fetchone()[0],"synthetic-grant")
+        finally:
+            backup.OAUTH_DB=original_oauth
+            backup.SOURCES=original_sources
+            backup.BACKUPS=original_backups
+
     def test_wal_mode_backup_is_standalone_without_orphan_sidecars(self):
         # Real finance.sqlite3 uses WAL; never touch any live data in tests.
         src=self.root/"synthetic-live-wal.sqlite3"
