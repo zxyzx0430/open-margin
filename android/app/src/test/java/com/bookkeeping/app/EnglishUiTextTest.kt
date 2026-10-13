@@ -27,6 +27,22 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun historicalSyncStatusesWithDynamicNumbersTranslate() {
+        assertEquals(
+            "Local transaction 12 is invalid and cannot sync",
+            EnglishUiText.translate("本地交易 12 数据异常，无法同步")
+        )
+        assertEquals(
+            "Server returned 503; retrying later",
+            EnglishUiText.translate("服务器返回 503，稍后重试")
+        )
+        assertEquals(
+            "Synced non-conflicting records; 3 changes still need review. Do not uninstall.",
+            EnglishUiText.translate("已同步无冲突交易；仍有 3 笔修改待核对，请不要卸载应用")
+        )
+    }
+
+    @Test
     fun unknownUserNotesStayUntouched() {
         // Never translate free-form user data or bank/notification parser data.
         assertEquals("我的自定义商户", EnglishUiText.translate("我的自定义商户"))
