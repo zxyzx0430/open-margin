@@ -5,8 +5,10 @@ on:
     branches:
       - fix/v1.2.0-adaptive-icon-padding-20261013
       - integration/v1.2.0-final-20261013
+      - feat/v1.2.0-android-languages-20261013
     paths:
-      - 'android/app/src/main/res/**'
+      - 'android/app/src/main/**'
+      - 'android/app/build.gradle.kts'
       - 'android/app/src/androidTest/**'
       - '.github/workflows/android-emulator-smoke.yml'
   workflow_dispatch:

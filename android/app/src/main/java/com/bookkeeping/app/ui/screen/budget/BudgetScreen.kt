@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.budget
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,7 +53,7 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
     var showAddCategory by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<TransactionCategory?>(null) }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("预算") }) }) { innerPadding ->
+    Scaffold(topBar = { TopAppBar(title = { Text(tr("预算")) }) }) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -79,13 +80,13 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "分类预算",
+                        text = tr("分类预算"),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = { showAddCategory = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "添加分类预算")
+                        Icon(Icons.Default.Add, contentDescription = tr("添加分类预算"))
                     }
                 }
             }
@@ -93,7 +94,7 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
             if (budget.perCategory.isEmpty()) {
                 item(key = "category_empty") {
                     Text(
-                        text = "还没有分类预算。点击右上角 + 添加。",
+                        text = tr("还没有分类预算。点击右上角 + 添加。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -117,7 +118,7 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
     // 总预算对话框
     if (showEditTotal) {
         EditBudgetDialog(
-            title = "设置月预算",
+            title = tr("设置月预算"),
             initialYuan = budget.monthlyTotalCents / 100.0,
             pickCategory = false,
             onDismiss = { showEditTotal = false },
@@ -131,7 +132,7 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
     // 添加分类预算对话框
     if (showAddCategory) {
         EditBudgetDialog(
-            title = "添加分类预算",
+            title = tr("添加分类预算"),
             pickCategory = true,
             excludeCategories = budget.perCategory.keys,
             onDismiss = { showAddCategory = false },
@@ -145,7 +146,7 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
     // 编辑某分类预算对话框
     editingCategory?.let { cat ->
         EditBudgetDialog(
-            title = "${cat.displayName} 预算",
+            title = "${tr(cat.displayName)} ${tr("预算")}",
             initialYuan = (budget.perCategory[cat] ?: 0L) / 100.0,
             pickCategory = false,
             initialCategory = cat,
@@ -180,21 +181,21 @@ private fun TotalBudgetCard(
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "本月总预算",
+                    text = tr("本月总预算"),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
                     Icons.Default.Edit,
-                    contentDescription = "编辑",
+                    contentDescription = tr("编辑"),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
             }
 
             if (!hasBudget) {
                 Text(
-                    text = "未设置，点击此处设置",
+                    text = tr("未设置，点击此处设置"),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.padding(top = 8.dp),
@@ -219,15 +220,15 @@ private fun TotalBudgetCard(
                 )
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                     Text(
-                        text = if (overSpent) "已超支 ¥${"%.2f".format((spentCents - budgetCents) / 100.0)}"
-                               else "剩余 ¥${"%.2f".format(remainingCents / 100.0)}",
+                        text = if (overSpent) "${tr("已超支")} ¥${"%.2f".format((spentCents - budgetCents) / 100.0)}"
+                               else "${tr("剩余")} ¥${"%.2f".format(remainingCents / 100.0)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (overSpent) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = "剩 $daysRemaining 天",
+                        text = "${tr("剩余")} $daysRemaining ${tr("天")}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -252,7 +253,7 @@ private fun CategoryBudgetCard(
         Column(modifier = Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = category.displayName,
+                    text = tr(category.displayName),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f),
@@ -267,7 +268,7 @@ private fun CategoryBudgetCard(
                 IconButton(onClick = onRemove) {
                     Icon(
                         Icons.Default.Delete,
-                        contentDescription = "删除",
+                        contentDescription = tr("删除"),
                         tint = MaterialTheme.colorScheme.outline,
                     )
                 }
@@ -284,7 +285,7 @@ private fun CategoryBudgetCard(
             )
             if (overSpent) {
                 Text(
-                    text = "已超支 ¥${"%.2f".format((spentCents - budgetCents) / 100.0)}",
+                    text = "${tr("已超支")} ¥${"%.2f".format((spentCents - budgetCents) / 100.0)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 2.dp),

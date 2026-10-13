@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.navigation
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -48,8 +49,8 @@ fun RootNavigation() {
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(item.icon, contentDescription = item.label) },
-                        label = { Text(item.label) },
+                        icon = { Icon(item.icon, contentDescription = tr(item.label)) },
+                        label = { Text(tr(item.label)) },
                     )
                 }
             }
