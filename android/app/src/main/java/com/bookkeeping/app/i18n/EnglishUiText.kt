@@ -5,7 +5,7 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
-        "本次更新类型：" to "Update type: ",
+        "待更新组件：" to "Update components: ",
         "仅 Android APP 更新" to "Android app only",
         "仅 Windows / VPS 更新" to "Windows / VPS only",
         "Android APP 与 Windows / VPS 都有更新" to "Both Android app and Windows / VPS",

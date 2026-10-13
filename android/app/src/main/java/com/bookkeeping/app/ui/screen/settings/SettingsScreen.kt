@@ -452,7 +452,7 @@ private fun AboutUpdateCard() {
                             tr("更新范围未注明") to tr("不能确定该版本需要更新哪些组件，请先阅读发布说明。")
                     }
                     Text(
-                        tr("本次更新类型：") + scopeTitle,
+                        tr("待更新组件：") + scopeTitle,
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Text(scopeAdvice, style = MaterialTheme.typography.bodyMedium)

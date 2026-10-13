@@ -19,6 +19,7 @@ class EnglishUiTextTest {
             "转账" to "Transfer",
             "同步关闭或尚未执行" to "Sync off or not yet run",
             "启用双向同步" to "Enable two-way sync",
+            "待更新组件：" to "Update components: ",
             "关于与更新" to "About & updates",
             "检查更新" to "Check for updates",
             "浏览全部发布版本" to "Browse all releases",
