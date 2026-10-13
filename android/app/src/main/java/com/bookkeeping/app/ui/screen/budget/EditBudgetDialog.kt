@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.budget
 
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,10 +64,10 @@ fun EditBudgetDialog(
                         onExpandedChange = { menuExpanded = it },
                     ) {
                         OutlinedTextField(
-                            value = selectedCategory?.displayName ?: "选择分类",
+                            value = selectedCategory?.displayName ?: tr("选择分类"),
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("分类") },
+                            label = { Text(tr("分类")) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = menuExpanded) },
                             modifier = Modifier.menuAnchor().fillMaxWidth(),
                         )
@@ -90,7 +91,7 @@ fun EditBudgetDialog(
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("金额（元）") },
+                    label = { Text(tr("金额（元）")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     isError = amountText.isNotEmpty() && !amountValid,
@@ -102,10 +103,10 @@ fun EditBudgetDialog(
             TextButton(
                 onClick = { onConfirm(selectedCategory, amount ?: 0.0) },
                 enabled = amountValid && categoryValid,
-            ) { Text("保存") }
+            ) { Text(tr("保存")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
 }

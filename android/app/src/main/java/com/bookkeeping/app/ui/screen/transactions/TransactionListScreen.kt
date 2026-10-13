@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -99,10 +101,10 @@ fun TransactionListScreen(
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("无感记账") }) },
+        topBar = { TopAppBar(title = { Text(tr("无感记账")) }) },
         floatingActionButton = {
             FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, contentDescription = "新建账单")
+                Icon(Icons.Default.Add, contentDescription = tr("新建账单"))
             }
         }
     ) { innerPadding ->
@@ -154,15 +156,15 @@ fun TransactionListScreen(
     pendingDelete?.let { entry ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除这笔交易？") },
-            text = { Text("删除将在电脑或 VPS 在线后双向同步；其他设备也会删除该笔交易。若只是误识别或退款，建议在网站标记为不计入或退款。") },
+            title = { Text(tr("删除这笔交易？")) },
+            text = { Text(tr("删除将在电脑或 VPS 在线后双向同步；其他设备也会删除该笔交易。若只是误识别或退款，建议在网站标记为不计入或退款。")) },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.delete(entry)
                     pendingDelete = null
-                }) { Text("确认删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(tr("确认删除"), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(tr("取消")) } },
         )
     }
 
@@ -197,7 +199,7 @@ private fun MonthlySummaryCard(monthlyExpenseCents: Long, monthlyIncomeCents: Lo
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("本月收支差额", style = MaterialTheme.typography.titleMedium,
+            Text(tr("本月收支差额"), style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onPrimaryContainer)
             Text(
                 (if (diff >= 0) "+" else "−") + "¥" +
@@ -208,12 +210,12 @@ private fun MonthlySummaryCard(monthlyExpenseCents: Long, monthlyIncomeCents: Lo
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.13f))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SummaryStat("已记录收入", "+¥" + "%.2f".format(Locale.CHINA, monthlyIncomeCents / 100.0),
+                SummaryStat(tr("已记录收入"), "+¥" + "%.2f".format(Locale.CHINA, monthlyIncomeCents / 100.0),
                     Modifier.weight(1f))
-                SummaryStat("已记录支出", "−¥" + "%.2f".format(Locale.CHINA, monthlyExpenseCents / 100.0),
+                SummaryStat(tr("已记录支出"), "−¥" + "%.2f".format(Locale.CHINA, monthlyExpenseCents / 100.0),
                     Modifier.weight(1f))
             }
-            Text("本机交易 · 不是账户余额，尚需对照官方账单",
+            Text(tr("本机交易 · 不是账户余额，尚需对照官方账单"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
         }
@@ -247,13 +249,13 @@ private fun CategoryFilterRow(
         FilterChip(
             selected = selected == null,
             onClick = { onSelect(null) },
-            label = { Text("全部") }
+            label = { Text(tr("全部")) }
         )
         TransactionCategory.entries.forEach { cat ->
             FilterChip(
                 selected = selected == cat,
                 onClick = { onSelect(if (selected == cat) null else cat) },
-                label = { Text(cat.displayName) }
+                label = { Text(tr(cat.displayName)) }
             )
         }
     }
@@ -306,9 +308,9 @@ private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
             fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         val total = if (valid.isEmpty() && items.any { it.currency != "CNY" })
-                        "仅外币 · 未换算"
-                    else if (expense > 0L) "支出 ¥" + "%.2f".format(Locale.CHINA, expense / 100.0)
-                    else "收入 ¥" + "%.2f".format(Locale.CHINA, income / 100.0)
+                        tr("仅外币 · 未换算")
+                    else if (expense > 0L) tr("支出 ¥") + "%.2f".format(Locale.CHINA, expense / 100.0)
+                    else tr("收入 ¥") + "%.2f".format(Locale.CHINA, income / 100.0)
         Text(total, style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -323,13 +325,13 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
     val amount = "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
     val currencyLabel = if (transaction.currency == "CNY") "¥" else transaction.currency + " "
     val sourceName = when (transaction.source) {
-        "ALIPAY" -> "支付宝"
-        "WECHAT" -> "微信"
-        "BANK_SMS" -> "银行短信"
-        "MANUAL" -> "手动"
-        else -> "其他来源"
+        "ALIPAY" -> tr("支付宝")
+        "WECHAT" -> tr("微信")
+        "BANK_SMS" -> tr("银行短信")
+        "MANUAL" -> tr("手动")
+        else -> tr("其他来源")
     }
-    val title = transaction.merchant.ifBlank { category.displayName }
+    val title = transaction.merchant.ifBlank { tr(category.displayName) }
     val noteSummary = transaction.note
         .removePrefix("[自动抓取] ")
         .removePrefix("[银行短信] ")
@@ -351,7 +353,7 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                     Text(title, style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold, maxLines = 2,
                         overflow = TextOverflow.Ellipsis)
-                    Text(sourceName + " · " + category.displayName + " · " +
+                    Text(sourceName + " · " + tr(category.displayName) + " · " +
                         timeOnlyFormat.format(Date(transaction.timestamp)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -368,7 +370,7 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
             }
             if (expanded) {
                 if (transaction.remoteReviewStatus == "refund") {
-                    Text("已关联退款 · 请在网站管理退款关系",
+                    Text(tr("已关联退款 · 请在网站管理退款关系"),
                         style = MaterialTheme.typography.bodySmall)
                 } else {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -377,7 +379,7 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                                 "unverified" else "excluded")
                         }) {
                             Text(if (transaction.remoteReviewStatus == "excluded")
-                                "恢复计入统计" else "不计入统计")
+                                tr("恢复计入统计") else tr("不计入统计"))
                         }
                     }
                 }
@@ -388,19 +390,19 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End) {
-                    Text("修改会双向同步", style = MaterialTheme.typography.labelSmall,
+                    Text(tr("修改会双向同步"), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f))
-                    TextButton(onClick = onEdit) { Text("编辑") }
+                    TextButton(onClick = onEdit) { Text(tr("编辑")) }
                     TextButton(onClick = onDelete) {
                         Icon(Icons.Default.Delete, contentDescription = null,
                             tint = MaterialTheme.colorScheme.error)
-                        Text("删除", color = MaterialTheme.colorScheme.error)
+                        Text(tr("删除"), color = MaterialTheme.colorScheme.error)
                     }
                 }
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "展开详情",
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = tr("展开详情"),
                         tint = MaterialTheme.colorScheme.outline)
                 }
             }
@@ -413,13 +415,13 @@ private fun EmptyState(filterActive: Boolean) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = if (filterActive) "该分类下还没有记录" else "还没有账单",
+                text = if (filterActive) tr("该分类下还没有记录") else tr("还没有账单"),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (!filterActive) {
                 Text(
-                    text = "点击右下角 + 添加第一笔",
+                    text = tr("点击右下角 + 添加第一笔"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -431,8 +433,8 @@ private fun EmptyState(filterActive: Boolean) {
 @Composable
 private fun NotificationPermissionBanner(onClick: () -> Unit) {
     PermissionBanner(
-        title = "未开启通知监听",
-        body = "点击此处开启「通知使用权」，App 才能自动抓取支付宝 / 微信付款记录",
+        title = tr("未开启通知监听"),
+        body = tr("点击此处开启「通知使用权」，App 才能自动抓取支付宝 / 微信付款记录"),
         onClick = onClick,
     )
 }
@@ -440,8 +442,8 @@ private fun NotificationPermissionBanner(onClick: () -> Unit) {
 @Composable
 private fun SmsPermissionBanner(onClick: () -> Unit) {
     PermissionBanner(
-        title = "未开启短信权限",
-        body = "点击此处授予短信权限，App 才能自动抓取银行交易短信",
+        title = tr("未开启短信权限"),
+        body = tr("点击此处授予短信权限，App 才能自动抓取银行交易短信"),
         onClick = onClick,
     )
 }
@@ -477,7 +479,8 @@ private fun PermissionBanner(title: String, body: String, onClick: () -> Unit) {
 
 private val dayKeyFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 private val timeOnlyFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-private val monthDayFormat = SimpleDateFormat("MM月dd日", Locale.getDefault())
+private val monthDayFormat = SimpleDateFormat("MM月dd日", Locale.CHINA)
+private val englishMonthDayFormat = SimpleDateFormat("MMM d", Locale.ENGLISH)
 
 // 把毫秒时间戳转成 "yyyy-MM-dd" 字符串作为分组 key
 private fun dayKey(timestampMs: Long): String = dayKeyFormat.format(Date(timestampMs))
@@ -490,11 +493,15 @@ private fun dayLabel(dayKey: String): String {
     val todayKey = dayKeyFormat.format(today.time)
     val yesterdayKey = dayKeyFormat.format(Date(today.timeInMillis - 86_400_000L))
     return when (dayKey) {
-        todayKey -> "今天"
-        yesterdayKey -> "昨天"
+        todayKey -> tr("今天")
+        yesterdayKey -> tr("昨天")
         else -> {
             // 解析回 Date，然后格式化为 MM月dd日
-            runCatching { monthDayFormat.format(dayKeyFormat.parse(dayKey)!!) }.getOrDefault(dayKey)
+            runCatching {
+                val date = dayKeyFormat.parse(dayKey)!!
+                if (AppLanguage.current() == AppLanguage.ENGLISH)
+                    englishMonthDayFormat.format(date) else monthDayFormat.format(date)
+            }.getOrDefault(dayKey)
         }
     }
 }
