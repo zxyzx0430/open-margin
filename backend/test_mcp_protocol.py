@@ -66,6 +66,30 @@ class MCPProtocolTest(unittest.TestCase):
         self.assertEqual(tool_names, set(mcp_access.TOOL_SCOPES))
         self.assertEqual(len(tool_names), 11)
 
+    def test_tool_annotations_match_read_write_scopes(self):
+        """ChatGPT must not classify pure queries as write actions."""
+        from mcp_access import READ_TOOLS, WRITE_TOOLS
+        response = self.post(self.read, {
+            "jsonrpc": "2.0", "id": 81, "method": "tools/list", "params": {}
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        tools = {tool["name"]: tool for tool in response.json()["result"]["tools"]}
+        self.assertEqual(set(tools), set(READ_TOOLS) | set(WRITE_TOOLS))
+        for name in READ_TOOLS:
+            with self.subTest(name=name, mode="read"):
+                annotations = tools[name]["annotations"]
+                self.assertIs(annotations["readOnlyHint"], True)
+                self.assertIs(annotations["destructiveHint"], False)
+                self.assertIs(annotations["idempotentHint"], True)
+                self.assertIs(annotations["openWorldHint"], False)
+        for name in WRITE_TOOLS:
+            with self.subTest(name=name, mode="write"):
+                annotations = tools[name]["annotations"]
+                self.assertIs(annotations["readOnlyHint"], False)
+                self.assertIs(annotations["destructiveHint"], True)
+                self.assertIs(annotations["idempotentHint"], False)
+                self.assertIs(annotations["openWorldHint"], False)
+
     def test_no_anonymous_or_expired_access(self):
         payload = self.call("list_recent_transactions", limit=1)
         r = self.client.post("/mcp/", json=payload, headers={
