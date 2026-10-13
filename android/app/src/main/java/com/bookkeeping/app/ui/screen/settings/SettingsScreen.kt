@@ -17,6 +17,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -30,18 +31,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
+import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
+import com.bookkeeping.app.update.UpdateVersionPolicy
 import com.bookkeeping.app.sync.SyncSettingsCard
 import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 
@@ -85,6 +93,9 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
 
             item { SectionTitle(tr("语言 / Language")) }
             item { LanguageCard() }
+
+            item { SectionTitle(tr("关于与更新")) }
+            item { AboutUpdateCard() }
 
             item { SectionTitle(tr("权限授权")) }
             item {
@@ -356,6 +367,109 @@ private fun LanguageCard() {
             }
             if (error) Text(tr("语言设置保存失败"),
                 color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** Read-only public version check. APK upgrades always remain user-initiated. */
+@Composable
+private fun AboutUpdateCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var includePrereleases by remember {
+        mutableStateOf(UpdateVersionPolicy.CURRENT_TAG.contains("-rc."))
+    }
+    var checking by remember { mutableStateOf(false) }
+    var result by remember {
+        mutableStateOf<GitHubReleaseUpdateChecker.CheckResult?>(null)
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                tr("当前版本") + ": " + BuildConfig.VERSION_NAME +
+                    " (Build " + BuildConfig.VERSION_CODE + ")",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                tr("发布标识") + ": " + UpdateVersionPolicy.CURRENT_TAG,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    tr("包含测试版本（RC）"),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Switch(
+                    checked = includePrereleases,
+                    onCheckedChange = {
+                        includePrereleases = it
+                        result = null
+                    },
+                    enabled = !checking,
+                )
+            }
+            FilledTonalButton(
+                enabled = !checking,
+                onClick = {
+                    checking = true
+                    result = null
+                    scope.launch {
+                        result = withContext(Dispatchers.IO) {
+                            GitHubReleaseUpdateChecker.check(includePrereleases)
+                        }
+                        checking = false
+                    }
+                },
+            ) {
+                Text(if (checking) tr("正在检查更新…") else tr("检查更新"))
+            }
+            when (val state = result) {
+                null -> Unit
+                GitHubReleaseUpdateChecker.CheckResult.UpToDate ->
+                    Text(tr("已是最新版本"))
+                GitHubReleaseUpdateChecker.CheckResult.Unavailable ->
+                    Text(
+                        tr("检查更新失败，请检查网络或稍后重试"),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                is GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable -> {
+                    Text(tr("发现新版本：") + state.tag)
+                    OutlinedButton(onClick = {
+                        // The checker constructs only github.com/zxyzx0430/open-margin
+                        // release URLs from strictly parsed version tags.
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(state.releaseUrl))
+                            )
+                        }
+                    }) {
+                        Text(tr("查看 GitHub 发布页"))
+                    }
+                }
+            }
+            OutlinedButton(onClick = {
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/zxyzx0430/open-margin/releases")
+                        )
+                    )
+                }
+            }) {
+                Text(tr("浏览全部发布版本"))
+            }
+            Text(
+                tr("检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
