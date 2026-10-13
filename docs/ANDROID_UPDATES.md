@@ -1,4 +1,4 @@
-# Android 版本号与 GitHub 更新检查（v1.2.0 RC5）
+# Android 版本号与 GitHub 更新检查（v1.2.0 RC6）
 
 ## 用户入口
 
@@ -14,7 +14,7 @@
 
 `v1.1.3` ＜ `v1.2.0-rc.4` ＜ `v1.2.0-rc.5` ＜ `v1.2.0`。只接受严格匹配的 `vN.N.N` 和 `vN.N.N-rc.N` tag，并检查附件必须是非空且文件名以 `-signed.apk` 或 `-original-signature.apk` 结尾的 APK。过滤草稿版本。
 
-当前候选版 `v1.2.0-rc.5`、`versionCode=10`。上一版 RC4 的整数构建号为 9，不会被误判为新更新。下一次正式出包必须同步提升 `versionCode` 和 `UpdateVersionPolicy.CURRENT_TAG`。GitHub Releases 路径和仓库所有者固定在源码中。
+当前候选版 `v1.2.0-rc.6`、`versionCode=11`。上一版 RC5 的整数构建号为 10，不会被误判为新更新。下一次正式出包必须同步提升 `versionCode` 和 `UpdateVersionPolicy.CURRENT_TAG`。GitHub Releases 路径和仓库所有者固定在源码中。
 
 ## 验证
 
@@ -34,3 +34,25 @@
 5. 独立代码审查、生产变更审批及签名验收记录；合并 PR #3 到 `main` 后才创建正式 v1.2.0 tag 和带原永久私钥签名的 Release。不得擅自重置生产数据库卷。
 
 测试包可保持 prerelease；正式版的发布、上生产、数据库迁移属于独立审批阶段。
+
+
+## 每次 Release 必填：更新范围元数据
+
+在每一条 GitHub Release 的正文中单独放置以下**一行**，三种选项只能选一种：
+
+\`\`\`text
+<!-- open-margin-components: android -->
+<!-- open-margin-components: server -->
+<!-- open-margin-components: android,server -->
+\`\`\`
+
+上方为三种可选写法的展示，**实际 Release 正文中只能包含其中一行**：
+
+- \`android\`：仅 Android APK 修改，电脑/VPS **不需因此次发布而重部署**。
+- \`server\`：仅 Windows/VPS 服务端修改；可没有新 APK，APP 仍必须收到提醒。
+- \`android,server\`：两端都包含更新，先看版本说明确定更新顺序。
+- 历史版或遗漏元数据：显示「更新范围未注明」，明确要求先阅读发布说明，**不通过 APK 存在与否推断服务端是否已升级**。
+
+Android 或双端发布必须有非空的、以 \`-signed.apk\` 或 \`-original-signature.apk\` 结尾的 APK 才提示该版本；server-only 发布无需 APK。仍不检查当前 Windows/VPS 真实部署 SHA、账本身份、版本，因此**更新范围不等于已安装服务端状态**，页面会明确提示这一限制。
+
+RC6 本身是 **android-only**：只增加显示更新类型的提示，不修改同步 API/数据库/Windows 部署内容，已经部署 v1.2.0 的 VPS 无须因 RC6 再部署。
