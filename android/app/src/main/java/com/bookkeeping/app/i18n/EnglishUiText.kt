@@ -5,7 +5,19 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
-        "账单" to "Transactions",
+        "浏览全部发布版本" to "Browse all releases",
+        "关于与更新" to "About & updates",
+        "当前版本" to "Current version",
+        "发布标识" to "Release tag",
+        "包含测试版本（RC）" to "Include prereleases (RC)",
+        "检查更新" to "Check for updates",
+        "正在检查更新…" to "Checking for updates…",
+        "已是最新版本" to "You're up to date",
+        "发现新版本：" to "New version: ",
+        "查看 GitHub 发布页" to "View GitHub release",
+        "检查更新失败，请检查网络或稍后重试" to "Unable to check for updates. Check your connection and try again.",
+        "检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。" to "Checks public GitHub Releases without uploading financial data. Install updates manually.",
+        "账单" to "Records",
         "统计" to "Statistics",
         "预算" to "Budget",
         "设置" to "Settings",

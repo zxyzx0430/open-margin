@@ -14,8 +14,9 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        // RC3 installs over v1.1.3 (5), RC1 (6) and RC2 (7) without uninstall.
-        versionCode = 9
+        // RC5: original permanent signing key, upgrades all older release candidates.
+        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.5).
+        versionCode = 10
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
