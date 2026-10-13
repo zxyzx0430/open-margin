@@ -1,8 +1,8 @@
 package com.bookkeeping.app.update
 
 /**
- * GitHub Release tags are the authoritative public version identifiers.
- * The Android versionCode is used separately by PackageManager for APK upgrades.
+ * GitHub release tags sort release announcements, but do not prove which
+ * server version is installed. Update scope is explicit release metadata.
  */
 data class ReleaseVersion(
     val major: Int,
@@ -37,25 +37,59 @@ data class ReleaseVersion(
     }
 }
 
+/** Components included by the *release*, not the installation status on a remote computer. */
+enum class UpdateComponentScope {
+    ANDROID_ONLY,
+    SERVER_ONLY,
+    BOTH,
+    UNSPECIFIED;
+
+    companion object {
+        // Exactly one metadata line in the release body, not a guessed keyword
+        // from free-form notes. Order is fixed so it is safe to parse.
+        private val METADATA = Regex(
+            "(?m)^<!-- open-margin-components: (android|server|android,server) -->\\r?$"
+        )
+
+        fun fromReleaseNotes(body: String): UpdateComponentScope {
+            val matches = METADATA.findAll(body).toList()
+            if (matches.size != 1) return UNSPECIFIED
+            return when (matches.single().groupValues[1]) {
+                "android" -> ANDROID_ONLY
+                "server" -> SERVER_ONLY
+                "android,server" -> BOTH
+                else -> UNSPECIFIED
+            }
+        }
+    }
+}
+
 data class PublishedRelease(
     val tag: String,
     val version: ReleaseVersion,
     val prerelease: Boolean,
     val hasSignedApk: Boolean,
+    val componentScope: UpdateComponentScope = UpdateComponentScope.UNSPECIFIED,
 )
 
 object UpdateVersionPolicy {
-    // The build is published under this tag, tied to versionCode 10. Raise both
-    // when shipping a newer RC; RC4 is code 9 and must never be offered to RC5.
-    const val CURRENT_TAG = "v1.2.0-rc.5"
+    // RC6 is Android-only; the live v1.2.0 server does not need a redeploy for
+    // this UI change. Keep both release tag and Android versionCode in sync.
+    const val CURRENT_TAG = "v1.2.0-rc.6"
 
     fun latestNewer(
         releases: List<PublishedRelease>,
         current: ReleaseVersion,
         includePrereleases: Boolean,
     ): PublishedRelease? = releases.asSequence()
-        .filter { it.hasSignedApk && (includePrereleases || !it.prerelease) }
+        .filter { !it.prerelease || includePrereleases }
         .filter { it.version > current }
+        .filter {
+            // Server-only releases legitimately have no APK. Android/both
+            // releases must have a signed APK, and legacy unlabelled releases
+            // are only discoverable if they contain a signed APK.
+            it.componentScope == UpdateComponentScope.SERVER_ONLY || it.hasSignedApk
+        }
         .maxByOrNull { it.version }
 
     fun isSignedApkName(name: String): Boolean =
