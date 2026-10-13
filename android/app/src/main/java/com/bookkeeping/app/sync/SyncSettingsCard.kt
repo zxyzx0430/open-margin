@@ -1,5 +1,6 @@
 package com.bookkeeping.app.sync
 
+import android.content.SharedPreferences
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,6 +25,22 @@ fun SyncSettingsCard() {
     var url by remember { mutableStateOf(prefs.getString("url", "") ?: "") }
     var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
     var message by remember { mutableStateOf(prefs.getString("last_result", "同步关闭或尚未执行") ?: "") }
+
+    // Windows first-connection wizard and this legacy VPS settings card share
+    // the same preferences. An external successful wizard configuration must
+    // refresh these editable fields; otherwise saving here would overwrite a
+    // newly verified Windows endpoint with a stale (possibly empty) URL.
+    DisposableEffect(prefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, changed ->
+            if (changed == "url" || changed == "token" || changed == "enabled") {
+                url = prefs.getString("url", "") ?: ""
+                token = prefs.getString("token", "") ?: ""
+                enabled = prefs.getBoolean("enabled", false)
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     var lastSuccess by remember { mutableStateOf(prefs.getLong("last_success_ms", 0L)) }
     var conflictIds by remember {
         mutableStateOf(prefs.getStringSet("pending_conflict_event_ids",emptySet())?.toSet() ?: emptySet())
