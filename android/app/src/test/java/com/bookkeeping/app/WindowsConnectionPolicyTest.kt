@@ -49,4 +49,26 @@ class WindowsConnectionPolicyTest {
         assertEquals(WindowsConnectionPolicy.Result.INVALID_RESPONSE,
             WindowsConnectionPolicy.response(200, SyncServerIdentityPolicy.Decision.MISSING_ID))
     }
+
+    @Test fun syncProbeEnvelopeRejectsMisleadingOk() {
+        val policy = WindowsConnectionPolicy
+        assertTrue(policy.isValidProbeEnvelope(0, 0, 0, 0, false))
+        assertTrue(policy.isValidProbeEnvelope(4, 5, 10, 1, true))
+        // A restored older database is a cursor-ahead identity decision.
+        assertTrue(policy.isValidProbeEnvelope(10, 10, 4, 0, false))
+        assertFalse(policy.isValidProbeEnvelope(0, 0, 5, null, false))
+        assertFalse(policy.isValidProbeEnvelope(0, 0, 5, 0, null))
+        assertFalse(policy.isValidProbeEnvelope(0, 8, 5, 1, false))
+        assertFalse(policy.isValidProbeEnvelope(0, 0, 5, 1, false))
+        assertFalse(policy.isValidProbeEnvelope(0, 0, 5, 0, true))
+        assertFalse(policy.isValidProbeEnvelope(0, 1, 5, 2, false))
+        assertFalse(policy.isValidProbeEnvelope(-1, 0, 5, 0, false))
+    }
+
+    @Test fun staleProbeNeverConfirmsUpdatedCredentials() {
+        val policy = WindowsConnectionPolicy
+        assertTrue(policy.isSameAttempt(address, "valid-key", "$address/", " valid-key "))
+        assertFalse(policy.isSameAttempt(address, "valid-key", address, "replaced-key"))
+        assertFalse(policy.isSameAttempt(address, "valid-key", "https://other-pc.ts.net/finance", "valid-key"))
+    }
 }
