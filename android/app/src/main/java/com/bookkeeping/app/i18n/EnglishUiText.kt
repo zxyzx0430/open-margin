@@ -219,6 +219,30 @@ internal object EnglishUiText {
         "状态：" to "Status: ",
     )
 
-    fun translate(chinese: String): String = english[chinese] ?: chinese
+    fun translate(chinese: String): String {
+        english[chinese]?.let { return it }
+        // These historical sync status messages contain dynamic IDs/counts.
+        // Translate them only at the presentation layer, never in the journal.
+        if (chinese.startsWith("本地交易 ") && chinese.endsWith(" 数据异常，无法同步")) {
+            val id = chinese.removePrefix("本地交易 ").removeSuffix(" 数据异常，无法同步")
+            return "Local transaction $id is invalid and cannot sync"
+        }
+        if (chinese.startsWith("服务器返回 ") && chinese.endsWith("，稍后重试")) {
+            val code = chinese.removePrefix("服务器返回 ").removeSuffix("，稍后重试")
+            return "Server returned $code; retrying later"
+        }
+        if (chinese.startsWith("旧交易 ") && chinese.endsWith(" 金额待核对；未擅自修改")) {
+            val id = chinese.removePrefix("旧交易 ").removeSuffix(" 金额待核对；未擅自修改")
+            return "Old transaction $id needs an amount review; no automatic correction was made"
+        }
+        if (chinese.startsWith("已同步无冲突交易；仍有 ") &&
+            chinese.endsWith(" 笔修改待核对，请不要卸载应用")) {
+            val count = chinese.removePrefix("已同步无冲突交易；仍有 ")
+                .removeSuffix(" 笔修改待核对，请不要卸载应用")
+            return "Synced non-conflicting records; $count changes still need review. Do not uninstall."
+        }
+        return chinese
+    }
+
     fun hasTranslation(chinese: String): Boolean = english.containsKey(chinese)
 }
