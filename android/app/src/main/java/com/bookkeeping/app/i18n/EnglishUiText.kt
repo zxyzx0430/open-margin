@@ -5,6 +5,17 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "待更新组件：" to "Update components: ",
+        "仅 Android APP 更新" to "Android app only",
+        "仅 Windows / VPS 更新" to "Windows / VPS only",
+        "Android APP 与 Windows / VPS 都有更新" to "Both Android app and Windows / VPS",
+        "更新范围未注明" to "Update scope not specified",
+        "此次只需更新手机 APP；电脑/VPS 不需要因这个版本重新部署。" to "Only the Android app changes in this release; no Windows/VPS redeployment is required for this release.",
+        "此次只更新电脑或 VPS 服务端；手机 APP 无需因这个版本重装。" to "This release only updates Windows/VPS. You do not need to reinstall the Android app for this release.",
+        "此次两个组件都要更新，请按发布说明的步骤执行。" to "Both the Android app and the Windows/VPS server need an update. Follow the release instructions.",
+        "不能确定该版本需要更新哪些组件，请先阅读发布说明。" to "The affected components are unknown. Read the release notes before updating.",
+        "此处显示发行版本的更新范围，并未检测你电脑/VPS 的实际安装版本。" to "This describes the release scope; it does not verify which version is installed on your PC/VPS.",
+        "没有找到更新的 GitHub 发布版本；未检测电脑/VPS 的实际部署版本。" to "No newer GitHub release found. Your installed Windows/VPS version was not checked.",
         "浏览全部发布版本" to "Browse all releases",
         "关于与更新" to "About & updates",
         "当前版本" to "Current version",

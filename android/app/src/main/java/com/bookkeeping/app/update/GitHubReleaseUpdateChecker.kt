@@ -5,8 +5,9 @@ import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
 /**
- * Read-only public GitHub API check. No device key, bank record or ledger data
- * is sent; the user explicitly chooses to open the official release page.
+ * Read-only public GitHub Releases query. Version update scope is declared by
+ * release maintainers, never guessed from the presence of an APK or a title.
+ * This does not inspect the user's installed Windows/VPS server version.
  */
 object GitHubReleaseUpdateChecker {
     private const val RELEASES_API =
@@ -16,7 +17,11 @@ object GitHubReleaseUpdateChecker {
 
     sealed interface CheckResult {
         data object UpToDate : CheckResult
-        data class UpdateAvailable(val tag: String, val releaseUrl: String) : CheckResult
+        data class UpdateAvailable(
+            val tag: String,
+            val releaseUrl: String,
+            val componentScope: UpdateComponentScope,
+        ) : CheckResult
         data object Unavailable : CheckResult
     }
 
@@ -50,15 +55,22 @@ object GitHubReleaseUpdateChecker {
                     asset.optLong("size", 0) > 0 &&
                         UpdateVersionPolicy.isSignedApkName(asset.optString("name"))
                 }
+                val scope = UpdateComponentScope.fromReleaseNotes(entry.optString("body", ""))
                 candidates.add(
-                    PublishedRelease(tag, version, entry.optBoolean("prerelease", false), signedApk)
+                    PublishedRelease(
+                        tag, version, entry.optBoolean("prerelease", false), signedApk, scope
+                    )
                 )
             }
             val newer = UpdateVersionPolicy.latestNewer(candidates, current, includePrereleases)
                 ?: return CheckResult.UpToDate
-            // Tag parser restricts input to numeric semver/rc; no arbitrary URLs
-            // from a remote JSON response can be opened inside the app.
-            return CheckResult.UpdateAvailable(newer.tag, RELEASE_PAGE + newer.tag)
+            // Only strictly parsed version tags can be added to this fixed
+            // GitHub URL. Never open a URL supplied by the JSON response.
+            return CheckResult.UpdateAvailable(
+                newer.tag,
+                RELEASE_PAGE + newer.tag,
+                newer.componentScope,
+            )
         } catch (_: Exception) {
             return CheckResult.Unavailable
         } finally {

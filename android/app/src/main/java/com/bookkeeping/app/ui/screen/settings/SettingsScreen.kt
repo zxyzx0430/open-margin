@@ -49,6 +49,7 @@ import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureServic
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
+import com.bookkeeping.app.update.UpdateComponentScope
 import com.bookkeeping.app.update.UpdateVersionPolicy
 import com.bookkeeping.app.sync.SyncSettingsCard
 import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
@@ -432,7 +433,7 @@ private fun AboutUpdateCard() {
             when (val state = result) {
                 null -> Unit
                 GitHubReleaseUpdateChecker.CheckResult.UpToDate ->
-                    Text(tr("已是最新版本"))
+                    Text(tr("没有找到更新的 GitHub 发布版本；未检测电脑/VPS 的实际部署版本。"))
                 GitHubReleaseUpdateChecker.CheckResult.Unavailable ->
                     Text(
                         tr("检查更新失败，请检查网络或稍后重试"),
@@ -440,6 +441,26 @@ private fun AboutUpdateCard() {
                     )
                 is GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable -> {
                     Text(tr("发现新版本：") + state.tag)
+                    val (scopeTitle, scopeAdvice) = when (state.componentScope) {
+                        UpdateComponentScope.ANDROID_ONLY ->
+                            tr("仅 Android APP 更新") to tr("此次只需更新手机 APP；电脑/VPS 不需要因这个版本重新部署。")
+                        UpdateComponentScope.SERVER_ONLY ->
+                            tr("仅 Windows / VPS 更新") to tr("此次只更新电脑或 VPS 服务端；手机 APP 无需因这个版本重装。")
+                        UpdateComponentScope.BOTH ->
+                            tr("Android APP 与 Windows / VPS 都有更新") to tr("此次两个组件都要更新，请按发布说明的步骤执行。")
+                        UpdateComponentScope.UNSPECIFIED ->
+                            tr("更新范围未注明") to tr("不能确定该版本需要更新哪些组件，请先阅读发布说明。")
+                    }
+                    Text(
+                        tr("待更新组件：") + scopeTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(scopeAdvice, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        tr("此处显示发行版本的更新范围，并未检测你电脑/VPS 的实际安装版本。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     OutlinedButton(onClick = {
                         // The checker constructs only github.com/zxyzx0430/open-margin
                         // release URLs from strictly parsed version tags.
