@@ -3,6 +3,7 @@ package com.bookkeeping.app
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -10,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.ui.navigation.RootNavigation
 import com.bookkeeping.app.ui.theme.BookkeepingAppTheme
@@ -21,6 +23,11 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var settings: SettingsPreferences
+
+    override fun attachBaseContext(newBase: Context) {
+        // Read the language before views/resources are initialized.
+        super.attachBaseContext(AppLanguage.wrap(newBase))
+    }
 
     // Android 13+ 必须运行时申请 POST_NOTIFICATIONS，否则前台服务的常驻通知不可见
     private val notificationPermissionLauncher = registerForActivityResult(
