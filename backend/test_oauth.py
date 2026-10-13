@@ -37,6 +37,31 @@ class OAuthTest(unittest.TestCase):
         self.assertTrue(oauth.owner_ok("owner","test-only-password"))
         self.assertFalse(oauth.owner_ok("other","second-password"))
 
+    def test_default_scope_is_read_only_and_visible_on_consent(self):
+        redirect = self.redirect
+        registration = self.client.post("/oauth/register", json={
+            "redirect_uris": [redirect], "token_endpoint_auth_method": "none",
+        })
+        self.assertEqual(registration.status_code, 201, registration.text)
+        page = self.client.get("/oauth/authorize", params={
+            "client_id": registration.json()["client_id"],
+            "redirect_uri": redirect,
+            "response_type": "code",
+            "code_challenge_method": "S256",
+            "code_challenge": self.challenge,
+            "resource": oauth.RESOURCE,
+            "state": "default-read-only",
+            # Client intentionally does not supply a scope.
+        })
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertIn("finance:read", page.text)
+        self.assertIn("只允许查询财务信息", page.text)
+        self.assertNotIn("finance:write", page.text)
+        with oauth.store() as db:
+            self.assertEqual(db.execute(
+                "SELECT scope FROM pending WHERE state='default-read-only'"
+            ).fetchone()[0], "finance:read")
+
     def test_dcr_authorize_token_refresh(self):
         discovery=self.client.get("/oauth/.well-known/oauth-authorization-server")
         self.assertEqual(discovery.status_code,200)

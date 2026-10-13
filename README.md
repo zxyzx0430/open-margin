@@ -97,6 +97,7 @@ Open **http://127.0.0.1:18082** and register your first Wallos account, then log
 - Today, seven-day, monthly and per-day CNY summaries; category/merchant/date filters; status review; optional monthly spending budget; CSV export.
 - Currency summaries remain independent without assumed FX rates; the daily bar chart currently displays CNY only.
 - ChatGPT/MCP uses OAuth DCR + S256 PKCE and scopes. Only grant access to trusted clients.
+- MCP exposes 11 tools (7 read, 4 write); unscoped OAuth requests are read-only. For permissions and tests see [MCP v1.2.0](docs/MCP_V120_COMPATIBILITY.md).
 
 ## Backups and recovery
 
