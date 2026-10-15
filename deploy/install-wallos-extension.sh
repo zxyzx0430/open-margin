@@ -46,6 +46,15 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
 fi
 # Always compare baked code against source, not only a Docker tag/image ID.
 # This guards against a stale image accidentally carrying a new hash tag.
+# Verify access as the real nginx user rather than root.
+verify_static_asset_access() {
+    for asset in finance-unified.css finance-unified.js daily-spend-chart-v2.js; do
+        docker exec --user nginx "$NAME" test -r "/var/www/html/$asset" || {
+            echo "Nginx static asset unreadable: $asset" >&2
+            return 1
+        }
+    done
+}
 verify_baked_assets() {
     for asset in expenses.php daily-spend-chart-v2.js service-worker.php images/siteicons/svg/mobile-menu/expenses.php includes/header.php manifest.php calendar.php stats.php finance-unified-common.php finance-unified-data.php finance-unified-action.php finance-unified.js finance-unified.css; do
         local expected actual
@@ -74,6 +83,7 @@ target_id="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
 if [ "$running_id" = "$target_id" ] &&
    [ "$(docker inspect "$NAME" --format '{{.State.Running}}' 2>/dev/null || true)" = true ]; then
     verify_baked_assets
+    verify_static_asset_access
     docker exec "$NAME" test ! -e /var/www/html/integration.php
     # The page's actual PHP identity, not root's docker-exec identity,
     # must be able to read the auth secret and make an API request.
@@ -129,6 +139,7 @@ for php in expenses.php expenses-action.php expenses-export.php ledger-common.ph
     docker exec "$NAME" php -l "/var/www/html/$php" >/dev/null
 done
 verify_baked_assets
+verify_static_asset_access
 docker exec "$NAME" test ! -e /var/www/html/integration.php
 if docker inspect "$NAME" --format '{{range .Mounts}}{{.Destination}}{{println}}{{end}}' | grep -qE '^/var/www/html/(expenses.php|index.php|includes/header.php)$'; then
     echo "Code remains on a writable bind mount. Refusing deployment." >&2
