@@ -160,7 +160,8 @@
           const box=document.createElement("aside");
           box.className="finance-day-plan";
           box.innerHTML='<strong>订阅计划 · 未计入实际支出</strong>'+data.subscriptions.map(s=>
-            '<div>'+esc(s.name)+' · '+esc(s.currency)+' '+(Number(s.cents)/100).toFixed(2)+'</div>').join("");
+            '<div>'+esc(s.name)+' · '+esc(s.currency)+' '+(Number(s.cents)/100).toFixed(2)+
+            (s.estimated_first_month?' · 首月周期推算，非已扣款':'')+'</div>').join("");
           content.appendChild(box);
         }
       }else{
@@ -489,6 +490,7 @@
         esc(x.name)+'</button><span>'+esc(x.date.slice(5))+' · '+esc(x.currency)+' '+
         (Number(x.cents)/100).toFixed(2)+
         (x.cny_cents===null?' · 无法换算':' ≈ '+money(x.cny_cents))+
+        (x.estimated_first_month?' · 首月周期推算，非已扣款':'')+
         '</span></div>').join("")+
         (other.length?'<p class="finance-hint">未能换算的币种：'+
           other.map(([k,v])=>esc(k)+' '+(Number(v)/100).toFixed(2)).join(' / ')+'</p>':'')+
