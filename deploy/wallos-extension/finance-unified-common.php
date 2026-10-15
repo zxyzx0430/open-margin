@@ -113,15 +113,30 @@ function finance_plan_month(SQLite3 $db,int $uid,string $month):array {
             }
         }
         while($date >= $start && $date < $end && $limit++ < 1250) {
+            $estimatedFirstMonth=false;
             if(!empty($r['start_date'])) {
                 try {
                     $begin=new DateTimeImmutable((string)$r['start_date'],$zone);
-                    if($date<$begin) {if($interval===null)break;$date=$date->add($interval);continue;}
+                    if($date<$begin) {
+                        // Wallos may advance next_payment to the next cycle while
+                        // start_date is the date a subscription was entered.
+                        // Monthly/yearly plans count the entry MONTH as eligible,
+                        // not the exact entry DAY; prior months remain excluded.
+                        // This is a budget estimate, never a confirmed payment.
+                        $estimatedFirstMonth=in_array($cycle,[3,4],true)
+                            && $date->format('Y-m')===$begin->format('Y-m');
+                        if(!$estimatedFirstMonth) {
+                            if($interval===null)break;
+                            $date=$date->add($interval);
+                            continue;
+                        }
+                    }
                 }catch(Throwable $e){}
             }
             $event=['date'=>$date->format('Y-m-d'),'id'=>(int)$r['id'],
                 'name'=>(string)$r['name'],'cents'=>$originalCents,'currency'=>$currency,
-                'cny_cents'=>$cny,'rate'=>$rate>0?$rate:null];
+                'cny_cents'=>$cny,'rate'=>$rate>0?$rate:null,
+                'estimated_first_month'=>$estimatedFirstMonth];
             $events[]=$event;
             if($cny!==null)$dueCny+=$cny;
             else $unconverted[$currency]=($unconverted[$currency]??0)+$originalCents;
@@ -306,7 +321,7 @@ function finance_render_panel(string $view,array $model):void {
         <div class="finance-subscription-monthly"></div>
         <h3 class="finance-list-heading">本月计划续费</h3>
         <div class="finance-subscriptions"></div>
-        <p class="finance-hint">外币按 Wallos 已保存汇率换算为人民币，仅供预算参考，不是银行卡实际结算价。计划续费不等于已扣款；实际订阅支出仅来自 Finance 中有效的订阅分类交易。若汇率缺失会显示“无法完整计算”，不把缺失项目当作零。</p>
+        <p class="finance-hint">外币按 Wallos 已保存汇率换算为人民币，仅供预算参考，不是银行卡实际结算价。计划续费不等于已扣款；首月若开始日与推算账单日冲突，将标注“首月周期推算”，请核对首次付款日期；实际订阅支出仅来自 Finance 中有效的订阅分类交易。若汇率缺失会显示“无法完整计算”，不把缺失项目当作零。</p>
       </div>
       <?php endif; ?>
       <?php if($view==='calendar'): ?>
