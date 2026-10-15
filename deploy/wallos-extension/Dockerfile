@@ -20,6 +20,12 @@ COPY mobile-menu-expenses.php /var/www/html/images/siteicons/svg/mobile-menu/exp
 COPY index.php /var/www/html/index.php
 COPY service-worker.php /var/www/html/service-worker.php
 
+# Nginx static-file worker is "nginx", not the PHP-FPM "www-data" user.
+# Normalize public CSS/JS after COPY. Do not widen permissions on secrets.
+RUN chmod 0644 /var/www/html/finance-unified.css \
+               /var/www/html/finance-unified.js \
+               /var/www/html/daily-spend-chart-v2.js
+
 LABEL org.opencontainers.image.title="Open Margin (清衡) · Wallos-powered finance" \
       org.opencontainers.image.description="Wallos vendor UI with custom expense ledger endpoint. Two separate databases."
 
