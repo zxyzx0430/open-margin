@@ -17,6 +17,7 @@ READ_TOOLS = frozenset({
 })
 WRITE_TOOLS = frozenset({
     "add_subscription",
+    "edit_subscription",
     "edit_record",
     "register_merchant_rule",
     "link_refund",
