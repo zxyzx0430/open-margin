@@ -1,5 +1,5 @@
 """Read-mostly MCP interface for self-hosted transaction/recurring expense data."""
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from mcp.server.transport_security import TransportSecuritySettings
@@ -72,25 +72,123 @@ def get_recurring_expense_candidates() -> dict:
         if hits:out.append({"merchant":name,"amount_cents":cents,"currency":currency,"monthly_intervals":hits,"requires_confirmation":True})
     return {"items":out}
 
+SUBSCRIPTION_CURRENCIES=frozenset(("CNY","USD","EUR","HKD","JPY","GBP"))
+SUBSCRIPTION_CADENCES=frozenset(("weekly","monthly","quarterly","yearly"))
+
+def _subscription_date(value:str|None) -> date|None:
+    if value is None:return None
+    if len(value)!=10:raise ValueError("start_date must be YYYY-MM-DD")
+    parsed=date.fromisoformat(value)
+    if parsed.isoformat()!=value:raise ValueError("start_date must be YYYY-MM-DD")
+    if not 2000<=parsed.year<=2099:raise ValueError("start_date year out of range")
+    return parsed
+
+def _subscription_due(ms:int) -> date:
+    from zoneinfo import ZoneInfo
+    if not isinstance(ms,int) or not 946684800000<ms<4102444800000:
+        raise ValueError("bad next due date")
+    return datetime.fromtimestamp(ms/1000,ZoneInfo(LOCAL_TIMEZONE)).date()
+
+def _subscription_fields(name=None,amount_cents=None,currency=None,cadence=None,
+                         next_due_ms=None,start_date=None,notify_days_before=None):
+    if name is not None and (not name.strip() or len(name)>140):raise ValueError("bad subscription name")
+    if amount_cents is not None and (not isinstance(amount_cents,int) or not 0<=amount_cents<=100000000000):
+        raise ValueError("bad amount")
+    if currency is not None and currency not in SUBSCRIPTION_CURRENCIES:raise ValueError("unsupported currency")
+    if cadence is not None and cadence not in SUBSCRIPTION_CADENCES:
+        raise ValueError("unsupported cadence; Wallos does not support one_time")
+    if next_due_ms is not None:_subscription_due(next_due_ms)
+    _subscription_date(start_date)
+    if notify_days_before is not None and not 0<=notify_days_before<=365:
+        raise ValueError("notify_days_before must be 0..365")
+
+
 @mcp.tool(annotations=MUTATES_LEDGER)
 def add_subscription(name:str, amount_cents:int, currency:str, cadence:str, next_due_ms:int,
-                     payment_channel:str="") -> dict:
-    """Add a subscription schedule in Wallos. Does not initiate any real payment."""
+                     payment_channel:str="",start_date:str|None=None,
+                     auto_renew:bool|None=None,notify:bool|None=None,
+                     notify_days_before:int|None=None) -> dict:
+    """Schedule a Wallos subscription. start_date is optional YYYY-MM-DD (Asia/Shanghai).
+    Payment schedules are not evidence of real payment. Does not initiate charges.
+    """
     from wallos_api import add,get_all,WallosError
-    if not name or len(name)>140 or not 0<=amount_cents<=100000000000: return {"error":"bad name or amount"}
-    if currency not in ("CNY","USD","EUR","HKD","JPY","GBP"):return {"error":"unsupported currency"}
-    if cadence not in ("weekly","monthly","quarterly","yearly","one_time"):return {"error":"unsupported cadence"}
-    if not 946684800000<next_due_ms<4102444800000:return {"error":"bad next due date"}
     try:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-        day=datetime.fromtimestamp(next_due_ms/1000,ZoneInfo(LOCAL_TIMEZONE)).date()
+        _subscription_fields(name,amount_cents,currency,cadence,next_due_ms,start_date,notify_days_before)
+        due=_subscription_due(next_due_ms)
+        first=_subscription_date(start_date)
+        if first and first>due:raise ValueError("start_date cannot be later than next due date")
         for sub in get_all():
-            if sub["name"]==name and sub["amount_cents"]==amount_cents and sub["currency"]==currency and sub["cadence"]==cadence:
-                if sub["next_due_ms"] is not None and datetime.fromtimestamp(sub["next_due_ms"]/1000,ZoneInfo(LOCAL_TIMEZONE)).date()==day:
-                    return {"created":False,"already_exists":True,"subscription_id":sub["id"],"source":"Wallos"}
-        return {"created":True,"subscription_id":add(name,amount_cents,currency,cadence,next_due_ms,payment_channel),"source":"Wallos"}
-    except WallosError as exc:
+            if (sub["name"]==name and sub["amount_cents"]==amount_cents
+                    and sub["currency"]==currency and sub["cadence"]==cadence
+                    and sub["next_due_ms"] is not None and _subscription_due(sub["next_due_ms"])==due):
+                conflicts=[]
+                if first and (sub.get("start_ms") is None or _subscription_due(sub["start_ms"])!=first):conflicts.append("start_date")
+                if payment_channel and sub.get("payment_channel","").casefold()!=payment_channel.casefold():conflicts.append("payment_channel")
+                if auto_renew is not None and sub.get("auto_renew",True)!=auto_renew:conflicts.append("auto_renew")
+                if notify is not None and sub.get("notify",False)!=notify:conflicts.append("notify")
+                if notify_days_before is not None and sub.get("notify_days_before")!=notify_days_before:conflicts.append("notify_days_before")
+                if conflicts:
+                    return {"error":"subscription already exists but specified fields differ; use edit_subscription",
+                            "subscription_id":sub["id"],"conflicting_fields":conflicts}
+                return {"created":False,"already_exists":True,"subscription_id":sub["id"],"source":"Wallos"}
+        sid=add(name,amount_cents,currency,cadence,next_due_ms,payment_channel,
+                start_date=start_date,auto_renew=True if auto_renew is None else auto_renew,
+                notify=False if notify is None else notify,
+                notify_days_before=notify_days_before)
+        created=next((s for s in get_all() if s["id"]==sid),None)
+        verified=bool(created and (first is None or
+            (created.get("start_ms") is not None and _subscription_due(created["start_ms"])==first)))
+        return {"created":True,"subscription_id":sid,"source":"Wallos",
+                "verified":verified,"subscription":created}
+    except (WallosError,ValueError,OverflowError) as exc:
+        return {"error":str(exc)}
+
+
+@mcp.tool(annotations=MUTATES_LEDGER)
+def edit_subscription(subscription_id:int,name:str|None=None,amount_cents:int|None=None,
+                      currency:str|None=None,cadence:str|None=None,next_due_ms:int|None=None,
+                      start_date:str|None=None,payment_channel:str|None=None,
+                      auto_renew:bool|None=None,notify:bool|None=None,
+                      notify_days_before:int|None=None,active:bool|None=None) -> dict:
+    """Edit an existing Wallos subscription by ID; only supplied fields change.
+    start_date is YYYY-MM-DD in the configured Finance timezone.
+    """
+    from wallos_api import edit,get_all,WallosError
+    try:
+        if not isinstance(subscription_id,int) or subscription_id<1:raise ValueError("bad subscription ID")
+        changes={k:v for k,v in locals().items()
+                 if k not in ("subscription_id","edit","get_all","WallosError") and v is not None}
+        # Only API-editable fields may reach the Wallos adapter.
+        allowed={"name","amount_cents","currency","cadence","next_due_ms",
+                 "start_date","payment_channel","auto_renew","notify","notify_days_before","active"}
+        changes={k:v for k,v in changes.items() if k in allowed}
+        if not changes:raise ValueError("No changes supplied")
+        _subscription_fields(name,amount_cents,currency,cadence,next_due_ms,start_date,notify_days_before)
+        original=next((s for s in get_all() if s["id"]==subscription_id),None)
+        if original is None:raise ValueError("Subscription not found")
+        first=_subscription_date(start_date) if start_date else (
+            _subscription_due(original["start_ms"]) if original.get("start_ms") else None)
+        due=_subscription_due(next_due_ms if next_due_ms is not None else original["next_due_ms"])
+        if first and first>due:raise ValueError("start_date cannot be later than next due date")
+        edit(subscription_id,**changes)
+        updated=next((s for s in get_all() if s["id"]==subscription_id),None)
+        if updated is None:return {"updated":True,"verified":False,"error":"Wallos edit succeeded but readback missing"}
+        expected={"name":"name","amount_cents":"amount_cents","currency":"currency",
+                  "cadence":"cadence","next_due_ms":"next_due_ms","payment_channel":"payment_channel",
+                  "auto_renew":"auto_renew","notify":"notify","notify_days_before":"notify_days_before",
+                  "active":"active"}
+        mismatches=[]
+        for key,value in changes.items():
+            if key=="start_date":
+                if updated.get("start_ms") is None or _subscription_due(updated["start_ms"])!=_subscription_date(value):
+                    mismatches.append(key)
+            elif key=="next_due_ms":
+                if updated.get(key) is None or _subscription_due(updated[key])!=_subscription_due(value):mismatches.append(key)
+            elif key in expected and updated.get(expected[key])!=value:
+                mismatches.append(key)
+        return {"updated":True,"subscription_id":subscription_id,"verified":not mismatches,
+                "mismatches":mismatches,"subscription":updated,"source":"Wallos"}
+    except (WallosError,ValueError,OverflowError) as exc:
         return {"error":str(exc)}
 
 # Retired legacy subscription-reconciliation integration.
