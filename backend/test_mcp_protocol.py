@@ -64,7 +64,7 @@ class MCPProtocolTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         tool_names = {tool["name"] for tool in r.json()["result"]["tools"]}
         self.assertEqual(tool_names, set(mcp_access.TOOL_SCOPES))
-        self.assertEqual(len(tool_names), 11)
+        self.assertEqual(len(tool_names), 12)
 
     def test_tool_annotations_match_read_write_scopes(self):
         """ChatGPT must not classify pure queries as write actions."""
@@ -89,6 +89,24 @@ class MCPProtocolTest(unittest.TestCase):
                 self.assertIs(annotations["destructiveHint"], True)
                 self.assertIs(annotations["idempotentHint"], False)
                 self.assertIs(annotations["openWorldHint"], False)
+
+    def test_edit_subscription_is_write_scoped(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        tz=ZoneInfo("Asia/Shanghai")
+        def ms(day):
+            return int(datetime.strptime(day,"%Y-%m-%d").replace(tzinfo=tz).timestamp()*1000)
+        before={"id":8,"name":"sample","amount_cents":1000,"currency":"CNY",
+                "cadence":"monthly","start_ms":ms("2026-10-22"),"next_due_ms":ms("2026-11-20")}
+        after={**before,"start_ms":ms("2026-10-20")}
+        payload=self.call("edit_subscription",subscription_id=8,start_date="2026-10-20")
+        self.assertEqual(self.post(self.read,payload).status_code,403)
+        with patch("wallos_api.get_all",side_effect=[[before],[after]]), \
+             patch("wallos_api.edit",return_value=8) as updater:
+            response=self.post(self.write,payload)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertTrue(json.loads(response.json()["result"]["content"][0]["text"])["verified"])
+        updater.assert_called_once_with(8,start_date="2026-10-20")
 
     def test_no_anonymous_or_expired_access(self):
         payload = self.call("list_recent_transactions", limit=1)
@@ -162,7 +180,7 @@ class MCPProtocolTest(unittest.TestCase):
                     self.assertFalse(response.json().get("result", {}).get("isError"),
                                      response.text)
 
-    def test_all_four_write_tools_require_scope_and_work_on_synthetic_data(self):
+    def test_all_write_tools_require_scope_and_work_on_synthetic_data(self):
         with core.db_connection() as db:
             expense = db.execute("""INSERT INTO transactions
                 (event_id,timestamp_ms,amount_cents,currency,direction,source,category,merchant,review_status)
@@ -180,6 +198,7 @@ class MCPProtocolTest(unittest.TestCase):
             self.call("link_refund", original_tx_id=expense, refund_tx_id=refund, amount_cents=345),
             self.call("add_subscription", name="test only", amount_cents=300,
                       currency="CNY", cadence="monthly", next_due_ms=1795000000000),
+
         ]
         with patch("wallos_api.get_all", return_value=[]), patch("wallos_api.add", return_value=7):
             for operation in operations:
