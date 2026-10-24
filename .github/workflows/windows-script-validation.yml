@@ -25,7 +25,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $paths = @(
             'deploy/windows/Install-OpenMargin.ps1',
-            'deploy/windows/Start-OpenMarginSetup.ps1'
+            'deploy/windows/Start-OpenMarginSetup.ps1',
+            'deploy/windows/Start-OpenMarginLocalMcp.ps1'
           )
           foreach ($path in $paths) {
             $tokens = $null
