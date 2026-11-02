@@ -91,7 +91,7 @@ object AccessibilityCaptureHealth {
             .putString("error_stage", stage.take(48))
             .putString("error_kind", throwable.javaClass.simpleName.take(80))
             .putInt("error_count", (prefs.getInt("error_count", 0) + 1).coerceAtMost(1_000_000))
-            .apply()
+            .commit() // Persist before a fatal failure can terminate the process.
     }
 }
 
