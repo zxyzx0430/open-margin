@@ -74,9 +74,9 @@ jobs:
             done
             test "$success" -eq 1
             adb shell pidof com.bookkeeping.app.sync2
+            mkdir -p emulator-proof
             adb shell dumpsys accessibility > "emulator-proof/accessibility-api-${{ matrix.api-level }}.txt"
             adb logcat -d -s BkAccessibility:D > "emulator-proof/accessibility-lifecycle-api-${{ matrix.api-level }}.txt"
-            mkdir -p emulator-proof
             adb shell screencap -p /sdcard/openmargin_app_launch.png
             adb pull /sdcard/openmargin_app_launch.png emulator-proof/app_launch.png
             echo "EMULATOR_INSTRUMENTATION_APP_START_AND_ACCESSIBILITY_BIND_PASS_API_${{ matrix.api-level }}"
