@@ -3,6 +3,7 @@ package com.bookkeeping.app.notification.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -35,22 +36,37 @@ class AccessibilityCaptureService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        val ep = EntryPointAccessors.fromApplication(
-            applicationContext,
-            AccessibilityServiceEntryPoint::class.java,
-        )
-        repository = ep.transactionRepository()
-        extractors = mapOf(
-            PKG_ALIPAY to listOf(AlipayTransferExtractor()),
-            PKG_WECHAT to listOf(
-                WechatTransferExtractor(),
-                WechatRedPacketExtractor(),
-            ),
-        )
-        if (BuildConfig.DEBUG) Log.d(TAG, "AccessibilityCaptureService connected")
+        try {
+            val ep = EntryPointAccessors.fromApplication(
+                applicationContext,
+                AccessibilityServiceEntryPoint::class.java,
+            )
+            repository = ep.transactionRepository()
+            extractors = mapOf(
+                PKG_ALIPAY to listOf(AlipayTransferExtractor()),
+                PKG_WECHAT to listOf(
+                    WechatTransferExtractor(),
+                    WechatRedPacketExtractor(),
+                ),
+            )
+            AccessibilityCaptureHealth.onConnected(this)
+            if (BuildConfig.DEBUG) Log.d(TAG, "AccessibilityCaptureService connected")
+        } catch (failure: Throwable) {
+            AccessibilityCaptureHealth.onFailure(this, "connect", failure)
+            throw failure // Preserve prior crash semantics; report the type before failing.
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        try {
+            handleAccessibilityEvent(event)
+        } catch (failure: Throwable) {
+            AccessibilityCaptureHealth.onFailure(this, "event", failure)
+            throw failure // Diagnostic-only; no change to event processing/recovery policy.
+        }
+    }
+
+    private fun handleAccessibilityEvent(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString() ?: return
 
         // 入口处不过滤包名先打 log，方便确认事件分发是否被 vivo 拦截
@@ -59,6 +75,7 @@ class AccessibilityCaptureService : AccessibilityService() {
         }
 
         val list = extractors[pkg] ?: return
+        AccessibilityCaptureHealth.onEvent(this)
         val root = rootInActiveWindow
         if (root == null) {
             if (BuildConfig.DEBUG) Log.d(TAG, "  -> rootInActiveWindow=null, skip")
@@ -67,14 +84,16 @@ class AccessibilityCaptureService : AccessibilityService() {
 
         // 强制刷新一次根节点，避免事件到达时 UI 树尚未填充完
         runCatching { root.refresh() }
+            .onFailure { AccessibilityCaptureHealth.onFailure(this, "refresh", it) }
 
-        if (BuildConfig.DEBUG && event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            Log.d(TAG, "  -> Tree (childCount=${root.childCount}):\n${root.dumpTree()}")
-        }
+        // Diagnostics must never print the accessibility tree (chat/payment content).
 
         for (ext in list) {
             val tx = runCatching { ext.extract(root, event) }
-                .onFailure { if (BuildConfig.DEBUG) Log.w(TAG, "  -> extractor ${ext.javaClass.simpleName} threw", it) }
+                .onFailure {
+                    AccessibilityCaptureHealth.onFailure(this, "extract:" + ext.javaClass.simpleName, it)
+                    if (BuildConfig.DEBUG) Log.w(TAG, "  -> extractor " + ext.javaClass.simpleName + " failed (" + it.javaClass.simpleName + ")")
+                }
                 .getOrNull()
 
             if (tx == null) {
@@ -110,22 +129,32 @@ class AccessibilityCaptureService : AccessibilityService() {
 
     private fun persist(tx: TransactionEntity) {
         scope.launch {
-            val id = repository.insertIfNotDuplicate(tx)
-            if (id == null) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Accessibility: skipped duplicate (in 60s window)")
-            } else if (BuildConfig.DEBUG) {
-                Log.i(TAG, "Accessibility captured id=$id amount=${tx.amountCents} source=${tx.source} type=${tx.type}")
-            } else {
-                Log.i(TAG, "Accessibility captured id=$id")
+            try {
+                val id = repository.insertIfNotDuplicate(tx)
+                if (id == null) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Accessibility: skipped duplicate")
+                } else {
+                    Log.i(TAG, "Accessibility captured id=$id")
+                }
+            } catch (failure: Throwable) {
+                AccessibilityCaptureHealth.onFailure(this@AccessibilityCaptureService, "persist", failure)
+                throw failure
             }
         }
     }
 
     override fun onInterrupt() {
-        // 系统要求覆盖。我们没有要中断的工作。
+        AccessibilityCaptureHealth.onInterrupted(this)
+        // An interruption does not mean the service was disconnected.
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        AccessibilityCaptureHealth.onDisconnected(this, "unbind")
+        return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        AccessibilityCaptureHealth.onDisconnected(this, "destroy")
         scope.cancel()
         super.onDestroy()
     }
