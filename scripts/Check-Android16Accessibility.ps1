@@ -16,23 +16,24 @@ function Read-Adb([string[]]$AdbArgs) {
     if ($LASTEXITCODE -ne 0) { throw "ADB command failed: $($AdbArgs -join ' ')" }
     return ($output | Out-String).Trim()
 }
-$sdk = Read-Adb @("shell", "getprop", "ro.build.version.sdk")
+$sdk = Read-Adb -AdbArgs @("shell", "getprop", "ro.build.version.sdk")
 if ($sdk -ne "36") { throw "This check requires Android 16 (SDK 36); detected SDK $sdk." }
-$packagePath = Read-Adb @("shell", "pm", "path", $PackageName)
+$packagePath = Read-Adb -AdbArgs @("shell", "pm", "path", $PackageName)
 if ($packagePath -notmatch "^package:") { throw "Package not installed: $PackageName" }
-$allowed = Read-Adb @("shell", "settings", "get", "secure", "enabled_accessibility_services")
+$allowed = Read-Adb -AdbArgs @("shell", "settings", "get", "secure", "enabled_accessibility_services")
 $authorized = $allowed.Contains($PackageName) -and $allowed.Contains("AccessibilityCaptureService")
-$pid = Read-Adb @("shell", "pidof", $PackageName)
-$dumpsys = Read-Adb @("shell", "dumpsys", "accessibility")
+$processIdText = (& adb @target shell pidof $PackageName 2>$null | Out-String).Trim()
+$running = ($LASTEXITCODE -eq 0) -and ($processIdText.Length -gt 0)
+$dumpsys = Read-Adb -AdbArgs @("shell", "dumpsys", "accessibility")
 $matchingLines = @($dumpsys -split "\r?\n" | Where-Object { $_ -like "*AccessibilityCaptureService*" })
-$crashLog = Read-Adb @("logcat", "-d", "-b", "crash", "-v", "brief")
+$crashLog = Read-Adb -AdbArgs @("logcat", "-d", "-b", "crash", "-v", "brief")
 $crashMatches = @($crashLog -split "\r?\n" | Where-Object {
     $_ -like "*$PackageName*" -or $_ -like "*AccessibilityCaptureService*"
 })
 Write-Host "Android SDK: $sdk"
 Write-Host "Package installed: yes ($PackageName)"
 Write-Host "Permission authorized: $authorized"
-Write-Host "Process running: $([bool]$pid)"
+Write-Host "Process running: $running"
 Write-Host "Accessibility service mentions in dumpsys: $($matchingLines.Count)"
 Write-Host "Crash buffer lines mentioning app/service: $($crashMatches.Count)"
 Write-Host ""
