@@ -87,6 +87,7 @@ jobs:
           name: emulator-launch-evidence-api-${{ matrix.api-level }}
           path: |
             android/emulator-proof/*.png
+            android/emulator-proof/*.txt
             android/app/build/reports/androidTests/connected/**
           if-no-files-found: warn
           retention-days: 7
