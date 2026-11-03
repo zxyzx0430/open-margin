@@ -1,5 +1,7 @@
 package com.bookkeeping.app.notification
 
+import android.app.Notification
+import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -40,9 +42,50 @@ class PaymentNotificationListenerService : NotificationListenerService() {
     // 通知到达时回调（关键入口）
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName ?: return
-        val extras = sbn.notification?.extras ?: return
+        val notification = sbn.notification ?: return
+        val extras = notification.extras ?: return
+
+        // 分组汇总通知只是把子通知汇总展示，子通知会各自回调；
+        // 汇总若再处理一次就会重复记账，直接跳过。
+        // Children arrive individually, so the summary would double-count.
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
+
         val title = extras.getCharSequence("android.title")?.toString()
         val text = extras.getCharSequence("android.text")?.toString()
+        // 展开态/样式文本：金额常常只出现在这些 extras 里。
+        // Expanded / style extras: the amount often only lives here.
+        val bigText = extras.getCharSequence("android.bigText")?.toString()
+        val textLines = extras.getCharSequenceArray("android.textLines")
+            ?.mapNotNull { it?.toString() }
+            .orEmpty()
+
+        // android.messages 是 Parcelable(Bundle) 数组，逐个安全读取，脏数据不崩。
+        // Each entry carries its own "text" and "time".
+        val messageTexts = mutableListOf<String>()
+        val messageTimes = mutableListOf<Long>()
+        extras.getParcelableArray("android.messages")?.forEach { raw ->
+            val bundle = raw as? Bundle ?: return@forEach
+            bundle.getCharSequence("text")?.toString()?.let(messageTexts::add)
+            // time=0 表示未知，不作为时间候选。
+            val messageTime = bundle.getLong("time", 0L)
+            if (messageTime > 0L) messageTimes.add(messageTime)
+        }
+
+        // 按 bigText -> textLines -> messages -> text 的顺序挑正文。
+        val body = NotificationTextExtractor.bestBody(
+            text = text,
+            bigText = bigText,
+            textLines = textLines,
+            messages = messageTexts,
+        )
+
+        // postTime 会被 MessagingStyle 重发/通知刷新推后，记账用最早的真实时间。
+        // Reposts move postTime forward; book the earliest plausible real time.
+        val originalTime = NotificationTextExtractor.resolveOriginalTimeMs(
+            postTimeMs = sbn.postTime,
+            notificationWhenMs = notification.`when`,
+            messageTimesMs = messageTimes,
+        )
 
         // 不在 release 构建中记录通知内容（含 PII：金额/商户/付款方式）
         // Notification bodies can contain transaction and identity details;
@@ -51,8 +94,8 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         val parsed = NotificationParser.parse(
             packageName = packageName,
             title = title,
-            text = text,
-            timestampMs = sbn.postTime,
+            text = body,
+            timestampMs = originalTime,
         ) ?: return
 
         // 在后台协程里入库（IO 不能在主线程）。
