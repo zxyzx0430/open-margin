@@ -3,6 +3,7 @@ package com.bookkeeping.app.di
 import android.content.Context
 import androidx.room.Room
 import com.bookkeeping.app.data.local.BookkeepingDatabase
+import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import dagger.Module
 import dagger.Provides
@@ -28,10 +29,17 @@ object DatabaseModule {
             BookkeepingDatabase::class.java,
             BookkeepingDatabase.DB_NAME
         )
-            .addMigrations(BookkeepingDatabase.MIGRATION_1_2, BookkeepingDatabase.MIGRATION_2_3)
+            .addMigrations(
+                BookkeepingDatabase.MIGRATION_1_2,
+                BookkeepingDatabase.MIGRATION_2_3,
+                BookkeepingDatabase.MIGRATION_3_4
+            )
             .build()
     }
 
     @Provides
     fun provideTransactionDao(db: BookkeepingDatabase): TransactionDao = db.transactionDao()
+
+    @Provides
+    fun provideProcessedNoticeDao(db: BookkeepingDatabase): ProcessedNoticeDao = db.processedNoticeDao()
 }
