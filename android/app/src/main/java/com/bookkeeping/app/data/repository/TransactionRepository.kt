@@ -1,9 +1,11 @@
 package com.bookkeeping.app.data.repository
 
+import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -19,6 +21,7 @@ import java.util.UUID
 @Singleton
 class TransactionRepository @Inject constructor(
     private val dao: TransactionDao,
+    private val processedNoticeDao: ProcessedNoticeDao,
     @ApplicationContext private val context: Context,
 ) {
     private val duplicateMutex = Mutex()
@@ -54,6 +57,32 @@ class TransactionRepository @Inject constructor(
             windowEndMs = transaction.timestamp + windowMs,
         )
         if (existing != null) null else insert(transaction)
+    }
+
+    // D05 影子模式：持久记录通知指纹，返回 true 表示这条证据以前处理过
+    // （疑似重放）。当前阶段只记录与计数，不改变 insertIfNotDuplicate 的
+    // 入库决策；跨渠道拦截要等 D06 双端核验通过后才启用（蓝图铁律）。
+    // Shadow only: never blocks an insert yet.
+    suspend fun recordNoticeFingerprint(
+        fingerprint: String,
+        source: String,
+        seenMs: Long,
+    ): Boolean = duplicateMutex.withLock {
+        val inserted = processedNoticeDao.insertIgnore(
+            ProcessedNoticeEntity(
+                fingerprint = fingerprint,
+                source = source,
+                firstSeenMs = seenMs,
+                lastSeenMs = seenMs,
+                seenCount = 1,
+            )
+        )
+        if (inserted == -1L) {
+            processedNoticeDao.touch(fingerprint, seenMs)
+            true
+        } else {
+            false
+        }
     }
 
     suspend fun update(transaction: TransactionEntity) {
