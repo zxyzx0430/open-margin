@@ -98,6 +98,7 @@ class WechatTransferPageRuleTest {
         assertEquals(1230L, AmountText.parseCents("付款 12.30 元"))
         assertEquals(1200L, AmountText.parseCents("￥12"))
         assertEquals(5L, AmountText.parseCents("0.05 元"))
+        assertEquals(123456L, AmountText.parseCents("1,234.56 元")) // 千分位（独立复核发现）
         assertNull(AmountText.parseCents("没有金额"))
     }
 }
