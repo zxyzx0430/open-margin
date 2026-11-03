@@ -22,9 +22,12 @@ object AmountText {
     private val BARE = Regex("""^[¥￥]?\s*([0-9]+\.[0-9]{2})$""")
 
     fun parseCents(text: String): Long? {
-        val raw = SYMBOL.find(text)?.groupValues?.get(1)
-            ?: YUAN.find(text)?.groupValues?.get(1)
-            ?: BARE.find(text.trim())?.groupValues?.get(1)
+        // 千分位分隔符先归一化："1,234.56 元" 在银行类页面真实存在，
+        // 不处理会被截成尾段 234.56。只去掉数字之间的逗号。
+        val cleaned = text.replace(Regex("""(?<=\d),(?=\d)"""), "")
+        val raw = SYMBOL.find(cleaned)?.groupValues?.get(1)
+            ?: YUAN.find(cleaned)?.groupValues?.get(1)
+            ?: BARE.find(cleaned.trim())?.groupValues?.get(1)
             ?: return null
         return toCents(raw)
     }
