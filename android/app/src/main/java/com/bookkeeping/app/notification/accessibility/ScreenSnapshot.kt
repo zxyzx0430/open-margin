@@ -21,14 +21,17 @@ data class SnapshotNode(
         else if (contentDesc.isEmpty()) text
         else "$text / $contentDesc"
 
-    /** 本子树内所有节点（含自身），深度优先、保持出现顺序。 */
+    /** 本子树内所有节点（含自身），深度优先、保持出现顺序。迭代实现，防超深树爆栈。 */
     fun walk(): List<SnapshotNode> {
         val out = ArrayList<SnapshotNode>()
-        fun dfs(n: SnapshotNode) {
+        val stack = ArrayDeque<SnapshotNode>()
+        stack.addLast(this)
+        while (stack.isNotEmpty()) {
+            val n = stack.removeLast()
             out.add(n)
-            n.children.forEach(::dfs)
+            // 子节点逆序入栈，出栈顺序即原始顺序。
+            for (i in n.children.indices.reversed()) stack.addLast(n.children[i])
         }
-        dfs(this)
         return out
     }
 
