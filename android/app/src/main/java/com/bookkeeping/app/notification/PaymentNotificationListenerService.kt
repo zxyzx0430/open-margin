@@ -99,9 +99,21 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         ) ?: return
 
         // 在后台协程里入库（IO 不能在主线程）。
-        // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
-        // 不跨来源自动合并，避免把独立的支付误删。
+        // D05 影子模式：先持久记录通知指纹。重放只计数并写 debug 日志，
+        // 不拦截入库——跨渠道去重启用要等 D06 核验（蓝图铁律）。
+        // Shadow mode: record the fingerprint, never block the insert yet.
+        val fingerprint = NoticeFingerprint.of(packageName, title, body, originalTime)
         scope.launch {
+            val replay = repository.recordNoticeFingerprint(
+                fingerprint = fingerprint,
+                source = packageName,
+                seenMs = System.currentTimeMillis(),
+            )
+            if (replay && BuildConfig.DEBUG) {
+                Log.d(TAG, "Notice fingerprint already seen (shadow mode, not blocking)")
+            }
+            // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
+            // 不跨来源自动合并，避免把独立的支付误删。
             val id = repository.insertIfNotDuplicate(parsed)
             if (id == null) {
                 if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate notification")
