@@ -16,8 +16,9 @@ import com.bookkeeping.app.notification.TransactionCandidate
 
 /** 精确金额解析（字符串 → 分），避免 Double 乘 100 的舍入误差（如 0.29 元）。 */
 object AmountText {
-    private val SYMBOL = Regex("""[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)""")
-    private val YUAN = Regex("""([0-9]+(?:\.[0-9]{1,2})?)\s*元""")
+    // 数字两侧加边界：不许从 "1.2.3 元" 这类残缺数字里截一段出来当金额。
+    private val SYMBOL = Regex("""[¥￥]\s*(?<![0-9.])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])""")
+    private val YUAN = Regex("""(?<![0-9.])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])\s*元""")
     private val BARE = Regex("""^[¥￥]?\s*([0-9]+\.[0-9]{2})$""")
 
     fun parseCents(text: String): Long? {
@@ -28,10 +29,12 @@ object AmountText {
         return toCents(raw)
     }
 
-    /** "12.3" -> 1230, "12.30" -> 1230, "12" -> 1200。输入已由正则保证格式。 */
+    /** "12.3" -> 1230, "12.30" -> 1230, "12" -> 1200。溢出返回 null，绝不绕回。 */
     fun toCents(raw: String): Long? {
         val parts = raw.split('.')
         val yuan = parts[0].toLongOrNull() ?: return null
+        // yuan*100 会溢出 Long 时直接拒绝：资金路径宁可不记，不能记错。
+        if (yuan > (Long.MAX_VALUE - 99) / 100) return null
         val frac = if (parts.size > 1) parts[1].padEnd(2, '0').take(2).toLongOrNull() ?: return null else 0L
         return yuan * 100 + frac
     }
