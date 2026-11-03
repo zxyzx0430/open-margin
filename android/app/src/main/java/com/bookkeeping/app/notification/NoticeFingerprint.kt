@@ -25,6 +25,7 @@ object NoticeFingerprint {
 
     // 空白折叠 + 英文字母小写化：同一通知在不同投递路径下可能有多余空白，
     // 不应因此被当成两条证据。中文不受 lowercase 影响。
+    // 用 Locale.ROOT 保证指纹与系统语言无关（土耳其语 i/I 规则会改变哈希）。
     private fun normalize(s: String?): String =
-        s?.trim()?.replace(Regex("\\s+"), " ")?.lowercase().orEmpty()
+        s?.trim()?.replace(Regex("\\s+"), " ")?.lowercase(java.util.Locale.ROOT).orEmpty()
 }
