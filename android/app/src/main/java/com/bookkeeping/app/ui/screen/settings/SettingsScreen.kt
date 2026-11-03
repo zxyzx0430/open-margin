@@ -46,6 +46,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
+import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureHealth
+import com.bookkeeping.app.notification.accessibility.AccessibilityConnectionState
+import java.text.DateFormat
+import java.util.Date
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
@@ -63,13 +67,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     // 无障碍服务的"是否已被系统勾选"状态。
     // 用户从无障碍设置返回时（ON_RESUME）重新读一次。
     val lifecycleOwner = LocalLifecycleOwner.current
-    var accessibilityEnabled by remember {
-        mutableStateOf(AccessibilityCaptureService.isEnabled(context))
+    var accessibilityHealth by remember {
+        mutableStateOf(AccessibilityCaptureHealth.snapshot(context))
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                accessibilityEnabled = AccessibilityCaptureService.isEnabled(context)
+                accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -130,7 +134,10 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             }
             item {
                 AccessibilityCard(
-                    enabled = accessibilityEnabled,
+                    health = accessibilityHealth,
+                    onRefresh = {
+                        accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
+                    },
                     onOpen = {
                         runCatching {
                             context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -229,7 +236,12 @@ private fun PermissionCard(
 }
 
 @Composable
-private fun AccessibilityCard(enabled: Boolean, onOpen: () -> Unit) {
+private fun AccessibilityCard(
+    health: AccessibilityCaptureHealth.Snapshot,
+    onRefresh: () -> Unit,
+    onOpen: () -> Unit,
+) {
+    val enabled = health.authorized
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -253,6 +265,49 @@ private fun AccessibilityCard(enabled: Boolean, onOpen: () -> Unit) {
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
             )
 
+            HorizontalDivider(modifier = Modifier.padding(bottom = 10.dp))
+            val statusText = when (health.state) {
+                AccessibilityConnectionState.PERMISSION_OFF -> "未授权：无法采集"
+                AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED ->
+                    "已授权，但服务未连接（可能被系统停止或尚未启动）"
+                AccessibilityConnectionState.CONNECTED -> "服务已连接（不代表已抓取支付记录）"
+            }
+            Text("实际运行状态：$statusText", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "上次连接：${formatHealthTime(health.connectedAtMs)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "上次页面事件：${formatHealthTime(health.eventAtMs)}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (health.disconnectedAtMs > 0L) {
+                Text(
+                    "上次断开：${formatHealthTime(health.disconnectedAtMs)}（${health.disconnectedReason}）",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (health.errorAtMs > 0L) {
+                Text(
+                    "上次异常：${formatHealthTime(health.errorAtMs)}，阶段 ${health.errorStage}，类型 ${health.errorKind}（累计 ${health.errorCount} 次）",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            if (health.interruptedAtMs > 0L) {
+                Text(
+                    "上次系统中断通知：${formatHealthTime(health.interruptedAtMs)}（不代表断连）",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedButton(onClick = onRefresh) {
+                Text("刷新实际运行状态")
+            }
+            Text(
+                "仅在本机保存连接时间、事件时间和异常类名；不会在诊断信息中保存聊天内容、商户或金额。",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+
             // 强提示：隐私边界
             Text(
                 text = tr("隐私说明"),
@@ -273,6 +328,10 @@ private fun AccessibilityCard(enabled: Boolean, onOpen: () -> Unit) {
         }
     }
 }
+
+private fun formatHealthTime(timestampMs: Long): String =
+    if (timestampMs <= 0L) "尚无记录"
+    else DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(timestampMs))
 
 @Composable
 private fun RomGuideCard() {

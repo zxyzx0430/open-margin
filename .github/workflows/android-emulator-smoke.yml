@@ -5,6 +5,7 @@ on:
     branches:
       - fix/v1.2.0-adaptive-icon-padding-20261013
       - 'fix/v1.2.0-*'
+      - fix/accessibility-health-diagnostics-android16-20261102
       - integration/v1.2.0-final-20261013
       - feat/v1.2.0-android-languages-20261013
       - feat/v1.2.0-update-component-scope-20261013
@@ -21,7 +22,11 @@ permissions:
 jobs:
   emulator:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [35, 36]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -36,7 +41,7 @@ jobs:
       - name: Emulator instrumentation and application startup
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ matrix.api-level }}
           target: google_apis
           arch: x86_64
           profile: pixel_6
@@ -53,17 +58,36 @@ jobs:
             adb shell am start -W -n com.bookkeeping.app.sync2/com.bookkeeping.app.MainActivity
             sleep 8
             adb shell pidof com.bookkeeping.app.sync2
+            # Enable the accessibility service via emulator-only ADB settings,
+            # then prove Android actually invoked onServiceConnected.
+            # These commands never run on a personal / production device.
+            adb logcat -c
+            adb shell settings put secure enabled_accessibility_services "com.bookkeeping.app.sync2/com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService"
+            adb shell settings put secure accessibility_enabled 1
+            success=0
+            for i in $(seq 1 15); do
+              if adb logcat -d -s BkAccessibility:D | grep -q "AccessibilityCaptureService connected"; then
+                success=1
+                break
+              fi
+              sleep 2
+            done
+            test "$success" -eq 1
+            adb shell pidof com.bookkeeping.app.sync2
             mkdir -p emulator-proof
+            adb shell dumpsys accessibility > "emulator-proof/accessibility-api-${{ matrix.api-level }}.txt"
+            adb logcat -d -s BkAccessibility:D > "emulator-proof/accessibility-lifecycle-api-${{ matrix.api-level }}.txt"
             adb shell screencap -p /sdcard/openmargin_app_launch.png
             adb pull /sdcard/openmargin_app_launch.png emulator-proof/app_launch.png
-            echo "EMULATOR_INSTRUMENTATION_AND_APP_START_PASS"
+            echo "EMULATOR_INSTRUMENTATION_APP_START_AND_ACCESSIBILITY_BIND_PASS_API_${{ matrix.api-level }}"
       - name: Upload emulator run evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: emulator-launch-evidence
+          name: emulator-launch-evidence-api-${{ matrix.api-level }}
           path: |
             android/emulator-proof/*.png
+            android/emulator-proof/*.txt
             android/app/build/reports/androidTests/connected/**
           if-no-files-found: warn
           retention-days: 7
