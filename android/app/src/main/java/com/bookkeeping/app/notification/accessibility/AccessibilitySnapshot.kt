@@ -12,12 +12,16 @@ fun AccessibilityNodeInfo.toSnapshot(
 ): ScreenSnapshot {
     val visited = HashSet<AccessibilityNodeInfo>()
 
-    fun convert(node: AccessibilityNodeInfo): SnapshotNode? {
+    // 深度上限与 ScreenSnapshot 的限额一致：更深的节点反正会被限额剪掉，
+    // 在转换阶段就停手，防病态深树把递归栈打爆。
+    fun convert(node: AccessibilityNodeInfo, depth: Int): SnapshotNode? {
         if (!visited.add(node)) return null
         val children = ArrayList<SnapshotNode>()
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            convert(child)?.let(children::add)
+        if (depth < ScreenSnapshot.DEFAULT_MAX_DEPTH) {
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                convert(child, depth + 1)?.let(children::add)
+            }
         }
         return SnapshotNode(
             text = node.text?.toString().orEmpty(),
@@ -28,6 +32,6 @@ fun AccessibilityNodeInfo.toSnapshot(
         )
     }
 
-    val raw = convert(this) ?: SnapshotNode()
+    val raw = convert(this, 0) ?: SnapshotNode()
     return ScreenSnapshot.of(packageName, capturedAtMs, raw)
 }
