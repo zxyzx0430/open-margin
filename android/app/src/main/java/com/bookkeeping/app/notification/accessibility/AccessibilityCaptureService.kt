@@ -86,7 +86,24 @@ class AccessibilityCaptureService : AccessibilityService() {
         runCatching { root.refresh() }
             .onFailure { AccessibilityCaptureHealth.onFailure(this, "refresh", it) }
 
+        // D02：把活的节点树固化为结构化快照（有界、保留父子关系）。
+        // 当前提取器仍走 AccessibilityNodeInfo；快照先供诊断与 D03 规则层迁移。
         // Diagnostics must never print the accessibility tree (chat/payment content).
+        val snapshot = runCatching { root.toSnapshot(pkg, System.currentTimeMillis()) }.getOrNull()
+        if (snapshot != null && BuildConfig.DEBUG) {
+            Log.v(TAG, "  -> snapshot nodes=${snapshot.nodeCount} truncated=${snapshot.truncated}")
+            // D03 影子模式：微信转账页面规则只产出候选并记录过门结果，
+            // 不影响现有提取器的入库路径（等 D06 核验后才切换）。
+            // 只记决策枚举，不记金额/对方（页面内容不进日志）。
+            if (pkg == PKG_WECHAT) {
+                runCatching {
+                    WechatTransferPageRule.classifyAll(snapshot).forEach { candidate ->
+                        val decision = com.bookkeeping.app.notification.SettlementGate.evaluate(candidate)
+                        Log.v(TAG, "  -> pageRule candidate type=${candidate.type} completion=${candidate.completion} gate=$decision")
+                    }
+                }
+            }
+        }
 
         for (ext in list) {
             val tx = runCatching { ext.extract(root, event) }
