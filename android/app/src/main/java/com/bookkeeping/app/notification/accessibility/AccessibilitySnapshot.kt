@@ -12,13 +12,23 @@ fun AccessibilityNodeInfo.toSnapshot(
 ): ScreenSnapshot {
     val visited = HashSet<AccessibilityNodeInfo>()
 
+    // 节点预算在转换阶段就生效（交叉审查修正）：以前先整树拷贝再由
+    // ScreenSnapshot 限额，病态大树（聊天列表动辄上万节点）的拷贝成本
+    // 一点没省。现在拷贝到上限即停，limitTree 只再做兜底。
+    var nodeBudget = ScreenSnapshot.DEFAULT_MAX_NODES
+
     // 深度上限与 ScreenSnapshot 的限额一致：更深的节点反正会被限额剪掉，
     // 在转换阶段就停手，防病态深树把递归栈打爆。
+    // 注意：这里不 recycle 子节点——同一棵树随后还要喂给现有提取器，
+    // 提前回收会让它们在 API 33 以下拿到失效节点。
     fun convert(node: AccessibilityNodeInfo, depth: Int): SnapshotNode? {
         if (!visited.add(node)) return null
+        if (nodeBudget <= 0) return null
+        nodeBudget--
         val children = ArrayList<SnapshotNode>()
         if (depth < ScreenSnapshot.DEFAULT_MAX_DEPTH) {
             for (i in 0 until node.childCount) {
+                if (nodeBudget <= 0) break
                 val child = node.getChild(i) ?: continue
                 convert(child, depth + 1)?.let(children::add)
             }
