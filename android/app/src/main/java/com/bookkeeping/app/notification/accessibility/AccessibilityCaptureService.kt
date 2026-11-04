@@ -87,19 +87,22 @@ class AccessibilityCaptureService : AccessibilityService() {
             .onFailure { AccessibilityCaptureHealth.onFailure(this, "refresh", it) }
 
         // D02：把活的节点树固化为结构化快照（有界、保留父子关系）。
-        // 当前提取器仍走 AccessibilityNodeInfo；快照先供诊断与 D03 规则层迁移。
+        // 当前只在 DEBUG 下构建：快照的消费者（诊断日志 + D03 影子规则）
+        // 都是调试用途，release 下构建了也用不上——每个无障碍事件都整树
+        // 拷贝会白白吃 CPU/电量（交叉审查修正）。D03 转正时再移出门外。
         // Diagnostics must never print the accessibility tree (chat/payment content).
-        val snapshot = runCatching { root.toSnapshot(pkg, System.currentTimeMillis()) }.getOrNull()
-        if (snapshot != null && BuildConfig.DEBUG) {
-            Log.v(TAG, "  -> snapshot nodes=${snapshot.nodeCount} truncated=${snapshot.truncated}")
-            // D03 影子模式：微信转账页面规则只产出候选并记录过门结果，
-            // 不影响现有提取器的入库路径（等 D06 核验后才切换）。
-            // 只记决策枚举，不记金额/对方（页面内容不进日志）。
-            if (pkg == PKG_WECHAT) {
-                runCatching {
-                    WechatTransferPageRule.classifyAll(snapshot).forEach { candidate ->
-                        val decision = com.bookkeeping.app.notification.SettlementGate.evaluate(candidate)
-                        Log.v(TAG, "  -> pageRule candidate type=${candidate.type} completion=${candidate.completion} gate=$decision")
+        if (BuildConfig.DEBUG) {
+            runCatching { root.toSnapshot(pkg, System.currentTimeMillis()) }.getOrNull()?.let { snapshot ->
+                Log.v(TAG, "  -> snapshot nodes=${snapshot.nodeCount} truncated=${snapshot.truncated}")
+                // D03 影子模式：微信转账页面规则只产出候选并记录过门结果，
+                // 不影响现有提取器的入库路径（等 D06 核验后才切换）。
+                // 只记决策枚举，不记金额/对方（页面内容不进日志）。
+                if (pkg == PKG_WECHAT) {
+                    runCatching {
+                        WechatTransferPageRule.classifyAll(snapshot).forEach { candidate ->
+                            val decision = com.bookkeeping.app.notification.SettlementGate.evaluate(candidate)
+                            Log.v(TAG, "  -> pageRule candidate type=${candidate.type} completion=${candidate.completion} gate=$decision")
+                        }
                     }
                 }
             }
@@ -154,8 +157,11 @@ class AccessibilityCaptureService : AccessibilityService() {
                     Log.i(TAG, "Accessibility captured id=$id")
                 }
             } catch (failure: Throwable) {
+                // 只上报健康系统并吞掉：这里是脱离主线程的协程，异常若再抛
+                // 出去会走未捕获异常处理器把整个进程打崩——一条记录入库
+                // 失败（磁盘满/DB 锁）不值得让 App 闪退（交叉审查修正）。
                 AccessibilityCaptureHealth.onFailure(this@AccessibilityCaptureService, "persist", failure)
-                throw failure
+                Log.e(TAG, "Accessibility persist failed", failure)
             }
         }
     }
