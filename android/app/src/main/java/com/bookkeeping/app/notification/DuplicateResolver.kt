@@ -41,17 +41,18 @@ object DuplicateResolver {
     data class Result(val decision: Decision, val matchedId: Long? = null)
 
     fun resolve(candidate: TransactionCandidate, existing: List<ExistingTx>): Result {
+        // 1. 交易号是最高优先级证据：在**全部**既有记录里查，不先按金额过滤——
+        // 金额被用户改过、或渠道回填金额不同的时候，交易号仍然成立。
+        val candidateTxId = candidate.sourceTransactionId?.takeIf { it.isNotBlank() }
+        if (candidateTxId != null) {
+            val byId = existing.firstOrNull { it.sourceTransactionId == candidateTxId }
+            if (byId != null) return Result(Decision.SAME, byId.id)
+        }
+
         val sameAmountAndDirection = existing.filter {
             it.amountCents == candidate.amountCents && it.type == candidate.type
         }
         if (sameAmountAndDirection.isEmpty()) return Result(Decision.NEW)
-
-        // 1. 交易号是最高优先级证据。
-        val candidateTxId = candidate.sourceTransactionId?.takeIf { it.isNotBlank() }
-        if (candidateTxId != null) {
-            val byId = sameAmountAndDirection.firstOrNull { it.sourceTransactionId == candidateTxId }
-            if (byId != null) return Result(Decision.SAME, byId.id)
-        }
 
         val candidateMerchant = candidate.merchant.trim()
 
