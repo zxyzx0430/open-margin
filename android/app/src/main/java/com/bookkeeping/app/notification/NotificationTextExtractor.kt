@@ -50,26 +50,30 @@ object NotificationTextExtractor {
 
     /**
      * 还原真实支付时间：postTime 会被 MessagingStyle 重发/通知刷新推后，
-     * 真正的时间是 24h 内最早的候选（notification.when_ 或各条 message.time）。
-     * Reposts move postTime forward; the real payment time is the earliest
-     * plausible candidate (when_ plus MessagingStyle message times) inside 24h.
+     * 真正的时间是 24h 内**最新**的候选（notification.when 或各条 message.time）。
+     *
+     * 取最新而不是最早（交叉审查修正）：一条通知当前代表的是它最新那条
+     * 消息——MessagingStyle 会话会累积历史消息，取最早时间会把新支付
+     * 记到旧消息的时刻，甚至撞上旧账的 8 秒去重窗把真实支付吞掉。
+     * The notification represents its newest message; the original time is
+     * the latest plausible candidate (when plus message times) inside 24h.
      */
     fun resolveOriginalTimeMs(
         postTimeMs: Long,
         notificationWhenMs: Long,
         messageTimesMs: List<Long>,
     ): Long {
-        // when_ 缺省为 0，表示未设置，不作为候选。
-        // when_ defaults to 0, which means "unset".
+        // when 缺省为 0，表示未设置，不作为候选。
+        // when defaults to 0, which means "unset".
         val candidates = buildList<Long> {
             if (notificationWhenMs > 0L) add(notificationWhenMs)
             addAll(messageTimesMs)
         }
         val earliestAllowed = postTimeMs - ORIGINAL_TIME_WINDOW_MS
-        // 只接受不晚于 postTime 且不早于 24h 的候选，取最早的一个。
+        // 只接受不晚于 postTime 且不早于 24h 的候选，取最新的一个。
         return candidates
             .filter { it in earliestAllowed..postTimeMs }
-            .minOrNull()
+            .maxOrNull()
             ?: postTimeMs
     }
 }
