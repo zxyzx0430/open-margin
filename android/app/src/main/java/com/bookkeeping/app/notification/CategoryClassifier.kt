@@ -71,7 +71,9 @@ object CategoryClassifier {
     // 输入：商户名 + 上下文文本（如通知正文、短信正文）
     // 输出：匹配到的分类，没有就 OTHER
     fun classify(merchant: String, contextText: String = ""): TransactionCategory {
-        val haystack = "$merchant $contextText"
+        // Bound the scan: real SMS/notifications are short, while a pathological
+        // multi-hundred-KB body would make keyword x body scanning quadratic.
+        val haystack = "$merchant $contextText".take(4_000)
         for ((keywords, category) in RULES) {
             for (keyword in keywords) {
                 if (haystack.contains(keyword, ignoreCase = true)) {
