@@ -9,7 +9,7 @@
 ## 01. 结论
 
 - **可稳定使用**：Windows / VPS 单用户自托管、Wallos 日常账本、手动记账、预算、CSV、v1/v2 双向同步、OAuth 2.1 + PKCE、MCP 只读/授权写入、三库备份。
-- **可稳定开发**：后端 74 个测试、Android 100 个 JVM 单测全绿；Debug/Release APK 均可构建。
+- **可稳定开发**：后端 89 个测试（74 功能 + 15 同步/上传压力）、Android 100 个 JVM 单测全绿；Debug/Release APK 均可构建。
 - **仍属实验**：Android 支付通知与无障碍采集、跨渠道去重（D05 仍为影子模式）、真实设备覆盖率。
 - **未验证**：Android 16 真机、模拟器 instrumentation、GitHub CI 绿灯、正式签名 APK、v1.1.3 → v1.2.0 同签名升级。
 
@@ -17,7 +17,7 @@
 
 | 验证项 | 命令 / 方式 | 结果 |
 |---|---|---|
-| 后端全量单测 | `python -m unittest discover -p "test_*.py"` | **74 tests, OK** |
+| 后端全量单测 | `python -m unittest discover -p "test_*.py"` | **89 tests, OK**（74 功能 + 15 压力/鲁棒性） |
 | Android JVM 单测 | `gradlew testDebugUnitTest` | **100 tests, 0 failures** |
 | Debug APK | `gradlew assembleDebug` | **成功，18.90 MB** |
 | Release 未签名 APK | `gradlew assembleRelease` | **成功，12.61 MB** |
@@ -40,6 +40,27 @@
 本机 Docker 缓存中的 Wallos 固定上游层已损坏，多个镜像源均返回 HTML/白名单错误，无法重新拉取。为验证**当前** `deploy/wallos-extension` 文件，本次使用本机已有的 PR11 acceptance Wallos 镜像作为基础镜像，叠加当前扩展文件后运行；finance-api 镜像则由完整的 `python:3.11-slim` 本地镜像干净构建。
 
 因此该烟测证明**当前代码、Compose 接线、Wallos 扩展页面和 Finance API 的集成可用**，但不等同于“从公网重新拉取上游 Wallos 的完整洁净安装”。换一台 Docker 缓存正常的机器仍需重跑一次。
+
+### 同步/上传压力与鲁棒性结果
+
+本机真实 uvicorn（单 worker，SQLite WAL，全合成数据）实测：
+
+| 场景 | 结果 |
+|---|---|
+| 20,000 条上传（200 批 × 100，8 并发） | **2.71 s**，全部入库 |
+| 20,000 条全量重放（8 并发） | **1.87 s**，`inserted=0`、`already_present=20000` |
+| 16 个客户端同时上传同一批 100 条 | 只有 **100 条**入库，其余 1500 次全部 `already_present` |
+| 2,000 条 v2 upsert（40 批 × 50，8 并发） | **4.86 s**，全部 applied |
+| 22,100 条变更分页拉取（limit=500） | **1.31 s / 45 页**，revision 全唯一 |
+| 8 个客户端同 base revision 并发写同一条 | **1 applied + 7 conflict**，无丢写 |
+| 20 个并发畸形上传请求 | 全部 **422**，无 500 |
+
+压力测试还发现并修复了两个真实问题：
+
+1. **WAL 读事务升级写事务会绕过 `busy_timeout`**：v1 上传先查墓碑/疑似重复再插入，并发时 `BEGIN IMMEDIATE` 之前已持有读事务，部分请求直接 `database is locked`。现在上传批次和一分钱修正都在读操作前 `BEGIN IMMEDIATE` 预占写锁。
+2. **上传去重查询缺少索引**：账本到 2 万行时，100 条批次从约 25 ms 退化到约 580 ms，因为按金额/币种/方向/时间窗查询做了全表扫描。新增 `tx_dedup_lookup(amount_cents,currency,direction,timestamp_ms)` 后恢复稳定吞吐。
+
+可复现的自动化覆盖在 `backend/test_sync_stress.py`：10k 顺序上传、全量/重叠重放、16 路并发同批、20 路并发不同批、v2 最大批量推送/重放、分页、墓碑风暴、最大长度/Unicode、畸形 JSON/字段、批次中途异常回滚等。
 
 ## 03. 稳定使用基线
 
@@ -156,6 +177,8 @@ docker compose -p pfs-acceptance down -v
 
 | 文件 | 修复 |
 |---|---|
+| `backend/app.py` | 上传/修正先 `BEGIN IMMEDIATE`；先设 `busy_timeout` 再切 WAL；新增上传去重复合索引 |
+| `backend/test_sync_stress.py` | 新增 15 项同步/上传压力与鲁棒性测试 |
 | `backend/testutil.py` | 新增测试连接器：成功提交、始终关闭 SQLite |
 | `backend/test_backup_regression.py` 等 5 个测试 | 改用 `testutil.connect`，修复 Windows 临时目录文件锁 |
 | `backend/oauth_support.py` | `owner_ok` 显式关闭 Wallos 连接 |
