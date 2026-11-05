@@ -17,6 +17,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 import kotlin.random.Random
 
 // 鲁棒性/对抗性用例：金额溢出、空白交易号、窗口边界、超深/超宽树、
@@ -117,12 +118,26 @@ class CaptureRobustnessTest {
             }
             val r = DuplicateResolver.resolve(c, pool) // must not throw
             if (r.decision == DuplicateResolver.Decision.SAME) {
-                // SAME 必须有真实证据：金额方向全等，且（交易号等 / 同源同商户窗口内 / 跨源同商户窗口内）之一成立
                 val m = pool.first { it.id == r.matchedId }
+                // 交易号是最高优先级证据：金额被用户改过、或渠道回填金额不同，
+                // 都不影响"同一笔"判定。
+                val txIdHit = c.sourceTransactionId?.takeIf { it.isNotBlank() } != null &&
+                    c.sourceTransactionId == m.sourceTransactionId
+                if (txIdHit) return@repeat
+                // 没有交易号证据时，SAME 必须金额/方向一致且商户与时间窗口成立。
                 assertEquals(c.amountCents, m.amountCents)
-                val txIdHit = c.sourceTransactionId?.takeIf { it.isNotBlank() } == m.sourceTransactionId && c.sourceTransactionId != null
-                val merchantHit = c.merchant.trim().isNotEmpty() && c.merchant.trim() == m.merchant.trim()
-                assertTrue("false SAME: c=$c m=$m", txIdHit || merchantHit)
+                assertEquals(c.type, m.type)
+                val merchantHit = c.merchant.trim().isNotEmpty() &&
+                    c.merchant.trim() == m.merchant.trim()
+                val window = if (c.source == m.source) {
+                    DuplicateResolver.SAME_SOURCE_REPLAY_WINDOW_MS
+                } else {
+                    DuplicateResolver.CROSS_SOURCE_WINDOW_MS
+                }
+                assertTrue(
+                    "false SAME without tx id: c=$c m=$m",
+                    merchantHit && abs(c.occurredAtMs - m.occurredAtMs) <= window,
+                )
             }
         }
     }

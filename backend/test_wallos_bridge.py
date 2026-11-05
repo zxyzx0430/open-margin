@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 import urllib.parse
+from testutil import connect as sqlite_connect
 from pathlib import Path
 from unittest.mock import patch
 import wallos_bridge as bridge
@@ -17,7 +18,7 @@ class WallosMirrorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             previous=(bridge.DB,bridge.API_KEY)
             bridge.DB=Path(tmp)/"finance.sqlite3";bridge.API_KEY="test-only"
-            with sqlite3.connect(bridge.DB) as db:
+            with sqlite_connect(bridge.DB) as db:
                 db.execute("""CREATE TABLE subscriptions(
                     id INTEGER PRIMARY KEY,name TEXT,amount_cents INTEGER,currency TEXT,cadence TEXT,
                     next_due_ms INTEGER,payment_channel TEXT,note TEXT,active INTEGER)""")
@@ -35,7 +36,7 @@ class WallosMirrorTest(unittest.TestCase):
                     self.assertEqual(observed[-1]["action"],["add"])
                     b=bridge.sync()
                     self.assertEqual(b["synced"],0)
-                    with sqlite3.connect(bridge.DB) as db:
+                    with sqlite_connect(bridge.DB) as db:
                         db.execute("UPDATE subscriptions SET amount_cents=2500 WHERE id=1")
                     c=bridge.sync()
                     self.assertEqual(c["synced"],1)

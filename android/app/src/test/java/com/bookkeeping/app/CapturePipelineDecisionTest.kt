@@ -126,6 +126,16 @@ class CapturePipelineDecisionTest {
     }
 
     @Test
+    fun `same transaction id still wins after user corrected amount`() {
+        val result = DuplicateResolver.resolve(
+            candidate(amountCents = 1300, txId = "4200001234"),
+            listOf(existing(amountCents = 1250, txId = "4200001234")),
+        )
+        assertEquals(DuplicateResolver.Decision.SAME, result.decision)
+        assertEquals(1L, result.matchedId)
+    }
+
+    @Test
     fun `T09 two real purchases same amount two minutes apart are both kept`() {
         val result = DuplicateResolver.resolve(
             candidate(occurredAtMs = t0 + 120_000),

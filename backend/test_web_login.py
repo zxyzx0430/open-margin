@@ -2,6 +2,7 @@
 import sqlite3
 import tempfile
 import unittest
+from testutil import connect as sqlite_connect
 from pathlib import Path
 
 import bcrypt
@@ -17,7 +18,7 @@ class WebLoginTests(unittest.TestCase):
         self.original_db,self.original_user_db=core.DB,oauth.WALLOS_DB
         core.DB=Path(self.temp.name)/"finance.sqlite3"
         oauth.WALLOS_DB=Path(self.temp.name)/"wallos.sqlite3"
-        with sqlite3.connect(oauth.WALLOS_DB) as c:
+        with sqlite_connect(oauth.WALLOS_DB) as c:
             c.execute("CREATE TABLE user(id INTEGER PRIMARY KEY,username TEXT UNIQUE,password TEXT NOT NULL)")
             c.execute("INSERT INTO user (username, password) VALUES (?,?)",("owner",
                   bcrypt.hashpw(b"example-test-password",bcrypt.gensalt()).decode()))

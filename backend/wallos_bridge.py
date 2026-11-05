@@ -3,6 +3,7 @@
 Wallos account and API key must be initialized separately. Never writes to Wallos SQLite directly.
 """
 from pathlib import Path
+from contextlib import closing
 from config import DB, WALLOS_DB, WALLOS_API_URL
 from datetime import datetime,timezone
 import json
@@ -19,7 +20,7 @@ def get_api_key():
     local_db = WALLOS_DB
     if not local_db.exists():
         return ""
-    with sqlite3.connect(f"file:{local_db}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"file:{local_db}?mode=ro", uri=True)) as connection:
         rows = connection.execute("SELECT api_key FROM user").fetchall()
     return rows[0][0] if len(rows) == 1 and rows[0][0] else ""
 
@@ -33,7 +34,7 @@ def sync():
         return {"enabled":False,"reason":"Wallos account/API key has not been configured"}
     if not DB.exists():
         return {"enabled":True,"synced":0,"reason":"No finance database yet"}
-    with sqlite3.connect(DB) as db:
+    with closing(sqlite3.connect(DB)) as db:
         db.row_factory=sqlite3.Row
         if not db.execute("SELECT name FROM sqlite_master WHERE name='subscriptions'").fetchone():
             return {"enabled":True,"synced":0,"reason":"No subscriptions yet"}
