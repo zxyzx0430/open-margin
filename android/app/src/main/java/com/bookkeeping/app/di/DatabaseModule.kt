@@ -1,7 +1,6 @@
 package com.bookkeeping.app.di
 
 import android.content.Context
-import androidx.room.Room
 import com.bookkeeping.app.data.local.BookkeepingDatabase
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
@@ -23,19 +22,7 @@ object DatabaseModule {
     @Singleton
     fun provideBookkeepingDatabase(
         @ApplicationContext context: Context
-    ): BookkeepingDatabase {
-        return Room.databaseBuilder(
-            context,
-            BookkeepingDatabase::class.java,
-            BookkeepingDatabase.DB_NAME
-        )
-            .addMigrations(
-                BookkeepingDatabase.MIGRATION_1_2,
-                BookkeepingDatabase.MIGRATION_2_3,
-                BookkeepingDatabase.MIGRATION_3_4
-            )
-            .build()
-    }
+    ): BookkeepingDatabase = BookkeepingDatabase.build(context)
 
     @Provides
     fun provideTransactionDao(db: BookkeepingDatabase): TransactionDao = db.transactionDao()

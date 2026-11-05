@@ -1,7 +1,6 @@
 package com.bookkeeping.app.sync
 
 import android.content.Context
-import androidx.room.Room
 import androidx.work.*
 import com.bookkeeping.app.data.local.BookkeepingDatabase
 import com.bookkeeping.app.data.MoneyAmount
@@ -34,8 +33,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         val installation = prefs.getString("installation_id", null) ?: UUID.randomUUID().toString().also {
             prefs.edit().putString("installation_id", it).commit()
         }
-        val db = Room.databaseBuilder(applicationContext, BookkeepingDatabase::class.java, BookkeepingDatabase.DB_NAME)
-            .addMigrations(BookkeepingDatabase.MIGRATION_1_2, BookkeepingDatabase.MIGRATION_2_3).build()
+        val db = BookkeepingDatabase.build(applicationContext)
         try {
             val sync=BidirectionalSyncClient(db,prefs,base,token,installation)
             // Do not write even legacy v1 batches to a new/reset server at the

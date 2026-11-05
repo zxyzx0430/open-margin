@@ -1,8 +1,10 @@
 # 清衡 Open Margin v1.2.0｜集成验收与发布门禁
 
+> **历史文档（2026-10-13）**：以下描述的是 v1.2.0 集成候选阶段。当前 `main` 已包含 RC6 及后续并发/提取修复，Android 为 versionCode 11；最新验证状态以 [STABLE_BASELINE.md](STABLE_BASELINE.md) 为准。不要把本文的“main = 正式 v1.1.3”当作当前状态。
+
 ## 集成基线
 
-- `main`: 正式 v1.1.3，保持不变直至最终验收
+- 历史基线：`main` 当时为正式 v1.1.3，保持不变直至最终验收
 - 同步与部署修复：`fix/v1.2.0-sync-deploy-audit-20261013`（`6190640`）
 - Windows 私有同步与向导：`feature/v120-windows-private-wizard-20261013`（`76c1b3b`）
 - 集成分支：`integration/v1.2.0-final-20261013`
@@ -10,7 +12,7 @@
 
 ## 本版整合功能
 
-1. Android Room v1→v2→v3 非破坏性迁移；原 applicationId，versionName 1.2.0，当前 RC5 versionCode 10（RC4 为 9）；离线交易、后台 WorkManager 同步。
+1. Android Room v1→v2→v3 非破坏性迁移；原 applicationId，versionName 1.2.0，当时 RC5 versionCode 10（历史；当前 RC6 为 11）；离线交易、后台 WorkManager 同步。
 2. Android 与 Finance API 交易双向新增、修改、删除；服务器修订号、幂等操作、删除墓碑、逐笔冲突人工确认、服务器身份与游标检查；手机端可以更新排除状态。
 3. 单一 Docker Compose 支持 Windows（Docker Desktop）与 Linux/VPS；Finance API、Wallos、SQLite 数据模型一致。
 4. Windows 本地仅 `127.0.0.1` 访问；可选 `windows-private-sync` Nginx 网关，API-only 私有 Tailscale Serve；显式 `PrivateFull` 模式。

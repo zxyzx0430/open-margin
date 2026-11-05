@@ -11,6 +11,7 @@ import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.EntryPointAccessors
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,22 +52,25 @@ class AccessibilityCaptureService : AccessibilityService() {
             )
             AccessibilityCaptureHealth.onConnected(this)
             if (BuildConfig.DEBUG) Log.d(TAG, "AccessibilityCaptureService connected")
-        } catch (failure: Throwable) {
+        } catch (failure: Exception) {
             AccessibilityCaptureHealth.onFailure(this, "connect", failure)
-            throw failure // Preserve prior crash semantics; report the type before failing.
+            Log.e(TAG, "connect failed: ${failure.javaClass.simpleName}")
+            return
         }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         try {
             handleAccessibilityEvent(event)
-        } catch (failure: Throwable) {
+        } catch (failure: Exception) {
+            // A single malformed event must not crash the service or the app.
             AccessibilityCaptureHealth.onFailure(this, "event", failure)
-            throw failure // Diagnostic-only; no change to event processing/recovery policy.
+            Log.e(TAG, "event failed: ${failure.javaClass.simpleName}")
         }
     }
 
     private fun handleAccessibilityEvent(event: AccessibilityEvent) {
+        if (!this::repository.isInitialized || !this::extractors.isInitialized) return
         val pkg = event.packageName?.toString() ?: return
 
         // 入口处不过滤包名先打 log，方便确认事件分发是否被 vivo 拦截
@@ -156,12 +160,14 @@ class AccessibilityCaptureService : AccessibilityService() {
                 } else {
                     Log.i(TAG, "Accessibility captured id=$id")
                 }
-            } catch (failure: Throwable) {
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
                 // 只上报健康系统并吞掉：这里是脱离主线程的协程，异常若再抛
                 // 出去会走未捕获异常处理器把整个进程打崩——一条记录入库
                 // 失败（磁盘满/DB 锁）不值得让 App 闪退（交叉审查修正）。
                 AccessibilityCaptureHealth.onFailure(this@AccessibilityCaptureService, "persist", failure)
-                Log.e(TAG, "Accessibility persist failed", failure)
+                Log.e(TAG, "Accessibility persist failed: ${failure.javaClass.simpleName}")
             }
         }
     }
