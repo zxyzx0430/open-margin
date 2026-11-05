@@ -114,4 +114,48 @@ class SmsParserTest {
         assertEquals(2500L, tx.amountCents)
         assertTrue(tx.note.length <= 90)
     }
+
+    @Test fun fuzzNeverThrowsOrEmitsInvalidFields() {
+        val rng = kotlin.random.Random(20261105)
+        val pieces = listOf(
+            "【工商银行】", "【招商银行】", "【某平台】", "尾号1234", "尾号为5678",
+            "消费", "转入", "转出", "人民币", "12.30", "1,234.56", "元",
+            "余额", "失败", "预授权", "满100元返50元", "验证码", "，", " ", "🍔",
+        )
+        val validCategories = TransactionCategory.values().map { it.name }.toSet()
+        repeat(20_000) {
+            val text = buildString {
+                repeat(rng.nextInt(0, 20)) { append(pieces[rng.nextInt(pieces.size)]) }
+            }
+            val tx = SmsParser.parse("+8613800000000", text, ts)
+            if (tx != null) {
+                assertTrue("amount=${tx.amountCents}", tx.amountCents > 0L)
+                assertTrue("type=${tx.type}", tx.type in setOf("EXPENSE", "INCOME"))
+                assertEquals(TransactionSource.BANK_SMS.name, tx.source)
+                assertTrue("category=${tx.category}", tx.category in validCategories)
+                assertEquals(ts, tx.timestamp)
+            }
+        }
+    }
+
+    @Test fun adversarialRepeatedConsumptionCompletesWithoutCrashing() {
+        val text = "【工商银行】" + "消费".repeat(100_000) + "25.00元"
+        SmsParser.parse("+8613800000000", text, ts)?.let {
+            assertTrue(it.amountCents > 0L)
+        }
+    }
+
+    @Test fun adversarialRepeatedDigitsCompletesWithoutCrashing() {
+        val text = "【工商银行】尾号" + "1".repeat(100_000)
+        SmsParser.parse("+8613800000000", text, ts)?.let {
+            assertTrue(it.amountCents > 0L)
+        }
+    }
+
+    @Test fun adversarialRepeatedCommasCompletesWithoutCrashing() {
+        val text = "【招商银行】" + "1,".repeat(50_000) + "元"
+        SmsParser.parse("+8613800000000", text, ts)?.let {
+            assertTrue(it.amountCents > 0L)
+        }
+    }
 }

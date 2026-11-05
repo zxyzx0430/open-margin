@@ -32,8 +32,10 @@ class CaptureRobustnessTest {
         assertNull(AmountText.parseCents("99999999999999999.99 元"))
         assertNull(AmountText.parseCents("￥99999999999999999999"))
         assertNull(AmountText.toCents("9223372036854775807"))
-        // 合法大额仍可解析（约 9e13 元 = 9e15 分，在 Long 内）。
-        assertEquals(9_000_000_000_000_000L, AmountText.parseCents("90000000000000.00 元"))
+        // The server caps amount_cents at 100,000,000,000; larger values must
+        // not be captured locally because they could never be uploaded.
+        assertEquals(AmountText.MAX_CENTS, AmountText.parseCents("1000000000.00 元"))
+        assertNull(AmountText.parseCents("1000000000.01 元"))
     }
 
     @Test fun amountMalformedInputsReturnNull() {

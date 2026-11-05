@@ -137,4 +137,44 @@ class NotificationParserTest {
             wechat("微信支付", "付款成功 ￥1000000000.00")!!.amountCents)
         assertNull(wechat("微信支付", "付款成功 ￥1000000000.01"))
     }
+
+    @Test fun fuzzNeverThrowsOrEmitsInvalidFields() {
+        val rng = kotlin.random.Random(20261105)
+        val pieces = listOf(
+            "微信支付", "支付宝", "向", "付款", "成功", "付款成功", "失败",
+            "收到", "的转账", "￥", "1,234.56", "12.30", "12.345", "元",
+            "红包", "优惠券", "余额", "待支付", "张三", "🍔", " ", "。", "-",
+        )
+        val validCategories = TransactionCategory.values().map { it.name }.toSet()
+        repeat(20_000) {
+            val text = buildString {
+                repeat(rng.nextInt(0, 20)) { append(pieces[rng.nextInt(pieces.size)]) }
+            }
+            val packageName = if (rng.nextBoolean()) "com.tencent.mm"
+                              else "com.eg.android.AlipayGphone"
+            val tx = NotificationParser.parse(packageName, "标题", text, ts)
+            if (tx != null) {
+                assertTrue("amount=${tx.amountCents}", tx.amountCents > 0L)
+                assertTrue("type=${tx.type}", tx.type in setOf("EXPENSE", "INCOME"))
+                assertTrue("source=${tx.source}", tx.source in setOf("WECHAT", "ALIPAY"))
+                assertTrue("category=${tx.category}", tx.category in validCategories)
+                assertEquals(ts, tx.timestamp)
+            }
+        }
+    }
+
+    @Test fun adversarialLongTextCompletesWithoutCrashing() {
+        val longTexts = listOf(
+            "1,".repeat(50_000),
+            "向 ".repeat(50_000),
+            "收到 " + "张".repeat(100_000) + " 的转账",
+            "付款成功 ￥" + "9".repeat(100_000),
+        )
+        for (text in longTexts) {
+            // Must complete and either reject or return valid money.
+            NotificationParser.parse("com.tencent.mm", "标题", text, ts)?.let {
+                assertTrue(it.amountCents > 0L)
+            }
+        }
+    }
 }

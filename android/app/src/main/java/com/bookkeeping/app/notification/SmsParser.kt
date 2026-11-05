@@ -45,7 +45,7 @@ object SmsParser {
     )
 
     // 金额：要求带 "元"，可选 "人民币" 前缀。避免误匹配日期数字
-    private val AMOUNT_REGEX = Regex("""(?:人民币)?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*元""")
+    private val AMOUNT_REGEX = Regex("""(?:人民币)?\s*([0-9]{1,12}(?:\.[0-9]{1,2})?)\s*元""")
 
     // 卡尾号 / 账户尾号（"尾号1234" / "尾号为1234" 都常见）
     private val CARD_NO_REGEX = Regex("""尾号(?:为)?\s*(\d{4})""")

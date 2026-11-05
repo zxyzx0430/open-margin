@@ -4,7 +4,7 @@ import java.math.BigDecimal
 
 /** Exact decimal-yuan to integer-cents conversion. Never round via Double. */
 object MoneyAmount {
-    private val VALID = Regex("""\d+(?:\.\d{1,2})?""")
+    private val VALID = Regex("""\d{1,12}(?:\.\d{1,2})?""")
 
     fun cents(raw: String): Long? {
         val input = raw.trim()

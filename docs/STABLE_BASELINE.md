@@ -9,7 +9,7 @@
 ## 01. 结论
 
 - **可稳定使用**：Windows / VPS 单用户自托管、Wallos 日常账本、手动记账、预算、CSV、v1/v2 双向同步、OAuth 2.1 + PKCE、MCP 只读/授权写入、三库备份。
-- **可稳定开发**：后端 93 个测试（74 功能 + 17 同步/上传压力 + 2 跨层契约）、Android 145 个 JVM 单测全绿；Debug/Release APK 均可构建。
+- **可稳定开发**：后端 93 个测试（74 功能 + 17 同步/上传压力 + 2 跨层契约）、Android 151 个 JVM 单测全绿；Debug/Release APK 均可构建。
 - **仍属实验**：Android 支付通知与无障碍采集、跨渠道去重（D05 仍为影子模式）、真实设备覆盖率。
 - **未验证**：Android 16 真机、模拟器 instrumentation、GitHub CI 绿灯、正式签名 APK、v1.1.3 → v1.2.0 同签名升级。
 
@@ -18,8 +18,9 @@
 | 验证项 | 命令 / 方式 | 结果 |
 |---|---|---|
 | 后端全量单测 | `python -m unittest discover -p "test_*.py"` | **93 tests, OK**（74 功能 + 17 压力/鲁棒性 + 2 跨层契约） |
-| Android JVM 单测 | `gradlew testDebugUnitTest` | **145 tests, 0 failures** |
-| 通知/短信解析字段契约 | `NotificationParserTest` + `SmsParserTest` | **32 tests, 0 failures** |
+| Android JVM 单测 | `gradlew testDebugUnitTest` | **151 tests, 0 failures** |
+| 通知/短信解析字段契约 | `NotificationParserTest` + `SmsParserTest` | **38 tests, 0 failures** |
+| 解析器 fuzz/超长对抗 | 20,000 随机输入 + 10 万字符病态文本 | **全过；最慢单项约 0.16 s** |
 | 结构化页面规则/金额边界 | `WechatTransferPageRuleTest` | **16 tests, 0 failures** |
 | 上传字段映射 | `UploadPayloadTest` | **6 tests, 0 failures** |
 | 提取→上传跨层契约 | `backend/test_extraction_upload_contract.py` | **2 tests, OK** |
@@ -74,8 +75,8 @@
 
 本次新增字段级测试，覆盖三类实际入口和一条跨层契约：
 
-- **通知解析**（`NotificationParserTest`，16 项）：微信/支付宝支出、个人转账收入、“向你付款”、退款、支付宝通用支出、商户、分类、账户、时间、金额边界、促销/失败/待支付排除、Unicode/长文本。
-- **银行短信**（`SmsParserTest`，16 项）：银行识别、卡尾号、收支方向、余额排除、工资/转账分类、促销/失败/预授权排除、千分位、长文本。
+- **通知解析**（`NotificationParserTest`，18 项）：微信/支付宝支出、个人转账收入、“向你付款”、退款、支付宝通用支出、商户、分类、账户、时间、金额边界、促销/失败/待支付排除、Unicode/长文本、20k 随机 fuzz。
+- **银行短信**（`SmsParserTest`，20 项）：银行识别、卡尾号、收支方向、余额排除、工资/转账分类、促销/失败/预授权排除、千分位、长文本、20k 随机 fuzz、三类 10 万字符病态输入。
 - **结构化页面规则**（`WechatTransferPageRuleTest`，16 项）：金额、方向、完成态、商户、失败原因、区域定位、contentDescription 节点、多卡不串金额、截断页面、金额格式边界。
 - **上传字段契约**（`UploadPayloadTest` 6 项 + 后端 `test_extraction_upload_contract.py` 2 项）：`event_id / timestamp_ms / amount_cents / currency / direction / source / category / merchant` 逐字段保留；`note` / `account` 明确不上传；重放幂等。
 
@@ -89,6 +90,8 @@
 6. 银行短信缺少促销/失败/预授权排除，可能把“满100元返50元”“消费失败”误记；现在直接跳过。
 7. “尾号为1234”未提取卡尾号；现在支持。
 8. 旧无障碍提取器用 `Double * 100` 计算分，可能把 0.29 记成 28；现在统一走 `AmountText.parseCents` 精确到分。
+9. 金额正则使用无界 `[0-9]+`，遇到 10 万位纯数字发生指数回溯（单项 345 s）；现在数字上限 12 位，同类病态输入降到约 0.16 s。分类器上下文也限制为 4,000 字符。
+10. `AmountText` 允许超过服务端上限的金额，可能生成永远无法上传的记录；现在统一限制为 100,000,000,000 分。
 
 **重要边界**：新的 `WechatTransferPageRule` 目前仍只在 DEBUG 影子运行（蓝图 D03/D05），真正写入账本的仍是通知/SMS/旧无障碍提取器。上述测试同时覆盖新结构化规则和实际写入路径；切换写路径仍必须等 D01 真机样本与 D06 双端核验。
 
@@ -216,12 +219,14 @@ docker compose -p pfs-acceptance down -v
 | `backend/wallos_bridge.py`、`backend/wallos_api.py` | 显式关闭 SQLite 连接 |
 | `backend/requirements.txt` | 增加 `tzdata`，支持 Windows 原生运行/测试 |
 | `scripts/test_private_sync_gateway.py` | nginx 配置改用 POSIX 路径，创建 Windows 前缀 temp/log 目录并传 `-p` |
-| `android/.../NotificationParser.kt` | 千分位、畸形金额边界、“收到 X 的转账”、“付款给”、促销金额优先级 |
-| `android/.../SmsParser.kt` | 千分位、“尾号为”、促销/失败/预授权排除 |
-| `android/.../PageRules.kt` | `AmountText` 拒绝负数和残缺金额 |
+| `android/.../NotificationParser.kt` | 千分位、畸形金额边界、“收到 X 的转账”、“付款给”、促销金额优先级、金额数字上限 |
+| `android/.../SmsParser.kt` | 千分位、“尾号为”、促销/失败/预授权排除、金额数字上限 |
+| `android/.../CategoryClassifier.kt` | 分类上下文限制 4,000 字符，防病态长文本 |
+| `android/.../MoneyAmount.kt` | 金额输入限制 12 位数字，防超长 BigDecimal |
+| `android/.../PageRules.kt` | `AmountText` 拒绝负数和残缺金额，统一服务端 1000 亿分上限 |
 | `android/.../WechatTransferExtractor.kt`、`AlipayTransferExtractor.kt`、`WechatRedPacketExtractor.kt` | 旧写入路径改为精确到分，移除 `Double * 100` |
 | `android/.../UploadPayload.kt` | v1/v2 字段映射抽成纯函数；`note`/`account` 不上传 |
-| `android/.../NotificationParserTest.kt`、`SmsParserTest.kt` | 通知/短信字段级与鲁棒性测试（32 项） |
+| `android/.../NotificationParserTest.kt`、`SmsParserTest.kt` | 通知/短信字段级、fuzz 与超长对抗测试（38 项） |
 | `android/.../WechatTransferPageRuleTest.kt` | 结构化页面字段、多卡、截断、金额边界（16 项） |
 | `android/.../UploadPayloadTest.kt` | 上传字段映射与敏感字段排除（6 项） |
 | `android/.../NotificationTextExtractorTest.kt` | 断言改为“24h 内取最新时间” |

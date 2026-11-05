@@ -28,8 +28,8 @@ object NotificationParser {
 
     // 金额提取：只匹配带 ￥/¥ 前缀或后缀"元"的数字，避免误匹配日期等。
     // 尾部边界防止把 12.345 / 1.2.3 截成合法金额。
-    private val AMOUNT_REGEX_SYMBOL = Regex("""[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])""")
-    private val AMOUNT_REGEX_YUAN = Regex("""(?<![0-9.])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])\s*元""")
+    private val AMOUNT_REGEX_SYMBOL = Regex("""[¥￥]\s*([0-9]{1,12}(?:\.[0-9]{1,2})?)(?![0-9.])""")
+    private val AMOUNT_REGEX_YUAN = Regex("""(?<![0-9.])([0-9]{1,12}(?:\.[0-9]{1,2})?)(?![0-9.])\s*元""")
 
     // 收入关键词
     private val INCOME_KEYWORDS = listOf(
