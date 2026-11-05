@@ -38,13 +38,13 @@ class AlipayTransferExtractor : AccessibilityExtractor {
         // 反向排除：如果同时含明确支出语义则放弃
         if (EXPENSE_NEGATIVES.any { allText.contains(it) }) return null
 
-        val amount = extractAmountYuan(allText) ?: return null
-        if (amount <= 0) return null
+        val amountCents = AmountText.parseCents(allText) ?: return null
+        if (amountCents <= 0L) return null
 
         val merchant = guessCounterpart(allText)
 
         return TransactionEntity(
-            amountCents = (amount * 100).toLong(),
+            amountCents = amountCents,
             type = TransactionType.INCOME.name,
             category = TransactionCategory.TRANSFER.name,
             merchant = merchant,

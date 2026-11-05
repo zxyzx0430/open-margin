@@ -18,7 +18,7 @@ import com.bookkeeping.app.notification.TransactionCandidate
 object AmountText {
     // 数字两侧加边界：不许从 "1.2.3 元" 这类残缺数字里截一段出来当金额。
     private val SYMBOL = Regex("""[¥￥]\s*(?<![0-9.])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])""")
-    private val YUAN = Regex("""(?<![0-9.])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])\s*元""")
+    private val YUAN = Regex("""(?<![0-9.-])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])\s*元""")
     private val BARE = Regex("""^[¥￥]?\s*([0-9]+\.[0-9]{2})$""")
 
     fun parseCents(text: String): Long? {

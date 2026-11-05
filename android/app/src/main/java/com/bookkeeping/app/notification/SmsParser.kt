@@ -47,8 +47,8 @@ object SmsParser {
     // 金额：要求带 "元"，可选 "人民币" 前缀。避免误匹配日期数字
     private val AMOUNT_REGEX = Regex("""(?:人民币)?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*元""")
 
-    // 卡尾号 / 账户尾号
-    private val CARD_NO_REGEX = Regex("""尾号\s*(\d{4})""")
+    // 卡尾号 / 账户尾号（"尾号1234" / "尾号为1234" 都常见）
+    private val CARD_NO_REGEX = Regex("""尾号(?:为)?\s*(\d{4})""")
 
     // 收入关键词
     private val INCOME_KEYWORDS = listOf(
@@ -71,23 +71,33 @@ object SmsParser {
     fun parse(sender: String?, body: String, timestampMs: Long): TransactionEntity? {
         if (body.isBlank()) return null
 
+        // Bank texts may contain thousands separators. Normalize before any
+        // amount or direction matching so "1,234.56元" is not read as 234.56.
+        val normalized = body.replace(Regex("""(?<=\d),(?=\d)"""), "")
+
+        // Promotions, failed/reversed transactions and pending authorizations
+        // are not actual money movement. Prefer a miss over a false entry.
+        if (PROMOTION_PATTERN.containsMatchIn(normalized)) return null
+        if (FAILURE_HINTS.any { normalized.contains(it) }) return null
+        if (PENDING_HINTS.any { normalized.contains(it) }) return null
+
         // 1. 识别银行（不是银行短信直接返回 null）
-        val bank = detectBank(body) ?: return null
+        val bank = detectBank(normalized) ?: return null
 
         // 2. 提金额
-        val amount = findTransactionAmount(body) ?: return null
+        val amount = findTransactionAmount(normalized) ?: return null
         val amountCents = MoneyAmount.cents(amount.groupValues[1]) ?: return null
 
         // 3. 银行短信常同时含“转入”和“转出”（以及余额、历史交易等）。
         // 先看交易金额之前最近的动词；只有单方向关键词时才保留原兜底。
-        val type = directionNearAmount(body, amount.range.first) ?: return null
+        val type = directionNearAmount(normalized, amount.range.first) ?: return null
 
         // 4. 提卡尾号，组装账户名
-        val cardLast4 = CARD_NO_REGEX.find(body)?.groupValues?.get(1).orEmpty()
+        val cardLast4 = CARD_NO_REGEX.find(normalized)?.groupValues?.get(1).orEmpty()
         val account = if (cardLast4.isNotEmpty()) "$bank ($cardLast4)" else bank
 
         // 5. 自动分类（基于短信正文：能识别"工资到账"→SALARY、"加油"→TRANSPORT 等）
-        val category = CategoryClassifier.classify(merchant = "", contextText = body)
+        val category = CategoryClassifier.classify(merchant = "", contextText = normalized)
 
         return TransactionEntity(
             amountCents = amountCents,
@@ -100,6 +110,16 @@ object SmsParser {
             timestamp = timestampMs,
         )
     }
+
+    private val PROMOTION_PATTERN = Regex(
+        """(?:满\s*\d+(?:\.\d+)?\s*元?\s*(?:返|减|送|赠)|抽奖|积分兑换|活动详情|点击(?:查看|领取)|优惠券|代金券|立减|返现)"""
+    )
+    private val FAILURE_HINTS = listOf(
+        "失败", "未成功", "已撤销", "交易撤销", "已取消", "交易取消",
+    )
+    private val PENDING_HINTS = listOf(
+        "预授权", "冻结", "待扣款", "待支付", "处理中",
+    )
 
     private fun detectBank(body: String): String? {
         for ((keyword, fullName) in BANK_NAMES) {

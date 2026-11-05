@@ -62,20 +62,20 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 }
                 val events = JSONArray()
                 for (t in batch) {
-                    val source = t.source.uppercase()
-                    if (source !in SOURCES || t.type !in setOf("EXPENSE", "INCOME") || t.amountCents <= 0) {
+                    if (!UploadPayload.isUploadable(t)) {
                         prefs.edit().putString("last_result", "本地交易 ${t.id} 数据异常，无法同步").apply()
                         return Result.failure()
                     }
+                    val event = UploadPayload.v1Event(t, installation)
                     events.put(JSONObject().apply {
-                        put("event_id", "android:$installation:${t.id}")
-                        put("timestamp_ms", t.timestamp)
-                        put("amount_cents", t.amountCents)
-                        put("currency", t.currency)
-                        put("direction", t.type)
-                        put("source", source)
-                        put("category", t.category)
-                        put("merchant", t.merchant.take(140))
+                        put("event_id", event.eventId)
+                        put("timestamp_ms", event.timestampMs)
+                        put("amount_cents", event.amountCents)
+                        put("currency", event.currency)
+                        put("direction", event.direction)
+                        put("source", event.source)
+                        put("category", event.category)
+                        put("merchant", event.merchant)
                     })
                 }
                 val response = postBatch("$base/api/v1/transactions/batch", token, events)
@@ -218,7 +218,6 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         private const val PERIODIC = "finance_periodic_sync"
         private const val IMMEDIATE = "finance_immediate_sync"
         private val mutex = Mutex()
-        private val SOURCES = setOf("WECHAT", "ALIPAY", "BANK_SMS", "MANUAL", "OTHER")
 
         /** Called after the Room insert has completed. */
         fun requestImmediate(context: Context) {
