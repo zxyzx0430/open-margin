@@ -5,6 +5,7 @@ ledger; the original subscription table is retained as historical migration data
 """
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from contextlib import closing
 import json
 import sqlite3
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
@@ -93,7 +94,7 @@ def valid_subscription_links(payment_channel: str = "") -> dict:
     which broke Wallos subscriptions.php under PHP 8.
     """
     path=WALLOS_DB
-    with sqlite3.connect(f"file:{path}?mode=ro",uri=True) as db:
+    with closing(sqlite3.connect(f"file:{path}?mode=ro",uri=True)) as db:
         owners=db.execute("SELECT id FROM user").fetchall()
         if len(owners)!=1:
             raise WallosError("Expected one Wallos owner")

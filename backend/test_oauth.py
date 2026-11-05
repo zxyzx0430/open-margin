@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from testutil import connect as sqlite_connect
 from pathlib import Path
 import bcrypt
 from fastapi.testclient import TestClient
@@ -17,7 +18,7 @@ class OAuthTest(unittest.TestCase):
         self.old=(oauth.OAUTH_DB,oauth.WALLOS_DB)
         oauth.OAUTH_DB=Path(self.dir.name)/"oauth.sqlite3"
         oauth.WALLOS_DB=Path(self.dir.name)/"wallos.sqlite3"
-        with sqlite3.connect(oauth.WALLOS_DB) as db:
+        with sqlite_connect(oauth.WALLOS_DB) as db:
             db.execute("CREATE TABLE user (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT NOT NULL)")
             db.execute("INSERT INTO user (username, password) VALUES (?,?)",("owner",bcrypt.hashpw(b"test-only-password",bcrypt.gensalt()).decode()))
         self.client=TestClient(core.app,follow_redirects=False)
@@ -31,7 +32,7 @@ class OAuthTest(unittest.TestCase):
 
     def test_second_wallos_account_cannot_authorize_global_ledger(self):
         # This project is intentionally a single-owner ledger.
-        with sqlite3.connect(oauth.WALLOS_DB) as db:
+        with sqlite_connect(oauth.WALLOS_DB) as db:
             db.execute("INSERT INTO user (id,username,password) VALUES (?,?,?)",
                 (2,"other",bcrypt.hashpw(b"second-password",bcrypt.gensalt()).decode()))
         self.assertTrue(oauth.owner_ok("owner","test-only-password"))

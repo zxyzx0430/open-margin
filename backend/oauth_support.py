@@ -15,7 +15,7 @@ import re
 import secrets
 import sqlite3
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -147,7 +147,7 @@ def consent_page(request_id: str,client_name: str,msg: str="",scopes: str="finan
 def owner_ok(username:str,password:str)->bool:
     if not WALLOS_DB.exists() or not username or not password:
         return False
-    with sqlite3.connect(str(WALLOS_DB)) as db:
+    with closing(sqlite3.connect(str(WALLOS_DB))) as db:
         row=db.execute("SELECT password FROM user WHERE username=? AND id=? LIMIT 1",(username,WALLOS_OWNER_ID)).fetchone()
     if not row: return False
     stored=row[0].encode().replace(b"$2y$",b"$2b$",1)

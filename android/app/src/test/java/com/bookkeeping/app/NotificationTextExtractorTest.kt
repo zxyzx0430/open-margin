@@ -73,14 +73,14 @@ class NotificationTextExtractorTest {
         assertNull(NotificationTextExtractor.bestBody(null, null, emptyList(), emptyList()))
     }
 
-    @Test fun resolveOriginalTimePicksEarliestMessageTimeWithin24h() {
+    @Test fun resolveOriginalTimePicksLatestMessageTimeWithin24h() {
         val postTime = 1791512160000L
         val resolved = NotificationTextExtractor.resolveOriginalTimeMs(
             postTimeMs = postTime,
             notificationWhenMs = postTime - 600_000L,          // 10 min earlier
             messageTimesMs = listOf(postTime - 3_600_000L, postTime - 60_000L),
         )
-        assertEquals(postTime - 3_600_000L, resolved)
+        assertEquals(postTime - 60_000L, resolved)
     }
 
     @Test fun resolveOriginalTimeRejectsTimesAfterPostTime() {

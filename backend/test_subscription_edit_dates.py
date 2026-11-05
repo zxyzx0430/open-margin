@@ -2,6 +2,7 @@
 import sqlite3
 import tempfile
 import unittest
+from testutil import connect as sqlite_connect
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -134,7 +135,7 @@ class SubscriptionPatchTests(unittest.TestCase):
     def test_strict_payment_channel_does_not_silently_substitute(self):
         with tempfile.TemporaryDirectory() as tmp:
             db=Path(tmp)/"wallos.db"
-            with sqlite3.connect(db) as con:
+            with sqlite_connect(db) as con:
                 con.executescript("""
                 CREATE TABLE user(id INTEGER);
                 CREATE TABLE household(id INTEGER,user_id INTEGER);

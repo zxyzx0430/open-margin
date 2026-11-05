@@ -45,13 +45,21 @@ def main():
             raw = CONF.read_text().replace("finance-api:8767", f"127.0.0.1:{upstream}")
             raw = raw.replace("listen 80 default_server;", f"listen 127.0.0.1:{gateway} default_server;")
             (base / "gateway.conf").write_text(raw)
+            # nginx treats backslashes as escapes; use POSIX separators in config.
+            base_posix = base.as_posix()
             (base / "nginx.conf").write_text(
-                f"pid {base}/nginx.pid; error_log stderr; events {{ }} "
-                f"http {{ access_log off; include {base}/gateway.conf; }}"
+                f"pid {base_posix}/nginx.pid; error_log stderr; events {{ }} "
+                f"http {{ access_log off; include {base_posix}/gateway.conf; }}"
             )
+            # nginx does not create its Windows prefix temp/log directories.
+            (base / "logs").mkdir(parents=True, exist_ok=True)
+            for name in ("client_body_temp", "proxy_temp", "fastcgi_temp",
+                         "uwsgi_temp", "scgi_temp"):
+                (base / "temp" / name).mkdir(parents=True, exist_ok=True)
             conf = str(base / "nginx.conf")
-            subprocess.run(["nginx", "-t", "-c", conf], check=True, capture_output=True)
-            process = subprocess.Popen(["nginx", "-c", conf, "-g", "daemon off;"],
+            prefix = base_posix + "/"
+            subprocess.run(["nginx", "-t", "-c", conf, "-p", prefix], check=True, capture_output=True)
+            process = subprocess.Popen(["nginx", "-c", conf, "-p", prefix, "-g", "daemon off;"],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             try:
                 time.sleep(0.3)

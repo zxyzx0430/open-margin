@@ -4,6 +4,7 @@ import importlib.util
 import sqlite3
 import tempfile
 import unittest
+from testutil import connect as sqlite_connect
 from pathlib import Path
 
 BACKUP_CODE=Path(__file__).parent.parent/"deploy/backup.py"
@@ -20,11 +21,11 @@ class BackupRegressionTests(unittest.TestCase):
     def test_snapshot_integrity_and_missing_source(self):
         src=self.root/"finance.sqlite3"
         out=self.root/"archive.sqlite3"
-        with sqlite3.connect(src) as c:
+        with sqlite_connect(src) as c:
             c.execute("CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT)")
             c.execute("INSERT INTO items(name) VALUES ('a real transaction')")
         backup.snapshot_one(src,out)
-        with sqlite3.connect(out) as c:
+        with sqlite_connect(out) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM items").fetchone()[0],1)
             self.assertEqual(c.execute("PRAGMA integrity_check").fetchone()[0],"ok")
         with self.assertRaises(FileNotFoundError):
@@ -39,7 +40,7 @@ class BackupRegressionTests(unittest.TestCase):
             wallos=self.root/"wallos.db"
             oauth=self.root/"oauth.sqlite3"
             for path in (finance,wallos):
-                with sqlite3.connect(path) as db:
+                with sqlite_connect(path) as db:
                     db.execute("CREATE TABLE fixture(value TEXT)")
             backup.OAUTH_DB=oauth
             backup.SOURCES={"transactions":finance,"wallos":wallos}
@@ -47,14 +48,14 @@ class BackupRegressionTests(unittest.TestCase):
             self.assertNotIn("oauth",backup.sources_for_backup())
             backup.run()
             self.assertEqual(len(list(backup.BACKUPS.glob("*.sqlite3"))),2)
-            with sqlite3.connect(oauth) as db:
+            with sqlite_connect(oauth) as db:
                 db.execute("CREATE TABLE grants(token TEXT)")
                 db.execute("INSERT INTO grants VALUES ('synthetic-grant')")
             self.assertIn("oauth",backup.sources_for_backup())
             backup.run()
             snapshots=list(backup.BACKUPS.glob("oauth-*.sqlite3"))
             self.assertEqual(len(snapshots),1)
-            with sqlite3.connect(snapshots[0]) as db:
+            with sqlite_connect(snapshots[0]) as db:
                 self.assertEqual(db.execute("SELECT token FROM grants").fetchone()[0],"synthetic-grant")
         finally:
             backup.OAUTH_DB=original_oauth
@@ -65,18 +66,18 @@ class BackupRegressionTests(unittest.TestCase):
         # Real finance.sqlite3 uses WAL; never touch any live data in tests.
         src=self.root/"synthetic-live-wal.sqlite3"
         dest=self.root/"wal-archive.sqlite3"
-        with sqlite3.connect(src) as live:
+        with sqlite_connect(src) as live:
             self.assertEqual(live.execute("PRAGMA journal_mode=WAL").fetchone()[0],"wal")
             live.execute("CREATE TABLE expense(id INTEGER PRIMARY KEY, cents INTEGER)")
             live.execute("INSERT INTO expense(cents) VALUES(1886)")
         backup.snapshot_one(src,dest)
         self.assertEqual({p.name for p in self.root.glob("wal-archive.sqlite3*")},
                          {"wal-archive.sqlite3"})
-        with sqlite3.connect(f"file:{dest}?mode=ro&immutable=1",uri=True) as restored:
+        with sqlite_connect(f"file:{dest}?mode=ro&immutable=1",uri=True) as restored:
             self.assertEqual(restored.execute("PRAGMA journal_mode").fetchone()[0],"delete")
             self.assertEqual(restored.execute("SELECT cents FROM expense").fetchone()[0],1886)
             self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone()[0],"ok")
-        with sqlite3.connect(src) as original:
+        with sqlite_connect(src) as original:
             self.assertEqual(original.execute("PRAGMA journal_mode").fetchone()[0],"wal")
 
     def test_30_day_retention_keeps_daily_sets(self):
