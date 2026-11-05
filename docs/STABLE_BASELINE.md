@@ -1,8 +1,8 @@
 # 清衡 Open Margin｜稳定使用基线与开发基线
 
 **基线日期**：2026-11-05  
-**代码基线**：`main@30393da`（2026-11-05，已提交推送）  
-**基线标签**：`dev-baseline-2026-11-05`  
+**代码基线**：`main@4762780`（2026-11-05，已提交推送）
+**上一验证基线**：`dev-baseline-2026-11-05`（main@4c75214）
 **产品版本**：Android `1.2.0` / versionCode `11`；后端 `/health` 报告 `1.5.0`
 
 > 这是**预发布基线**，不是正式发布声明。真实手机的通知采集、无障碍绑定、国产 ROM 兼容仍未经真机验证；不能把本文件当作“采集已可靠”或“银行账单已对账”的证据。
@@ -25,7 +25,7 @@
 | 结构化页面规则/金额边界 | `WechatTransferPageRuleTest` | **16 tests, 0 failures** |
 | 上传字段映射 | `UploadPayloadTest` | **6 tests, 0 failures** |
 | 提取→上传跨层契约 | `backend/test_extraction_upload_contract.py` | **2 tests, OK** |
-| Debug APK | `gradlew assembleDebug` | **成功，18.90 MB** |
+| Debug APK | `gradlew assembleDebug` | **成功，19.09 MB（当前工作树）** |
 | Release 未签名 APK | `gradlew assembleRelease` | **成功，12.61 MB** |
 | APK 元数据 | `aapt dump badging` | debug `com.bookkeeping.app.sync2`、release `com.bookkeeping.app`；versionCode 11；minSdk 24；targetSdk 35 |
 | 公开就绪静态扫描 | `python scripts/check-public-ready.py` | **OK（262 files）** |
@@ -95,6 +95,8 @@
 10. `AmountText` 允许超过服务端上限的金额，可能生成永远无法上传的记录；现在统一限制为 100,000,000,000 分。
 
 **重要边界**：新的 `WechatTransferPageRule` 目前仍只在 DEBUG 影子运行（蓝图 D03/D05），真正写入账本的仍是通知/SMS/旧无障碍提取器。上述测试同时覆盖新结构化规则和实际写入路径；切换写路径仍必须等 D01 真机样本与 D06 双端核验。
+
+本轮还修复了一个**无法用纯 JVM 测试覆盖的升级缺陷**：WorkManager 打开 Room 时曾漏注册 `MIGRATION_3_4`，从 v3 升级后后台同步可能直接失败。现在 Hilt 和 Worker 共用 `BookkeepingDatabase.build(context)`，迁移链只有一份。该路径仍需 Android instrumentation/真机升级测试确认。
 
 ## 03. 稳定使用基线
 
@@ -207,7 +209,9 @@ docker compose -p pfs-acceptance down -v
 
 `smoke_clean_install.py` 会拒绝标准生产端口，只接受示例域名和 staging 端口；不要指向真实数据。
 
-## 05. 本次修复清单（已提交推送）
+## 05. 修复清单
+
+### 上一基线（`30393da`）
 
 | 文件 | 修复 |
 |---|---|
@@ -233,6 +237,18 @@ docker compose -p pfs-acceptance down -v
 | `android/.../NotificationTextExtractorTest.kt` | 断言改为“24h 内取最新时间” |
 | `android/.../CaptureRobustnessTest.kt` | SAME 不变量允许“交易号优先、金额可被用户改过” |
 | `android/.../CapturePipelineDecisionTest.kt` | 新增“同交易号、金额不同仍判同一笔”回归用例 |
+
+### 本次提交（`4762780`）
+
+> 以下条目已包含在 `4762780`，并通过本地测试/构建；CI 结果见 GitHub Actions。
+
+| 文件 | 修复 |
+|---|---|
+| `android/.../BookkeepingDatabase.kt`、`DatabaseModule.kt`、`TransactionSyncWorker.kt` | Room builder 收敛到 `BookkeepingDatabase.build(context)`，确保 Worker 也注册 `MIGRATION_3_4` |
+| `android/.../PaymentNotificationListenerService.kt`、`SmsBroadcastReceiver.kt` | 解析/入库异常不再抛穿；移除 Debug 中的金额与卡尾号日志 |
+| `android/.../AccessibilityCaptureService.kt` | 连接/事件异常只上报健康状态，不再 rethrow 崩服务 |
+| `android/.../AccessibilityNodeUtils.kt` | `allNodes()` 改迭代实现，防超深树爆栈 |
+| `docs/RELEASE_V1.2.0_CANDIDATE.md` | 标记为历史文档，指向当前基线与 RC6/versionCode 11 |
 
 ## 06. 下一步门槛
 
