@@ -3,18 +3,20 @@ package com.bookkeeping.app.notification.accessibility
 import android.view.accessibility.AccessibilityNodeInfo
 
 // 提取所有节点（深度优先），按出现顺序返回。
-// 不递归到自身已访问的节点（防止环）。
+// 不递归到自身已访问的节点（防止环）；迭代实现，防超深树爆栈。
 fun AccessibilityNodeInfo.allNodes(): List<AccessibilityNodeInfo> {
     val result = mutableListOf<AccessibilityNodeInfo>()
     val visited = HashSet<AccessibilityNodeInfo>()
-
-    fun walk(node: AccessibilityNodeInfo?) {
-        if (node == null) return
-        if (!visited.add(node)) return
+    val stack = ArrayDeque<AccessibilityNodeInfo>()
+    stack.addLast(this)
+    while (stack.isNotEmpty()) {
+        val node = stack.removeLast()
+        if (!visited.add(node)) continue
         result.add(node)
-        for (i in 0 until node.childCount) walk(node.getChild(i))
+        for (i in node.childCount - 1 downTo 0) {
+            node.getChild(i)?.let(stack::addLast)
+        }
     }
-    walk(this)
     return result
 }
 

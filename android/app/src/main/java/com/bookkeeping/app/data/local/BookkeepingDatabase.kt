@@ -1,6 +1,8 @@
 package com.bookkeeping.app.data.local
 
+import android.content.Context
 import androidx.room.Database
+import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -25,6 +27,16 @@ abstract class BookkeepingDatabase : RoomDatabase() {
 
     companion object {
         const val DB_NAME = "bookkeeping.db"
+
+        /**
+         * Single source of truth for the Room builder. Every caller (Hilt and
+         * WorkManager) must register the same migration chain; missing one
+         * migration breaks synchronization on app upgrades.
+         */
+        fun build(context: Context): BookkeepingDatabase =
+            Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .build()
 
         // Must never fall back to destructive migration: user's unsynced
         // payment notifications and manually entered expenses live here.

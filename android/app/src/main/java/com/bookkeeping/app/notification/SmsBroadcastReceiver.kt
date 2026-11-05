@@ -8,6 +8,7 @@ import android.util.Log
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,20 +41,29 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         // 不在 release 构建中记录短信内容（含 PII：银行/卡尾号/金额）
         // Never write raw SMS or card details to logcat (including debug builds).
 
-        val parsed = SmsParser.parse(sender, fullBody, timestamp) ?: return
+        val parsed = try {
+            SmsParser.parse(sender, fullBody, timestamp)
+        } catch (failure: Exception) {
+            Log.e(TAG, "SMS parse failed: ${failure.javaClass.simpleName}")
+            return
+        } ?: return
 
         val pending = goAsync()
         scope.launch {
             try {
-            val id = repository.insertIfNotDuplicate(parsed)
-            if (id == null) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate SMS")
-            } else if (BuildConfig.DEBUG) {
-                Log.i(TAG, "Auto-captured bank SMS: id=$id amount=${parsed.amountCents} account=${parsed.account}")
-            } else {
-                Log.i(TAG, "Auto-captured bank SMS: id=$id")
+                val id = repository.insertIfNotDuplicate(parsed)
+                if (id == null) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate SMS")
+                } else {
+                    Log.i(TAG, "Auto-captured bank SMS: id=$id")
+                }
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                Log.e(TAG, "SMS processing failed: ${failure.javaClass.simpleName}")
+            } finally {
+                pending.finish()
             }
-            } finally { pending.finish() }
         }
     }
 

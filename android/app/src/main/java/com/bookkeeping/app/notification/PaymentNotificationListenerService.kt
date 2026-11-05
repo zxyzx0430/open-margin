@@ -8,6 +8,7 @@ import android.util.Log
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.EntryPointAccessors
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,8 +40,17 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         super.onDestroy()
     }
 
-    // 通知到达时回调（关键入口）
+    // 通知到达时回调（关键入口）。任何解析/入库异常只记录类型，不能打崩监听服务。
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        try {
+            handleNotificationPosted(sbn)
+        } catch (failure: Exception) {
+            // Exception class only; never log notification content or amounts.
+            Log.e(TAG, "Notification processing failed: ${failure.javaClass.simpleName}")
+        }
+    }
+
+    private fun handleNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName ?: return
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
@@ -105,23 +115,27 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         // Shadow mode: record the fingerprint, never block the insert yet.
         val fingerprint = NoticeFingerprint.of(packageName, title, body, originalTime)
         scope.launch {
-            val replay = repository.recordNoticeFingerprint(
-                fingerprint = fingerprint,
-                source = packageName,
-                seenMs = System.currentTimeMillis(),
-            )
-            if (replay && BuildConfig.DEBUG) {
-                Log.d(TAG, "Notice fingerprint already seen (shadow mode, not blocking)")
-            }
-            // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
-            // 不跨来源自动合并，避免把独立的支付误删。
-            val id = repository.insertIfNotDuplicate(parsed)
-            if (id == null) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate notification")
-            } else if (BuildConfig.DEBUG) {
-                Log.i(TAG, "Auto-captured transaction id=$id amount=${parsed.amountCents} source=${parsed.source}")
-            } else {
-                Log.i(TAG, "Auto-captured transaction id=$id")
+            try {
+                val replay = repository.recordNoticeFingerprint(
+                    fingerprint = fingerprint,
+                    source = packageName,
+                    seenMs = System.currentTimeMillis(),
+                )
+                if (replay && BuildConfig.DEBUG) {
+                    Log.d(TAG, "Notice fingerprint already seen (shadow mode, not blocking)")
+                }
+                // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
+                // 不跨来源自动合并，避免把独立的支付误删。
+                val id = repository.insertIfNotDuplicate(parsed)
+                if (id == null) {
+                    if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate notification")
+                } else {
+                    Log.i(TAG, "Auto-captured transaction id=$id")
+                }
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                Log.e(TAG, "Notification persist failed: ${failure.javaClass.simpleName}")
             }
         }
     }
