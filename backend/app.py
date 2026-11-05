@@ -56,8 +56,10 @@ def db_connection():
     db = sqlite3.connect(str(DB), timeout=10)
     try:
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
+        # Set the busy timeout before any journal-mode change: switching WAL
+        # needs a lock and must wait under concurrent first connections.
         db.execute("PRAGMA busy_timeout=10000")
+        db.execute("PRAGMA journal_mode=WAL")
         db.execute("""CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY,
             event_id TEXT NOT NULL UNIQUE,
@@ -71,6 +73,11 @@ def db_connection():
             review_status TEXT NOT NULL DEFAULT 'unverified',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
         db.execute("CREATE INDEX IF NOT EXISTS tx_timestamp ON transactions(timestamp_ms)")
+        # Upload de-duplication filters by amount/currency/direction and a
+        # +/-90s timestamp window. Without this composite index every event
+        # scans the whole ledger, so ingest latency grows with history size.
+        db.execute("""CREATE INDEX IF NOT EXISTS tx_dedup_lookup
+            ON transactions(amount_cents,currency,direction,timestamp_ms)""")
         # The optional ledger epoch is a durable, DB-wide import boundary.
         # It stops offline Android retries and manual imports reintroducing
         # expenses from before the user's requested fresh start.
@@ -158,6 +165,10 @@ def health():
 def ingest(batch: Batch):
     inserted, existed, ignored_before_start = 0, 0, 0
     with db_connection() as db:
+        # Reserve the writer lock before the tombstone/duplicate SELECTs.
+        # Upgrading a read transaction to a write transaction can return
+        # SQLITE_BUSY immediately in WAL mode, bypassing busy_timeout.
+        db.execute("BEGIN IMMEDIATE")
         cutoff = ledger_start_ms(db)
         for e in batch.events:
             if e.timestamp_ms < cutoff:
@@ -202,6 +213,7 @@ def correct_rounding(item: AmountCorrection):
     if item.corrected_cents != item.old_cents + 1:
         raise HTTPException(status_code=422, detail="Only one-cent rounding repairs allowed")
     with db_connection() as db:
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT id,amount_cents,source,review_status FROM transactions WHERE event_id=?",
                          (item.event_id,)).fetchone()
         if row is None:
