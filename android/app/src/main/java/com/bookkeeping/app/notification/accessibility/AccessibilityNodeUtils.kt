@@ -59,14 +59,4 @@ fun AccessibilityNodeInfo.dumpTree(maxDepth: Int = 20): String {
     return sb.toString()
 }
 
-// 提取第一个"X.XX 元" 或 "￥X.XX" 的金额，返回元（Double）。
-private val AMOUNT_YUAN = Regex("""([0-9]+(?:\.[0-9]{1,2})?)\s*元""")
-private val AMOUNT_SYMBOL = Regex("""[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)""")
-private val AMOUNT_BARE = Regex("""^[¥￥]?\s*([0-9]+\.[0-9]{2})$""")
-
-fun extractAmountYuan(text: String): Double? {
-    AMOUNT_SYMBOL.find(text)?.let { return it.groupValues[1].toDoubleOrNull() }
-    AMOUNT_YUAN.find(text)?.let { return it.groupValues[1].toDoubleOrNull() }
-    AMOUNT_BARE.find(text.trim())?.let { return it.groupValues[1].toDoubleOrNull() }
-    return null
-}
+// 金额解析统一走 AmountText（精确到分，不再经过 Double）。

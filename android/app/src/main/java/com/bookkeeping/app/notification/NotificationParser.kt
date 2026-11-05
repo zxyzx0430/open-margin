@@ -26,9 +26,10 @@ object NotificationParser {
     private const val PKG_ALIPAY = "com.eg.android.AlipayGphone"
     private const val PKG_WECHAT = "com.tencent.mm"
 
-    // 金额提取：只匹配带 ￥/¥ 前缀或后缀"元"的数字，避免误匹配日期等
-    private val AMOUNT_REGEX_SYMBOL = Regex("""[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)""")
-    private val AMOUNT_REGEX_YUAN = Regex("""([0-9]+(?:\.[0-9]{1,2})?)\s*元""")
+    // 金额提取：只匹配带 ￥/¥ 前缀或后缀"元"的数字，避免误匹配日期等。
+    // 尾部边界防止把 12.345 / 1.2.3 截成合法金额。
+    private val AMOUNT_REGEX_SYMBOL = Regex("""[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])""")
+    private val AMOUNT_REGEX_YUAN = Regex("""(?<![0-9.])([0-9]+(?:\.[0-9]{1,2})?)(?![0-9.])\s*元""")
 
     // 收入关键词
     private val INCOME_KEYWORDS = listOf(
@@ -58,6 +59,7 @@ object NotificationParser {
     private val COMPLETED_EXPENSE_HINTS = listOf(
         "付款成功", "成功付款", "已付款", "您已付款",
         "支付成功", "已支付", "您已支付", "扣款成功", "已扣款", "扣费成功",
+        "付款给", "付给",
         "你有一笔", "您有一笔",
     )
     private val COMPLETED_INCOME_HINTS = listOf(
@@ -75,20 +77,25 @@ object NotificationParser {
                 (full.contains("的支出") || full.contains("支出，") || full.contains("支出。"))
         val explicitIncome = COMPLETED_INCOME_HINTS.any { full.contains(it) }
         val payToMerchant = PAY_TO_MERCHANT_REGEX.containsMatchIn(full)
+        val receivedTransfer = RECEIVED_TRANSFER.containsMatchIn(full)
         val englishPaid = ENGLISH_PAID.containsMatchIn(full)
-        val confirmed = explicitExpense || explicitIncome || payToMerchant || englishPaid
+        val confirmed = explicitExpense || explicitIncome || payToMerchant ||
+            receivedTransfer || englishPaid
         if (!confirmed) return false
         if (PROMOTION_HINTS.any { full.contains(it) } &&
-            !explicitExpense && !explicitIncome && !payToMerchant && !englishPaid) return false
+            !explicitExpense && !explicitIncome && !payToMerchant &&
+            !receivedTransfer && !englishPaid) return false
         // "红包" must not be taken as a credit merely because a notification
         // says "收到红包"; opening/settlement is checked by the UI extractor.
         if (full.contains("红包") && !explicitExpense && !explicitIncome &&
-            !payToMerchant && !englishPaid) return false
+            !payToMerchant && !receivedTransfer && !englishPaid) return false
         return true
     }
 
     // "向 商户名 付款" 模式（区分于"向你/您 付款"）= 支出
     private val PAY_TO_MERCHANT_REGEX = Regex("""向\s*(?!你|您)(\S+?)\s*付款""")
+    // "收到 张三 的转账" 是微信个人转账的真实通知格式。
+    private val RECEIVED_TRANSFER = Regex("""收到\s*\S{1,20}\s*的转账""")
 
     // 商户提取模式（按优先级试，命中即用）
     private val MERCHANT_PATTERNS = listOf(
@@ -138,6 +145,7 @@ object NotificationParser {
         //    d. 默认 EXPENSE
         val type = when {
             INCOME_KEYWORDS.any { full.contains(it) } -> TransactionType.INCOME
+            RECEIVED_TRANSFER.containsMatchIn(full) -> TransactionType.INCOME
             EXPENSE_KEYWORDS.any { full.contains(it) } -> TransactionType.EXPENSE
             PAY_TO_MERCHANT_REGEX.containsMatchIn(full) -> TransactionType.EXPENSE
             else -> TransactionType.EXPENSE
@@ -176,21 +184,27 @@ object NotificationParser {
     )
 
     private fun extractAmountCents(text: String): Long? {
+        // Bank/payment texts may use thousands separators. Normalize before
+        // matching, otherwise "￥1,234.56" is read as ￥1 or 234.56.
+        val cleaned = text.replace(Regex("""(?<=\d),(?=\d)"""), "")
         // "¥5.00元" 两个正则都会命中同一笔金额，第二条不能绕过
         // 第一条的“优惠券 / 红包”排除判断。
-        val withSymbol = AMOUNT_REGEX_SYMBOL.findAll(text).toList()
-        val withoutSymbolOverlap = AMOUNT_REGEX_YUAN.findAll(text).filterNot { yuan ->
+        val withSymbol = AMOUNT_REGEX_SYMBOL.findAll(cleaned).toList()
+        val withoutSymbolOverlap = AMOUNT_REGEX_YUAN.findAll(cleaned).filterNot { yuan ->
             withSymbol.any { symbol -> yuan.range.first in symbol.range }
         }
         val matches = (withSymbol.asSequence() + withoutSymbolOverlap)
             .sortedBy { it.range.first }
         for (match in matches) {
-            val before = text.substring((match.range.first - 18).coerceAtLeast(0), match.range.first)
-            val after = text.substring(match.range.last + 1, (match.range.last + 13).coerceAtMost(text.length))
+            val before = cleaned.substring((match.range.first - 18).coerceAtLeast(0), match.range.first)
+            val after = cleaned.substring(match.range.last + 1, (match.range.last + 13).coerceAtMost(cleaned.length))
             val isConfirmed = TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before)
-            val appearsPromotional = NON_TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before) ||
-                NON_TRANSACTION_AMOUNT_AFTER.containsMatchIn(after)
-            if (appearsPromotional && !isConfirmed) continue
+            // An amount immediately preceded by "优惠券/红包/余额" is a
+            // promotional value even if "付款成功" appears earlier.
+            if (NON_TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before)) continue
+            // A trailing promo label is allowed only for an amount already
+            // confirmed by a transaction verb ("付款成功 ￥3.00 红包抵扣").
+            if (NON_TRANSACTION_AMOUNT_AFTER.containsMatchIn(after) && !isConfirmed) continue
             val cents = MoneyAmount.cents(match.groupValues[1])
             if (cents != null) return cents
         }

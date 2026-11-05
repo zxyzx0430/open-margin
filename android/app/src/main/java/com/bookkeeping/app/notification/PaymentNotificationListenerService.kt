@@ -79,8 +79,9 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             messages = messageTexts,
         )
 
-        // postTime 会被 MessagingStyle 重发/通知刷新推后，记账用最早的真实时间。
-        // Reposts move postTime forward; book the earliest plausible real time.
+        // postTime 会被 MessagingStyle 重发/通知刷新推后；取 24h 内最新的
+        // 可信候选作为事件时间，避免新支付被旧消息时间吞掉。
+        // Reposts move postTime forward; book the latest plausible real time.
         val originalTime = NotificationTextExtractor.resolveOriginalTimeMs(
             postTimeMs = sbn.postTime,
             notificationWhenMs = notification.`when`,

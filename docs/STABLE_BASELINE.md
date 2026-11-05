@@ -9,7 +9,7 @@
 ## 01. 结论
 
 - **可稳定使用**：Windows / VPS 单用户自托管、Wallos 日常账本、手动记账、预算、CSV、v1/v2 双向同步、OAuth 2.1 + PKCE、MCP 只读/授权写入、三库备份。
-- **可稳定开发**：后端 91 个测试（74 功能 + 17 同步/上传压力）、Android 100 个 JVM 单测全绿；Debug/Release APK 均可构建。
+- **可稳定开发**：后端 93 个测试（74 功能 + 17 同步/上传压力 + 2 跨层契约）、Android 145 个 JVM 单测全绿；Debug/Release APK 均可构建。
 - **仍属实验**：Android 支付通知与无障碍采集、跨渠道去重（D05 仍为影子模式）、真实设备覆盖率。
 - **未验证**：Android 16 真机、模拟器 instrumentation、GitHub CI 绿灯、正式签名 APK、v1.1.3 → v1.2.0 同签名升级。
 
@@ -17,8 +17,12 @@
 
 | 验证项 | 命令 / 方式 | 结果 |
 |---|---|---|
-| 后端全量单测 | `python -m unittest discover -p "test_*.py"` | **91 tests, OK**（74 功能 + 17 压力/鲁棒性） |
-| Android JVM 单测 | `gradlew testDebugUnitTest` | **100 tests, 0 failures** |
+| 后端全量单测 | `python -m unittest discover -p "test_*.py"` | **93 tests, OK**（74 功能 + 17 压力/鲁棒性 + 2 跨层契约） |
+| Android JVM 单测 | `gradlew testDebugUnitTest` | **145 tests, 0 failures** |
+| 通知/短信解析字段契约 | `NotificationParserTest` + `SmsParserTest` | **32 tests, 0 failures** |
+| 结构化页面规则/金额边界 | `WechatTransferPageRuleTest` | **16 tests, 0 failures** |
+| 上传字段映射 | `UploadPayloadTest` | **6 tests, 0 failures** |
+| 提取→上传跨层契约 | `backend/test_extraction_upload_contract.py` | **2 tests, OK** |
 | Debug APK | `gradlew assembleDebug` | **成功，18.90 MB** |
 | Release 未签名 APK | `gradlew assembleRelease` | **成功，12.61 MB** |
 | APK 元数据 | `aapt dump badging` | debug `com.bookkeeping.app.sync2`、release `com.bookkeeping.app`；versionCode 11；minSdk 24；targetSdk 35 |
@@ -33,7 +37,7 @@
 | 重启持久化 | 重启 finance-api + wallos 前后查 SQLite | **3 → 3，未丢失** |
 | Android instrumentation | `connectedDebugAndroidTest` | **未运行**：模拟器/系统镜像安装未完成，且本机可用内存不足 |
 | Android 16 真机 | D01/D06/D07 真机流程 | **未验证** |
-| GitHub CI | `main` 最新 `Build Android APK` | **修复前为失败；本地修复未 push，尚未验证远端转绿** |
+| GitHub CI | `main` 最新工作流 | **已推送，Android/后端/就绪检查全部通过** |
 
 ### 隔离烟测的环境说明
 
@@ -41,7 +45,7 @@
 
 因此该烟测证明**当前代码、Compose 接线、Wallos 扩展页面和 Finance API 的集成可用**，但不等同于“从公网重新拉取上游 Wallos 的完整洁净安装”。换一台 Docker 缓存正常的机器仍需重跑一次。
 
-该烟测执行于并发加固之前；加固后的后端由 91 项测试和真实 uvicorn 压测覆盖，受本机可用内存限制，未再次重建 Docker 栈。
+该烟测执行于并发加固之前；加固后的后端由 93 项测试和真实 uvicorn 压测覆盖，受本机可用内存限制，未再次重建 Docker 栈。
 
 ### 同步/上传压力与鲁棒性结果
 
@@ -65,6 +69,28 @@
 3. **每个连接都执行 `PRAGMA journal_mode=WAL`**：并发时切换 WAL 需要排他锁，部分请求在连接建立阶段直接 `database is locked`。现在 WAL 切换和建表按数据库路径每进程只初始化一次，后续请求不再争抢排他锁。
 
 可复现的自动化覆盖在 `backend/test_sync_stress.py`：10k 顺序上传、全量/重叠重放、16 路并发同批、20 路并发不同批、v2 最大批量推送/重放、分页、墓碑风暴、最大长度/Unicode、畸形 JSON/字段、批次中途异常回滚、v1 与 v2 混合协议并发等。
+
+### 结构化提取与上传验证
+
+本次新增字段级测试，覆盖三类实际入口和一条跨层契约：
+
+- **通知解析**（`NotificationParserTest`，16 项）：微信/支付宝支出、个人转账收入、“向你付款”、退款、支付宝通用支出、商户、分类、账户、时间、金额边界、促销/失败/待支付排除、Unicode/长文本。
+- **银行短信**（`SmsParserTest`，16 项）：银行识别、卡尾号、收支方向、余额排除、工资/转账分类、促销/失败/预授权排除、千分位、长文本。
+- **结构化页面规则**（`WechatTransferPageRuleTest`，16 项）：金额、方向、完成态、商户、失败原因、区域定位、contentDescription 节点、多卡不串金额、截断页面、金额格式边界。
+- **上传字段契约**（`UploadPayloadTest` 6 项 + 后端 `test_extraction_upload_contract.py` 2 项）：`event_id / timestamp_ms / amount_cents / currency / direction / source / category / merchant` 逐字段保留；`note` / `account` 明确不上传；重放幂等。
+
+本轮发现并修复的提取问题：
+
+1. 通知/短信的千分位金额被截断（`￥1,234.56` 读成 1 或 234.56）。
+2. `￥12.345`、`￥1.2.3` 等畸形金额被截成合法金额；现在返回 null。
+3. 微信“收到 张三 的转账”未识别为收入；现在识别为 INCOME。
+4. “付款给 星巴克”未识别为完成支出；现在识别。
+5. 促销金额在“付款成功”之后仍被当成成交额；现在优先跳过紧邻“优惠券/红包/余额”的金额。
+6. 银行短信缺少促销/失败/预授权排除，可能把“满100元返50元”“消费失败”误记；现在直接跳过。
+7. “尾号为1234”未提取卡尾号；现在支持。
+8. 旧无障碍提取器用 `Double * 100` 计算分，可能把 0.29 记成 28；现在统一走 `AmountText.parseCents` 精确到分。
+
+**重要边界**：新的 `WechatTransferPageRule` 目前仍只在 DEBUG 影子运行（蓝图 D03/D05），真正写入账本的仍是通知/SMS/旧无障碍提取器。上述测试同时覆盖新结构化规则和实际写入路径；切换写路径仍必须等 D01 真机样本与 D06 双端核验。
 
 ## 03. 稳定使用基线
 
@@ -177,28 +203,35 @@ docker compose -p pfs-acceptance down -v
 
 `smoke_clean_install.py` 会拒绝标准生产端口，只接受示例域名和 staging 端口；不要指向真实数据。
 
-## 05. 本次本地修复清单（未提交）
+## 05. 本次修复清单（已提交推送）
 
 | 文件 | 修复 |
 |---|---|
 | `backend/app.py` | WAL/建表改为按 DB 路径每进程只初始化一次；上传/修正先 `BEGIN IMMEDIATE`；新增上传去重复合索引 |
-| `backend/test_sync_stress.py` | 新增 15 项同步/上传压力与鲁棒性测试 |
-| `backend/testutil.py` | 新增测试连接器：成功提交、始终关闭 SQLite |
+| `backend/test_sync_stress.py` | 同步/上传压力与鲁棒性测试（17 项） |
+| `backend/test_extraction_upload_contract.py` | 提取字段 → v1 上传 → 落库的跨层契约（2 项） |
+| `backend/testutil.py` | 测试连接器：成功提交、始终关闭 SQLite |
 | `backend/test_backup_regression.py` 等 5 个测试 | 改用 `testutil.connect`，修复 Windows 临时目录文件锁 |
 | `backend/oauth_support.py` | `owner_ok` 显式关闭 Wallos 连接 |
 | `backend/wallos_bridge.py`、`backend/wallos_api.py` | 显式关闭 SQLite 连接 |
 | `backend/requirements.txt` | 增加 `tzdata`，支持 Windows 原生运行/测试 |
 | `scripts/test_private_sync_gateway.py` | nginx 配置改用 POSIX 路径，创建 Windows 前缀 temp/log 目录并传 `-p` |
-| `android/.../NotificationTextExtractorTest.kt` | 断言改为“24h 内取最新时间”，与 11-04 修复一致 |
+| `android/.../NotificationParser.kt` | 千分位、畸形金额边界、“收到 X 的转账”、“付款给”、促销金额优先级 |
+| `android/.../SmsParser.kt` | 千分位、“尾号为”、促销/失败/预授权排除 |
+| `android/.../PageRules.kt` | `AmountText` 拒绝负数和残缺金额 |
+| `android/.../WechatTransferExtractor.kt`、`AlipayTransferExtractor.kt`、`WechatRedPacketExtractor.kt` | 旧写入路径改为精确到分，移除 `Double * 100` |
+| `android/.../UploadPayload.kt` | v1/v2 字段映射抽成纯函数；`note`/`account` 不上传 |
+| `android/.../NotificationParserTest.kt`、`SmsParserTest.kt` | 通知/短信字段级与鲁棒性测试（32 项） |
+| `android/.../WechatTransferPageRuleTest.kt` | 结构化页面字段、多卡、截断、金额边界（16 项） |
+| `android/.../UploadPayloadTest.kt` | 上传字段映射与敏感字段排除（6 项） |
+| `android/.../NotificationTextExtractorTest.kt` | 断言改为“24h 内取最新时间” |
 | `android/.../CaptureRobustnessTest.kt` | SAME 不变量允许“交易号优先、金额可被用户改过” |
 | `android/.../CapturePipelineDecisionTest.kt` | 新增“同交易号、金额不同仍判同一笔”回归用例 |
 
-这些修改不改变产品业务规则；主要是测试可移植性和 SQLite 资源释放。没有 commit、没有 push。
-
 ## 06. 下一步门槛
 
-1. 将本地修复提交并 push，确认 `Build Android APK` 在 GitHub CI 转绿。
+1. 用 Android 16 真机样本替换本轮合成页面/通知/短信文案（D01），逐条核对金额、方向、完成态和商户。
 2. 用正常 Docker 缓存机器重跑一次完整清洁安装（本次使用了 Wallos 本地回退基础镜像）。
-3. 在 Android 16 真机执行 D01 采样、D06 影子双端核验、D07 发布验收。
-4. 真机通过后，才更新知识库中“D02–D05 已落地、D01/D06/D07 待真机”的状态。
+3. 在 Android 16 真机执行 D06 影子双端核验、D07 发布验收。
+4. 真机通过后，才更新知识库中“D02–D05 已落地、D01/D06/D07 待真机”的状态，并把结构化页面规则从 DEBUG 影子切换到正式写入。
 5. 正式发布前补齐同签名 APK 升级、生产库备份恢复演练和发布门禁清单。

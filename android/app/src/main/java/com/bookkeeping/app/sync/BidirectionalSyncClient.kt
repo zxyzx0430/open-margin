@@ -152,17 +152,17 @@ internal class BidirectionalSyncClient(
         return false
     }
 
-    private fun payload(row:TransactionEntity)=JSONObject().apply {
-        put("timestamp_ms",row.timestamp)
-        put("amount_cents",row.amountCents)
-        put("currency",row.currency)
-        put("direction",row.type)
-        put("source",row.source)
-        put("category",row.category)
-        put("merchant",row.merchant.take(140))
-        if(row.remoteReviewStatus in setOf(
-                "unverified","confirmed","excluded","transfer","possible_duplicate")) {
-            put("review_status",row.remoteReviewStatus)
+    private fun payload(row:TransactionEntity):JSONObject {
+        val record=UploadPayload.v2Record(row)
+        return JSONObject().apply {
+            put("timestamp_ms",record.timestampMs)
+            put("amount_cents",record.amountCents)
+            put("currency",record.currency)
+            put("direction",record.direction)
+            put("source",record.source)
+            put("category",record.category)
+            put("merchant",record.merchant)
+            record.reviewStatus?.let { put("review_status",it) }
         }
     }
 

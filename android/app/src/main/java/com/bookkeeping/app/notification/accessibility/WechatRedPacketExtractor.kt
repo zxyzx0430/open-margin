@@ -30,11 +30,11 @@ class WechatRedPacketExtractor : AccessibilityExtractor {
 
         if (EXPENSE_NEGATIVES.any { allText.contains(it) }) return null
 
-        val amount = extractAmountYuan(allText) ?: return null
-        if (amount <= 0) return null
+        val amountCents = AmountText.parseCents(allText) ?: return null
+        if (amountCents <= 0L) return null
 
         return TransactionEntity(
-            amountCents = (amount * 100).toLong(),
+            amountCents = amountCents,
             type = TransactionType.INCOME.name,
             // 红包没有更合适的分类，归到 OTHER；用户可手动改
             category = TransactionCategory.OTHER.name,
