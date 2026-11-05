@@ -479,6 +479,105 @@ class SyncStressTests(SyncStressBase):
         self.assertEqual(sample["record"]["category"], category)
         self.assertEqual(self.count(), 50)
 
+    def test_v1_and_v2_race_on_same_event_keeps_one_row(self):
+        rounds = 20
+        for round_index in range(rounds):
+            item = event(round_index, prefix="mixed-create")
+            barrier = threading.Barrier(2)
+
+            def v1_upload():
+                client = TestClient(core.app)
+                try:
+                    barrier.wait(timeout=20)
+                    return client.post("/api/v1/transactions/batch",
+                                       json={"events": [item]},
+                                       headers=self.headers)
+                finally:
+                    client.close()
+
+            def v2_push():
+                client = TestClient(core.app)
+                try:
+                    operation = {
+                        "mutation_id": f"mutation:mixed:create:{round_index}",
+                        "event_id": item["event_id"],
+                        "base_revision": 0,
+                        "action": "upsert",
+                        "record": record_of(item),
+                    }
+                    barrier.wait(timeout=20)
+                    return client.post("/api/v2/sync/push",
+                                       json={"operations": [operation]},
+                                       headers=self.headers)
+                finally:
+                    client.close()
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(v1_upload), pool.submit(v2_push)]
+                responses = [future.result(timeout=30) for future in futures]
+            self.assertTrue(all(response.status_code == 200
+                                for response in responses),
+                            [response.text for response in responses])
+            with core.db_connection() as db:
+                count = db.execute("SELECT COUNT(*) FROM transactions WHERE event_id=?",
+                                   (item["event_id"],)).fetchone()[0]
+            self.assertEqual(count, 1, round_index)
+
+    def test_v1_replay_cannot_resurrect_concurrent_v2_tombstone(self):
+        rounds = 20
+        for round_index in range(rounds):
+            item = event(round_index, prefix="mixed-delete")
+            seed = self.push([{
+                "mutation_id": f"mutation:mixed:seed:{round_index}",
+                "event_id": item["event_id"],
+                "base_revision": 0,
+                "action": "upsert",
+                "record": record_of(item),
+            }])
+            self.assertEqual(seed.status_code, 200, seed.text)
+            revision = seed.json()["results"][0]["revision"]
+            barrier = threading.Barrier(2)
+
+            def v1_replay():
+                client = TestClient(core.app)
+                try:
+                    barrier.wait(timeout=20)
+                    return client.post("/api/v1/transactions/batch",
+                                       json={"events": [item]},
+                                       headers=self.headers)
+                finally:
+                    client.close()
+
+            def v2_delete():
+                client = TestClient(core.app)
+                try:
+                    operation = {
+                        "mutation_id": f"mutation:mixed:delete:{round_index}",
+                        "event_id": item["event_id"],
+                        "base_revision": revision,
+                        "action": "delete",
+                    }
+                    barrier.wait(timeout=20)
+                    return client.post("/api/v2/sync/push",
+                                       json={"operations": [operation]},
+                                       headers=self.headers)
+                finally:
+                    client.close()
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(v1_replay), pool.submit(v2_delete)]
+                responses = [future.result(timeout=30) for future in futures]
+            self.assertTrue(all(response.status_code == 200
+                                for response in responses),
+                            [response.text for response in responses])
+            with core.db_connection() as db:
+                count = db.execute("SELECT COUNT(*) FROM transactions WHERE event_id=?",
+                                   (item["event_id"],)).fetchone()[0]
+                latest = db.execute("""SELECT action FROM sync_journal WHERE event_id=?
+                    ORDER BY revision DESC LIMIT 1""", (item["event_id"],)).fetchone()
+            self.assertEqual(count, 0, round_index)
+            self.assertEqual(latest["action"], "delete", round_index)
+
     def test_push_validation_never_returns_500(self):
         base = self.make_operations(1, prefix="invalid")[0]
         cases = [

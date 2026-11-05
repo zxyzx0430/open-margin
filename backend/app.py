@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -50,56 +51,75 @@ def admin_auth(request: Request, x_admin_token: str | None = Header(default=None
 from web_login import router as dashboard_auth_router
 app.include_router(dashboard_auth_router)
 
+_DB_INITIALIZED: set[str] = set()
+_DB_INIT_LOCK = threading.Lock()
+
+
+def _initialize_database(db: sqlite3.Connection) -> None:
+    try:
+        db.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError:
+        # Another process may be switching the same database to WAL.
+        mode = db.execute("PRAGMA journal_mode").fetchone()
+        if not mode or str(mode[0]).lower() != "wal":
+            raise
+    db.execute("""CREATE TABLE IF NOT EXISTS transactions (
+        id INTEGER PRIMARY KEY,
+        event_id TEXT NOT NULL UNIQUE,
+        timestamp_ms INTEGER NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        source TEXT NOT NULL,
+        category TEXT NOT NULL,
+        merchant TEXT NOT NULL,
+        review_status TEXT NOT NULL DEFAULT 'unverified',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+    db.execute("CREATE INDEX IF NOT EXISTS tx_timestamp ON transactions(timestamp_ms)")
+    # Upload de-duplication filters by amount/currency/direction and a
+    # +/-90s timestamp window. Without this composite index every event
+    # scans the whole ledger, so ingest latency grows with history size.
+    db.execute("""CREATE INDEX IF NOT EXISTS tx_dedup_lookup
+        ON transactions(amount_cents,currency,direction,timestamp_ms)""")
+    # The optional ledger epoch is a durable, DB-wide import boundary.
+    # It stops offline Android retries and manual imports reintroducing
+    # expenses from before the user's requested fresh start.
+    db.execute("""CREATE TABLE IF NOT EXISTS ledger_settings (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
+    db.execute("""CREATE TRIGGER IF NOT EXISTS transactions_start_date_guard
+        BEFORE INSERT ON transactions
+        WHEN EXISTS (
+            SELECT 1 FROM ledger_settings
+            WHERE key='start_timestamp_ms'
+              AND NEW.timestamp_ms < CAST(value AS INTEGER))
+        BEGIN SELECT RAISE(IGNORE); END""")
+    db.execute("""CREATE TABLE IF NOT EXISTS expense_budgets (
+        month TEXT PRIMARY KEY, amount_cents INTEGER NOT NULL
+        CHECK(amount_cents>0))""")
+    from integration import schema as integration_schema
+    from v15_reconciliation import schema as v15_schema
+    integration_schema(db)
+    v15_schema(db)
+    from sync_v2 import schema as sync_schema
+    sync_schema(db)
+    db.commit()
+
+
 @contextmanager
 def db_connection():
     DB.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    key = str(DB.resolve())
     db = sqlite3.connect(str(DB), timeout=10)
     try:
         db.row_factory = sqlite3.Row
-        # Set the busy timeout before any journal-mode change: switching WAL
-        # needs a lock and must wait under concurrent first connections.
         db.execute("PRAGMA busy_timeout=10000")
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("""CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY,
-            event_id TEXT NOT NULL UNIQUE,
-            timestamp_ms INTEGER NOT NULL,
-            amount_cents INTEGER NOT NULL,
-            currency TEXT NOT NULL,
-            direction TEXT NOT NULL,
-            source TEXT NOT NULL,
-            category TEXT NOT NULL,
-            merchant TEXT NOT NULL,
-            review_status TEXT NOT NULL DEFAULT 'unverified',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
-        db.execute("CREATE INDEX IF NOT EXISTS tx_timestamp ON transactions(timestamp_ms)")
-        # Upload de-duplication filters by amount/currency/direction and a
-        # +/-90s timestamp window. Without this composite index every event
-        # scans the whole ledger, so ingest latency grows with history size.
-        db.execute("""CREATE INDEX IF NOT EXISTS tx_dedup_lookup
-            ON transactions(amount_cents,currency,direction,timestamp_ms)""")
-        # The optional ledger epoch is a durable, DB-wide import boundary.
-        # It stops offline Android retries and manual imports reintroducing
-        # expenses from before the user's requested fresh start.
-        db.execute("""CREATE TABLE IF NOT EXISTS ledger_settings (
-            key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
-        db.execute("""CREATE TRIGGER IF NOT EXISTS transactions_start_date_guard
-            BEFORE INSERT ON transactions
-            WHEN EXISTS (
-                SELECT 1 FROM ledger_settings
-                WHERE key='start_timestamp_ms'
-                  AND NEW.timestamp_ms < CAST(value AS INTEGER))
-            BEGIN SELECT RAISE(IGNORE); END""")
-        db.execute("""CREATE TABLE IF NOT EXISTS expense_budgets (
-            month TEXT PRIMARY KEY, amount_cents INTEGER NOT NULL
-            CHECK(amount_cents>0))""")
-        from integration import schema as integration_schema
-        from v15_reconciliation import schema as v15_schema
-        integration_schema(db)
-        v15_schema(db)
-        from sync_v2 import schema as sync_schema
-        sync_schema(db)
-        db.commit()
+        # WAL switching needs an exclusive lock and must not run on every
+        # request: concurrent connections would race and return SQLITE_BUSY.
+        if key not in _DB_INITIALIZED:
+            with _DB_INIT_LOCK:
+                if key not in _DB_INITIALIZED:
+                    _initialize_database(db)
+                    _DB_INITIALIZED.add(key)
         yield db
         db.commit()
     finally:
