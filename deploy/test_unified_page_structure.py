@@ -71,6 +71,21 @@ class UnifiedWebStructureTest(unittest.TestCase):
         self.assertIn("['current' => [], 'future' => []]", index)
         self.assertIn("CLONES = 4", source("dashboard-carousel.js"))
 
+    def test_about_explicit_upstream_attribution(self):
+        about = source("about.php")
+        self.assertIn("清衡（Open Margin）基于 Wallos 与 Seamless Bookkeeping", about)
+        self.assertIn("我们是整合与修改方", about)
+        self.assertIn("https://github.com/ellite/Wallos", about)
+        self.assertIn("https://github.com/DykiSensei/seamless-bookkeeping", about)
+        self.assertIn("GPL-3.0", about)
+        self.assertIn("MIT", about)
+        self.assertIn('translate("credits"', about)
+
+    def test_upstream_page_width_restored(self):
+        css = source("ui-unified.css")
+        self.assertNotIn("max-width:1240px", css)
+        self.assertIn("upstream .contain max-width:970px", css)
+
     def test_responsive_and_non_destructive(self):
         css = source("ui-unified.css")
         self.assertIn("@media(max-width:480px)", css)

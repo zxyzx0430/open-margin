@@ -55,8 +55,8 @@
   function setupAbout(root) {
     root.classList.add("om-about-page");
     heading("关于清衡", root);
-    const sourceTitle = root.querySelector(".account-section:first-of-type > header > h2");
-    if (sourceTitle) sourceTitle.textContent = "产品与开源信息";
+    // The introduction and both upstream credits are authored in about.php.
+    // Preserve the Wallos component section and all original library credits.
   }
 
   function setupSettings(root) {
