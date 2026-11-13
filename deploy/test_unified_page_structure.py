@@ -36,6 +36,16 @@ class UnifiedWebStructureTest(unittest.TestCase):
         self.assertIn("订阅详细统计", stats)
         self.assertNotIn("页面上方为 Finance 真实财务分析", stats)
 
+    def test_subscription_insights_keep_unique_metrics(self):
+        stats = source("stats.php")
+        self.assertIn("om-subscription-insights", stats)
+        for metric in ("在用周期订阅", "平均每项月费", "最高月费订阅", "需手动续费"):
+            self.assertIn(metric, stats)
+        self.assertIn("CurrencyFormatter::format($averageSubscriptionCost, $code)", stats)
+        self.assertIn("(int)$manualRenewalsCount", stats)
+        self.assertIn("htmlspecialchars((string)$mostExpensiveSubscription['name']", stats)
+        self.assertEqual(stats.count('data-om-stat-extra hidden'), 1)
+
     def test_calendar_has_single_month_control_layer(self):
         calendar = source("calendar.php")
         common = source("finance-unified-common.php")
