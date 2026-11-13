@@ -242,7 +242,7 @@ function finance_json(array $model):string {
 function finance_money(?int $cents):string {
     return $cents===null?'未设置':(($cents<0?'−':'').'¥'.number_format(abs($cents)/100,2,'.',','));
 }
-function finance_render_panel(string $view,array $model):void {
+function finance_render_panel(string $view,array $model,string $dashboardPaymentsHtml=''):void {
     if(empty($_SESSION['finance_csrf']))$_SESSION['finance_csrf']=bin2hex(random_bytes(32));
     $month=$model['month'];
     $income=finance_money($model['income_cents']);
@@ -282,11 +282,14 @@ function finance_render_panel(string $view,array $model):void {
         <div class="finance-budget">
           <div class="finance-line"><strong>日常预算</strong><span data-finance-budget-caption><?= $budget ?> · 已用 <?= $model['budget_cents']>0?round($model['expense_cents']/$model['budget_cents']*100,1).'%' :'未设置' ?></span></div>
           <div class="finance-progress"><div data-finance-budget-bar style="width:<?= $model['budget_cents']>0?min(100,round($model['expense_cents']/$model['budget_cents']*100,1)):0 ?>%"></div></div>
+          <details class="finance-budget-adjust"><summary>调整预算</summary>
           <form class="finance-budget-form" data-finance-budget-form>
             <label>调整预算（元）<input type="number" min="0" step=".01" name="budget" value="<?= $model['budget_cents']===null?'':number_format($model['budget_cents']/100,2,'.','') ?>" placeholder="例如 2000"></label>
             <button type="submit">保存</button>
           </form>
+          </details>
         </div>
+        <?php if($view==='dashboard' && $dashboardPaymentsHtml!=='') echo $dashboardPaymentsHtml; ?>
         <?php if($view==='stats'): ?>
         <div class="finance-comparison"><strong>与上月对比</strong>
           <span>本月实际支出 <b data-finance-value="expense_cents"><?= $expense ?></b> · <span data-finance-comparison-label><?=ledger_escape($model['comparison_label'])?></span> <b data-finance-value="previous_same_period_expense_cents"><?=finance_money($model['previous_same_period_expense_cents'])?></b></span>
