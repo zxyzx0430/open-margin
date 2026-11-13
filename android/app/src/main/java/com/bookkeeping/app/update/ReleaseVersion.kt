@@ -73,9 +73,10 @@ data class PublishedRelease(
 )
 
 object UpdateVersionPolicy {
-    // RC6 is Android-only; the live v1.2.0 server does not need a redeploy for
-    // this UI change. Keep both release tag and Android versionCode in sync.
-    const val CURRENT_TAG = "v1.2.0-rc.6"
+    // RC7 is Android-only: it rolls the duplicate-review prompt, optional save
+    // notifications and persistent capture status into one build. Keep both
+    // release tag and Android versionCode in sync.
+    const val CURRENT_TAG = "v1.2.0-rc.7"
 
     fun latestNewer(
         releases: List<PublishedRelease>,

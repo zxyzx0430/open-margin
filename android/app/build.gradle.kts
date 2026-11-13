@@ -14,9 +14,10 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        // RC6: original permanent signing key; safe in-place upgrade from RC5.
-        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.6).
-        versionCode = 11
+        // RC7: single Android build containing duplicate review, optional save
+        // notifications and the persistent capture status. Keep in sync with
+        // UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.7).
+        versionCode = 12
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
