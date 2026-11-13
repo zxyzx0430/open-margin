@@ -263,7 +263,7 @@ function finance_render_panel(string $view,array $model):void {
           <label>财务月份 <input type="month" class="finance-month" value="<?=ledger_escape($month)?>" aria-label="选择财务月份"></label>
         </div>
       </div>
-      <p class="finance-hint">真实交易与订阅计划分别计算 · 人民币 · 北京时间</p>
+
       <?php if($view==='stats'): ?>
         <div class="finance-tabbar" role="tablist" aria-label="统计视图">
           <button type="button" class="finance-tab is-current" data-finance-tab="overview">综合财务</button>
@@ -275,12 +275,12 @@ function finance_render_panel(string $view,array $model):void {
       <div class="finance-panel" data-finance-panel="overview">
         <div class="finance-metric-grid">
           <button type="button" class="finance-metric" data-finance-detail="expense"><small>本月实际支出</small><strong data-finance-value="expense_cents"><?= $expense ?></strong></button>
-          <button type="button" class="finance-metric" data-finance-detail="income"><small>本月已记录收入（含转账入账）</small><strong data-finance-value="income_cents"><?= $income ?></strong></button>
+          <button type="button" class="finance-metric" data-finance-detail="income"><small>本月收入</small><strong data-finance-value="income_cents"><?= $income ?></strong></button>
           <div class="finance-metric"><small>净现金流</small><strong data-finance-value="net_cents"><?= $net ?></strong></div>
           <div class="finance-metric"><small>预算剩余</small><strong data-finance-value="remaining_cents"><?= $remaining ?></strong></div>
         </div>
         <div class="finance-budget">
-          <div class="finance-line"><strong>Finance 日常消费预算</strong><span data-finance-budget-caption><?= $budget ?> · 已用 <?= $model['budget_cents']>0?round($model['expense_cents']/$model['budget_cents']*100,1).'%' :'未设置' ?></span></div>
+          <div class="finance-line"><strong>日常预算</strong><span data-finance-budget-caption><?= $budget ?> · 已用 <?= $model['budget_cents']>0?round($model['expense_cents']/$model['budget_cents']*100,1).'%' :'未设置' ?></span></div>
           <div class="finance-progress"><div data-finance-budget-bar style="width:<?= $model['budget_cents']>0?min(100,round($model['expense_cents']/$model['budget_cents']*100,1)):0 ?>%"></div></div>
           <form class="finance-budget-form" data-finance-budget-form>
             <label>调整预算（元）<input type="number" min="0" step=".01" name="budget" value="<?= $model['budget_cents']===null?'':number_format($model['budget_cents']/100,2,'.','') ?>" placeholder="例如 2000"></label>
@@ -305,7 +305,7 @@ function finance_render_panel(string $view,array $model):void {
         <p class="finance-hint">点击分类查看对应交易；转账和已排除项目不计入。</p>
       </div>
       <?php endif; ?>
-      <?php if($view!=='calendar'): ?>
+      <?php if($view==='stats'): ?>
       <div class="finance-panel" data-finance-panel="subscriptions" <?= $view==='stats'?'hidden':'' ?>>
         <div class="finance-metric-grid">
           <div class="finance-metric"><small>实际订阅支出</small><strong data-finance-value="actual_subscription_cents"><?= $actual ?></strong><span>占实际支出 <b data-finance-share="actual"><?= $model['actual_subscription_share_pct']===null?'不可计算':$model['actual_subscription_share_pct'].'%' ?></b></span></div>
