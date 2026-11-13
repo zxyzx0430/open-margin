@@ -8,6 +8,10 @@ This is an **integration project**, built on existing open-source software. The 
 
 > **Status: pre-release / single-owner.** Real WeChat/Alipay notification coverage depends on the phone/ROM and requires reconciliation with official statements. Do not treat captured notifications as confirmed bank statements. No banking credentials or real payment actions are supported.
 
+## Product iteration roadmap
+
+The proposed, **not-yet-approved** version-by-version goals, release safety gates, and acceptance criteria are in [Product Iteration Roadmap](docs/PRODUCT_ITERATION_ROADMAP.md). This roadmap preserves the tentative OM-03 → OM-05 → OM-02 feature sequence while requiring real-device/data-integrity validation first. It is not a release announcement or an engineering schedule.
+
 ## Architecture
 
 ```text
