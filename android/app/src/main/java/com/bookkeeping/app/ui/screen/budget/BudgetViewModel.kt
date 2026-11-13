@@ -32,7 +32,8 @@ class BudgetViewModel @Inject constructor(
         transactionRepository.observeBetween(monthRange.first, monthRange.second)
             .map { txs ->
                 txs.filter { it.type == TransactionType.EXPENSE.name && it.currency == "CNY" &&
-                    it.remoteReviewStatus !in setOf("excluded","transfer","refund") &&
+                    it.duplicateOfId == null &&
+                    it.remoteReviewStatus !in setOf("excluded","transfer","refund","possible_duplicate") &&
                     it.category != "TRANSFER" }
                     .groupBy {
                         runCatching { TransactionCategory.valueOf(it.category) }

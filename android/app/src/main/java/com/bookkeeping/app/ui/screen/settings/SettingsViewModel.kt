@@ -22,10 +22,20 @@ class SettingsViewModel @Inject constructor(
     val keepAliveEnabled: StateFlow<Boolean> = prefs.observeKeepAliveEnabled()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    val successNotificationsEnabled: StateFlow<Boolean> =
+        prefs.observeSuccessNotificationsEnabled()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     fun setKeepAlive(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setKeepAliveEnabled(enabled)
             if (enabled) KeepAliveService.start(appContext) else KeepAliveService.stop(appContext)
+        }
+    }
+
+    fun setSuccessNotifications(enabled: Boolean) {
+        viewModelScope.launch {
+            prefs.setSuccessNotificationsEnabled(enabled)
         }
     }
 }

@@ -37,13 +37,16 @@ interface TransactionDao {
 
     // 统计某段时间内的总支出（单位:分）。COALESCE 处理"没数据时返回 0 而不是 null"
     @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'EXPENSE' AND currency = 'CNY' AND syncDeleted = 0
-              AND remoteReviewStatus NOT IN ('excluded','transfer','refund')
+              AND remoteReviewStatus NOT IN ('excluded','transfer','refund','possible_duplicate')
+              AND duplicateOfId IS NULL
               AND category <> 'TRANSFER' AND timestamp >= :startMs AND timestamp < :endMs""")
     fun observeTotalExpenseBetween(startMs: Long, endMs: Long): Flow<Long>
 
     // 总收入（单位:分）
     @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'INCOME' AND currency = 'CNY' AND syncDeleted = 0
-              AND remoteReviewStatus NOT IN ('excluded','transfer','refund') AND timestamp >= :startMs AND timestamp < :endMs""")
+              AND remoteReviewStatus NOT IN ('excluded','transfer','refund','possible_duplicate')
+              AND duplicateOfId IS NULL
+              AND timestamp >= :startMs AND timestamp < :endMs""")
     fun observeTotalIncomeBetween(startMs: Long, endMs: Long): Flow<Long>
 
     @Query("SELECT * FROM transactions WHERE id = :id")
@@ -79,6 +82,7 @@ interface TransactionDao {
     @Query("""
         SELECT * FROM transactions
         WHERE syncDeleted = 0 AND source = :source AND merchant = :merchant AND amountCents = :amountCents
+          AND type = :type AND currency = :currency
           AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
         LIMIT 1
     """)
@@ -86,7 +90,31 @@ interface TransactionDao {
         source: String,
         merchant: String,
         amountCents: Long,
+        type: String,
+        currency: String,
         windowStartMs: Long,
         windowEndMs: Long,
     ): TransactionEntity?
+
+    // 不确定是否重复：同金额/方向/币种、时间接近，但来源或商户可能不同。
+    // 命中后只打本地待确认标记，不删除、不阻止入库。
+    @Query("""
+        SELECT * FROM transactions
+        WHERE syncDeleted = 0 AND amountCents = :amountCents AND type = :type
+          AND currency = :currency AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
+        ORDER BY timestamp DESC
+        LIMIT 1
+    """)
+    suspend fun findRecentSimilar(
+        amountCents: Long,
+        type: String,
+        currency: String,
+        windowStartMs: Long,
+        windowEndMs: Long,
+    ): TransactionEntity?
+
+    @Query("""SELECT * FROM transactions WHERE syncDeleted = 0
+              AND (duplicateOfId IS NOT NULL OR remoteReviewStatus = 'possible_duplicate')
+              ORDER BY timestamp DESC LIMIT 20""")
+    fun observeDuplicateCandidates(): Flow<List<TransactionEntity>>
 }

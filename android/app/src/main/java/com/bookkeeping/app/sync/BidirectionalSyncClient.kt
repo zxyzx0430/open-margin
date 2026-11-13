@@ -98,6 +98,7 @@ internal class BidirectionalSyncClient(
         val direction=payload.optString("direction","EXPENSE").takeIf{
             it=="EXPENSE" || it=="INCOME"
         } ?: "EXPENSE"
+        val reviewStatus=payload.optString("review_status","unverified")
         return TransactionEntity(
             id=row?.id ?: 0,
             amountCents=payload.getLong("amount_cents"),
@@ -114,8 +115,11 @@ internal class BidirectionalSyncClient(
             syncDirty=false,
             syncDeleted=false,
             syncModifiedMs=row?.syncModifiedMs ?: 0,
-            remoteReviewStatus=payload.optString("review_status","unverified"),
-            syncMutationId=null
+            remoteReviewStatus=reviewStatus,
+            syncMutationId=null,
+            // A resolution made on another device clears the local review marker.
+            duplicateOfId=if (reviewStatus in setOf("confirmed","excluded","transfer","refund")) null
+                          else row?.duplicateOfId
         )
     }
 

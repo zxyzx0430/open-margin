@@ -70,6 +70,7 @@ fun TransactionListScreen(
     viewModel: TransactionViewModel = hiltViewModel()
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
+    val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
     val monthlyExpense by viewModel.monthlyExpenseCents.collectAsState()
     val monthlyIncome by viewModel.monthlyIncomeCents.collectAsState()
     val selectedCategory by viewModel.categoryFilter.collectAsState()
@@ -124,6 +125,14 @@ fun TransactionListScreen(
             if (!smsPermissionGranted) {
                 SmsPermissionBanner(
                     onClick = { smsPermissionLauncher.launch(SmsPermissionHelper.REQUIRED_PERMISSIONS) }
+                )
+            }
+
+            if (duplicateCandidates.isNotEmpty()) {
+                DuplicateReviewCard(
+                    candidates = duplicateCandidates,
+                    onKeepBoth = viewModel::keepBoth,
+                    onDeleteNew = { pendingDelete = it },
                 )
             }
 
@@ -297,8 +306,8 @@ private fun GroupedTransactionList(
 private fun DayHeader(dayKey: String, items: List<TransactionEntity>) {
     // This daily summary is denominated in CNY. Non-CNY entries remain in
     // the list below with an explicit currency label, but are not falsely added.
-    val valid=items.filter { it.currency == "CNY" &&
-        it.remoteReviewStatus !in setOf("excluded","transfer","refund") }
+    val valid=items.filter { it.currency == "CNY" && it.duplicateOfId == null &&
+        it.remoteReviewStatus !in setOf("excluded","transfer","refund","possible_duplicate") }
     val expense = valid.filter { it.type == "EXPENSE" && it.category!="TRANSFER" }
         .sumOf { it.amountCents }
     val income = valid.filter { it.type == "INCOME" }.sumOf { it.amountCents }
@@ -357,6 +366,11 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
                         timeOnlyFormat.format(Date(transaction.timestamp)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (transaction.duplicateOfId != null ||
+                        transaction.remoteReviewStatus == "possible_duplicate") {
+                        Text(tr("待确认重复"), style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.tertiary)
+                    }
                 }
                 Text((if (type == TransactionType.INCOME) "+" else "−") + currencyLabel + amount,
                     style = MaterialTheme.typography.titleMedium,
@@ -408,6 +422,78 @@ private fun TransactionItem(transaction: TransactionEntity, onDelete: () -> Unit
             }
         }
     }
+}
+
+@Composable
+private fun DuplicateReviewCard(
+    candidates: List<TransactionViewModel.DuplicateCandidate>,
+    onKeepBoth: (TransactionEntity) -> Unit,
+    onDeleteNew: (TransactionEntity) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                tr("待确认重复") + "（" + candidates.size + "）",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                tr("这些记录金额和时间相近，但没有足够证据自动合并。请确认每笔是否真实；确认前不计入本机统计。"),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            candidates.take(3).forEach { item ->
+                val row = item.candidate
+                Column(Modifier.fillMaxWidth()) {
+                    Text(
+                        (if (item.original != null) tr("新记录：") else tr("待确认记录：")) +
+                            transactionSummary(row),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        item.original?.let { tr("疑似原记录：") + transactionSummary(it) }
+                            ?: tr("原记录不可用（可能来自服务器）"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { onKeepBoth(row) }) {
+                            Text(if (item.original != null) tr("保留两笔") else tr("确认不是重复"))
+                        }
+                        TextButton(onClick = { onDeleteNew(row) }) {
+                            Text(
+                                if (item.original != null) tr("删除新记录") else tr("删除此记录"),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
+            if (candidates.size > 3) {
+                Text(
+                    tr("还有 ") + (candidates.size - 3) + tr(" 笔待确认。"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+private fun transactionSummary(row: TransactionEntity): String {
+    val merchant = row.merchant.ifBlank { row.source }
+    val amount = "%.2f".format(Locale.CHINA, row.amountCents / 100.0)
+    return row.currency + " " + amount + " · " + merchant + " · " +
+        timeOnlyFormat.format(Date(row.timestamp))
 }
 
 @Composable

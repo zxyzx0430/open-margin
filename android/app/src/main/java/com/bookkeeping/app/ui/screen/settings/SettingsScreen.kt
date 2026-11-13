@@ -62,6 +62,7 @@ import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
+    val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
     val context = LocalContext.current
 
     // 无障碍服务的"是否已被系统勾选"状态。
@@ -93,6 +94,14 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 KeepAliveCard(
                     enabled = keepAlive,
                     onToggle = viewModel::setKeepAlive,
+                )
+            }
+
+            item { SectionTitle(tr("自动记账提醒")) }
+            item {
+                SuccessNotificationCard(
+                    enabled = successNotifications,
+                    onToggle = viewModel::setSuccessNotifications,
                 )
             }
 
@@ -203,6 +212,40 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                        tr("代价是通知栏多一条常驻提示。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SuccessNotificationCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = tr("自动记账成功提醒"),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = if (enabled) tr("已开启：保存后显示金额、商户和时间")
+                               else tr("已关闭：不显示成功通知"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = onToggle)
+            }
+            HorizontalDivider()
+            Text(
+                text = tr("使用低优先级、静音通知，不打断正在进行的支付。只有实际保存成功后才提示；") +
+                       tr("采集失败、权限异常等重要告警不受此开关影响。待确认重复提示也不受此开关影响。若系统通知权限未开启，此开关不会生效。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
