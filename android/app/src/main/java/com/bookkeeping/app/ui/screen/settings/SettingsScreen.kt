@@ -89,7 +89,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item { SectionTitle(tr("后台保活")) }
+            item { SectionTitle(tr("常驻运行状态")) }
             item {
                 KeepAliveCard(
                     enabled = keepAlive,
@@ -188,14 +188,14 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = tr("常驻通知保活"),
+                        text = tr("常驻运行状态"),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                     Text(
-                        text = if (enabled) tr("已开启：通知栏会有一条常驻提示")
-                               else tr("未开启：节省一条通知，但可能被国产 ROM 杀掉"),
+                        text = if (enabled) tr("已开启：通知栏显示连接状态与运行时长")
+                               else tr("未开启：不会显示常驻状态条，也可能被国产 ROM 杀掉"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
@@ -207,9 +207,10 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
             )
             Text(
-                text = tr("原理：开启后 app 会启动一个前台 Service，挂在通知栏。") +
-                       tr("Android 系统不会随便杀正在运行前台服务的进程，从而保住通知监听不掉线。") +
-                       tr("代价是通知栏多一条常驻提示。"),
+                text = tr("开启后通知栏会显示绿色/红色状态圆点：绿色表示通知监听已连接，红色表示已断开或权限关闭；") +
+                       tr("同时显示本次连接运行时长、断开时间和最近一次成功入账。") +
+                       tr("刚启动的几秒会先显示灰色确认中，避免误报。") +
+                       tr("Android 13 及以上需要通知权限，否则状态条不会显示。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )

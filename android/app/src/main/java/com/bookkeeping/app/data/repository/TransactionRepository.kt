@@ -3,7 +3,9 @@ package com.bookkeeping.app.data.repository
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.CaptureNotifier
+import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -104,7 +106,12 @@ class TransactionRepository @Inject constructor(
         } else {
             transaction
         }
-        insert(candidate, notifySuccess = true)
+        val id = insert(candidate, notifySuccess = true)
+        if (id > 0L) {
+            CaptureHealth.onTransactionSaved(context)
+            KeepAliveService.refreshStatus(context)
+        }
+        id
     }
 
     // 用户在交易页确认“两笔都是真的”：清除本地标记，并把状态同步为已确认。

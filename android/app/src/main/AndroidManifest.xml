@@ -4,13 +4,14 @@
 
     <!-- Internet access is used only after the user enables HTTPS cloud sync. -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- 短信权限：读取银行交易短信 -->
+    <!-- 短信权限：读取银行交易短信。短信是可选通道，不应把设备限定为必须有电话功能。 -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!-- 通知监听不需要 uses-permission，是通过 BIND_NOTIFICATION_LISTENER_SERVICE 在 Service 上声明 -->
     <!-- 前台服务：保证抓取行为稳定，不被系统杀 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Android 13+ 通知权限（让 app 自身能发通知，比如预算超支提醒） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -50,12 +51,16 @@
             </intent-filter>
         </service>
 
-        <!-- 前台保活服务：常驻通知 + 提高 NotificationListener 在国产 ROM 上的存活率 -->
+        <!-- 前台保活服务：常驻运行状态通知，并提高 NotificationListener 在国产 ROM 上的存活率 -->
         <!-- 默认不启动，由用户在「设置」里开启 -->
         <service
             android:name=".notification.KeepAliveService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="continuous on-device payment capture health monitor" />
+        </service>
 
         <!-- 无障碍兜底服务：抓微信转账/红包、支付宝转账入账等通知抓不到的场景 -->
         <!-- 默认未启用，用户必须在系统「无障碍」里手动勾选才会生效 -->
