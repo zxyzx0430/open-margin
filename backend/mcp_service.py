@@ -25,6 +25,17 @@ MUTATES_LEDGER = ToolAnnotations(
     idempotentHint=False,
     openWorldHint=False,
 )
+MUTATES_IDEMPOTENT = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=True,  # safe to retry with the same request ID / same value
+    openWorldHint=False,
+)
+
+def _error_detail(exc) -> str:
+    detail=getattr(exc,"detail",None)
+    return str(detail if detail is not None else exc)[:200]
+
 
 @mcp.tool(annotations=READ_ONLY)
 def list_recent_transactions(limit:int=30) -> dict:
@@ -191,6 +202,48 @@ def edit_subscription(subscription_id:int,name:str|None=None,amount_cents:int|No
     except (WallosError,ValueError,OverflowError) as exc:
         return {"error":str(exc)}
 
+@mcp.tool(annotations=MUTATES_LEDGER)
+def delete_subscription(subscription_id:int,confirm:bool=False) -> dict:
+    """Permanently DELETE a Wallos subscription by ID and detach its finance payment links.
+    This is not the same as edit_subscription(active=false), which keeps history and only
+    stops renewal. Requires confirm=true. Does not initiate or refund any payment.
+    """
+    from wallos_api import delete,get_all,WallosError
+    attempted=False
+    try:
+        if not isinstance(subscription_id,int) or subscription_id<1:raise ValueError("bad subscription ID")
+        if confirm is not True:raise ValueError("confirm=true is required for permanent subscription deletion")
+        original=next((s for s in get_all() if s["id"]==subscription_id),None)
+        if original is None:raise ValueError("Subscription not found")
+        attempted=True
+        delete(subscription_id)
+        remaining=next((s for s in get_all() if s["id"]==subscription_id),None)
+        links_removed=None;cleanup_error=None
+        try:
+            import app as core
+            with core.db_connection() as db:
+                links_removed=db.execute("DELETE FROM tx_subscription_links WHERE sub_id=?",
+                                         (subscription_id,)).rowcount
+        except Exception as exc:
+            # Wallos deletion already happened; report the local cleanup failure
+            # instead of pretending the operation was fully atomic.
+            cleanup_error=str(exc)[:150]
+        result={"deleted":remaining is None,"verified":remaining is None,
+                "subscription_id":subscription_id,"deleted_subscription":original,
+                "finance_links_removed":links_removed,"cleanup_error":cleanup_error,
+                "source":"Wallos"}
+        if remaining is not None:
+            result["error"]="Wallos delete reported success but readback still shows the subscription"
+        return result
+    except (WallosError,ValueError,OverflowError) as exc:
+        result={"error":str(exc)}
+        if attempted:
+            # A timeout after the POST is indistinguishable from a failed send.
+            # Never let the caller assume the subscription still exists.
+            result.update({"deleted":None,"verified":False,"subscription_id":subscription_id,
+                           "warning":"Wallos delete request may have been sent; re-read subscriptions before retrying"})
+        return result
+
 # Retired legacy subscription-reconciliation integration.
 def personal_finance_overview(month: str) -> dict:
     """Combine REAL spending with Wallos subscriptions, paid cycles, pending charges,
@@ -230,6 +283,101 @@ def edit_record(tx_id:int,amount_cents:int|None=None,merchant:str|None=None,cate
     values={k:v for k,v in {"amount_cents":amount_cents,"merchant":merchant,"category":category}.items() if v is not None}
     return edit_transaction(tx_id,Edit(**values))
 
+@mcp.tool(annotations=MUTATES_IDEMPOTENT)
+def add_record(request_id:str,timestamp_ms:int,amount_cents:int,direction:str="EXPENSE",
+               currency:str="CNY",category:str="OTHER",merchant:str="") -> dict:
+    """Append one real manual income or expense to the ledger.
+    request_id must be a UUID; a retry with the same request_id returns the same row
+    and sets current_record_differs if that row was later edited. Values are integer cents.
+    """
+    import app as core
+    from fastapi import HTTPException
+    from pydantic import ValidationError
+    from sync_v2 import latest,schema as sync_schema
+    from wallos_ledger import NewEntry,add_manual
+    try:
+        entry=NewEntry(idempotency_key=request_id,timestamp_ms=timestamp_ms,
+                       amount_cents=amount_cents,currency=currency,direction=direction,
+                       category=category,merchant=merchant)
+        event_id="wallos:manual:"+request_id.lower()
+        with core.db_connection() as db:
+            sync_schema(db)
+            tombstone=latest(db,event_id)
+        if tombstone is not None and tombstone["action"]=="delete":
+            return {"error":"request_id refers to a deleted record; use a new request_id",
+                    "request_id":request_id.lower()}
+        result=add_manual(entry)
+        if result.get("created"):
+            return {**result,"request_id":request_id.lower()}
+        with core.db_connection() as db:
+            row=db.execute("""SELECT timestamp_ms,amount_cents,currency,direction,category,merchant
+                              FROM transactions WHERE event_id=?""",(event_id,)).fetchone()
+        # A later edit is legitimate; never turn a replay into a spurious conflict.
+        same=bool(row) and (row["timestamp_ms"]==entry.timestamp_ms
+                and row["amount_cents"]==entry.amount_cents and row["currency"]==entry.currency
+                and row["direction"]==entry.direction and row["category"]==entry.category
+                and row["merchant"]==entry.merchant)
+        return {**result,"request_id":request_id.lower(),"idempotent_replay":True,
+                "current_record_differs":not same}
+    except (ValidationError,HTTPException,ValueError) as exc:
+        return {"error":_error_detail(exc)}
+
+@mcp.tool(annotations=MUTATES_IDEMPOTENT)
+def exclude_record(tx_id:int) -> dict:
+    """Exclude one ledger record from spending/income totals without deleting it.
+    The row stays visible for reconciliation. Refund-linked records must be unlinked first.
+    """
+    from fastapi import HTTPException
+    from pydantic import ValidationError
+    from wallos_ledger import ReviewEntry,review
+    try:
+        if not isinstance(tx_id,int) or tx_id<1:raise ValueError("bad transaction ID")
+        result=review(tx_id,ReviewEntry(status="excluded"))
+        return {**result,"tx_id":tx_id,"review_status":"excluded"}
+    except (HTTPException,ValidationError,ValueError) as exc:
+        return {"error":_error_detail(exc)}
+
+@mcp.tool(annotations=MUTATES_LEDGER)
+def delete_record(tx_id:int,confirm:bool=False) -> dict:
+    """Permanently delete one ordinary ledger record and publish a sync_v2 tombstone.
+    Requires confirm=true. Refuses refund-linked or bank-statement-matched records.
+    Split breakdowns and subscription links are removed with the record.
+    """
+    import app as core
+    from fastapi import HTTPException
+    from sync_v2 import latest,schema as sync_schema
+    try:
+        if not isinstance(tx_id,int) or tx_id<1:raise ValueError("bad transaction ID")
+        if confirm is not True:raise ValueError("confirm=true is required for permanent record deletion")
+        with core.db_connection() as db:
+            sync_schema(db)
+            row=db.execute("SELECT event_id FROM transactions WHERE id=?",(tx_id,)).fetchone()
+            if row is None:raise ValueError("Transaction not found")
+            if db.execute("SELECT 1 FROM refund_links WHERE original_tx_id=? OR refund_tx_id=? LIMIT 1",
+                          (tx_id,tx_id)).fetchone():
+                raise ValueError("Unlink refunds before deleting this transaction")
+            if db.execute("SELECT 1 FROM statement_rows WHERE matched_tx_id=? LIMIT 1",(tx_id,)).fetchone():
+                raise ValueError("Transaction is matched to a bank statement row; unmatch it first")
+            event_id=row["event_id"]
+            links=db.execute("DELETE FROM tx_subscription_links WHERE tx_id=?",(tx_id,)).rowcount
+            splits=db.execute("DELETE FROM transaction_splits WHERE transaction_id=?",(tx_id,)).rowcount
+            db.execute("DELETE FROM transactions WHERE id=?",(tx_id,))
+            tombstone=latest(db,event_id)
+            if tombstone is None or tombstone["action"]!="delete":
+                # The DB trigger normally writes this; fall back so an upgraded
+                # database without the trigger cannot drop a deletion silently.
+                import time as _time
+                db.execute("""INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
+                              VALUES(?,'delete',NULL,?)""",(event_id,int(_time.time()*1000)))
+                tombstone=latest(db,event_id)
+        return {"deleted":True,"tx_id":tx_id,"event_id":event_id,
+                "tombstone_revision":tombstone["revision"],
+                "tombstone_action":tombstone["action"],
+                "subscription_links_removed":links,"splits_removed":splits,
+                "verified":tombstone["action"]=="delete"}
+    except (HTTPException,ValueError) as exc:
+        return {"error":_error_detail(exc)}
+
 @mcp.tool(annotations=MUTATES_LEDGER)
 def register_merchant_rule(needle:str,category:str) -> dict:
     """After owner confirmation, classify future OTHER transactions from this merchant."""
@@ -260,3 +408,44 @@ def finance_duplicate_review(limit:int=50) -> dict:
     with core.db_connection() as db:
         rows=db.execute("SELECT * FROM transactions WHERE review_status='possible_duplicate' ORDER BY timestamp_ms DESC LIMIT ?",(limit,)).fetchall()
     return {"items":[dict(r) for r in rows]}
+
+def _month_key(value:str) -> str:
+    if not isinstance(value,str) or len(value)!=7:raise ValueError("month must be YYYY-MM")
+    try:
+        year,month=map(int,value.split("-"))
+    except ValueError:
+        raise ValueError("month must be YYYY-MM")
+    if not (2000<=year<=2099 and 1<=month<=12) or value!=f"{year:04d}-{month:02d}":
+        raise ValueError("month must be YYYY-MM")
+    return value
+
+@mcp.tool(annotations=READ_ONLY)
+def get_monthly_budget(month:str) -> dict:
+    """Return the personal CNY daily-expense budget for YYYY-MM in integer cents.
+    null means no budget is set. This is separate from Wallos subscription budgets
+    and from any Android-local budget.
+    """
+    import app as core
+    try:
+        month=_month_key(month)
+        with core.db_connection() as db:
+            row=db.execute("SELECT amount_cents FROM expense_budgets WHERE month=?",(month,)).fetchone()
+        return {"month":month,"budget_cny_cents":row[0] if row else None}
+    except ValueError as exc:
+        return {"error":_error_detail(exc)}
+
+@mcp.tool(annotations=MUTATES_IDEMPOTENT)
+def set_monthly_budget(month:str,amount_cents:int) -> dict:
+    """Set the personal CNY daily-expense budget for YYYY-MM in integer cents.
+    amount_cents=0 clears the month. This is separate from Wallos subscription budgets
+    and from any Android-local budget.
+    """
+    from pydantic import ValidationError
+    from wallos_ledger import BudgetUpdate,set_monthly_budget as _set_monthly_budget
+    try:
+        month=_month_key(month)
+        if isinstance(amount_cents,bool) or not isinstance(amount_cents,int):
+            raise ValueError("amount_cents must be an integer")
+        return _set_monthly_budget(month,BudgetUpdate(amount_cents=amount_cents))
+    except (ValidationError,ValueError) as exc:
+        return {"error":_error_detail(exc)}

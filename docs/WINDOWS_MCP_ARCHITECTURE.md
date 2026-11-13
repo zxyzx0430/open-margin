@@ -5,7 +5,7 @@
 
 ## 0. 核心决定
 
-- **不另写一套 MCP 工具。** 复用 `backend/mcp_service.py` 的 11 个工具、`backend/mcp_access.py` 的 7 read / 4 write 语义，以及 SQLite / Wallos 业务代码。
+- **不另写一套 MCP 工具。** 复用 `backend/mcp_service.py` 的 18 个工具、`backend/mcp_access.py` 的 8 read / 10 write 语义，以及 SQLite / Wallos 业务代码。
 - **保持 Android 同步的 Tailscale Serve API-only 不变。** 现有 `deploy/windows/private-sync-gateway.conf` 必须继续默认拒绝 `/mcp`、OAuth、Wallos 和管理 API。
 - Windows 开放 MCP 是**独立的、默认关闭的功能**。先交付本地 MCP 客户端；再提供面向 ChatGPT 的私有隧道或 HTTPS OAuth 接入。
 - 任何默认通道必须最小权限（只读）；写入需要用户明确启用、不同凭证和可审计记录。**严禁把 Finance Admin Token 或 Android Device Token 作为长期隧道凭证。**
@@ -18,7 +18,7 @@
 | 一套 Compose，Finance API、Wallos、SQLite volumes | `compose.yaml` |
 | Finance HTTP MCP Streamable，复用业务工具 | `backend/app.py`, `backend/mcp_service.py` |
 | OAuth 2.1 + DCR + PKCE 已存在 | `backend/oauth_support.py` |
-| 全部 11 个工具注册，7 只读/4 写入注解 | `backend/mcp_access.py`, `backend/test_mcp_protocol.py` |
+| 全部 18 个工具注册，8 只读/10 写入注解 | `backend/mcp_access.py`, `backend/test_mcp_protocol.py` |
 | Windows Finance 回环端口 | `127.0.0.1:8767` |
 | Windows Wallos 回环端口 | `127.0.0.1:18082` |
 | Windows API-only 回环网关 | `127.0.0.1:18768` |
@@ -43,7 +43,7 @@ IDE / Claude Desktop / local MCP client
 - 应构建一个**专用的 stdio 启动器/进程**，复用现有 MCP Tool 对象，并在启动前按用户配置筛选只读工具；不能误把全部 Finance Admin 环境变量复制到 Windows 主机进程。
 - 优先测试容器内 `mcp.run(transport="stdio")` 可否与 `docker compose exec -T finance-api ...` 正确交换 JSON-RPC；尤其验证 stdin、stdout 无非协议日志，Docker Desktop 关闭时的错误提示。
 - 需保证本机用户边界以及客户端配置文件权限，不要把数据库卷挂成 Windows 可随意访问的目录。
-- **本地原型已实现：** backend/mcp_stdio.py 启动前核对 11 个注册工具并删除 4 个写工具；deploy/windows/Start-OpenMarginLocalMcp.ps1 通过 Docker Compose exec -T 启动同一 MCP；backend/test_mcp_stdio.py 使用临时 SQLite 进行真实 stdio 会话测试。当前未进行 Windows 实机验证。
+- **本地原型已实现：** backend/mcp_stdio.py 启动前核对 18 个注册工具并删除 10 个写工具；deploy/windows/Start-OpenMarginLocalMcp.ps1 通过 Docker Compose exec -T 启动同一 MCP；backend/test_mcp_stdio.py 使用临时 SQLite 进行真实 stdio 会话测试。当前未进行 Windows 实机验证。
 - 实现前需完成 Docker Desktop + 一个实际本地 MCP 客户端的端到端验证。
 
 ### B. Windows + ChatGPT 云端（首选私有方案，技术用户）
@@ -66,7 +66,7 @@ OpenAI 在 2026 年提供 Windows `amd64/arm64` 预构建的 `tunnel-client`，�
 
 1. 后端新增独立的 `FINANCE_MCP_TUNNEL_READ_TOKEN`，并支持其**只读**验证。不能复用能访问所有 API 的 Admin Token，也不能使用 Android Device Token。
 2. ChatGPT 隧道入口作为受 Platform 隧道权限控制的私有客户端；由 `tunnel-client` 在本地 MCP HTTP 请求中加入专用凭证；不把凭证送给 ChatGPT、写进命令行或公开日志。官方客户端支持 `mcp.extra_headers` 和 `mcp.discovery_extra_headers`，两者须使用环境/受保护文件引用来避免明文。
-3. MCP 工具校验必须是**执行时的后端强制范围**，而非仅靠 `readOnlyHint` 注解。优先确保 `tools/list` 在只读模式下只返回 7 个只读工具；否则至少确保 4 个写工具调用返回 403。
+3. MCP 工具校验必须是**执行时的后端强制范围**，而非仅靠 `readOnlyHint` 注解。优先确保 `tools/list` 在只读模式下只返回 8 个只读工具；否则至少确保 10 个写工具调用返回 403。
 4. 明确启用写入时，改为不同凭证/授权通道，默认不提供；添加财务修改的确认、审计。任何写入测试必须使用临时合成账本。
 5. Windows 进程离线、Docker 停止或设备休眠时，ChatGPT MCP 应显示不可用/可重试，不能回退到其他 VPS 的独立账本。
 6. 如果需要完整的 OAuth 网页授权，应单独解决公开认证服务器可达性；不能误以为 Tunnel 包办了 OAuth 网站。是否采用 tunnel 身份 + 专用 token 代替 OAuth，须通过用户/工作区安全验收。
@@ -118,7 +118,7 @@ Android -> Tailscale Serve 443 -> existing API-only gateway -> sync endpoints
 - HTTPS hostname、redirect_uri、issuer/resource 元数据一致；跨域和危险重定向拒绝。
 
 ### 强制安全回归
-- 全部 11 个工具源定义仍一致；读权限不能修改任何记录；写权限必须用户明确开启且由后端校验。
+- 全部 18 个工具源定义仍一致；读权限不能修改任何记录；写权限必须用户明确开启且由后端校验。
 - 真实 Windows + Docker Desktop 和 ChatGPT 账号 E2E，不得仅用 VPS Linux 断言 Windows 可用。
 - 使用隔离 SQLite / 模拟 Wallos 写入，永远不以真实生产账本生成测试交易。
 - `docker compose down -v` 禁止；关闭隧道/撤销密钥不删除数据库；现有 Android 同步和 Tailscale Serve 路由完整未变。

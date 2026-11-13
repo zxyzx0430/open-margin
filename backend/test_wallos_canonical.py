@@ -29,6 +29,16 @@ class WallosCanonicalTests(unittest.TestCase):
             self.assertEqual(payload["category_id"],1)
             self.assertEqual(payload["payment_method_id"],32)
 
+    def test_direct_api_delete_uses_native_action(self):
+        from wallos_api import delete, WallosError
+        with patch("wallos_api.call", return_value={"success": True}) as api_call:
+            self.assertEqual(delete(8), 8)
+            api_call.assert_called_once_with(
+                "/api/subscriptions/set_subscriptions.php",
+                {"action": "delete", "id": 8})
+        with self.assertRaises(WallosError):
+            delete(0)
+
     def test_mcp_list_reads_wallos(self):
         with patch("wallos_api.get_all",return_value=[{"id":7,"name":"Wallos-owned"}]):
             r=get_subscription_list()

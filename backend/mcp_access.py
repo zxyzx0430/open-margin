@@ -14,6 +14,7 @@ READ_TOOLS = frozenset({
     "personal_finance_long_term_trends",
     "finance_reconciliation_queue",
     "finance_duplicate_review",
+    "get_monthly_budget",
 })
 WRITE_TOOLS = frozenset({
     "add_subscription",
@@ -21,6 +22,11 @@ WRITE_TOOLS = frozenset({
     "edit_record",
     "register_merchant_rule",
     "link_refund",
+    "delete_subscription",
+    "add_record",
+    "exclude_record",
+    "delete_record",
+    "set_monthly_budget",
 })
 TOOL_SCOPES = {
     **{name: "finance:read" for name in READ_TOOLS},
