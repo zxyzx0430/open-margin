@@ -9,7 +9,7 @@
   --om-gap:14px;
 }
 .om-ui :where(.contain){box-sizing:border-box}
-.om-ui :where(section.contain){max-width:1240px;margin-inline:auto}
+/* Retain upstream .contain max-width:970px and its exact horizontal margins. */
 .om-ui :where(.om-page-title){font-size:clamp(23px,2.4vw,29px);line-height:1.25;font-weight:700;letter-spacing:-.03em;color:var(--om-ink);margin:26px 0 18px}
 .om-ui :where(.om-page-title + .split-header){margin-top:0}
 .om-ui :where(.stats-section,.account-section){margin-block:18px 22px}
@@ -112,6 +112,22 @@
 .om-ui .om-subscriptions-page :where(.button,.view-toggle-button){border-radius:9px}
 .om-ui .om-about-page>.account-section{margin-block:16px}
 .om-ui .om-about-page .credits-list{border-radius:var(--om-radius)}
+.om-ui .om-about-page .om-integration-intro{padding:21px;border:1px solid var(--om-border);border-radius:var(--om-radius)}
+.om-ui .om-about-page .om-integration-intro>header h2{margin:0 0 12px}
+.om-ui .om-about-page .om-origin-lead{margin:0 0 18px;color:var(--om-secondary);font-size:14px;line-height:1.75}
+.om-ui .om-about-page .om-origin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-bottom:17px}
+.om-ui .om-about-page .om-origin-card{min-width:0;padding:17px 18px;background:var(--om-surface);
+  border:1px solid var(--om-border);border-radius:12px;display:flex;flex-direction:column;gap:11px}
+.om-ui .om-about-page .om-origin-card-title{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.om-ui .om-about-page .om-origin-card h3{font-size:18px;font-weight:650;margin:0}
+.om-ui .om-about-page .om-origin-card-title span{font-size:12px;color:var(--om-secondary)}
+.om-ui .om-about-page .om-origin-card p,.om-ui .om-about-page .om-origin-added p{font-size:13px;line-height:1.75;margin:0;color:var(--om-secondary)}
+.om-ui .om-about-page .om-origin-card-meta{display:flex;flex-direction:column;gap:4px;margin-top:auto;font-size:12px;color:var(--om-secondary);overflow-wrap:anywhere}
+.om-ui .om-about-page .om-integration-intro a{color:var(--om-primary);font-weight:600;font-size:13px}
+.om-ui .om-about-page .om-origin-added{padding-top:17px;border-top:1px solid var(--om-border);display:flex;flex-direction:column;gap:10px}
+.om-ui .om-about-page .om-origin-added h3{font-size:16px;margin:0;font-weight:650}
+@media(max-width:720px){.om-ui .om-about-page .om-origin-grid{grid-template-columns:1fr}}
+
 /* Responsive grid, form controls, and common hierarchy. */
 @media(max-width:1050px){
   .om-ui .om-settings-panel{grid-template-columns:1fr}

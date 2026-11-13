@@ -3,6 +3,7 @@
 FROM bellamy/wallos@sha256:0006879778f31a962a3873f7682514b92a3c7665dcbc4764fcc241ad968eaccd
 
 COPY calendar.php /var/www/html/calendar.php
+COPY about.php /var/www/html/about.php
 COPY stats.php /var/www/html/stats.php
 COPY finance-unified-common.php /var/www/html/finance-unified-common.php
 COPY finance-unified-data.php /var/www/html/finance-unified-data.php
