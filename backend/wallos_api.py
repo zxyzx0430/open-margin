@@ -152,6 +152,20 @@ def add(name: str,amount_cents:int,currency:str,cadence:str,next_due_ms:int,
     return int(result["subscriptionId"])
 
 
+def delete(subscription_id:int):
+    """Permanently delete one subscription through the native Wallos API.
+
+    Upstream set_subscriptions.php has handled action=delete since v5.0.0
+    (2026-07-11); this deployment pins a later image. This is not the same as
+    edit(active=False), which keeps history and only stops renewal.
+    Never writes Wallos SQLite.
+    """
+    if not isinstance(subscription_id,int) or subscription_id<1:
+        raise WallosError("bad subscription ID")
+    call("/api/subscriptions/set_subscriptions.php",{"action":"delete","id":subscription_id})
+    return subscription_id
+
+
 def edit(subscription_id:int, **changes):
     """Partial edit through native Wallos API. Missing fields remain untouched."""
     payload={"action":"edit","id":subscription_id}

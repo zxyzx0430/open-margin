@@ -41,7 +41,7 @@ Android 进入 **设置 → Windows 首次连接向导**，输入 `https://your-
 
 ## 可选：本机 AI 客户端使用只读 MCP（实验功能）
 
-对于支持 MCP stdio 的桌面 AI 客户端，可将程序配置为调用 Windows PowerShell 脚本 `deploy/windows/Start-OpenMarginLocalMcp.ps1`（以 PowerShell -NoProfile -ExecutionPolicy Bypass -File 启动）。它复用现有 Finance API Docker 容器和同一份账本，只暴露 7 个只读工具。不需要公网地址、OAuth、管理密钥或 Android 设备密钥；只有具有 Docker 容器运行权限的本机用户可以使用。需保持 Docker Desktop 运行。这里不支持云端 ChatGPT 网页版直连，未来需使用独立的安全隧道。Windows + Docker Desktop 实机端到端验收尚未完成；详细架构见 `WINDOWS_MCP_ARCHITECTURE.md`。
+对于支持 MCP stdio 的桌面 AI 客户端，可将程序配置为调用 Windows PowerShell 脚本 `deploy/windows/Start-OpenMarginLocalMcp.ps1`（以 PowerShell -NoProfile -ExecutionPolicy Bypass -File 启动）。它复用现有 Finance API Docker 容器和同一份账本，只暴露 8 个只读工具。不需要公网地址、OAuth、管理密钥或 Android 设备密钥；只有具有 Docker 容器运行权限的本机用户可以使用。需保持 Docker Desktop 运行。这里不支持云端 ChatGPT 网页版直连，未来需使用独立的安全隧道。Windows + Docker Desktop 实机端到端验收尚未完成；详细架构见 `WINDOWS_MCP_ARCHITECTURE.md`。
 
 ## 备份、恢复与排障
 
