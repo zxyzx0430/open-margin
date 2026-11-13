@@ -33,6 +33,7 @@ Wallos upstream Docker image → separate Wallos SQLite for subscriptions
 - This project is a **single-owner design**. The daily ledger, OAuth, and MCP are restricted to the configured Wallos owner ID; additional Wallos accounts must not be given access to private ledger data.
 - Android v1.2.0 ↔ server sync supports versioned additions, edits and deletion tombstones. Earlier v1.1.3 builds upload only; notification capture may still be incomplete or duplicate.
 - Android settings offer **简体中文 / English** under **Settings → Language** and **About & updates** with a local build number and manual GitHub signed-APK update check. Bottom navigation labels remain on one line. See [language](docs/ANDROID_LANGUAGE.md) and [updates](docs/ANDROID_UPDATES.md).
+- The optional persistent notification shows notification-capture health: a green/red dot, current connection uptime, disconnect time and the last successful automatic capture. It contains no amounts, merchants or notification text.
 
 ## Deployment choices
 

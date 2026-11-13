@@ -40,11 +40,30 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         super.onDestroy()
     }
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        CaptureHealth.onListenerConnected(applicationContext)
+        KeepAliveService.refreshStatus(applicationContext)
+    }
+
+    override fun onListenerDisconnected() {
+        val reason = if (NotificationListenerHelper.isEnabled(this)) {
+            "listener_disconnected"
+        } else {
+            "permission_revoked"
+        }
+        CaptureHealth.onListenerDisconnected(applicationContext, reason)
+        KeepAliveService.refreshStatus(applicationContext)
+        super.onListenerDisconnected()
+    }
+
     // 通知到达时回调（关键入口）。任何解析/入库异常只记录类型，不能打崩监听服务。
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         try {
             handleNotificationPosted(sbn)
         } catch (failure: Exception) {
+            CaptureHealth.onFailure(applicationContext, "processing", failure)
+            KeepAliveService.refreshStatus(applicationContext)
             // Exception class only; never log notification content or amounts.
             Log.e(TAG, "Notification processing failed: ${failure.javaClass.simpleName}")
         }
@@ -135,6 +154,8 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
+                CaptureHealth.onFailure(applicationContext, "persist", failure)
+                KeepAliveService.refreshStatus(applicationContext)
                 Log.e(TAG, "Notification persist failed: ${failure.javaClass.simpleName}")
             }
         }
