@@ -97,6 +97,8 @@ Open **http://127.0.0.1:18082** and register your first Wallos account, then log
 ## Daily workflow
 
 - Android queues new structured transaction events immediately; WorkManager retries and schedules additional sync at **minimum 15-minute intervals** subject to Android battery restrictions.
+- Automatic capture silently skips only high-confidence duplicates (same source, merchant, direction, currency and amount within 8 seconds). Other close matches (same amount/direction/currency within 3 minutes) are saved with a local review marker and shown in **Records** as possible duplicates; the user decides **Keep both** or **Delete new record**. Existing records are never deleted automatically.
+- Optional success notifications can show amount, merchant and time after a real save. Toggle them in **Settings → 自动记账提醒**; they use a low-priority silent channel and are separate from permission/failure alerts. Android 13+ requires notification permission.
 - Wallos opens the current ledger from live SQLite, then checks for changes around once per minute while the page is visible.
 - Today, seven-day, monthly and per-day CNY summaries; category/merchant/date filters; status review; optional monthly spending budget; CSV export.
 - Currency summaries remain independent without assumed FX rates; the daily bar chart currently displays CNY only.

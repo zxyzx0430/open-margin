@@ -34,7 +34,8 @@ class StatsViewModel @Inject constructor(
         ) { transactions, type ->
             // 1. 按 type 过滤
             val filtered = transactions.filter { it.type == type.name && it.currency == "CNY" &&
-                it.remoteReviewStatus !in setOf("excluded","transfer","refund") &&
+                it.duplicateOfId == null &&
+                it.remoteReviewStatus !in setOf("excluded","transfer","refund","possible_duplicate") &&
                 (it.type=="INCOME" || it.category!="TRANSFER") }
             if (filtered.isEmpty()) return@combine emptyList()
 
@@ -68,7 +69,8 @@ class StatsViewModel @Inject constructor(
             _viewingType,
         ) { transactions, type ->
             val filtered = transactions.filter { it.type == type.name && it.currency == "CNY" &&
-                it.remoteReviewStatus !in setOf("excluded","transfer","refund") &&
+                it.duplicateOfId == null &&
+                it.remoteReviewStatus !in setOf("excluded","transfer","refund","possible_duplicate") &&
                 (it.type=="INCOME" || it.category!="TRANSFER") }
             val byDay = filtered.groupBy {
                 Calendar.getInstance().apply { timeInMillis = it.timestamp }

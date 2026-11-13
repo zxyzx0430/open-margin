@@ -56,6 +56,10 @@ data class TransactionEntity(
     @ColumnInfo(defaultValue = "'unverified'")
     val remoteReviewStatus: String = "unverified",
     val syncMutationId: String? = null,
+
+    // Local-only link to a suspected duplicate. Never uploaded. Cleared when
+    // the user confirms both records are real, or the row is deleted.
+    val duplicateOfId: Long? = null,
 )
 
 // 收入还是支出

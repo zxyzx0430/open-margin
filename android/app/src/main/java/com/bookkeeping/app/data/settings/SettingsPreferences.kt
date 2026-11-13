@@ -29,6 +29,16 @@ class SettingsPreferences @Inject constructor(
         context.settingsDataStore.edit { it[KEY_KEEP_ALIVE] = enabled }
     }
 
+    fun observeSuccessNotificationsEnabled(): Flow<Boolean> =
+        context.settingsDataStore.data.map { it[KEY_SUCCESS_NOTIFICATIONS] ?: true }
+
+    suspend fun setSuccessNotificationsEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[KEY_SUCCESS_NOTIFICATIONS] = enabled }
+    }
+
+    suspend fun successNotificationsEnabledNow(): Boolean =
+        context.settingsDataStore.data.first()[KEY_SUCCESS_NOTIFICATIONS] ?: true
+
     // 同步读快照值。在 MainActivity.onCreate 里只需要"当前值"决定是否启动 Service，
     // 不需要 observe；用 runBlocking 拿一下，DataStore 本地读很快不会卡 UI。
     fun keepAliveEnabledBlocking(): Boolean = runBlocking {
@@ -37,5 +47,7 @@ class SettingsPreferences @Inject constructor(
 
     companion object {
         private val KEY_KEEP_ALIVE = booleanPreferencesKey("keep_alive_enabled")
+        private val KEY_SUCCESS_NOTIFICATIONS =
+            booleanPreferencesKey("success_notifications_enabled")
     }
 }

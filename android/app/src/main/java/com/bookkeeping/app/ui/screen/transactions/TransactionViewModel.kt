@@ -22,6 +22,11 @@ class TransactionViewModel @Inject constructor(
     private val repository: TransactionRepository
 ) : ViewModel() {
 
+    data class DuplicateCandidate(
+        val candidate: TransactionEntity,
+        val original: TransactionEntity?,
+    )
+
     // 当前选中的分类筛选；null = 不筛选（显示全部）
     private val _categoryFilter = MutableStateFlow<TransactionCategory?>(null)
     val categoryFilter: StateFlow<TransactionCategory?> = _categoryFilter
@@ -36,6 +41,20 @@ class TransactionViewModel @Inject constructor(
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
         combine(allTransactions, _categoryFilter) { list, filter ->
             if (filter == null) list else list.filter { it.category == filter.name }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val duplicateCandidates: StateFlow<List<DuplicateCandidate>> =
+        combine(
+            repository.observeDuplicateCandidates(),
+            allTransactions,
+        ) { candidates, all ->
+            val byId = all.associateBy { it.id }
+            candidates.map { candidate ->
+                DuplicateCandidate(
+                    candidate = candidate,
+                    original = candidate.duplicateOfId?.let(byId::get),
+                )
+            }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     // 本月支出/收入：注意基于全部数据（不受 filter 影响）
@@ -94,12 +113,22 @@ class TransactionViewModel @Inject constructor(
         if (status !in setOf("unverified","confirmed","excluded","transfer")) return
         if (entity.remoteReviewStatus == "refund") return
         viewModelScope.launch {
-            repository.update(entity.copy(remoteReviewStatus=status))
+            repository.update(
+                entity.copy(
+                    remoteReviewStatus = status,
+                    // Excluding a pending-duplicate row resolves the prompt.
+                    duplicateOfId = if (status == "excluded") null else entity.duplicateOfId,
+                )
+            )
         }
     }
 
     fun delete(entity: TransactionEntity) {
         viewModelScope.launch { repository.delete(entity) }
+    }
+
+    fun keepBoth(entity: TransactionEntity) {
+        viewModelScope.launch { repository.keepBoth(entity) }
     }
 
     private fun currentMonthRange(): Pair<Long, Long> {
