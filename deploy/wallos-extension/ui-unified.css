@@ -1,0 +1,134 @@
+/* 清衡 · Open Margin / Common visual language across Wallos and Finance pages. */
+.om-ui{
+  --om-surface:var(--box-background-color,#fff);
+  --om-border:var(--box-border-color,#e1e6ef);
+  --om-ink:var(--text-color,#1c2637);
+  --om-secondary:var(--text-muted,#68758a);
+  --om-primary:var(--main-color,#426de5);
+  --om-radius:14px;
+  --om-gap:14px;
+}
+.om-ui :where(.contain){box-sizing:border-box}
+.om-ui :where(section.contain){max-width:1240px;margin-inline:auto}
+.om-ui :where(.om-page-title){font-size:clamp(23px,2.4vw,29px);line-height:1.25;font-weight:700;letter-spacing:-.03em;color:var(--om-ink);margin:26px 0 18px}
+.om-ui :where(.om-page-title + .split-header){margin-top:0}
+.om-ui :where(.stats-section,.account-section){margin-block:18px 22px}
+.om-ui :where(.stats-section > h2,.account-section > header h2,.finance-native-heading h2){font-size:19px;line-height:1.35;font-weight:650;letter-spacing:-.015em;margin-bottom:14px}
+.om-ui :where(.stats-section .statistics){display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.om-ui :where(.stats-section .statistics > .statistic){
+  min-width:0;max-width:none;width:auto;margin:0;padding:17px 16px;
+  border:1px solid var(--om-border);border-radius:var(--om-radius);
+  background:var(--om-surface);box-shadow:0 1px 3px #16243a08;
+  display:flex;flex-direction:column;gap:8px;align-items:flex-start;text-align:left;
+}
+.om-ui :where(.statistics > .statistic > span){font-size:clamp(18px,2vw,24px);line-height:1.25;font-weight:700;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.om-ui :where(.statistics > .statistic .title){font-size:12px;line-height:1.4;color:var(--om-secondary);font-weight:500}
+.om-ui :where(.statistics > .statistic .subtitle){font-size:12px;color:var(--om-secondary)}
+.om-ui :where(.account-section,.stats-section > .graphs .graph){border-radius:var(--om-radius)}
+.om-ui :where(.graphs){gap:14px}
+.om-ui :where(.stats-section .graph){min-width:0;border-radius:var(--om-radius);overflow:hidden}
+.om-ui :where(button,.button,input,select,textarea){font-family:inherit}
+.om-ui :where(button,.button,input,select,textarea):focus-visible{outline:2px solid var(--om-primary);outline-offset:2px}
+.om-ui :where(.button.secondary-button){border-radius:9px}
+.om-ui :where(.om-section-heading h2,.om-section-heading h3){letter-spacing:-.02em}
+.om-ui :where(.om-compact-heading){display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0}
+.om-ui :where(.om-divider){height:1px;background:var(--om-border);margin:16px 0}
+.om-ui .finance-native .finance-native-heading{padding-bottom:5px}
+.om-ui .finance-native .finance-chart-section{padding:16px}
+.om-ui .finance-native .finance-budget{padding:13px 16px}
+.om-ui .finance-native .finance-metric{border-radius:var(--om-radius);min-height:95px}
+.om-ui .finance-native .finance-metric-grid{gap:12px}
+.om-ui .finance-native .finance-hint{margin-block:7px;font-size:12px}
+.om-ui .finance-native .finance-tabbar{margin-block:16px}
+.om-ui .finance-native .finance-tab{border-radius:9px;min-width:105px}
+.om-ui [hidden]{display:none!important}
+/* The original long statistics report now belongs to the Subscription Analysis tab only. */
+.om-ui .om-stat-page .finance-native-heading h2{display:none}
+.om-ui .om-stat-page .finance-native-heading{justify-content:flex-end}
+.om-ui .om-stat-extra{border-top:1px solid var(--om-border);margin-top:18px;padding-top:4px}
+.om-ui .om-stat-extra .om-native-duplicated{display:none!important}
+.om-ui .om-stat-extra .split-header{margin:10px 0 18px}
+.om-ui .om-stat-extra .split-header h2{font-size:17px}
+.om-ui .om-stat-extra .stats-section{margin-block:16px 26px}
+.om-ui .om-stat-extra .stats-section > h2{font-size:17px}
+.om-ui .om-stat-extra .statistics{grid-template-columns:repeat(4,minmax(0,1fr))}
+/* Expenses: put the ledger workflow ahead of supplementary charts and categories. */
+.om-ui .wallos-ledger #ledger-live{display:flex;flex-direction:column;gap:0}
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(1){order:0}
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(5){order:1}
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(2){order:2}
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(3){order:3}
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(4){order:4}
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(1) .statistic:nth-child(n+5){display:none}
+.om-ui .wallos-ledger .stats-section > h2{margin-bottom:12px}
+.om-ui .wallos-ledger .ledger-heading{margin:15px 0}
+.om-ui .wallos-ledger .ledger-heading h1{font-size:27px}
+.om-ui .wallos-ledger .ledger-live-state{margin:8px 0 13px}
+.om-ui .wallos-ledger .ledger-chart-controls>span{display:none}
+.om-ui .wallos-ledger .ledger-category-list .dashboard-subscriptions-list{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));min-width:0;gap:10px
+}
+.om-ui .wallos-ledger .ledger-category-list .subscription-item.thin{width:auto;height:auto;min-height:90px}
+.om-ui .wallos-ledger .ledger-search-form{margin:9px 0 15px}
+.om-ui .wallos-ledger .ledger-entry{margin-bottom:9px}
+.om-ui .wallos-ledger .ledger-entry .subscription{border-radius:var(--om-radius)}
+.om-ui .wallos-ledger .ledger-chart-shell{border-radius:var(--om-radius)}
+/* Calendar: month navigation owns the page header, not a separate Finance headline. */
+.om-ui .om-calendar-page{display:flex;flex-direction:column}
+.om-ui .om-calendar-page>.split-header{order:0;margin:6px 0 12px}
+.om-ui .om-calendar-page>.finance-native{order:1;padding:0 0 6px}
+.om-ui .om-calendar-page>.om-calendar-main{order:2}
+.om-ui .om-calendar-page>.over-budget{order:3}
+.om-ui .om-calendar-page.om-finance-ready>.calendar-monthly-stats{display:none!important}
+.om-ui .om-calendar-page .finance-native-heading,.om-ui .om-calendar-page .finance-hint{display:none!important}
+.om-ui .om-calendar-page .finance-metric-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin:4px 0 14px}
+.om-ui .om-calendar-page .calendar-title h2{font-size:22px;font-weight:700;margin:0}
+.om-ui .om-calendar-page .split-header .calendar-title{display:flex;align-items:center;gap:12px}
+.om-ui .om-calendar-page .calendar-cell{min-width:0}
+.om-ui .om-calendar-page .finance-calendar-amount{font-weight:600}
+.om-ui .om-calendar-page .finance-metric{min-height:80px;padding:12px 14px}
+/* Settings: actual navigation sections instead of a giant vertical form. */
+.om-ui .om-settings-tabs{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:5px;margin:0 0 18px;border-bottom:1px solid var(--om-border)}
+.om-ui .om-settings-tab{appearance:none;border:1px solid transparent;background:transparent;color:var(--om-secondary);
+  border-radius:9px;padding:10px 15px;font-size:14px;font-weight:600;cursor:pointer}
+.om-ui .om-settings-tab[aria-selected="true"]{background:color-mix(in srgb,var(--om-primary) 10%,var(--om-surface));border-color:color-mix(in srgb,var(--om-primary) 24%,var(--om-border));color:var(--om-primary)}
+.om-ui .om-settings-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px}
+.om-ui .om-settings-panel>.account-section{box-sizing:border-box;margin:0;min-width:0;padding:18px 19px;border:1px solid var(--om-border);
+  border-radius:var(--om-radius);background:var(--om-surface);box-shadow:none}
+.om-ui .om-settings-panel>.account-section.om-settings-wide{grid-column:1/-1}
+.om-ui .om-settings-panel>.account-section>header{margin-bottom:12px}
+.om-ui .om-settings-panel>.account-section>header h2{font-size:17px;margin:0}
+.om-ui .om-settings-panel>.account-section :where(.form-group-inline){max-width:100%}
+.om-ui .om-settings-panel>.account-section :where(input,select){max-width:100%}
+.om-ui .om-settings-panel>.account-section:has(#notifications),
+.om-ui .om-settings-panel>.account-section:has(#categories){grid-column:auto}
+.om-ui .om-profile-page .account-section{border:1px solid var(--om-border);border-radius:var(--om-radius);padding:18px}
+.om-ui .om-profile-page .account-section>header h2{font-size:18px}
+/* Subscriptions: same treatment of filters, cards and consistent page title. */
+.om-ui .om-subscriptions-page #main-actions{margin-top:0;margin-bottom:18px}
+.om-ui .om-subscriptions-page .subscriptions.grid-view{gap:13px}
+.om-ui .om-subscriptions-page .subscription-container{min-width:0}
+.om-ui .om-subscriptions-page .subscription{border-radius:var(--om-radius)}
+.om-ui .om-subscriptions-page :where(.button,.view-toggle-button){border-radius:9px}
+.om-ui .om-about-page>.account-section{margin-block:16px}
+.om-ui .om-about-page .credits-list{border-radius:var(--om-radius)}
+/* Responsive grid, form controls, and common hierarchy. */
+@media(max-width:1050px){
+  .om-ui .om-settings-panel{grid-template-columns:1fr}
+  .om-ui .stats-section .statistics{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@media(max-width:780px){
+  .om-ui .stats-section .statistics,
+  .om-ui .om-stat-extra .statistics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .om-ui .wallos-ledger .ledger-category-list .dashboard-subscriptions-list{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .om-ui .om-calendar-page .finance-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .om-ui .om-settings-tab{flex:1;padding:10px 8px}
+}
+@media(max-width:480px){
+  .om-ui .om-page-title{margin:17px 0 12px;font-size:23px}
+  .om-ui .stats-section .statistics>.statistic{padding:13px 11px}
+  .om-ui .om-settings-panel>.account-section{padding:14px 12px}
+  .om-ui .om-calendar-page .calendar-title h2{font-size:18px}
+  .om-ui .wallos-ledger .ledger-heading h1{font-size:23px}
+}
+@media(prefers-reduced-motion:reduce){.om-ui *{scroll-behavior:auto!important}}

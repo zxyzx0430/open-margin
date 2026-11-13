@@ -175,9 +175,11 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
       }
     }
   </script>
+  <link rel="stylesheet" href="ui-unified.css?v=<?=filemtime(dirname(__DIR__).'/ui-unified.css')?>">
+  <script defer src="ui-unified.js?v=<?=filemtime(dirname(__DIR__).'/ui-unified.js')?>"></script>
 </head>
 
-<body class="<?= $theme ?> <?= $languages[$lang]['dir'] ?> <?= $mobileNavigation ?>">
+<body class="om-ui <?= $theme ?> <?= $languages[$lang]['dir'] ?> <?= $mobileNavigation ?>">
   <header>
     <div class="contain">
       <div class="logo">

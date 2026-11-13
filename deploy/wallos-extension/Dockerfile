@@ -11,6 +11,8 @@ COPY finance-unified.js /var/www/html/finance-unified.js
 COPY finance-unified.css /var/www/html/finance-unified.css
 COPY dashboard-refresh.css /var/www/html/dashboard-refresh.css
 COPY dashboard-carousel.js /var/www/html/dashboard-carousel.js
+COPY ui-unified.css /var/www/html/ui-unified.css
+COPY ui-unified.js /var/www/html/ui-unified.js
 COPY expenses.php /var/www/html/expenses.php
 COPY daily-spend-chart-v2.js /var/www/html/daily-spend-chart-v2.js
 COPY expenses-action.php /var/www/html/expenses-action.php
@@ -26,7 +28,11 @@ COPY service-worker.php /var/www/html/service-worker.php
 # Normalize public CSS/JS after COPY. Do not widen permissions on secrets.
 RUN chmod 0644 /var/www/html/finance-unified.css \
                /var/www/html/finance-unified.js \
-               /var/www/html/daily-spend-chart-v2.js
+               /var/www/html/daily-spend-chart-v2.js \
+               /var/www/html/dashboard-refresh.css \
+               /var/www/html/dashboard-carousel.js \
+               /var/www/html/ui-unified.css \
+               /var/www/html/ui-unified.js
 
 LABEL org.opencontainers.image.title="Open Margin (清衡) · Wallos-powered finance" \
       org.opencontainers.image.description="Wallos vendor UI with custom expense ledger endpoint. Two separate databases."

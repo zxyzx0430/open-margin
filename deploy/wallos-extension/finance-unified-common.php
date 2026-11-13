@@ -319,12 +319,10 @@ function finance_render_panel(string $view,array $model,string $dashboardPayment
           <small>按当前周期折算，非实际扣费；一次性订阅不折算。历史月份也仅表示当前配置的月均负担。</small>
         </div>
         <p class="finance-hint" data-finance-fx-status>Wallos 汇率数据读取中</p>
-        <p class="finance-hint">实际订阅支出只统计 Finance 中归类为“订阅”的有效账单。未分类的已扣款不会自动算作订阅；如需计入，可在流水中调整分类。</p>
         <h3 class="finance-list-heading">全部有效订阅 · 月均成本明细</h3>
         <div class="finance-subscription-monthly"></div>
         <h3 class="finance-list-heading">本月计划续费</h3>
         <div class="finance-subscriptions"></div>
-        <p class="finance-hint">外币按 Wallos 已保存汇率换算为人民币，仅供预算参考，不是银行卡实际结算价。计划续费不等于已扣款；首月若开始日与推算账单日冲突，将标注“首月周期推算”，请核对首次付款日期；实际订阅支出仅来自 Finance 中有效的订阅分类交易。若汇率缺失会显示“无法完整计算”，不把缺失项目当作零。</p>
       </div>
       <?php endif; ?>
       <?php if($view==='calendar'): ?>
@@ -332,7 +330,6 @@ function finance_render_panel(string $view,array $model,string $dashboardPayment
         <div class="finance-metric"><small>本月实际支出</small><strong data-finance-value="expense_cents"><?= $expense ?></strong></div>
         <div class="finance-metric"><small>本月计划订阅</small><strong data-finance-value="planned_subscription_cents"><?= $planned ?></strong></div>
       </div>
-      <p class="finance-hint">原生订阅日历继续保留。金额显示 Finance 中已计入的真实支出，点击日期可直接编辑当日流水。</p>
       <?php endif; ?>
     </section>
     <script type="application/json" id="finance-data-<?=ledger_escape($view)?>"><?=finance_json($model)?></script>
