@@ -148,12 +148,10 @@ $financeMonthKey=finance_active_month();
         </div>
         <?php
         $paymentMonth = date('Y-m');
-        $nextPaymentMonth = date('Y-m', strtotime('first day of next month'));
-        $groupedPayments = ['current' => [], 'next' => [], 'later' => []];
+        $groupedPayments = ['current' => [], 'future' => []];
         foreach ($upcomingSubscriptions as $payment) {
             $dueMonth = substr((string)$payment['next_payment'], 0, 7);
-            $groupKey = $dueMonth <= $paymentMonth ? 'current' :
-                ($dueMonth === $nextPaymentMonth ? 'next' : 'later');
+            $groupKey = $dueMonth <= $paymentMonth ? 'current' : 'future';
             $groupedPayments[$groupKey][] = $payment;
         }
         ?>
@@ -162,15 +160,20 @@ $financeMonthKey=finance_active_month();
         <?php else: ?>
             <?php foreach ($groupedPayments as $groupKey => $groupItems):
                 if (!$groupItems) continue;
-                $groupTitle = $groupKey === 'current' ? '本月' :
-                    ($groupKey === 'next' ? '下月' : '之后');
-                if ($groupKey === 'current' && substr((string)$groupItems[0]['next_payment'], 0, 7) < $paymentMonth) {
-                    $groupTitle = '本月及逾期';
-                }
+                $groupTitle = $groupKey === 'current' ? '本月' : '未来';
             ?>
             <div class="om-payment-group">
-                <h3><?= $groupTitle ?></h3>
-                <div class="om-payment-grid">
+                <div class="om-payment-group-heading">
+                    <h3><?= $groupTitle ?></h3>
+                    <div class="om-carousel-controls" data-om-carousel-controls hidden>
+                        <span class="om-carousel-position" data-om-carousel-position aria-live="polite"></span>
+                        <button type="button" class="om-carousel-arrow" data-om-prev aria-label="<?= $groupTitle ?>付款：上一项">‹</button>
+                        <button type="button" class="om-carousel-arrow" data-om-next aria-label="<?= $groupTitle ?>付款：下一项">›</button>
+                    </div>
+                </div>
+                <div class="om-payment-carousel" data-om-carousel aria-label="<?= $groupTitle ?>付款" data-total="<?= count($groupItems) ?>">
+                  <div class="om-carousel-viewport" data-om-carousel-viewport role="region" aria-roledescription="轮播" aria-label="<?= $groupTitle ?>付款项目">
+                    <div class="om-payment-grid om-carousel-track" data-om-carousel-track>
                     <?php foreach ($groupItems as $subscription):
                         $due = (string)$subscription['next_payment'];
                         $dueStamp = strtotime($due);
@@ -206,6 +209,8 @@ $financeMonthKey=finance_active_month();
                         <span class="om-payment-meta"><?= htmlspecialchars($cycleText, ENT_QUOTES, 'UTF-8') ?><?= $method !== '' ? ' · '.htmlspecialchars($method, ENT_QUOTES, 'UTF-8') : '' ?></span>
                     </button>
                     <?php endforeach; ?>
+                    </div>
+                  </div>
                 </div>
             </div>
             <?php endforeach; ?>
@@ -324,6 +329,7 @@ require_once 'includes/subscription_details_popup.php';
 
 <script src="scripts/libs/apexcharts.min.js"></script>
 <script src="finance-unified.js?v=<?=filemtime(__DIR__."/finance-unified.js")?>"></script>
+<script src="dashboard-carousel.js?v=<?=filemtime(__DIR__."/dashboard-carousel.js")?>" defer></script>
 <?php
 require_once 'includes/footer.php';
 ?>

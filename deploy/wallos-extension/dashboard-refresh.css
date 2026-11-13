@@ -71,3 +71,28 @@
   .om-home .om-payment-name{font-size:13px;}.om-home .om-payment-amount{font-size:18px;}
   .om-home .om-payment-meta{font-size:11px;}}
 @media(max-width:370px){.om-home .om-payment-card{flex-basis:100%;min-height:135px;}}
+
+/* Homepage payments: four-card, infinitely looping horizontal carousel. */
+.om-home .om-payment-group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px;min-height:32px;}
+.om-home .om-payment-group-heading h3{margin:0;}
+.om-home .om-carousel-controls{display:flex;align-items:center;gap:6px;}
+.om-home .om-carousel-position{font-size:12px;color:var(--om-muted);min-width:42px;text-align:right;margin-right:6px;font-variant-numeric:tabular-nums;}
+.om-home .om-carousel-arrow{width:31px;height:31px;border:1px solid var(--om-line);border-radius:9px;background:var(--om-bg);color:var(--om-text);font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.om-home .om-carousel-arrow:hover,.om-home .om-carousel-arrow:focus-visible{border-color:var(--om-accent);color:var(--om-accent);}
+.om-home .om-carousel-controls[hidden]{display:none!important;}
+.om-home .om-carousel-viewport{overflow:hidden;max-width:100%;touch-action:pan-y;overscroll-behavior-inline:contain;}
+.om-home .om-carousel-track{display:flex;flex-wrap:nowrap;gap:12px;align-items:stretch;min-width:0;will-change:transform;}
+.om-home .om-carousel-track>.om-payment-card{box-sizing:border-box;min-width:0;flex:1 1 0;}
+.om-home .om-payment-carousel.is-looping .om-carousel-track>.om-payment-card{flex:0 0 calc((100% - 36px)/4);}
+.om-home .om-payment-carousel.is-dragging .om-carousel-track{cursor:grabbing;}
+.om-home .om-payment-carousel.is-dragging .om-payment-card{user-select:none;}
+.om-home .om-carousel-viewport:focus-visible{outline:2px solid var(--om-accent);outline-offset:-2px;border-radius:8px;}
+@media(max-width:900px){
+  .om-home .om-payment-carousel.is-looping .om-carousel-track>.om-payment-card{flex-basis:calc((100% - 12px)/2);}
+}
+@media(max-width:520px){
+  .om-home .om-payment-carousel.is-looping .om-carousel-track>.om-payment-card{flex-basis:100%;}
+}
+@media(prefers-reduced-motion:reduce){
+  .om-home .om-carousel-track{scroll-behavior:auto;}
+}
