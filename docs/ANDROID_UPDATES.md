@@ -1,4 +1,4 @@
-# Android 版本号与 GitHub 更新检查（v1.2.0 RC6）
+# Android 版本号与 GitHub 更新检查（v1.2.0 RC7）
 
 ## 用户入口
 
@@ -12,9 +12,9 @@
 
 ## 版本规则
 
-`v1.1.3` ＜ `v1.2.0-rc.4` ＜ `v1.2.0-rc.5` ＜ `v1.2.0-rc.6` ＜ `v1.2.0`。只接受严格匹配的 `vN.N.N` 和 `vN.N.N-rc.N` tag，并过滤草稿版本。Android 和双端更新必须有非空签名 APK；单独服务端发布无需 APK。
+`v1.1.3` ＜ `v1.2.0-rc.4` ＜ `v1.2.0-rc.5` ＜ `v1.2.0-rc.6` ＜ `v1.2.0-rc.7` ＜ `v1.2.0`。只接受严格匹配的 `vN.N.N` 和 `vN.N.N-rc.N` tag，并过滤草稿版本。Android 和双端更新必须有非空签名 APK；单独服务端发布无需 APK。
 
-当前候选版 `v1.2.0-rc.6`、`versionCode=11`。上一版 RC5 的整数构建号为 10，不会被误判为新更新。下一次正式出包必须同步提升 `versionCode` 和 `UpdateVersionPolicy.CURRENT_TAG`。GitHub Releases 路径和仓库所有者固定在源码中。
+当前候选版 `v1.2.0-rc.7`、`versionCode=12`。它把重复记账提示、成功通知开关和常驻采集状态条合并为一个 Android 构建；上一版 RC6 的整数构建号为 11，不会被误判为新更新。下一次正式出包必须同步提升 `versionCode` 和 `UpdateVersionPolicy.CURRENT_TAG`。GitHub Releases 路径和仓库所有者固定在源码中。
 
 ## 验证
 
