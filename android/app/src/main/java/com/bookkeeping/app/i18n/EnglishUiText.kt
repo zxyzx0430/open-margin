@@ -472,6 +472,19 @@ internal object EnglishUiText {
         "可选建议：国产 ROM 还需允许自启动、把省电策略设为「无限制」，并允许常驻/持续通知；这些状态无法自动检测，也不影响上面的 4 项状态。" to "Optional: on Chinese ROMs, also allow autostart, set battery usage to Unrestricted and allow the ongoing/persistent notification. These states cannot be detected automatically and do not affect the 4 items above.",
         "查看 ROM 后台设置（可选）" to "View ROM background settings (optional)",
         "第 %d 步，共 3 步" to "Step %d of 3",
+        "4 项必需能力已完成；短信与 ROM 设置可选" to "All 4 required capabilities are ready; SMS and ROM settings are optional",
+        "系统会同时请求通知权限和短信权限。通知权限为必需；短信权限用于补充银行短信识别，可选、可跳过。" to "The system will request notification and SMS permissions together. Notification permission is required; SMS is optional for bank SMS and can be skipped.",
+        "尚未检测到通知权限，请重试或打开应用设置。" to "Notification permission not detected. Retry or open app settings.",
+        "短信权限可选，可跳过。" to "SMS permission is optional and can be skipped.",
+        "下一步" to "Next",
+        "请求短信" to "Allow SMS",
+        "在无障碍页面找到「清衡 · 页面识别」并打开，用于识别微信/支付宝支付页面。此开关只能由你在系统设置中手动确认。" to "Find “Qingheng · Page recognition” in accessibility settings and enable it to recognize WeChat/Alipay payment pages. This switch can only be confirmed manually in system settings.",
+        "开启无障碍兜底" to "Turn on accessibility fallback",
+        "在无障碍页面找到「清衡」并打开，用于微信转账/红包、支付宝转账入账。此开关只能由你在系统设置中手动确认。" to "Find Open Margin in accessibility settings and enable it for WeChat transfers/red packets and Alipay receipts. This switch can only be confirmed manually in system settings.",
+        "自动记账已开启" to "Automatic tracking is on",
+        "通知权限、通知使用权、页面识别和无障碍兜底均已就绪。" to "Notification permission, notification access, page recognition and accessibility fallback are all ready.",
+        "完成" to "Done",
+        "可选建议：国产 ROM 还需允许自启动、把省电策略设为「无限制」，并允许常驻/持续通知；这些状态无法自动检测，也不影响自动记账是否已开启。" to "Optional: on Chinese ROMs, also allow autostart, set battery usage to Unrestricted and allow the ongoing/persistent notification. These states cannot be detected automatically and do not affect whether automatic tracking is on.",
     )
 
     fun translate(chinese: String): String {

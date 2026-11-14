@@ -163,13 +163,22 @@ fun SettingsScreen(
         }
     }
 
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                permissionRefreshKey++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val missingCapabilityNames = buildList {
         if (!postNotificationsGranted) add(tr("通知权限"))
-        if (!smsGranted) add(tr("短信权限（可选）"))
         if (!notificationEnabled) add(tr("通知使用权"))
         if (!pageRecognitionEnabled) add(tr("页面识别服务"))
+        if (!accessibilityHealth.authorized) add(tr("无障碍兜底"))
     }
-    val grantedCapabilityCount = AUTOMATION_CAPABILITY_COUNT - missingCapabilityNames.size
 
     Scaffold(topBar = { TopAppBar(title = { Text(tr("设置")) }) }) { innerPadding ->
         LazyColumn(
@@ -181,7 +190,6 @@ fun SettingsScreen(
         ) {
             item {
                 AutomationSetupCard(
-                    grantedCount = grantedCapabilityCount,
                     missingNames = missingCapabilityNames,
                     onStart = { detailDialog = "automation" },
                 )
@@ -316,6 +324,7 @@ fun SettingsScreen(
                     AutomationSetupPanel(
                         notificationEnabled = notificationEnabled,
                         pageRecognitionEnabled = pageRecognitionEnabled,
+                        fallbackAccessibilityEnabled = accessibilityHealth.authorized,
                         postNotificationsGranted = postNotificationsGranted,
                         smsGranted = smsGranted,
                         missingNames = missingCapabilityNames,
@@ -333,6 +342,7 @@ fun SettingsScreen(
                         onOpenAppSettings = { openAppDetailsSettings(context) },
                         onRefresh = { permissionRefreshKey++ },
                         onOpenRomGuide = { detailDialog = "rom" },
+                        onFinish = { detailDialog = null },
                     )
                 }
                 "sync" -> SettingsDetailDialog(tr("同步设置"), { detailDialog = null }) {
@@ -549,7 +559,7 @@ private fun areNotificationsGranted(context: Context): Boolean {
     return NotificationManagerCompat.from(context).areNotificationsEnabled()
 }
 
-private const val AUTOMATION_CAPABILITY_COUNT = 4
+private const val AUTOMATION_WIZARD_STEPS = 5
 
 private fun runtimePermissionsToRequest(): Array<String> = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -558,41 +568,47 @@ private fun runtimePermissionsToRequest(): Array<String> = buildList {
     addAll(SmsPermissionHelper.REQUIRED_PERMISSIONS.toList())
 }.toTypedArray()
 
-private enum class AutomationSetupStep {
+private enum class AutomationWizardStep {
     RUNTIME_PERMISSIONS,
     NOTIFICATION_ACCESS,
-    ACCESSIBILITY,
-    RESULT,
+    PAGE_RECOGNITION,
+    ACCESSIBILITY_FALLBACK,
+    ROM_GUIDANCE,
 }
 
-private fun stepAfterRuntimePermissions(
-    notificationEnabled: Boolean,
+private fun initialWizardStep(
+    notificationListenerEnabled: Boolean,
     pageRecognitionEnabled: Boolean,
-): AutomationSetupStep = when {
-    !notificationEnabled -> AutomationSetupStep.NOTIFICATION_ACCESS
-    !pageRecognitionEnabled -> AutomationSetupStep.ACCESSIBILITY
-    else -> AutomationSetupStep.RESULT
-}
-
-private fun firstMissingAutomationStep(
-    notificationEnabled: Boolean,
-    pageRecognitionEnabled: Boolean,
+    fallbackAccessibilityEnabled: Boolean,
     postNotificationsGranted: Boolean,
     smsGranted: Boolean,
-): AutomationSetupStep = when {
-    !postNotificationsGranted || !smsGranted -> AutomationSetupStep.RUNTIME_PERMISSIONS
-    !notificationEnabled -> AutomationSetupStep.NOTIFICATION_ACCESS
-    !pageRecognitionEnabled -> AutomationSetupStep.ACCESSIBILITY
-    else -> AutomationSetupStep.RESULT
+): AutomationWizardStep = when {
+    !postNotificationsGranted || !smsGranted -> AutomationWizardStep.RUNTIME_PERMISSIONS
+    !notificationListenerEnabled -> AutomationWizardStep.NOTIFICATION_ACCESS
+    !pageRecognitionEnabled -> AutomationWizardStep.PAGE_RECOGNITION
+    !fallbackAccessibilityEnabled -> AutomationWizardStep.ACCESSIBILITY_FALLBACK
+    else -> AutomationWizardStep.ROM_GUIDANCE
 }
+
+private fun requiredAutomationReady(
+    notificationListenerEnabled: Boolean,
+    pageRecognitionEnabled: Boolean,
+    fallbackAccessibilityEnabled: Boolean,
+    postNotificationsGranted: Boolean,
+): Boolean = notificationListenerEnabled &&
+    pageRecognitionEnabled &&
+    fallbackAccessibilityEnabled &&
+    postNotificationsGranted
+
+private fun wizardProgress(step: AutomationWizardStep): String =
+    String.format(Locale.getDefault(), "%d/%d", step.ordinal + 1, AUTOMATION_WIZARD_STEPS)
 
 @Composable
 private fun AutomationSetupCard(
-    grantedCount: Int,
     missingNames: List<String>,
     onStart: () -> Unit,
 ) {
-    val ready = grantedCount >= AUTOMATION_CAPABILITY_COUNT
+    val ready = missingNames.isEmpty()
     val container = if (ready) MaterialTheme.colorScheme.primaryContainer
                     else MaterialTheme.colorScheme.errorContainer
     val content = if (ready) MaterialTheme.colorScheme.onPrimaryContainer
@@ -618,7 +634,7 @@ private fun AutomationSetupCard(
                     )
                     Text(
                         text = if (ready) {
-                            tr("4/4 项已完成，自动记账已就绪")
+                            tr("4 项必需能力已完成；短信与 ROM 设置可选")
                         } else {
                             tr("缺少：") + missingNames.joinToString(" / ")
                         },
@@ -650,6 +666,7 @@ private fun AutomationSetupCard(
 private fun AutomationSetupPanel(
     notificationEnabled: Boolean,
     pageRecognitionEnabled: Boolean,
+    fallbackAccessibilityEnabled: Boolean,
     postNotificationsGranted: Boolean,
     smsGranted: Boolean,
     missingNames: List<String>,
@@ -659,200 +676,167 @@ private fun AutomationSetupPanel(
     onOpenAppSettings: () -> Unit,
     onRefresh: () -> Unit,
     onOpenRomGuide: () -> Unit,
+    onFinish: () -> Unit,
 ) {
-    val grantedCount = listOf(
-        postNotificationsGranted,
-        smsGranted,
-        notificationEnabled,
-        pageRecognitionEnabled,
-    ).count { it }
     var step by remember {
         mutableStateOf(
-            firstMissingAutomationStep(
-                notificationEnabled = notificationEnabled,
+            initialWizardStep(
+                notificationListenerEnabled = notificationEnabled,
                 pageRecognitionEnabled = pageRecognitionEnabled,
+                fallbackAccessibilityEnabled = fallbackAccessibilityEnabled,
                 postNotificationsGranted = postNotificationsGranted,
                 smsGranted = smsGranted,
             ),
         )
     }
     var attempted by remember { mutableStateOf(false) }
+    val requiredReady = requiredAutomationReady(
+        notificationListenerEnabled = notificationEnabled,
+        pageRecognitionEnabled = pageRecognitionEnabled,
+        fallbackAccessibilityEnabled = fallbackAccessibilityEnabled,
+        postNotificationsGranted = postNotificationsGranted,
+    )
 
-    LaunchedEffect(
-        notificationEnabled,
-        pageRecognitionEnabled,
-        postNotificationsGranted,
-        smsGranted,
-    ) {
-        val next = when (step) {
-            AutomationSetupStep.RUNTIME_PERMISSIONS -> {
-                if (postNotificationsGranted && smsGranted) {
-                    stepAfterRuntimePermissions(notificationEnabled, pageRecognitionEnabled)
-                } else {
-                    AutomationSetupStep.RUNTIME_PERMISSIONS
-                }
-            }
-            AutomationSetupStep.NOTIFICATION_ACCESS -> {
-                if (notificationEnabled) {
-                    if (pageRecognitionEnabled) AutomationSetupStep.RESULT
-                    else AutomationSetupStep.ACCESSIBILITY
-                } else {
-                    AutomationSetupStep.NOTIFICATION_ACCESS
-                }
-            }
-            AutomationSetupStep.ACCESSIBILITY -> {
-                if (pageRecognitionEnabled) AutomationSetupStep.RESULT
-                else AutomationSetupStep.ACCESSIBILITY
-            }
-            AutomationSetupStep.RESULT -> AutomationSetupStep.RESULT
-        }
-        if (next != step) {
-            step = next
-            attempted = false
-        }
-    }
-
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = String.format(
-                Locale.getDefault(),
-                tr("已完成 %d/%d 项"),
-                grantedCount,
-                AUTOMATION_CAPABILITY_COUNT,
-            ),
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            text = if (grantedCount >= AUTOMATION_CAPABILITY_COUNT) {
-                tr("已开启")
-            } else {
-                String.format(
-                    Locale.getDefault(),
-                    tr("还缺 %d 项"),
-                    AUTOMATION_CAPABILITY_COUNT - grantedCount,
-                )
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (grantedCount >= AUTOMATION_CAPABILITY_COUNT) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.error
-            },
-        )
-    }
-    HorizontalDivider()
     when (step) {
-        AutomationSetupStep.RUNTIME_PERMISSIONS -> AutomationStepCard(
-            stepLabel = automationStepLabel(1),
+        AutomationWizardStep.RUNTIME_PERMISSIONS -> AutomationStepCard(
+            stepLabel = wizardProgress(step),
             title = tr("允许通知和短信"),
-            body = tr("系统会同时请求通知权限和短信权限；短信权限为可选补充，但会计入 4/4。已经允许的不会重复弹窗。"),
-            status = null,
-            statusIsError = false,
-            primaryLabel = tr("请求权限"),
-            onPrimary = {
-                onRequestRuntimePermissions()
-                step = stepAfterRuntimePermissions(
-                    notificationEnabled = notificationEnabled,
-                    pageRecognitionEnabled = pageRecognitionEnabled,
-                )
-                attempted = false
+            body = tr("系统会同时请求通知权限和短信权限。通知权限为必需；短信权限用于补充银行短信识别，可选、可跳过。"),
+            status = when {
+                !postNotificationsGranted && attempted ->
+                    tr("尚未检测到通知权限，请重试或打开应用设置。")
+                !smsGranted -> tr("短信权限可选，可跳过。")
+                else -> null
             },
-            secondaryLabel = tr("打开应用设置"),
-            onSecondary = onOpenAppSettings,
+            statusIsError = !postNotificationsGranted && attempted,
+            primaryLabel = if (postNotificationsGranted) tr("下一步") else tr("请求权限"),
+            onPrimary = {
+                if (postNotificationsGranted) {
+                    step = AutomationWizardStep.NOTIFICATION_ACCESS
+                    attempted = false
+                } else {
+                    attempted = true
+                    onRequestRuntimePermissions()
+                }
+            },
+            secondaryLabel = when {
+                !postNotificationsGranted -> tr("打开应用设置")
+                !smsGranted -> tr("请求短信")
+                else -> null
+            },
+            onSecondary = when {
+                !postNotificationsGranted -> onOpenAppSettings
+                !smsGranted -> onRequestRuntimePermissions
+                else -> null
+            },
         )
-        AutomationSetupStep.NOTIFICATION_ACCESS -> AutomationStepCard(
-            stepLabel = automationStepLabel(2),
+        AutomationWizardStep.NOTIFICATION_ACCESS -> AutomationStepCard(
+            stepLabel = wizardProgress(step),
             title = tr("开启通知使用权"),
             body = tr("在系统页面找到「清衡」并打开通知使用权，然后返回。此开关只能由你在系统设置中手动确认。"),
-            status = if (attempted) tr("尚未检测到，请确认已开启后重试。") else null,
-            statusIsError = attempted,
-            primaryLabel = tr("去通知使用权设置"),
+            status = if (attempted && !notificationEnabled) {
+                tr("尚未检测到，请确认已开启后重试。")
+            } else null,
+            statusIsError = attempted && !notificationEnabled,
+            primaryLabel = if (notificationEnabled) tr("下一步") else tr("去通知使用权设置"),
             onPrimary = {
-                attempted = true
-                onOpenNotificationSettings()
-            },
-            secondaryLabel = if (attempted) tr("重新检查") else null,
-            onSecondary = onRefresh,
-        )
-        AutomationSetupStep.ACCESSIBILITY -> AutomationStepCard(
-            stepLabel = automationStepLabel(3),
-            title = tr("开启页面识别"),
-            body = tr("在无障碍页面找到「清衡 · 页面识别」并打开，然后返回。此开关只能由你在系统设置中手动确认。"),
-            status = if (attempted) tr("尚未检测到，请确认已开启后重试。") else null,
-            statusIsError = attempted,
-            primaryLabel = tr("去无障碍设置"),
-            onPrimary = {
-                attempted = true
-                onOpenAccessibilitySettings()
-            },
-            secondaryLabel = if (attempted) tr("重新检查") else null,
-            onSecondary = onRefresh,
-        )
-        AutomationSetupStep.RESULT -> {
-            val allGranted = grantedCount >= AUTOMATION_CAPABILITY_COUNT
-            val resultContainer = if (allGranted) MaterialTheme.colorScheme.primaryContainer
-                                  else MaterialTheme.colorScheme.errorContainer
-            val resultContent = if (allGranted) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onErrorContainer
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = resultContainer),
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = if (allGranted) {
-                            tr("4/4 已开启")
-                        } else {
-                            String.format(
-                                Locale.getDefault(),
-                                tr("还缺 %d 项"),
-                                AUTOMATION_CAPABILITY_COUNT - grantedCount,
-                            )
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = resultContent,
-                    )
-                    Text(
-                        text = if (allGranted) {
-                            tr("自动记账所需的权限已全部就绪。")
-                        } else {
-                            tr("缺少：") + missingNames.joinToString(" / ")
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = resultContent,
-                    )
-                    if (!allGranted) {
-                        FilledTonalButton(
-                            onClick = {
-                                step = firstMissingAutomationStep(
-                                    notificationEnabled = notificationEnabled,
-                                    pageRecognitionEnabled = pageRecognitionEnabled,
-                                    postNotificationsGranted = postNotificationsGranted,
-                                    smsGranted = smsGranted,
-                                )
-                                attempted = false
-                            },
-                        ) {
-                            Text(tr("重试"))
-                        }
-                    }
+                if (notificationEnabled) {
+                    step = AutomationWizardStep.PAGE_RECOGNITION
+                    attempted = false
+                } else {
+                    attempted = true
+                    onOpenNotificationSettings()
                 }
+            },
+            secondaryLabel = if (attempted && !notificationEnabled) tr("重新检查") else null,
+            onSecondary = onRefresh,
+        )
+        AutomationWizardStep.PAGE_RECOGNITION -> AutomationStepCard(
+            stepLabel = wizardProgress(step),
+            title = tr("开启页面识别"),
+            body = tr("在无障碍页面找到「清衡 · 页面识别」并打开，用于识别微信/支付宝支付页面。此开关只能由你在系统设置中手动确认。"),
+            status = if (attempted && !pageRecognitionEnabled) {
+                tr("尚未检测到，请确认已开启后重试。")
+            } else null,
+            statusIsError = attempted && !pageRecognitionEnabled,
+            primaryLabel = if (pageRecognitionEnabled) tr("下一步") else tr("去无障碍设置"),
+            onPrimary = {
+                if (pageRecognitionEnabled) {
+                    step = AutomationWizardStep.ACCESSIBILITY_FALLBACK
+                    attempted = false
+                } else {
+                    attempted = true
+                    onOpenAccessibilitySettings()
+                }
+            },
+            secondaryLabel = if (attempted && !pageRecognitionEnabled) tr("重新检查") else null,
+            onSecondary = onRefresh,
+        )
+        AutomationWizardStep.ACCESSIBILITY_FALLBACK -> AutomationStepCard(
+            stepLabel = wizardProgress(step),
+            title = tr("开启无障碍兜底"),
+            body = tr("在无障碍页面找到「清衡」并打开，用于微信转账/红包、支付宝转账入账。此开关只能由你在系统设置中手动确认。"),
+            status = if (attempted && !fallbackAccessibilityEnabled) {
+                tr("尚未检测到，请确认已开启后重试。")
+            } else null,
+            statusIsError = attempted && !fallbackAccessibilityEnabled,
+            primaryLabel = if (fallbackAccessibilityEnabled) tr("下一步") else tr("去无障碍设置"),
+            onPrimary = {
+                if (fallbackAccessibilityEnabled) {
+                    step = AutomationWizardStep.ROM_GUIDANCE
+                    attempted = false
+                } else {
+                    attempted = true
+                    onOpenAccessibilitySettings()
+                }
+            },
+            secondaryLabel = if (attempted && !fallbackAccessibilityEnabled) tr("重新检查") else null,
+            onSecondary = onRefresh,
+        )
+        AutomationWizardStep.ROM_GUIDANCE -> {
+            if (requiredReady) {
+                AutomationStepCard(
+                    stepLabel = wizardProgress(step),
+                    title = tr("自动记账已开启"),
+                    body = tr("通知权限、通知使用权、页面识别和无障碍兜底均已就绪。"),
+                    status = null,
+                    statusIsError = false,
+                    primaryLabel = tr("完成"),
+                    onPrimary = onFinish,
+                )
+            } else {
+                AutomationStepCard(
+                    stepLabel = wizardProgress(step),
+                    title = String.format(
+                        Locale.getDefault(),
+                        tr("还缺 %d 项"),
+                        missingNames.size,
+                    ),
+                    body = tr("缺少：") + missingNames.joinToString(" / "),
+                    status = null,
+                    statusIsError = true,
+                    primaryLabel = tr("重试"),
+                    onPrimary = {
+                        step = initialWizardStep(
+                            notificationListenerEnabled = notificationEnabled,
+                            pageRecognitionEnabled = pageRecognitionEnabled,
+                            fallbackAccessibilityEnabled = fallbackAccessibilityEnabled,
+                            postNotificationsGranted = postNotificationsGranted,
+                            smsGranted = smsGranted,
+                        )
+                        attempted = false
+                    },
+                )
+            }
+            Text(
+                text = tr("可选建议：国产 ROM 还需允许自启动、把省电策略设为「无限制」，并允许常驻/持续通知；这些状态无法自动检测，也不影响自动记账是否已开启。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onOpenRomGuide) {
+                Text(tr("查看 ROM 后台设置（可选）"))
             }
         }
-    }
-    HorizontalDivider()
-    Text(
-        text = tr("可选建议：国产 ROM 还需允许自启动、把省电策略设为「无限制」，并允许常驻/持续通知；这些状态无法自动检测，也不影响上面的 4 项状态。"),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    TextButton(onClick = onOpenRomGuide) {
-        Text(tr("查看 ROM 后台设置（可选）"))
     }
 }
 
@@ -908,9 +892,6 @@ private fun AutomationStepCard(
         }
     }
 }
-
-private fun automationStepLabel(step: Int): String =
-    String.format(Locale.getDefault(), tr("第 %d 步，共 3 步"), step)
 
 @Composable
 private fun SettingsDetailDialog(
