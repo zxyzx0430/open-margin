@@ -324,7 +324,7 @@ $notice=$_GET['notice'] ?? '';
       </button>
     </div>
   </div>
-  <p class="ledger-intro">按月实时汇总已同步交易。Wallos 订阅计划不会重复计入实际支出。</p>
+
   <?php if($error): ?><div class="error-box" role="alert"><i class="fa-solid fa-circle-exclamation"></i> <?= ledger_escape($error) ?></div><?php endif; ?>
   <?php if ($notice==='added'): ?><div class="ledger-section-message" role="status"><i class="fa-solid fa-circle-check"></i> 已成功记录交易。</div>
   <?php elseif ($notice==='reviewed'): ?><div class="ledger-section-message" role="status"><i class="fa-solid fa-circle-check"></i> 已更新核对状态。</div>
@@ -350,7 +350,7 @@ $notice=$_GET['notice'] ?? '';
         <div class="statistic"><span><?= ledger_escape(ledger_money((int)$avgCny,'CNY')) ?></span><div class="title">本月人民币日均支出</div></div>
         <div class="statistic"><span><?= $monthCount ?></span><div class="title">本月记录笔数</div></div>
       </div>
-      <p class="ledger-section-message ledger-explainer">仅统计已录入交易，未经官方账单确认的记录可能存在遗漏或误识别；跨币种不合并。</p>
+
     </section>
     <section class="stats-section">
       <h2>消费预算 · 人民币</h2>
@@ -428,7 +428,9 @@ $notice=$_GET['notice'] ?? '';
           </tbody>
         </table>
       </details>
-      <p class="ledger-section-message ledger-explainer">柱子显示 VPS 账本中已计入的人民币支出；下方可查看当日“不计入”的金额和全部交易。手机 App 删除本地记录目前不会自动在 VPS 上标记“不计入”；如发现两端不一致，请在此页面对应交易中选择“不计入”。退款、转账和排除交易不计入实际支出。</p>
+      <details class="ledger-secondary-panel"><summary>统计口径与同步说明</summary>
+        <p class="ledger-section-message ledger-explainer">      柱子显示 VPS 账本中已计入的人民币支出；下方可查看当日“不计入”的金额和全部交易。手机 App 删除本地记录目前不会自动在 VPS 上标记“不计入”；如发现两端不一致，请在此页面对应交易中选择“不计入”。退款、转账和排除交易不计入实际支出。</p>
+      </details>
     </section>
     <script type="application/json" id="finance-daily-data"><?= json_encode($dailyChartPoints,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_UNICODE) ?></script>
     <script src="scripts/libs/apexcharts.min.js"></script>

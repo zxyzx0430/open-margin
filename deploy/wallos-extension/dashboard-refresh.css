@@ -1,0 +1,98 @@
+/* Open Margin: streamlined homepage, without changing other Wallos screens. */
+.om-home{--om-line:var(--box-border-color,#e3e7ef);--om-bg:var(--box-background-color,#fff);--om-text:var(--text-color,#1d2939);--om-muted:var(--text-muted,#667085);--om-accent:var(--main-color,#315efb);}
+.om-home *{box-sizing:border-box;}
+.om-home .finance-native{padding-top:24px;padding-bottom:0;}
+.om-home .finance-native .finance-panel[data-finance-panel="subscriptions"]{display:none!important;}
+.om-home .finance-native .finance-native-heading{margin-bottom:10px;}
+.om-home .finance-native .finance-metric-grid{margin-top:14px;}
+.om-home-section{margin:34px 0 38px;max-width:100%;}
+.om-section-heading{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 15px;}
+.om-section-heading h2{font-size:24px;line-height:1.3;margin:0;color:var(--om-text);font-weight:650;}
+.om-section-heading>div{display:flex;align-items:baseline;gap:13px;flex-wrap:wrap;}
+.om-section-heading span{color:var(--om-muted);font-size:12px;}
+.om-section-heading a{color:var(--om-accent);font-size:13px;text-decoration:none;white-space:nowrap;}
+.om-section-heading a:hover{text-decoration:underline;}
+.om-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;}
+.om-summary-card{background:var(--om-bg);border:1px solid var(--om-line);border-radius:14px;min-width:0;min-height:96px;padding:17px 16px;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:11px;}
+.om-summary-card small{font-size:12px;color:var(--om-muted);}
+.om-summary-card strong{font-size:clamp(18px,2vw,25px);line-height:1.25;font-weight:700;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+.om-subscription-budget{margin-top:13px;padding:19px 20px;border:1px solid var(--om-line);background:var(--om-bg);border-radius:14px;}
+.om-budget-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.om-budget-head>div{display:flex;align-items:center;gap:12px;}
+.om-budget-head h3{font-size:16px;margin:0;font-weight:650;}
+.om-budget-head span{font-size:12px;color:var(--om-muted);}
+.om-budget-head>strong{font-size:18px;font-variant-numeric:tabular-nums;}
+.om-budget-track{height:8px;border-radius:6px;background:color-mix(in srgb,var(--om-accent) 14%,transparent);overflow:hidden;margin:15px 0 8px;}
+.om-budget-track>span{display:block;height:100%;background:var(--om-accent);border-radius:6px;}
+.om-budget-foot,.om-budget-detail{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px 20px;color:var(--om-muted);font-size:12px;}
+.om-budget-detail{justify-content:flex-start;margin-top:12px;}
+.om-budget-detail:empty{display:none;}
+.om-cancellations{border:1px solid var(--om-line);border-radius:14px;margin-top:15px;padding:16px;}
+.om-cancellations h3{margin:0 0 8px;font-size:15px;}
+.om-cancellations button{display:flex;justify-content:space-between;gap:12px;width:100%;padding:9px 0;background:transparent;border:0;color:var(--om-text);cursor:pointer;font:inherit;text-align:left;}
+.om-cancellations button span{color:var(--om-muted);}
+@media(max-width:760px){.om-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:520px){.om-home-section{margin:25px 0;}.om-section-heading h2{font-size:21px;}.om-summary-grid{gap:8px;}.om-summary-card{padding:14px 11px;min-height:88px;}.om-subscription-budget{padding:15px;}}
+/* One compact date selection row under the spending chart. */
+.om-home .finance-native .finance-trend-controls{flex-direction:row;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding-top:7px;}
+.om-home .finance-native .finance-trend-selected{border:0;background:transparent;box-shadow:none;padding:0;}
+.om-home .finance-native .finance-trend-selected>span{display:none;}
+.om-home .finance-native .finance-trend-detail{border:1px solid var(--om-line);border-radius:8px;padding:6px 10px;background:var(--om-bg);color:var(--om-accent);cursor:pointer;}
+
+/* Second pass: chronological payment cards, visible without a sideways scroll. */
+.om-home .om-payments{margin:23px 0 23px;}
+.om-payment-group{margin-top:17px;}
+.om-payment-group h3{font-size:13px;font-weight:650;color:var(--om-muted);margin:0 0 9px;}
+.om-payment-grid{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;}
+.om-home .om-payment-card{appearance:none;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;
+  flex:1 1 205px;min-width:0;min-height:154px;gap:10px;padding:16px 16px 15px;
+  border:1px solid var(--om-line);border-radius:13px;background:var(--om-bg);color:var(--om-text);
+  box-shadow:0 1px 2px #161f2d05;text-align:left;font:inherit;cursor:pointer;}
+.om-home .om-payment-card:hover,.om-home .om-payment-card:focus-visible{border-color:var(--om-accent);
+  outline:0;box-shadow:0 0 0 2px color-mix(in srgb,var(--om-accent) 11%,transparent);}
+.om-payment-card-top{width:100%;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.om-home .om-payment-date{font-size:12px;font-weight:500;color:var(--om-muted);}
+.om-home .om-payment-name{font-size:15px;font-weight:600;line-height:1.35;overflow-wrap:anywhere;min-width:0;}
+.om-home .om-payment-amount{font-size:22px;font-weight:700;text-align:left;margin-top:auto;font-variant-numeric:tabular-nums;}
+.om-home .om-payment-meta{font-size:12px;color:var(--om-muted);white-space:normal;display:block;overflow-wrap:anywhere;}
+.om-budget-track.is-over-budget>span{background:#d35745;}
+.om-budget-foot .om-budget-over{color:#bf4939;font-weight:650;}
+/* Small and quiet daily budget control: expand only when editing. */
+.om-home .finance-native .finance-budget{margin-top:12px;padding:12px 15px;}
+.om-home .finance-native .finance-budget-adjust{margin-top:6px;}
+.om-home .finance-native .finance-budget-adjust summary{display:inline-block;list-style:none;
+  font-size:12px;color:var(--om-accent);cursor:pointer;}
+.om-home .finance-native .finance-budget-adjust summary::-webkit-details-marker{display:none;}
+.om-home .finance-native .finance-budget-form{margin:10px 0 0;}
+.om-home .finance-native .finance-chart-section{margin-top:22px;}
+/* Eliminate the old payment row layout without affecting other pages. */
+@media(max-width:760px){.om-home .om-payment-card{flex-basis:190px;}}
+@media(max-width:520px){.om-home .om-payment-card{flex-basis:calc(50% - 5px);padding:13px 12px;min-height:155px;}
+  .om-home .om-payment-name{font-size:13px;}.om-home .om-payment-amount{font-size:18px;}
+  .om-home .om-payment-meta{font-size:11px;}}
+@media(max-width:370px){.om-home .om-payment-card{flex-basis:100%;min-height:135px;}}
+
+/* Homepage payments: four-card, infinitely looping horizontal carousel. */
+.om-home .om-payment-group-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px;min-height:32px;}
+.om-home .om-payment-group-heading h3{margin:0;}
+.om-home .om-carousel-controls{display:flex;align-items:center;gap:6px;}
+.om-home .om-carousel-position{font-size:12px;color:var(--om-muted);min-width:42px;text-align:right;margin-right:6px;font-variant-numeric:tabular-nums;}
+.om-home .om-carousel-arrow{width:31px;height:31px;border:1px solid var(--om-line);border-radius:9px;background:var(--om-bg);color:var(--om-text);font-size:22px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.om-home .om-carousel-arrow:hover,.om-home .om-carousel-arrow:focus-visible{border-color:var(--om-accent);color:var(--om-accent);}
+.om-home .om-carousel-controls[hidden]{display:none!important;}
+.om-home .om-carousel-viewport{overflow:hidden;max-width:100%;touch-action:pan-y;overscroll-behavior-inline:contain;}
+.om-home .om-carousel-track{display:flex;flex-wrap:nowrap;gap:12px;align-items:stretch;min-width:0;will-change:transform;}
+.om-home .om-carousel-track>.om-payment-card{box-sizing:border-box;min-width:0;flex:1 1 0;}
+.om-home .om-payment-carousel.is-looping .om-carousel-track>.om-payment-card{flex:0 0 calc((100% - 36px)/4);}
+.om-home .om-payment-carousel.is-dragging .om-carousel-track{cursor:grabbing;}
+.om-home .om-payment-carousel.is-dragging .om-payment-card{user-select:none;}
+.om-home .om-carousel-viewport:focus-visible{outline:2px solid var(--om-accent);outline-offset:-2px;border-radius:8px;}
+@media(max-width:900px){
+  .om-home .om-payment-carousel.is-looping .om-carousel-track>.om-payment-card{flex-basis:calc((100% - 12px)/2);}
+}
+@media(max-width:520px){
+  .om-home .om-payment-carousel.is-looping .om-carousel-track>.om-payment-card{flex-basis:100%;}
+}
+@media(prefers-reduced-motion:reduce){
+  .om-home .om-carousel-track{scroll-behavior:auto;}
+}

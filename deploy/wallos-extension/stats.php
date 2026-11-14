@@ -47,7 +47,7 @@ $potentialMonthlySavings = get_upcoming_cancellations_monthly_value($upcomingCan
 
 ?>
 <section class="contain">
-<p class="finance-hint" style="margin-top:12px">页面上方为 Finance 真实财务分析；下方保留 Wallos 原生订阅统计，其筛选与订阅预算沿用 Wallos 设置，不与日常消费预算合并。</p>
+
 <?php
 try {
     $financeModel=finance_unified_model($db,(int)$userId,$financeMonthKey);
@@ -70,9 +70,36 @@ try {
     <?php
   }
   ?>
+  <div class="om-stat-extra" data-om-stat-extra hidden>
+    <section class="stats-section om-subscription-insights" aria-labelledby="om-subscription-insights-heading">
+      <h2 id="om-subscription-insights-heading">订阅结构</h2>
+      <div class="finance-metric-grid">
+        <div class="finance-metric">
+          <small>在用周期订阅</small>
+          <strong><?= (int)$activeSubscriptions ?> 项</strong>
+        </div>
+        <div class="finance-metric">
+          <small>平均每项月费</small>
+          <strong><?= CurrencyFormatter::format($averageSubscriptionCost, $code) ?></strong>
+        </div>
+        <div class="finance-metric">
+          <small>最高月费订阅</small>
+          <strong><?= !empty($mostExpensiveSubscription['name'])
+            ? CurrencyFormatter::format($mostExpensiveSubscription['price'], $code)
+            : '—' ?></strong>
+          <?php if (!empty($mostExpensiveSubscription['name'])): ?>
+            <span><?= htmlspecialchars((string)$mostExpensiveSubscription['name'], ENT_QUOTES, 'UTF-8') ?></span>
+          <?php endif; ?>
+        </div>
+        <div class="finance-metric">
+          <small>需手动续费</small>
+          <strong><?= (int)$manualRenewalsCount ?> 项</strong>
+        </div>
+      </div>
+    </section>
   <div class="split-header">
     <h2>
-      <?= translate('general_statistics', $i18n) ?> <span class="header-subtitle"><?= $statsSubtitle ?></span>
+      订阅详细统计 <span class="header-subtitle"><?= $statsSubtitle ?></span>
     </h2>
     <div class="filtermenu">
       <button class="button secondary-button" id="filtermenu-button" title="<?= translate("filter", $i18n) ?>">
@@ -240,7 +267,7 @@ try {
   $showHistorySection = $totalLifetimeSpend > 0 || $oldestSubscription !== null || $averageSubscriptionAge !== null || $showLifetimeGraph || $showYearlyNewGraph;
   ?>
 
-  <section class="stats-section">
+  <section class="stats-section om-native-duplicated">
     <h2><?= translate('overview', $i18n) ?></h2>
     <div class="statistics">
       <div class="statistic">
@@ -721,6 +748,7 @@ try {
   }
   ?>
 
+  </div>
 </section>
 <?php
 if ($showAnyGraph) {

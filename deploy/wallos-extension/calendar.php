@@ -117,7 +117,7 @@ if ($weekStartsSunday) {
 }
 ?>
 
-<section class="contain">
+<section class="contain om-calendar-page">
 <?php
 if($financeModel!==null)finance_render_panel('calendar',$financeModel);
 else echo '<section class="finance-unavailable">Finance 交易暂不可用，原有订阅日历继续显示。</section>';
@@ -173,7 +173,7 @@ else echo '<section class="finance-unavailable">Finance 交易暂不可用，原
         </div>
     </div>
   </div>
-  <div>
+  <div class="om-calendar-main">
     <?php
     $daysInMonth = cal_days_in_month(CAL_GREGORIAN, $calendarMonth, $calendarYear);
     $firstDay = mktime(0, 0, 0, $calendarMonth, 1, $calendarYear);
