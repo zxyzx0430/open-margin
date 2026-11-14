@@ -5,7 +5,6 @@ require_once 'includes/header.php';
 
 require_once 'includes/getdbkeys.php';
 require_once 'includes/logo_theme_variant.php';
-require_once 'includes/upcoming_payments.php';
 require_once 'includes/upcoming_cancellations.php';
 
 function formatPrice($price, $currencyCode, $currencies)
@@ -69,29 +68,20 @@ function formatDate($date, $lang = 'en')
     return $formattedDate;
 }
 
-// Get the first name of the user
-$stmt = $db->prepare("SELECT username, firstname FROM user WHERE id = :userId");
-$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-$result = $stmt->execute();
-$user = $result->fetchArray(SQLITE3_ASSOC);
-$first_name = $user['firstname'] ?? $user['username'] ?? '';
-
-// Fetch the enabled subscriptions up for payment using the user's dashboard setting.
-$upcomingSubscriptions = get_upcoming_payments(
-    $db,
-    $userId,
-    $settings['upcoming_payments_limit'] ?? 3
-);
-
-// Fetch enabled subscriptions with manual renewal that are overdue
-$stmt = $db->prepare("SELECT id, logo, logo_text_color, logo_variant, name, price, currency_id, next_payment, inactive, auto_renew FROM subscriptions WHERE user_id = :userId AND next_payment < date('now') AND auto_renew = 0 AND inactive = 0 AND cycle != 5 ORDER BY next_payment ASC");
-$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-$result = $stmt->execute();
-$overdueSubscriptions = [];
-while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-    $overdueSubscriptions[] = $row;
+// All active scheduled payments, earliest due first. Do not cap the homepage at three.
+$upcomingSubscriptions = [];
+$paymentQuery = $db->prepare("SELECT s.id, s.name, s.price, s.currency_id, s.next_payment,
+        s.cycle, s.frequency, s.auto_renew, pm.name AS payment_method_name
+    FROM subscriptions s
+    LEFT JOIN payment_methods pm ON pm.id = s.payment_method_id AND pm.user_id = s.user_id
+    WHERE s.user_id = :owner AND s.inactive = 0
+        AND s.next_payment IS NOT NULL AND s.next_payment <> ''
+    ORDER BY date(s.next_payment) ASC, s.id ASC");
+$paymentQuery->bindValue(':owner', $userId, SQLITE3_INTEGER);
+$paymentRows = $paymentQuery->execute();
+while ($paymentRows && ($payment = $paymentRows->fetchArray(SQLITE3_ASSOC))) {
+    $upcomingSubscriptions[] = $payment;
 }
-$hasOverdueSubscriptions = !empty($overdueSubscriptions);
 
 // Fetch the subscriptions whose cancellation reminder is still ahead (shared with
 // the statistics page, so both stay in step).
@@ -103,18 +93,10 @@ require_once 'finance-unified-common.php';
 $financeMonthKey=finance_active_month();
 
 
-// Get AI Recommendations for user
-$stmt = $db->prepare("SELECT * FROM ai_recommendations WHERE user_id = :userId");
-$stmt->bindValue(':userId', $userId, SQLITE3_INTEGER);
-$result = $stmt->execute();
-$aiRecommendations = [];
-while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-    $aiRecommendations[] = $row;
-}
-
 ?>
 
-<section class="contain dashboard">
+<section class="contain dashboard om-home">
+<link rel="stylesheet" href="dashboard-refresh.css?v=<?=filemtime(__DIR__."/dashboard-refresh.css")?>">
     <?php
         if ($isAdmin && $settings['update_notification']) {
             if (!is_null($settings['latest_version'])) {
@@ -153,369 +135,180 @@ while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
             <?php
         }
     ?>
-    <h1><?= translate('hello', $i18n) ?> <?= htmlspecialchars($first_name) ?></h1>
+
+
+<?php ob_start(); ?>
+    <section class="om-home-section om-payments" aria-labelledby="om-upcoming-title">
+        <div class="om-section-heading">
+            <div>
+                <h2 id="om-upcoming-title">即将到期的付款</h2>
+                <span><?= count($upcomingSubscriptions) ?> 项</span>
+            </div>
+            <a href="subscriptions.php">管理订阅</a>
+        </div>
+        <?php
+        $paymentMonth = date('Y-m');
+        $groupedPayments = ['current' => [], 'future' => []];
+        foreach ($upcomingSubscriptions as $payment) {
+            $dueMonth = substr((string)$payment['next_payment'], 0, 7);
+            $groupKey = $dueMonth <= $paymentMonth ? 'current' : 'future';
+            $groupedPayments[$groupKey][] = $payment;
+        }
+        ?>
+        <?php if (!$upcomingSubscriptions): ?>
+            <p class="om-empty">暂无付款计划</p>
+        <?php else: ?>
+            <?php foreach ($groupedPayments as $groupKey => $groupItems):
+                if (!$groupItems) continue;
+                $groupTitle = $groupKey === 'current' ? '本月' : '未来';
+            ?>
+            <div class="om-payment-group">
+                <div class="om-payment-group-heading">
+                    <h3><?= $groupTitle ?></h3>
+                    <div class="om-carousel-controls" data-om-carousel-controls hidden>
+                        <span class="om-carousel-position" data-om-carousel-position aria-live="polite"></span>
+                        <button type="button" class="om-carousel-arrow" data-om-prev aria-label="<?= $groupTitle ?>付款：上一项">‹</button>
+                        <button type="button" class="om-carousel-arrow" data-om-next aria-label="<?= $groupTitle ?>付款：下一项">›</button>
+                    </div>
+                </div>
+                <div class="om-payment-carousel" data-om-carousel aria-label="<?= $groupTitle ?>付款" data-total="<?= count($groupItems) ?>">
+                  <div class="om-carousel-viewport" data-om-carousel-viewport role="region" aria-roledescription="轮播" aria-label="<?= $groupTitle ?>付款项目">
+                    <div class="om-payment-grid om-carousel-track" data-om-carousel-track>
+                    <?php foreach ($groupItems as $subscription):
+                        $due = (string)$subscription['next_payment'];
+                        $dueStamp = strtotime($due);
+                        $overdue = $due < date('Y-m-d');
+                        $dueText = $dueStamp === false ? $due : date('Y年n月j日', $dueStamp);
+                        $currencyId = (int)$subscription['currency_id'];
+                        $currencyCode = $currencies[$currencyId]['code'] ?? 'CNY';
+                        $priceText = formatPrice((float)$subscription['price'], $currencyCode, $currencies);
+                        $cycle = (int)$subscription['cycle'];
+                        $frequency = max(1, (int)$subscription['frequency']);
+                        $cycleLabel = $cycle === 1 ? '天' : ($cycle === 2 ? '周' :
+                            ($cycle === 3 ? '月' : ($cycle === 4 ? '年' : '次')));
+                        $cycleText = $cycle === 5 ? '一次性' :
+                            (($frequency === 1 ? '每' : '每'.$frequency).$cycleLabel);
+                        if ($cycle !== 5 && !(int)$subscription['auto_renew']) {
+                            $cycleText .= ' · 手动续费';
+                        }
+                        $method = trim((string)($subscription['payment_method_name'] ?? ''));
+                        if ($method === 'Credit Card') $method = '银行卡';
+                        if ($method === 'WeChat') $method = '微信支付';
+                        if ($method === 'AliPay') $method = '支付宝';
+                        if ($method === '未指定（待确认）') $method = '未指定';
+                    ?>
+                    <button type="button" class="om-payment-card"
+                        onclick="showSubscriptionDetails(event, <?= (int)$subscription['id'] ?>)"
+                        data-id="<?= (int)$subscription['id'] ?>">
+                        <span class="om-payment-card-top">
+                            <span class="om-payment-date"><?= htmlspecialchars($dueText, ENT_QUOTES, 'UTF-8') ?></span>
+                            <?php if ($overdue): ?><em class="om-due-late">已逾期</em><?php endif; ?>
+                        </span>
+                        <strong class="om-payment-name"><?= htmlspecialchars((string)$subscription['name'], ENT_QUOTES, 'UTF-8') ?></strong>
+                        <strong class="om-payment-amount"><?= htmlspecialchars($priceText, ENT_QUOTES, 'UTF-8') ?></strong>
+                        <span class="om-payment-meta"><?= htmlspecialchars($cycleText, ENT_QUOTES, 'UTF-8') ?><?= $method !== '' ? ' · '.htmlspecialchars($method, ENT_QUOTES, 'UTF-8') : '' ?></span>
+                    </button>
+                    <?php endforeach; ?>
+                    </div>
+                  </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </section>
+<?php $omPaymentsHtml = ob_get_clean(); ?>
 
 <?php
 try {
     $financeModel=finance_unified_model($db,(int)$userId,$financeMonthKey);
-    finance_render_panel('dashboard',$financeModel);
+    finance_render_panel('dashboard',$financeModel,$omPaymentsHtml);
 } catch(Throwable $e) {
     error_log('[Finance unified] page render unavailable '.get_class($e));
     echo '<section class="finance-unavailable">Finance 实际消费暂时不可用，请刷新后重试；此处不把错误显示为零元。</section>';
+    echo $omPaymentsHtml;
 }
 ?>
 
 
 
-    <?php
-    // If there are overdue subscriptions, display them
-    if ($hasOverdueSubscriptions) {
-        ?>
-        <div class="overdue-subscriptions">
-            <h2><?= translate('overdue_renewals', $i18n) ?></h2>
-            <div class="dashboard-subscriptions-container">
-                <div class="dashboard-subscriptions-list">
-                    <?php
 
-                    foreach ($overdueSubscriptions as $subscription) {
-                        $subscriptionName = htmlspecialchars($subscription['name']);
-                        $subscriptionPrice = $subscription['price'];
-                        $subscriptionCurrency = $subscription['currency_id'];
-                        $subscriptionNextPayment = $subscription['next_payment'];
-                        $subscriptionDisplayNextPayment = formatDate($subscriptionNextPayment, $lang);
-                        $subscriptionDisplayPrice = formatPrice($subscriptionPrice, $currencies[$subscriptionCurrency]['code'], $currencies);
 
-                        ?>
-                        <div class="subscription-item" onClick="showSubscriptionDetails(event, <?= $subscription['id'] ?>)" data-id="<?= $subscription['id'] ?>">
-                            <?php
-                            if (empty($subscription['logo'])) {
-                                ?>
-                                <p class="subscription-item-title"><?= $subscriptionName ?></p>
-                                <?php
-                            } else {
-                                $subscriptionLogoSrc = "images/uploads/logos/" . $subscription['logo'];
-                                $subscriptionLogoVariantSrc = !empty($subscription['logo_variant']) ? "images/uploads/logos/" . $subscription['logo_variant'] : null;
-                                echo renderThemedLogoImg($subscriptionLogoSrc, $subscriptionLogoVariantSrc, $subscription['logo_text_color'] ?? null, 'subscription-item-logo', 'alt="' . $subscriptionName . ' logo" title="' . $subscriptionName . '"');
-                            }
-                            ?>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-date"> <?= $subscriptionDisplayNextPayment ?>
-                                </p>
-                                <p class="subscription-item-price"> <?= $subscriptionDisplayPrice ?></p>
-                            </div>
-                        </div>
-                        <?php
-                    }
-                    ?>
-                </div>
+
+    <section class="om-home-section om-subscription-overview" aria-labelledby="om-subscription-title">
+        <div class="om-section-heading">
+            <h2 id="om-subscription-title">我的订阅与预算</h2>
+            <a href="subscriptions.php">查看全部订阅</a>
+        </div>
+        <div class="om-summary-grid">
+            <div class="om-summary-card">
+                <small>本月实际订阅支出</small>
+                <strong><?= isset($financeModel) ? finance_money($financeModel['actual_subscription_cents']) : '—' ?></strong>
+            </div>
+            <div class="om-summary-card">
+                <small>本月计划到期</small>
+                <strong><?= isset($financeModel) && $financeModel['planned_subscription_cents'] !== null ? finance_money($financeModel['planned_subscription_cents']) : '—' ?></strong>
+            </div>
+            <div class="om-summary-card">
+                <small>在用订阅</small>
+                <strong><?= (int)($activeSubscriptions ?? 0) ?></strong>
+            </div>
+            <div class="om-summary-card">
+                <small>折合月均成本</small>
+                <strong><?= isset($totalCostPerMonth) ? CurrencyFormatter::format($totalCostPerMonth, $currencies[$userData['main_currency']]['code']) : '—' ?></strong>
             </div>
         </div>
-        <?php
-    }
-    ?>
-
-    <div class="upcoming-subscriptions">
-        <h2><?= translate('upcoming_payments', $i18n) ?></h2>
-        <div class="dashboard-subscriptions-container">
-            <div class="dashboard-subscriptions-list">
+        <div class="om-subscription-budget">
+            <div class="om-budget-head">
+                <div>
+                    <h3>订阅预算</h3>
+                    <span><?= isset($monthlyBudget) && $monthlyBudget > 0 ? '已设置' : '未设置' ?></span>
+                </div>
+                <strong><?= isset($monthlyBudget) && $monthlyBudget > 0 ? formatPrice($monthlyBudget, $currencies[$userData['main_currency']]['code'], $currencies) : '—' ?></strong>
+            </div>
+            <?php if (isset($monthlyBudget) && $monthlyBudget > 0): ?>
                 <?php
-                if (empty($upcomingSubscriptions)) {
-                    ?>
-                    <p><?= translate('no_upcoming_payments', $i18n) ?></p>
-                    <?php
-                } else {
-                    foreach ($upcomingSubscriptions as $subscription) {
-                        $subscriptionName = htmlspecialchars($subscription['name']);
-                        $subscriptionPrice = $subscription['price'];
-                        $subscriptionCurrency = $subscription['currency_id'];
-                        $subscriptionNextPayment = $subscription['next_payment'];
-                        $subscriptionDisplayNextPayment = formatDate($subscriptionNextPayment, $lang);
-                        $subscriptionDisplayPrice = formatPrice($subscriptionPrice, $currencies[$subscriptionCurrency]['code'], $currencies);
-
-                        ?>
-                        <div class="subscription-item" onClick="showSubscriptionDetails(event, <?= $subscription['id'] ?>)" data-id="<?= $subscription['id'] ?>">
-                            <?php
-                            if (empty($subscription['logo'])) {
-                                ?>
-                                <p class="subscription-item-title"><?= $subscriptionName ?></p>
-                                <?php
-                            } else {
-                                $subscriptionLogoSrc = "images/uploads/logos/" . $subscription['logo'];
-                                $subscriptionLogoVariantSrc = !empty($subscription['logo_variant']) ? "images/uploads/logos/" . $subscription['logo_variant'] : null;
-                                echo renderThemedLogoImg($subscriptionLogoSrc, $subscriptionLogoVariantSrc, $subscription['logo_text_color'] ?? null, 'subscription-item-logo', 'alt="' . $subscriptionName . ' logo" title="' . $subscriptionName . '"');
-                            }
-                            ?>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-date"> <?= $subscriptionDisplayNextPayment ?></p>
-                                <p class="subscription-item-price"> <?= $subscriptionDisplayPrice ?></p>
-                            </div>
-                        </div>
-                        <?php
-                    }
-                }
+                    $usedPct = isset($totalCostPerMonth) ? (float)$totalCostPerMonth / $monthlyBudget * 100 : 0;
+                    $overBudget = isset($totalCostPerMonth) ? max(0, $totalCostPerMonth - $monthlyBudget) : 0;
                 ?>
+                <div class="om-budget-track<?= $overBudget > 0 ? ' is-over-budget' : '' ?>" role="progressbar" aria-label="订阅预算使用率" aria-valuenow="<?= min(100, max(0, round($usedPct, 1))) ?>" aria-valuetext="已用 <?= number_format($usedPct, 1) ?>%" aria-valuemin="0" aria-valuemax="100">
+                    <span style="width:<?= min(100, max(0, $usedPct)) ?>%"></span>
+                </div>
+                <div class="om-budget-foot">
+                    <span>已用 <?= number_format($usedPct, 1) ?>%</span>
+                    <span class="<?= $overBudget > 0 ? 'om-budget-over' : '' ?>">
+                        <?= $overBudget > 0
+                            ? '超出 '.formatPrice($overBudget, $currencies[$userData['main_currency']]['code'], $currencies)
+                            : '剩余 '.(isset($monthlyBudgetLeft) ? formatPrice($monthlyBudgetLeft, $currencies[$userData['main_currency']]['code'], $currencies) : '—') ?>
+                    </span>
+                </div>
+            <?php endif; ?>
+            <div class="om-budget-detail">
+                <?php if (isset($totalCostPerYear)): ?>
+                    <span>全年折合 <?= CurrencyFormatter::format($totalCostPerYear, $currencies[$userData['main_currency']]['code']) ?></span>
+                <?php endif; ?>
+                <?php if (isset($inactiveSubscriptions) && $inactiveSubscriptions > 0): ?>
+                    <span>已停用 <?= (int)$inactiveSubscriptions ?> 项<?php if (isset($totalSavingsPerMonth) && $totalSavingsPerMonth > 0): ?> · 每月节省 <?= CurrencyFormatter::format($totalSavingsPerMonth, $currencies[$userData['main_currency']]['code']) ?><?php endif; ?></span>
+                <?php endif; ?>
+                <?php if (isset($periodBudget) && $periodBudget > 0): ?>
+                    <span>本周期预算 <?= formatPrice($periodBudget, $currencies[$userData['main_currency']]['code'], $currencies) ?></span>
+                    <?php if (isset($amountNeededThisPeriod)): ?>
+                    <span>本周期待付 <?= CurrencyFormatter::format($amountNeededThisPeriod, $currencies[$userData['main_currency']]['code']) ?></span>
+                    <?php endif; ?>
+                <?php endif; ?>
             </div>
         </div>
-
-        <?php if ($hasUpcomingCancellations) { ?>
-            <div class="cancellation-subscriptions">
-                <h2><?= translate('upcoming_cancellations', $i18n) ?></h2>
-                <div class="dashboard-subscriptions-container">
-                    <div class="dashboard-subscriptions-list">
-                        <?php
-                        foreach ($upcomingCancellations as $subscription) {
-                            $subscriptionName = htmlspecialchars($subscription['name']);
-                            $subscriptionPrice = $subscription['price'];
-                            $subscriptionCurrency = $subscription['currency_id'];
-                            $subscriptionDisplayCancellationDate = formatDate($subscription['cancellation_date'], $lang);
-                            $subscriptionDisplayPrice = formatPrice($subscriptionPrice, $currencies[$subscriptionCurrency]['code'], $currencies);
-
-                            ?>
-                            <div class="subscription-item" onClick="showSubscriptionDetails(event, <?= $subscription['id'] ?>)" data-id="<?= $subscription['id'] ?>">
-                                <?php
-                                if (empty($subscription['logo'])) {
-                                    ?>
-                                    <p class="subscription-item-title"><?= $subscriptionName ?></p>
-                                    <?php
-                                } else {
-                                    $subscriptionLogoSrc = "images/uploads/logos/" . $subscription['logo'];
-                                    $subscriptionLogoVariantSrc = !empty($subscription['logo_variant']) ? "images/uploads/logos/" . $subscription['logo_variant'] : null;
-                                    echo renderThemedLogoImg($subscriptionLogoSrc, $subscriptionLogoVariantSrc, $subscription['logo_text_color'] ?? null, 'subscription-item-logo', 'alt="' . $subscriptionName . ' logo" title="' . $subscriptionName . '"');
-                                }
-                                ?>
-                                <div class="subscription-item-info">
-                                    <p class="subscription-item-date"> <?= $subscriptionDisplayCancellationDate ?></p>
-                                    <p class="subscription-item-price"> <?= $subscriptionDisplayPrice ?></p>
-                                </div>
-                            </div>
-                            <?php
-                        }
-                        ?>
-                    </div>
-                </div>
+        <?php if ($hasUpcomingCancellations): ?>
+            <div class="om-cancellations">
+                <h3>即将取消</h3>
+                <?php foreach ($upcomingCancellations as $item): ?>
+                    <button type="button" onclick="showSubscriptionDetails(event, <?= (int)$item['id'] ?>)">
+                        <?= htmlspecialchars((string)$item['name'], ENT_QUOTES, 'UTF-8') ?>
+                        <span><?= htmlspecialchars((string)$item['cancellation_date'], ENT_QUOTES, 'UTF-8') ?></span>
+                    </button>
+                <?php endforeach; ?>
             </div>
-        <?php } ?>
-
-        <?php if (!empty($aiRecommendations)) { ?>
-            <div class="ai-recommendations">
-                <h2><?= translate('ai_recommendations', $i18n) ?></h2>
-                <div class="ai-recommendations-container">
-                    <ul class="ai-recommendations-list">
-                        <?php
-
-                        foreach ($aiRecommendations as $key => $recommendation) { ?>
-                            <li class="ai-recommendation-item" data-id="<?= $recommendation['id'] ?>">
-                                <div class="ai-recommendation-header">
-                                    <h3>
-                                        <span><?= ($key + 1) . ". " ?></span>
-                                        <?= htmlspecialchars($recommendation['title']) ?>
-                                    </h3>
-                                    <span class="item-arrow-down fa fa-caret-down"></span>
-                                </div>
-                                <p class="collapsible"><?= htmlspecialchars($recommendation['description']) ?></p>
-                                <p class="ai-recommendation-savings">
-                                    <?= htmlspecialchars($recommendation['savings']) ?>
-                                    <span>
-                                        <a href="#" class="delete-ai-recommendation" title="<?= translate('delete', $i18n) ?>">
-                                            <i class="fa fa-trash"></i>
-                                        </a>
-                                    </span>
-                                </p>
-                            </li>
-                        <?php } ?>
-                    </ul>
-                </div>
-            </div>
-
-        <?php } ?>
-
-        <?php if (isset($totalCostPerMonth)) { ?>
-            <div class="budget-subscriptions">
-                <h2>订阅预算 · Wallos</h2>
-                <div class="dashboard-subscriptions-container">
-                    <div class="dashboard-subscriptions-list">
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate("monthly_cost", $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= CurrencyFormatter::format($totalCostPerMonth, $currencies[$userData['main_currency']]['code']) ?>
-                                </p>
-                            </div>
-                        </div>
-                        <?php if (isset($monthlyBudget) && $monthlyBudget > 0) { ?>
-                            <div class="subscription-item thin">
-                                <p class="subscription-item-title"><?= translate("budget", $i18n) ?></p>
-                                <div class="subscription-item-info">
-                                    <p class="subscription-item-value">
-                                        <?= formatPrice($monthlyBudget, $currencies[$userData['main_currency']]['code'], $currencies) ?>
-                                    </p>
-                                </div>
-                            </div>
-                            <?php if (isset($monthlyBudgetUsed)) { ?>
-                                <div class="subscription-item thin">
-                                    <p class="subscription-item-title"><?= translate("budget_used", $i18n) ?></p>
-                                    <div class="subscription-item-info">
-                                        <p class="subscription-item-value">
-                                            <?= number_format($monthlyBudgetUsed, 2) ?>%
-                                        </p>
-                                    </div>
-                                </div>
-                            <?php } ?>
-                            <div class="subscription-item thin">
-                                <p class="subscription-item-title"><?= translate("budget_remaining", $i18n) ?></p>
-                                <div class="subscription-item-info">
-                                    <p class="subscription-item-value">
-                                        <?= formatPrice($monthlyBudgetLeft, $currencies[$userData['main_currency']]['code'], $currencies) ?>
-                                    </p>
-                                </div>
-                            </div>
-                            <?php if (isset($monthlyOverBudgetAmount) && $monthlyOverBudgetAmount > 0) { ?>
-                                <div class="subscription-item thin">
-                                    <p class="subscription-item-title"><?= translate("over_budget", $i18n) ?></p>
-                                    <div class="subscription-item-info">
-                                        <p class="subscription-item-value">
-                                            <?= formatPrice($monthlyOverBudgetAmount, $currencies[$userData['main_currency']]['code'], $currencies) ?>
-                                        </p>
-                                    </div>
-                                </div>
-                            <?php } ?>
-                        <?php } ?>
-                    </div>
-                </div>
-            </div>
-        <?php } ?>
-
-        <?php if (isset($periodBudget) && $periodBudget > 0) { ?>
-            <div class="budget-subscriptions">
-                <h2>周期订阅预算 · Wallos</h2>
-                <?php if (isset($budgetPeriodLabel)) { ?>
-                    <p class="header-subtitle"><?= translate('current_period', $i18n) ?>: <?= htmlspecialchars($budgetPeriodLabel, ENT_QUOTES, 'UTF-8') ?></p>
-                <?php } ?>
-                <div class="dashboard-subscriptions-container">
-                    <div class="dashboard-subscriptions-list">
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate("amount_needed_this_period", $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= CurrencyFormatter::format($amountNeededThisPeriod, $currencies[$userData['main_currency']]['code']) ?>
-                                </p>
-                            </div>
-                        </div>
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate("budget", $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= formatPrice($periodBudget, $currencies[$userData['main_currency']]['code'], $currencies) ?>
-                                </p>
-                            </div>
-                        </div>
-                        <?php if (isset($periodBudgetUsed)) { ?>
-                            <div class="subscription-item thin">
-                                <p class="subscription-item-title"><?= translate("budget_used", $i18n) ?></p>
-                                <div class="subscription-item-info">
-                                    <p class="subscription-item-value">
-                                        <?= number_format($periodBudgetUsed, 2) ?>%
-                                    </p>
-                                </div>
-                            </div>
-                        <?php } ?>
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate("budget_remaining", $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= formatPrice($periodBudgetLeft, $currencies[$userData['main_currency']]['code'], $currencies) ?>
-                                </p>
-                            </div>
-                        </div>
-                        <?php if (isset($periodOverBudgetAmount) && $periodOverBudgetAmount > 0) { ?>
-                            <div class="subscription-item thin">
-                                <p class="subscription-item-title"><?= translate("over_budget", $i18n) ?></p>
-                                <div class="subscription-item-info">
-                                    <p class="subscription-item-value">
-                                        <?= formatPrice($periodOverBudgetAmount, $currencies[$userData['main_currency']]['code'], $currencies) ?>
-                                    </p>
-                                </div>
-                            </div>
-                        <?php } ?>
-                    </div>
-                </div>
-            </div>
-        <?php } ?>
-    </div>
-
-    <?php if (isset($activeSubscriptions) && $activeSubscriptions > 0) { ?>
-        <div class="current-subscriptions">
-            <h2><?= translate('your_subscriptions', $i18n) ?></h2>
-            <div class="dashboard-subscriptions-container">
-                <div class="dashboard-subscriptions-list">
-                    <div class="subscription-item thin">
-                        <p class="subscription-item-title"><?= translate('active_subscriptions', $i18n) ?></p>
-                        <div class="subscription-item-info">
-                            <p class="subscription-item-value"><?= $activeSubscriptions ?></p>
-                        </div>
-                    </div>
-
-                    <?php if (isset($totalCostPerMonth)) { ?>
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate('monthly_cost', $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= CurrencyFormatter::format($totalCostPerMonth, $currencies[$userData['main_currency']]['code']) ?>
-                                </p>
-                            </div>
-                        </div>
-                    <?php } ?>
-
-                    <?php if (isset($totalCostPerYear)) { ?>
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate('yearly_cost', $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= CurrencyFormatter::format($totalCostPerYear, $currencies[$userData['main_currency']]['code']) ?>
-                                </p>
-                            </div>
-                        </div>
-                    <?php } ?>
-                </div>
-            </div>
-        </div>
-    <?php } ?>
-
-    <?php if (isset($inactiveSubscriptions) && $inactiveSubscriptions > 0) { ?>
-        <div class="savings-subscriptions">
-            <h2><?= translate('your_savings', $i18n) ?></h2>
-            <div class="dashboard-subscriptions-container">
-                <div class="dashboard-subscriptions-list">
-                    <div class="subscription-item thin">
-                        <p class="subscription-item-title"><?= translate('inactive_subscriptions', $i18n) ?></p>
-                        <div class="subscription-item-info">
-                            <p class="subscription-item-value"><?= $inactiveSubscriptions ?></p>
-                        </div>
-                    </div>
-
-                    <?php if (isset($totalSavingsPerMonth) && $totalSavingsPerMonth > 0) { ?>
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate('monthly_savings', $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= CurrencyFormatter::format($totalSavingsPerMonth, $currencies[$userData['main_currency']]['code']) ?>
-                                </p>
-                            </div>
-                        </div>
-
-                        <div class="subscription-item thin">
-                            <p class="subscription-item-title"><?= translate('yearly_savings', $i18n) ?></p>
-                            <div class="subscription-item-info">
-                                <p class="subscription-item-value">
-                                    <?= CurrencyFormatter::format($totalSavingsPerMonth * 12, $currencies[$userData['main_currency']]['code']) ?>
-                                </p>
-                            </div>
-                        </div>
-                    <?php } ?>
-                </div>
-            </div>
-        </div>
-    <?php } ?>
+        <?php endif; ?>
+    </section>
 
 </section>
 
@@ -536,6 +329,7 @@ require_once 'includes/subscription_details_popup.php';
 
 <script src="scripts/libs/apexcharts.min.js"></script>
 <script src="finance-unified.js?v=<?=filemtime(__DIR__."/finance-unified.js")?>"></script>
+<script src="dashboard-carousel.js?v=<?=filemtime(__DIR__."/dashboard-carousel.js")?>" defer></script>
 <?php
 require_once 'includes/footer.php';
 ?>
