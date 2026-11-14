@@ -60,6 +60,11 @@ data class TransactionEntity(
     // Local-only link to a suspected duplicate. Never uploaded. Cleared when
     // the user confirms both records are real, or the row is deleted.
     val duplicateOfId: Long? = null,
+
+    // Local-only merchant presentation metadata. The key points at a catalog
+    // entry; the path is reserved for a cropped local icon. Neither is uploaded.
+    val merchantIconKey: String? = null,
+    val merchantIconPath: String? = null,
 )
 
 // 收入还是支出
