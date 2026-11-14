@@ -26,14 +26,6 @@ class SettingsViewModel @Inject constructor(
         prefs.observeSuccessNotificationsEnabled()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
-    val successPageCaptureEnabled: StateFlow<Boolean> =
-        prefs.observeSuccessPageCaptureEnabled()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
-    val compatibilityAccessibilityEnabled: StateFlow<Boolean> =
-        prefs.observeCompatibilityAccessibilityEnabled()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     fun setKeepAlive(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setKeepAliveEnabled(enabled)
@@ -44,18 +36,6 @@ class SettingsViewModel @Inject constructor(
     fun setSuccessNotifications(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setSuccessNotificationsEnabled(enabled)
-        }
-    }
-
-    fun setSuccessPageCapture(enabled: Boolean) {
-        viewModelScope.launch {
-            prefs.setSuccessPageCaptureEnabled(enabled)
-        }
-    }
-
-    fun setCompatibilityAccessibility(enabled: Boolean) {
-        viewModelScope.launch {
-            prefs.setCompatibilityAccessibilityEnabled(enabled)
         }
     }
 }
