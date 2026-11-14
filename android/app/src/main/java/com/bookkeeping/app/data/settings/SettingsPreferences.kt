@@ -39,6 +39,37 @@ class SettingsPreferences @Inject constructor(
     suspend fun successNotificationsEnabledNow(): Boolean =
         context.settingsDataStore.data.first()[KEY_SUCCESS_NOTIFICATIONS] ?: true
 
+    /** Optional success-page capture. It is intentionally off until the user opts in. */
+    fun observeSuccessPageCaptureEnabled(): Flow<Boolean> =
+        context.settingsDataStore.data.map { it[KEY_SUCCESS_PAGE_CAPTURE] ?: false }
+
+    suspend fun setSuccessPageCaptureEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[KEY_SUCCESS_PAGE_CAPTURE] = enabled }
+    }
+
+    suspend fun successPageCaptureEnabledNow(): Boolean =
+        context.settingsDataStore.data.first()[KEY_SUCCESS_PAGE_CAPTURE] ?: false
+
+    /** The compatibility accessibility entry is separately opt-in. */
+    fun observeCompatibilityAccessibilityEnabled(): Flow<Boolean> =
+        context.settingsDataStore.data.map { it[KEY_COMPATIBILITY_ACCESSIBILITY] ?: false }
+
+    suspend fun setCompatibilityAccessibilityEnabled(enabled: Boolean) {
+        context.settingsDataStore.edit { it[KEY_COMPATIBILITY_ACCESSIBILITY] = enabled }
+    }
+
+    suspend fun compatibilityAccessibilityEnabledNow(): Boolean =
+        context.settingsDataStore.data.first()[KEY_COMPATIBILITY_ACCESSIBILITY] ?: false
+
+    // Synchronous snapshot for service startup; the value is tiny and local.
+    fun successPageCaptureEnabledBlocking(): Boolean = runBlocking {
+        context.settingsDataStore.data.first()[KEY_SUCCESS_PAGE_CAPTURE] ?: false
+    }
+
+    fun compatibilityAccessibilityEnabledBlocking(): Boolean = runBlocking {
+        context.settingsDataStore.data.first()[KEY_COMPATIBILITY_ACCESSIBILITY] ?: false
+    }
+
     // 同步读快照值。在 MainActivity.onCreate 里只需要"当前值"决定是否启动 Service，
     // 不需要 observe；用 runBlocking 拿一下，DataStore 本地读很快不会卡 UI。
     fun keepAliveEnabledBlocking(): Boolean = runBlocking {
@@ -49,5 +80,9 @@ class SettingsPreferences @Inject constructor(
         private val KEY_KEEP_ALIVE = booleanPreferencesKey("keep_alive_enabled")
         private val KEY_SUCCESS_NOTIFICATIONS =
             booleanPreferencesKey("success_notifications_enabled")
+        private val KEY_SUCCESS_PAGE_CAPTURE =
+            booleanPreferencesKey("success_page_capture_enabled")
+        private val KEY_COMPATIBILITY_ACCESSIBILITY =
+            booleanPreferencesKey("compatibility_accessibility_enabled")
     }
 }

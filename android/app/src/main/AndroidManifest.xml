@@ -79,6 +79,21 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- 可选页面识别（成功页 OCR 补充）：独立于转账兜底服务；默认关闭。 -->
+        <!-- 用户可见名称必须是“清衡 · 页面识别”；兼容入口类名只是内部实现。 -->
+        <service
+            android:name="com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+            android:exported="true"
+            android:label="@string/page_recognition_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_page_recognition_config" />
+        </service>
+
         <!-- 短信广播接收器：抓取银行交易短信 -->
         <!-- SMS_RECEIVED 是允许的"豁免隐式广播"，可以静态注册 -->
         <receiver

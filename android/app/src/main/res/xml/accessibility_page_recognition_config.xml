@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Optional page-recognition service. It is separate from the existing
+  AccessibilityCaptureService so transfer/red-packet capture is unchanged.
+  - Only WeChat and Alipay are visible.
+  - Screenshot access is required for the optional success-page candidate;
+    no screenshot is taken until PaymentPageDetector accepts the page.
+  - isAccessibilityTool=false is intentional for the opt-in compatibility
+    entry and must be disclosed in the settings UI.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/page_recognition_service_description"
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="200"
+    android:packageNames="com.eg.android.AlipayGphone,com.tencent.mm" />
