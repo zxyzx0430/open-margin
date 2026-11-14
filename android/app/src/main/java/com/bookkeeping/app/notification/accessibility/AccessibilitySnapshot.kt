@@ -39,9 +39,21 @@ fun AccessibilityNodeInfo.toSnapshot(
             viewId = node.viewIdResourceName,
             className = node.className?.toString(),
             children = children,
+            bounds = boundsOf(node),
+            windowId = node.windowId,
+            editable = node.isEditable,
+            password = node.isPassword,
         )
     }
 
     val raw = convert(this, 0) ?: SnapshotNode()
     return ScreenSnapshot.of(packageName, capturedAtMs, raw)
+}
+
+private fun boundsOf(node: AccessibilityNodeInfo): SnapshotRect? {
+    val rect = android.graphics.Rect()
+    node.getBoundsInScreen(rect)
+    return if (rect.width() <= 0 || rect.height() <= 0) null else {
+        SnapshotRect(rect.left, rect.top, rect.right, rect.bottom)
+    }
 }

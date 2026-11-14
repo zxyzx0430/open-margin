@@ -7,6 +7,18 @@ package com.bookkeeping.app.notification.accessibility
 // Pure Kotlin model — no Android imports, fully JVM-testable.
 // Android 侧的转换在 AccessibilitySnapshot.kt。
 
+/** Bounds in screen pixels; kept Android-free so the snapshot stays JVM-testable. */
+data class SnapshotRect(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+) {
+    val width: Int get() = (right - left).coerceAtLeast(0)
+    val height: Int get() = (bottom - top).coerceAtLeast(0)
+    val isEmpty: Boolean get() = width <= 0 || height <= 0
+}
+
 /** 快照里的一个节点：只留识别需要的字段，不持有系统节点引用。 */
 data class SnapshotNode(
     val text: String = "",
@@ -14,6 +26,12 @@ data class SnapshotNode(
     val viewId: String? = null,
     val className: String? = null,
     val children: List<SnapshotNode> = emptyList(),
+    /** Screen-space bounds, used only for optional screenshot/icon cropping. */
+    val bounds: SnapshotRect? = null,
+    /** Window that produced this node; guards screenshots against a page switch. */
+    val windowId: Int = 0,
+    val editable: Boolean = false,
+    val password: Boolean = false,
 ) {
     /** 与 AccessibilityNodeUtils.combinedText 相同的合并规则。 */
     fun combinedText(): String =
