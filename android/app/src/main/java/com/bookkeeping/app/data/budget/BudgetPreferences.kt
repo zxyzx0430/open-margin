@@ -4,52 +4,66 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import javax.inject.Inject
 import javax.inject.Singleton
 
 // DataStore 委托必须放在 file top level（不能在 class 里）
 private val Context.budgetDataStore: DataStore<Preferences> by preferencesDataStore(name = "budget_prefs")
 
-// 预算的持久化层，基于 DataStore Preferences
+// 预算的持久化层，基于 DataStore Preferences；v2 起按 YYYY-MM 隔离。
 @Singleton
 class BudgetPreferences @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    fun observe(): Flow<BudgetSettings> = context.budgetDataStore.data.map { prefs ->
-        val total = prefs[KEY_MONTHLY_TOTAL] ?: 0L
-        val perCategory = TransactionCategory.entries
-            .filter { it != TransactionCategory.SALARY && it != TransactionCategory.TRANSFER }  // 收入类不设预算
-            .mapNotNull { cat ->
-                val v = prefs[longKey(cat)] ?: 0L
-                if (v > 0) cat to v else null
+    fun observe(month: String = BudgetMonth.currentKey()): Flow<BudgetSettings> =
+        context.budgetDataStore.data
+            .onStart { migrateLegacyIfNeeded() }
+            .map { prefs ->
+                BudgetMonthPolicy.settingsWithLegacyFallback(
+                    prefs = prefs,
+                    month = month,
+                    currentMonth = BudgetMonth.currentKey(),
+                )
             }
-            .toMap()
-        BudgetSettings(monthlyTotalCents = total, perCategory = perCategory)
+
+    suspend fun setMonthlyTotal(month: String, cents: Long) {
+        context.budgetDataStore.edit { prefs ->
+            val key = BudgetMonthPolicy.totalKey(month)
+            if (cents > 0L) prefs[key] = cents else prefs.remove(key)
+        }
     }
 
     suspend fun setMonthlyTotal(cents: Long) {
+        setMonthlyTotal(BudgetMonth.currentKey(), cents)
+    }
+
+    suspend fun setCategoryBudget(month: String, category: TransactionCategory, cents: Long) {
         context.budgetDataStore.edit { prefs ->
-            if (cents > 0) prefs[KEY_MONTHLY_TOTAL] = cents
-            else prefs.remove(KEY_MONTHLY_TOTAL)
+            val key = BudgetMonthPolicy.categoryKey(month, category)
+            if (cents > 0L) prefs[key] = cents else prefs.remove(key)
         }
     }
 
     suspend fun setCategoryBudget(category: TransactionCategory, cents: Long) {
-        context.budgetDataStore.edit { prefs ->
-            val key = longKey(category)
-            if (cents > 0) prefs[key] = cents else prefs.remove(key)
-        }
+        setCategoryBudget(BudgetMonth.currentKey(), category, cents)
     }
 
-    private fun longKey(cat: TransactionCategory) = longPreferencesKey("cat_${cat.name}")
-
-    companion object {
-        private val KEY_MONTHLY_TOTAL = longPreferencesKey("monthly_total")
+    private suspend fun migrateLegacyIfNeeded() {
+        context.budgetDataStore.edit { prefs ->
+            if (prefs[BudgetMonthPolicy.MIGRATED] == true) return@edit
+            val currentMonth = BudgetMonth.currentKey()
+            BudgetMonthPolicy.migratedValues(prefs, currentMonth).forEach { (key, value) ->
+                if (prefs[key] == null) prefs[key] = value
+            }
+            // Legacy keys are deliberately kept for rollback; the marker prevents
+            // a later intentionally cleared month from resurrecting them.
+            prefs[BudgetMonthPolicy.MIGRATED] = true
+        }
     }
 }
