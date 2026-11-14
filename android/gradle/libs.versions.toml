@@ -23,6 +23,7 @@ lifecycleRuntimeCompose = "2.8.7"
 coroutines = "1.9.0"
 datastore = "1.1.1"
 vico = "2.0.0"
+mlkitTextChinese = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -66,6 +67,9 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 
 # Vico 图表
 vico-compose-m3 = { group = "com.patrykandpatrick.vico", name = "compose-m3", version.ref = "vico" }
+
+# ML Kit 本地中文 OCR（bundled，无需联网）
+mlkit-text-recognition-chinese = { group = "com.google.mlkit", name = "text-recognition-chinese", version.ref = "mlkitTextChinese" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

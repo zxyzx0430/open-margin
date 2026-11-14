@@ -84,6 +84,9 @@ dependencies {
     // Vico 图表
     implementation(libs.vico.compose.m3)
 
+    // 本地中文 OCR（支付成功页补充识别，图片不出本机）
+    implementation(libs.mlkit.text.recognition.chinese)
+
     // Background upload; default disabled until opt-in
     implementation("androidx.work:work-runtime-ktx:2.10.1")
 
