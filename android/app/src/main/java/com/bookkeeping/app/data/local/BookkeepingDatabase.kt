@@ -16,7 +16,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
     entities = [TransactionEntity::class, ProcessedNoticeEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -35,8 +35,17 @@ abstract class BookkeepingDatabase : RoomDatabase() {
          */
         fun build(context: Context): BookkeepingDatabase =
             Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
+
+        // v6: local-only merchant icon metadata. Existing rows keep null and
+        // continue to render with their category icon.
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN merchantIconKey TEXT")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN merchantIconPath TEXT")
+            }
+        }
 
         // v5: local-only duplicate-review marker. Never uploaded; existing
         // rows keep null and are unaffected.
