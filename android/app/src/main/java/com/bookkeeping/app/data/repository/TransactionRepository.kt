@@ -79,6 +79,7 @@ class TransactionRepository @Inject constructor(
     suspend fun insertIfNotDuplicate(
         transaction: TransactionEntity,
         windowMs: Long = 8_000L,
+        notifySuccess: Boolean = true,
     ): Long? = duplicateMutex.withLock {
         val existing = dao.findRecentSameAmount(
             source = transaction.source,
@@ -106,7 +107,7 @@ class TransactionRepository @Inject constructor(
         } else {
             transaction
         }
-        val id = insert(candidate, notifySuccess = true)
+        val id = insert(candidate, notifySuccess = notifySuccess)
         if (id > 0L) {
             CaptureHealth.onTransactionSaved(context)
             KeepAliveService.refreshStatus(context)
