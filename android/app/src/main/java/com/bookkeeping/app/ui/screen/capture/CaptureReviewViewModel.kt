@@ -63,9 +63,10 @@ class CaptureReviewViewModel @Inject constructor(
                     repository.insertIfNotDuplicate(entity, notifySuccess = false)
                 }
             }
-            val id = result.getOrNull()
+            val insertedId = result.getOrNull()
+            val inserted = result.isSuccess && insertedId != null && insertedId > 0L
             if (result.isSuccess) {
-                val status = if (id != null) {
+                val status = if (inserted) {
                     CaptureCandidate.STATUS_APPROVED
                 } else {
                     CaptureCandidate.STATUS_IGNORED
@@ -78,7 +79,7 @@ class CaptureReviewViewModel @Inject constructor(
                 busy = false,
                 message = when {
                     result.isFailure -> "记入失败，请稍后重试"
-                    id != null -> "已记入账本"
+                    inserted -> "已记入账本"
                     else -> "这笔记录已存在，已从待确认中移除"
                 },
             )
