@@ -65,11 +65,6 @@ fun MonthlySummaryCard(
                 modifier = Modifier.weight(1f),
             )
         }
-        Text(
-            text = tr("本机交易 · 不是账户余额，尚需对照官方账单"),
-            style = com.bookkeeping.app.ui.theme.Typography.labelSmall,
-            color = QingTextSecondary,
-        )
     }
 }
 

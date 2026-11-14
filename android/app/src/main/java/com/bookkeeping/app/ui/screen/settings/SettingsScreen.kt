@@ -15,11 +15,15 @@ import com.bookkeeping.app.notification.CaptureUptime
 import com.bookkeeping.app.notification.KeepAliveService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -29,10 +33,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -117,6 +124,7 @@ fun SettingsScreen(
     var conflicts by remember { mutableStateOf(syncPrefs.getInt("pending_sync_conflicts", 0)) }
     var syncEnabled by remember { mutableStateOf(syncPrefs.getBoolean("enabled", false)) }
     var endpoint by remember { mutableStateOf(syncPrefs.getString("url", "") ?: "") }
+    var detailDialog by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -174,8 +182,23 @@ fun SettingsScreen(
                     conflicts = conflicts,
                 )
             }
-            item { WindowsFirstConnectionWizard() }
-            item { SyncSettingsCard() }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Cloud,
+                        title = tr("同步设置"),
+                        subtitle = tr("服务器地址、密钥、立即同步"),
+                        onClick = { detailDialog = "sync" },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Sync,
+                        title = tr("首次连接向导"),
+                        subtitle = tr("3 步连接 Windows / VPS"),
+                        onClick = { detailDialog = "wizard" },
+                    )
+                }
+            }
 
             item { SectionHeader(tr("权限授权")) }
             item {
@@ -187,24 +210,7 @@ fun SettingsScreen(
                         NotificationListenerHelper.openSettings(context)
                     },
                     onOpenSmsSettings = { openAppDetailsSettings(context) },
-                    onOpenAccessibilitySettings = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
-                    },
-                )
-            }
-            item {
-                AccessibilityCard(
-                    health = accessibilityHealth,
-                    onRefresh = {
-                        accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
-                    },
-                    onOpen = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
-                    },
+                    onOpenAccessibilityDetails = { detailDialog = "accessibility" },
                 )
             }
 
@@ -227,16 +233,30 @@ fun SettingsScreen(
 
             item { SectionHeader(tr("提醒与语言")) }
             item {
-                KeepAliveCard(
-                    enabled = keepAlive,
-                    onToggle = viewModel::setKeepAlive,
-                )
-            }
-            item {
-                SuccessNotificationCard(
-                    enabled = successNotifications,
-                    onToggle = viewModel::setSuccessNotifications,
-                )
+                SettingsGroupCard {
+                    SettingsSwitchRow(
+                        icon = Icons.Filled.Notifications,
+                        title = tr("常驻运行状态"),
+                        subtitle = tr("通知栏显示连接状态与运行时长"),
+                        checked = keepAlive,
+                        onCheckedChange = viewModel::setKeepAlive,
+                    )
+                    SettingsRowDivider()
+                    SettingsSwitchRow(
+                        icon = Icons.Filled.Notifications,
+                        title = tr("自动记账成功提醒"),
+                        subtitle = tr("保存后显示金额、商户和时间"),
+                        checked = successNotifications,
+                        onCheckedChange = viewModel::setSuccessNotifications,
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Sync,
+                        title = tr("常驻状态详情"),
+                        subtitle = tr("查看运行时长、断开时间和最近入账"),
+                        onClick = { detailDialog = "keepAlive" },
+                    )
+                }
             }
             item { LanguageCard() }
 
@@ -244,7 +264,46 @@ fun SettingsScreen(
             item { AboutUpdateCard() }
 
             item { SectionHeader(tr("国产 ROM 后台白名单")) }
-            item { RomGuideCard() }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Warning,
+                        title = tr("后台运行设置"),
+                        subtitle = tr("自启动 / 省电策略 / 后台运行"),
+                        onClick = { detailDialog = "rom" },
+                    )
+                }
+            }
+        }
+
+        detailDialog?.let { key ->
+            when (key) {
+                "sync" -> SettingsDetailDialog(tr("同步设置"), { detailDialog = null }) {
+                    SyncSettingsCard()
+                }
+                "wizard" -> SettingsDetailDialog(tr("首次连接向导"), { detailDialog = null }) {
+                    WindowsFirstConnectionWizard()
+                }
+                "rom" -> SettingsDetailDialog(tr("国产 ROM 后台白名单"), { detailDialog = null }) {
+                    RomGuideCard()
+                }
+                "accessibility" -> SettingsDetailDialog(tr("无障碍诊断"), { detailDialog = null }) {
+                    AccessibilityCard(
+                        health = accessibilityHealth,
+                        onRefresh = {
+                            accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
+                        },
+                        onOpen = {
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            }
+                        },
+                    )
+                }
+                "keepAlive" -> SettingsDetailDialog(tr("常驻运行状态"), { detailDialog = null }) {
+                    KeepAliveCard(enabled = keepAlive, onToggle = viewModel::setKeepAlive)
+                }
+            }
         }
     }
 }
@@ -391,7 +450,7 @@ private fun PermissionStatusGroup(
     accessibilityHealth: AccessibilityCaptureHealth.Snapshot,
     onOpenNotificationSettings: () -> Unit,
     onOpenSmsSettings: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
+    onOpenAccessibilityDetails: () -> Unit,
 ) {
     SettingsGroupCard {
         SettingsStatusRow(
@@ -418,7 +477,7 @@ private fun PermissionStatusGroup(
             subtitle = tr("用于转账/红包兜底和页面识别"),
             statusText = if (accessibilityHealth.authorized) tr("已授权") else tr("未授权"),
             tone = if (accessibilityHealth.authorized) StatusTone.POSITIVE else StatusTone.WARNING,
-            onClick = onOpenAccessibilitySettings,
+            onClick = onOpenAccessibilityDetails,
         )
     }
 }
@@ -437,7 +496,7 @@ private fun PageRecognitionCard(
         SettingsSwitchRow(
             icon = Icons.Filled.Notifications,
             title = tr("OCR 补充"),
-            subtitle = tr("仅在受支持的微信/支付宝支付成功页本地截图和 OCR；不上传原图，不后台翻页，不抓历史账单。"),
+            subtitle = tr("仅成功页本地截图/OCR，不上传、不抓历史"),
             checked = ocrEnabled,
             onCheckedChange = onOcrToggle,
         )
@@ -445,7 +504,7 @@ private fun PageRecognitionCard(
         SettingsSwitchRow(
             icon = Icons.Filled.AccessibilityNew,
             title = tr("微信成功页兼容模式（实验）"),
-            subtitle = tr("可能随微信或系统更新失效；失效时关闭并切回标准无障碍。"),
+            subtitle = tr("可能随微信更新失效，可切回标准无障碍"),
             checked = compatibilityEnabled,
             onCheckedChange = onCompatibilityToggle,
         )
@@ -469,6 +528,41 @@ private fun PageRecognitionCard(
     SettingsHint(
         tr("历史账单请使用官方导出文件；扫描结果需逐条确认，不会自动入账。页面识别需要无障碍和系统截图能力，密码/验证页面会跳过。"),
     )
+}
+
+@Composable
+private fun SettingsDetailDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 620.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = onDismiss) { Text(tr("关闭")) }
+                }
+                content()
+            }
+        }
+    }
 }
 
 @Composable

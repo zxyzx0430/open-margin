@@ -336,23 +336,6 @@ fun TransactionListScreen(
                 }
             }
 
-            if (!notificationListenerEnabled) {
-                item(key = "notification_banner") {
-                    NotificationPermissionBanner(
-                        onClick = { NotificationListenerHelper.openSettings(context) },
-                    )
-                }
-            }
-            if (!smsPermissionGranted) {
-                item(key = "sms_banner") {
-                    SmsPermissionBanner(
-                        onClick = {
-                            smsPermissionLauncher.launch(SmsPermissionHelper.REQUIRED_PERMISSIONS)
-                        },
-                    )
-                }
-            }
-
             item(key = "summary") {
                 MonthlySummaryCard(
                     expenseCents = monthlyExpense,
