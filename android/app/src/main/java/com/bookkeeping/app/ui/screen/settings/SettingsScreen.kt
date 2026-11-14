@@ -68,29 +68,74 @@ import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
 import com.bookkeeping.app.update.UpdateComponentScope
 import com.bookkeeping.app.update.UpdateVersionPolicy
 import com.bookkeeping.app.sync.SyncSettingsCard
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessibilityNew
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.bookkeeping.app.notification.NotificationListenerHelper
+import com.bookkeeping.app.notification.SmsPermissionHelper
+import com.bookkeeping.app.sync.TransactionSyncWorker
+import com.bookkeeping.app.ui.components.SectionHeader
+import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel(),
+    onImportBills: () -> Unit = {},
+) {
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
+    val successPageCapture by viewModel.successPageCaptureEnabled.collectAsState()
+    val compatibilityEnabled by viewModel.compatibilityAccessibilityEnabled.collectAsState()
     val context = LocalContext.current
-
-    // 无障碍服务的"是否已被系统勾选"状态。
-    // 用户从无障碍设置返回时（ON_RESUME）重新读一次。
     val lifecycleOwner = LocalLifecycleOwner.current
+    val syncPrefs = remember {
+        context.getSharedPreferences(TransactionSyncWorker.PREFS, android.content.Context.MODE_PRIVATE)
+    }
+
     var accessibilityHealth by remember {
         mutableStateOf(AccessibilityCaptureHealth.snapshot(context))
     }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
+    var notificationEnabled by remember {
+        mutableStateOf(NotificationListenerHelper.isEnabled(context))
+    }
+    var smsGranted by remember { mutableStateOf(SmsPermissionHelper.isGranted(context)) }
+    var pageRecognitionEnabled by remember {
+        mutableStateOf(isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT))
+    }
+    var lastSyncMs by remember { mutableStateOf(syncPrefs.getLong("last_success_ms", 0L)) }
+    var lastSyncMessage by remember {
+        mutableStateOf(syncPrefs.getString("last_result", "") ?: "")
+    }
+    var conflicts by remember { mutableStateOf(syncPrefs.getInt("pending_sync_conflicts", 0)) }
+    var syncEnabled by remember { mutableStateOf(syncPrefs.getBoolean("enabled", false)) }
+    var endpoint by remember { mutableStateOf(syncPrefs.getString("url", "") ?: "") }
+
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                withContext(Dispatchers.IO) {
+                    accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
+                    notificationEnabled = NotificationListenerHelper.isEnabled(context)
+                    smsGranted = SmsPermissionHelper.isGranted(context)
+                    pageRecognitionEnabled =
+                        isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT)
+                    lastSyncMs = syncPrefs.getLong("last_success_ms", 0L)
+                    lastSyncMessage = syncPrefs.getString("last_result", "") ?: ""
+                    conflicts = syncPrefs.getInt("pending_sync_conflicts", 0)
+                    syncEnabled = syncPrefs.getBoolean("enabled", false)
+                    endpoint = syncPrefs.getString("url", "") ?: ""
+                }
+                delay(5_000L)
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text(tr("设置")) }) }) { innerPadding ->
@@ -99,56 +144,52 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 .fillMaxSize()
                 .padding(innerPadding),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item { SectionTitle(tr("常驻运行状态")) }
+            item { SectionHeader(tr("采集与运行状态")) }
             item {
-                KeepAliveCard(
-                    enabled = keepAlive,
-                    onToggle = viewModel::setKeepAlive,
-                )
-            }
-
-            item { SectionTitle(tr("自动记账提醒")) }
-            item {
-                SuccessNotificationCard(
-                    enabled = successNotifications,
-                    onToggle = viewModel::setSuccessNotifications,
-                )
-            }
-
-            item { SectionTitle(tr("语言 / Language")) }
-            item { LanguageCard() }
-
-            item { SectionTitle(tr("关于与更新")) }
-            item { AboutUpdateCard() }
-
-            item { SectionTitle(tr("权限授权")) }
-            item {
-                PermissionCard(
-                    title = tr("通知使用权"),
-                    desc = tr("用于抓取支付宝/微信支付通知。必须授权，否则自动记账无效。"),
-                    buttonText = tr("去授权"),
-                    onClick = {
+                CaptureStatusGroup(
+                    notificationEnabled = notificationEnabled,
+                    accessibilityHealth = accessibilityHealth,
+                    smsGranted = smsGranted,
+                    lastSyncMs = lastSyncMs,
+                    lastSyncMessage = lastSyncMessage,
+                    onOpenNotificationSettings = {
+                        NotificationListenerHelper.openSettings(context)
+                    },
+                    onOpenAccessibilitySettings = {
                         runCatching {
-                            context.startActivity(
-                                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                            )
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         }
                     },
+                    onOpenAppSettings = { openAppDetailsSettings(context) },
                 )
             }
+
+            item { SectionHeader(tr("同步")) }
             item {
-                PermissionCard(
-                    title = tr("短信权限"),
-                    desc = tr("用于读取银行交易短信。如果你不使用银行卡或不需要银行通道，可以不开。"),
-                    buttonText = tr("应用权限设置"),
-                    onClick = {
+                SyncOverviewGroup(
+                    enabled = syncEnabled,
+                    endpoint = endpoint,
+                    conflicts = conflicts,
+                )
+            }
+            item { WindowsFirstConnectionWizard() }
+            item { SyncSettingsCard() }
+
+            item { SectionHeader(tr("权限授权")) }
+            item {
+                PermissionStatusGroup(
+                    notificationEnabled = notificationEnabled,
+                    smsGranted = smsGranted,
+                    accessibilityHealth = accessibilityHealth,
+                    onOpenNotificationSettings = {
+                        NotificationListenerHelper.openSettings(context)
+                    },
+                    onOpenSmsSettings = { openAppDetailsSettings(context) },
+                    onOpenAccessibilitySettings = {
                         runCatching {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = Uri.fromParts("package", context.packageName, null)
-                            }
-                            context.startActivity(intent)
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                         }
                     },
                 )
@@ -167,14 +208,267 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 )
             }
 
-            item { SectionTitle(tr("交易双向同步（Windows / VPS）")) }
-            item { WindowsFirstConnectionWizard() }
-            item { SyncSettingsCard() }
+            item { SectionHeader(tr("页面识别（OCR 补充）")) }
+            item {
+                PageRecognitionCard(
+                    ocrEnabled = successPageCapture,
+                    compatibilityEnabled = compatibilityEnabled,
+                    pageServiceEnabled = pageRecognitionEnabled,
+                    onOcrToggle = viewModel::setSuccessPageCapture,
+                    onCompatibilityToggle = viewModel::setCompatibilityAccessibility,
+                    onOpenAccessibilitySettings = {
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                        }
+                    },
+                    onImportBills = onImportBills,
+                )
+            }
 
-            item { SectionTitle(tr("国产 ROM 后台白名单（重要）")) }
+            item { SectionHeader(tr("提醒与语言")) }
+            item {
+                KeepAliveCard(
+                    enabled = keepAlive,
+                    onToggle = viewModel::setKeepAlive,
+                )
+            }
+            item {
+                SuccessNotificationCard(
+                    enabled = successNotifications,
+                    onToggle = viewModel::setSuccessNotifications,
+                )
+            }
+            item { LanguageCard() }
+
+            item { SectionHeader(tr("关于与更新")) }
+            item { AboutUpdateCard() }
+
+            item { SectionHeader(tr("国产 ROM 后台白名单")) }
             item { RomGuideCard() }
         }
     }
+}
+
+private const val PAGE_RECOGNITION_COMPONENT =
+    "com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+
+private fun isAccessibilityServiceEnabled(context: Context, className: String): Boolean {
+    val expected = "${context.packageName}/$className"
+    val list = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    return list.split(':').any { it.equals(expected, ignoreCase = true) }
+}
+
+private fun openAppDetailsSettings(context: Context) {
+    runCatching {
+        context.startActivity(
+            Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", context.packageName, null),
+            ),
+        )
+    }
+}
+
+private fun relativeSyncTime(timestampMs: Long): String {
+    if (timestampMs <= 0L) return tr("尚未同步")
+    val diff = (System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)
+    return when {
+        diff < 60_000L -> tr("刚刚")
+        diff < 3_600_000L -> String.format(
+            Locale.getDefault(),
+            tr("%d 分钟前"),
+            diff / 60_000L,
+        )
+        diff < 86_400_000L -> String.format(
+            Locale.getDefault(),
+            tr("%d 小时前"),
+            diff / 3_600_000L,
+        )
+        else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+            .format(Date(timestampMs))
+    }
+}
+
+@Composable
+private fun CaptureStatusGroup(
+    notificationEnabled: Boolean,
+    accessibilityHealth: AccessibilityCaptureHealth.Snapshot,
+    smsGranted: Boolean,
+    lastSyncMs: Long,
+    lastSyncMessage: String,
+    onOpenNotificationSettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
+) {
+    val accessibilityStatus = when (accessibilityHealth.state) {
+        AccessibilityConnectionState.CONNECTED -> tr("已连接")
+        AccessibilityConnectionState.PERMISSION_OFF -> tr("未开启")
+        else -> tr("已授权未连接")
+    }
+    val accessibilityTone = when (accessibilityHealth.state) {
+        AccessibilityConnectionState.CONNECTED -> StatusTone.POSITIVE
+        AccessibilityConnectionState.PERMISSION_OFF -> StatusTone.ERROR
+        else -> StatusTone.WARNING
+    }
+    val syncTone = when {
+        lastSyncMs <= 0L -> StatusTone.NEUTRAL
+        else -> StatusTone.POSITIVE
+    }
+    SettingsGroupCard {
+        SettingsStatusRow(
+            icon = Icons.Filled.Notifications,
+            title = tr("自动记账"),
+            subtitle = tr("自动识别消费并生成账单"),
+            statusText = if (notificationEnabled) tr("已开启") else tr("未开启"),
+            tone = if (notificationEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
+            onClick = onOpenNotificationSettings,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.AccessibilityNew,
+            title = tr("无障碍兜底"),
+            subtitle = tr("增强采集稳定性"),
+            statusText = accessibilityStatus,
+            tone = accessibilityTone,
+            onClick = onOpenAccessibilitySettings,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.Sms,
+            title = tr("短信权限"),
+            subtitle = tr("可选，用于补充识别部分账单短信"),
+            statusText = if (smsGranted) tr("已开启") else tr("可选，未开启"),
+            tone = if (smsGranted) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+            onClick = onOpenAppSettings,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.Sync,
+            title = tr("最近同步"),
+            subtitle = lastSyncMessage.ifBlank { tr("尚未执行同步") }.let { tr(it) },
+            statusText = relativeSyncTime(lastSyncMs),
+            tone = syncTone,
+        )
+    }
+}
+
+@Composable
+private fun SyncOverviewGroup(
+    enabled: Boolean,
+    endpoint: String,
+    conflicts: Int,
+) {
+    SettingsGroupCard {
+        SettingsStatusRow(
+            icon = Icons.Filled.Cloud,
+            title = tr("Windows / VPS 双向同步"),
+            subtitle = endpoint.ifBlank { tr("未配置") },
+            statusText = if (enabled) tr("已开启") else tr("未开启"),
+            tone = if (enabled) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.Warning,
+            title = tr("冲突处理"),
+            subtitle = if (conflicts > 0) tr("有本地修改或冲突需要核对") else tr("无待处理冲突"),
+            statusText = if (conflicts > 0) String.format(
+                Locale.getDefault(),
+                tr("%d 笔待处理"),
+                conflicts,
+            ) else tr("正常"),
+            tone = if (conflicts > 0) StatusTone.WARNING else StatusTone.POSITIVE,
+        )
+    }
+}
+
+@Composable
+private fun PermissionStatusGroup(
+    notificationEnabled: Boolean,
+    smsGranted: Boolean,
+    accessibilityHealth: AccessibilityCaptureHealth.Snapshot,
+    onOpenNotificationSettings: () -> Unit,
+    onOpenSmsSettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+) {
+    SettingsGroupCard {
+        SettingsStatusRow(
+            icon = Icons.Filled.Notifications,
+            title = tr("通知使用权"),
+            subtitle = tr("用于抓取支付宝/微信支付通知"),
+            statusText = if (notificationEnabled) tr("已授权") else tr("未授权"),
+            tone = if (notificationEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
+            onClick = onOpenNotificationSettings,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.Sms,
+            title = tr("短信权限"),
+            subtitle = tr("可选，用于读取银行交易短信"),
+            statusText = if (smsGranted) tr("已授权") else tr("可选，未开启"),
+            tone = if (smsGranted) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+            onClick = onOpenSmsSettings,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.AccessibilityNew,
+            title = tr("无障碍权限"),
+            subtitle = tr("用于转账/红包兜底和页面识别"),
+            statusText = if (accessibilityHealth.authorized) tr("已授权") else tr("未授权"),
+            tone = if (accessibilityHealth.authorized) StatusTone.POSITIVE else StatusTone.WARNING,
+            onClick = onOpenAccessibilitySettings,
+        )
+    }
+}
+
+@Composable
+private fun PageRecognitionCard(
+    ocrEnabled: Boolean,
+    compatibilityEnabled: Boolean,
+    pageServiceEnabled: Boolean,
+    onOcrToggle: (Boolean) -> Unit,
+    onCompatibilityToggle: (Boolean) -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onImportBills: () -> Unit,
+) {
+    SettingsGroupCard {
+        SettingsSwitchRow(
+            icon = Icons.Filled.Notifications,
+            title = tr("OCR 补充"),
+            subtitle = tr("仅在受支持的微信/支付宝支付成功页本地截图和 OCR；不上传原图，不后台翻页，不抓历史账单。"),
+            checked = ocrEnabled,
+            onCheckedChange = onOcrToggle,
+        )
+        SettingsRowDivider()
+        SettingsSwitchRow(
+            icon = Icons.Filled.AccessibilityNew,
+            title = tr("微信成功页兼容模式（实验）"),
+            subtitle = tr("可能随微信或系统更新失效；失效时关闭并切回标准无障碍。"),
+            checked = compatibilityEnabled,
+            onCheckedChange = onCompatibilityToggle,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.AccessibilityNew,
+            title = tr("页面识别服务"),
+            subtitle = tr("系统无障碍中的「清衡 · 页面识别」"),
+            statusText = if (pageServiceEnabled) tr("已授权") else tr("未授权"),
+            tone = if (pageServiceEnabled) StatusTone.POSITIVE else StatusTone.WARNING,
+            onClick = onOpenAccessibilitySettings,
+        )
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.FileUpload,
+            title = tr("导入账单"),
+            subtitle = tr("支持微信/支付宝官方 CSV / XLSX / 文本"),
+            onClick = onImportBills,
+        )
+    }
+    SettingsHint(
+        tr("历史账单请使用官方导出文件；扫描结果需逐条确认，不会自动入账。页面识别需要无障碍和系统截图能力，密码/验证页面会跳过。"),
+    )
 }
 
 @Composable
