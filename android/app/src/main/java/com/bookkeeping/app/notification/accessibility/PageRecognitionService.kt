@@ -10,7 +10,6 @@ import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.repository.TransactionRepository
-import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.ocr.MlKitOcrEngine
@@ -26,11 +25,14 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Optional success-page recognition service.
+ * Page recognition service.
  *
  * It only reads WeChat/Alipay pages, only captures after the page passes the
  * pure PaymentPageDetector safety checks, and only writes a local candidate.
  * It never inserts a ledger row and never scrolls the source app.
+ *
+ * OCR is part of this single capture pipeline, not a separate opt-in feature.
+ * The service runs whenever the user enables it in system accessibility.
  *
  * The user-visible entry is the compatibility subclass at
  * com.google.android.accessibility.selecttospeak.SelectToSpeakService.
@@ -40,13 +42,9 @@ open class PageRecognitionService : AccessibilityService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val capturing = AtomicBoolean(false)
 
-    private lateinit var settings: SettingsPreferences
     private lateinit var store: CaptureCandidateStore
     private lateinit var repository: TransactionRepository
     private var ocrEngine: MlKitOcrEngine? = null
-
-    @Volatile private var captureEnabled = false
-    @Volatile private var compatibilityEnabled = false
 
     private var lastPageIdentity: String? = null
     private var lastCaptureAtMs: Long = 0L
@@ -58,17 +56,8 @@ open class PageRecognitionService : AccessibilityService() {
                 applicationContext,
                 AccessibilityServiceEntryPoint::class.java,
             )
-            settings = entryPoint.settingsPreferences()
             store = CaptureCandidateStore(applicationContext)
             repository = entryPoint.transactionRepository()
-            captureEnabled = settings.successPageCaptureEnabledBlocking()
-            compatibilityEnabled = settings.compatibilityAccessibilityEnabledBlocking()
-            scope.launch {
-                settings.observeSuccessPageCaptureEnabled().collect { captureEnabled = it }
-            }
-            scope.launch {
-                settings.observeCompatibilityAccessibilityEnabled().collect { compatibilityEnabled = it }
-            }
             if (BuildConfig.DEBUG) Log.d(TAG, "PageRecognitionService connected")
         } catch (failure: Exception) {
             Log.e(TAG, "connect failed: ${failure.javaClass.simpleName}")
@@ -85,7 +74,7 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     private fun handleEvent(event: AccessibilityEvent) {
-        if (!captureEnabled || capturing.get()) return
+        if (capturing.get()) return
         val packageName = event.packageName?.toString() ?: return
         if (packageName != PaymentPageDetector.PKG_WECHAT &&
             packageName != PaymentPageDetector.PKG_ALIPAY
@@ -160,8 +149,7 @@ open class PageRecognitionService : AccessibilityService() {
             return
         }
 
-        // Success-page fallback remains behind the experimental compatibility flag.
-        if (!compatibilityEnabled) return
+        // Success-page fallback is part of the same pipeline.
         val detection = PaymentPageDetector.detect(packageName, snapshot, now)
         if (!detection.isSuccessPage) {
             if (BuildConfig.DEBUG) {

@@ -1,9 +1,11 @@
 package com.bookkeeping.app.ui.screen.settings
 
 import com.bookkeeping.app.i18n.tr
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -54,6 +56,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -99,8 +105,6 @@ fun SettingsScreen(
 ) {
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
-    val successPageCapture by viewModel.successPageCaptureEnabled.collectAsState()
-    val compatibilityEnabled by viewModel.compatibilityAccessibilityEnabled.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val syncPrefs = remember {
@@ -114,6 +118,9 @@ fun SettingsScreen(
         mutableStateOf(NotificationListenerHelper.isEnabled(context))
     }
     var smsGranted by remember { mutableStateOf(SmsPermissionHelper.isGranted(context)) }
+    var postNotificationsGranted by remember {
+        mutableStateOf(areNotificationsGranted(context))
+    }
     var pageRecognitionEnabled by remember {
         mutableStateOf(isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT))
     }
@@ -125,14 +132,24 @@ fun SettingsScreen(
     var syncEnabled by remember { mutableStateOf(syncPrefs.getBoolean("enabled", false)) }
     var endpoint by remember { mutableStateOf(syncPrefs.getString("url", "") ?: "") }
     var detailDialog by remember { mutableStateOf<String?>(null) }
+    var permissionRefreshKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(lifecycleOwner) {
+    val runtimePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { _ ->
+        postNotificationsGranted = areNotificationsGranted(context)
+        smsGranted = SmsPermissionHelper.isGranted(context)
+        permissionRefreshKey++
+    }
+
+    LaunchedEffect(lifecycleOwner, permissionRefreshKey) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 withContext(Dispatchers.IO) {
                     accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
                     notificationEnabled = NotificationListenerHelper.isEnabled(context)
                     smsGranted = SmsPermissionHelper.isGranted(context)
+                    postNotificationsGranted = areNotificationsGranted(context)
                     pageRecognitionEnabled =
                         isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT)
                     lastSyncMs = syncPrefs.getLong("last_success_ms", 0L)
@@ -146,6 +163,14 @@ fun SettingsScreen(
         }
     }
 
+    val missingCapabilityNames = buildList {
+        if (!postNotificationsGranted) add(tr("通知权限"))
+        if (!smsGranted) add(tr("短信权限（可选）"))
+        if (!notificationEnabled) add(tr("通知使用权"))
+        if (!pageRecognitionEnabled) add(tr("页面识别服务"))
+    }
+    val grantedCapabilityCount = AUTOMATION_CAPABILITY_COUNT - missingCapabilityNames.size
+
     Scaffold(topBar = { TopAppBar(title = { Text(tr("设置")) }) }) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -154,6 +179,14 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            item {
+                AutomationSetupCard(
+                    grantedCount = grantedCapabilityCount,
+                    missingNames = missingCapabilityNames,
+                    onStart = { detailDialog = "automation" },
+                )
+            }
+
             item { SectionHeader(tr("采集与运行状态")) }
             item {
                 CaptureStatusGroup(
@@ -214,20 +247,18 @@ fun SettingsScreen(
                 )
             }
 
-            item { SectionHeader(tr("页面识别（OCR 补充）")) }
+            item { SectionHeader(tr("账单导入")) }
             item {
-                PageRecognitionCard(
-                    ocrEnabled = successPageCapture,
-                    compatibilityEnabled = compatibilityEnabled,
-                    pageServiceEnabled = pageRecognitionEnabled,
-                    onOcrToggle = viewModel::setSuccessPageCapture,
-                    onCompatibilityToggle = viewModel::setCompatibilityAccessibility,
-                    onOpenAccessibilitySettings = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
-                    },
-                    onImportBills = onImportBills,
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.FileUpload,
+                        title = tr("导入账单"),
+                        subtitle = tr("支持微信/支付宝官方 CSV / XLSX / 文本"),
+                        onClick = onImportBills,
+                    )
+                }
+                SettingsHint(
+                    tr("历史账单请使用官方导出文件。自动采集的高置信度记录会自动入账，低置信度记录进入待确认；密码/验证页面会跳过。"),
                 )
             }
 
@@ -278,6 +309,32 @@ fun SettingsScreen(
 
         detailDialog?.let { key ->
             when (key) {
+                "automation" -> SettingsDetailDialog(
+                    tr("一键开启自动记账"),
+                    { detailDialog = null },
+                ) {
+                    AutomationSetupPanel(
+                        notificationEnabled = notificationEnabled,
+                        pageRecognitionEnabled = pageRecognitionEnabled,
+                        postNotificationsGranted = postNotificationsGranted,
+                        smsGranted = smsGranted,
+                        missingNames = missingCapabilityNames,
+                        onRequestRuntimePermissions = {
+                            runtimePermissionLauncher.launch(runtimePermissionsToRequest())
+                        },
+                        onOpenNotificationSettings = {
+                            NotificationListenerHelper.openSettings(context)
+                        },
+                        onOpenAccessibilitySettings = {
+                            runCatching {
+                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            }
+                        },
+                        onOpenAppSettings = { openAppDetailsSettings(context) },
+                        onRefresh = { permissionRefreshKey++ },
+                        onOpenRomGuide = { detailDialog = "rom" },
+                    )
+                }
                 "sync" -> SettingsDetailDialog(tr("同步设置"), { detailDialog = null }) {
                     SyncSettingsCard()
                 }
@@ -473,8 +530,8 @@ private fun PermissionStatusGroup(
         SettingsRowDivider()
         SettingsStatusRow(
             icon = Icons.Filled.AccessibilityNew,
-            title = tr("无障碍权限"),
-            subtitle = tr("用于转账/红包兜底和页面识别"),
+            title = tr("无障碍兜底"),
+            subtitle = tr("微信转账/红包、支付宝转账入账"),
             statusText = if (accessibilityHealth.authorized) tr("已授权") else tr("未授权"),
             tone = if (accessibilityHealth.authorized) StatusTone.POSITIVE else StatusTone.WARNING,
             onClick = onOpenAccessibilityDetails,
@@ -482,53 +539,378 @@ private fun PermissionStatusGroup(
     }
 }
 
+private fun areNotificationsGranted(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+        PackageManager.PERMISSION_GRANTED
+    ) {
+        return false
+    }
+    return NotificationManagerCompat.from(context).areNotificationsEnabled()
+}
+
+private const val AUTOMATION_CAPABILITY_COUNT = 4
+
+private fun runtimePermissionsToRequest(): Array<String> = buildList {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    addAll(SmsPermissionHelper.REQUIRED_PERMISSIONS.toList())
+}.toTypedArray()
+
+private enum class AutomationSetupStep {
+    RUNTIME_PERMISSIONS,
+    NOTIFICATION_ACCESS,
+    ACCESSIBILITY,
+    RESULT,
+}
+
+private fun stepAfterRuntimePermissions(
+    notificationEnabled: Boolean,
+    pageRecognitionEnabled: Boolean,
+): AutomationSetupStep = when {
+    !notificationEnabled -> AutomationSetupStep.NOTIFICATION_ACCESS
+    !pageRecognitionEnabled -> AutomationSetupStep.ACCESSIBILITY
+    else -> AutomationSetupStep.RESULT
+}
+
+private fun firstMissingAutomationStep(
+    notificationEnabled: Boolean,
+    pageRecognitionEnabled: Boolean,
+    postNotificationsGranted: Boolean,
+    smsGranted: Boolean,
+): AutomationSetupStep = when {
+    !postNotificationsGranted || !smsGranted -> AutomationSetupStep.RUNTIME_PERMISSIONS
+    !notificationEnabled -> AutomationSetupStep.NOTIFICATION_ACCESS
+    !pageRecognitionEnabled -> AutomationSetupStep.ACCESSIBILITY
+    else -> AutomationSetupStep.RESULT
+}
+
 @Composable
-private fun PageRecognitionCard(
-    ocrEnabled: Boolean,
-    compatibilityEnabled: Boolean,
-    pageServiceEnabled: Boolean,
-    onOcrToggle: (Boolean) -> Unit,
-    onCompatibilityToggle: (Boolean) -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
-    onImportBills: () -> Unit,
+private fun AutomationSetupCard(
+    grantedCount: Int,
+    missingNames: List<String>,
+    onStart: () -> Unit,
 ) {
-    SettingsGroupCard {
-        SettingsSwitchRow(
-            icon = Icons.Filled.Notifications,
-            title = tr("OCR 补充"),
-            subtitle = tr("仅成功页本地截图/OCR，不上传、不抓历史"),
-            checked = ocrEnabled,
-            onCheckedChange = onOcrToggle,
-        )
-        SettingsRowDivider()
-        SettingsSwitchRow(
-            icon = Icons.Filled.AccessibilityNew,
-            title = tr("微信成功页兼容模式（实验）"),
-            subtitle = tr("可能随微信更新失效，可切回标准无障碍"),
-            checked = compatibilityEnabled,
-            onCheckedChange = onCompatibilityToggle,
-        )
-        SettingsRowDivider()
-        SettingsStatusRow(
-            icon = Icons.Filled.AccessibilityNew,
-            title = tr("页面识别服务"),
-            subtitle = tr("系统无障碍中的「清衡 · 页面识别」"),
-            statusText = if (pageServiceEnabled) tr("已授权") else tr("未授权"),
-            tone = if (pageServiceEnabled) StatusTone.POSITIVE else StatusTone.WARNING,
-            onClick = onOpenAccessibilitySettings,
-        )
-        SettingsRowDivider()
-        SettingsActionRow(
-            icon = Icons.Filled.FileUpload,
-            title = tr("导入账单"),
-            subtitle = tr("支持微信/支付宝官方 CSV / XLSX / 文本"),
-            onClick = onImportBills,
+    val ready = grantedCount >= AUTOMATION_CAPABILITY_COUNT
+    val container = if (ready) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.errorContainer
+    val content = if (ready) MaterialTheme.colorScheme.onPrimaryContainer
+                  else MaterialTheme.colorScheme.onErrorContainer
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = tr("一键开启自动记账"),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = content,
+                    )
+                    Text(
+                        text = if (ready) {
+                            tr("4/4 项已完成，自动记账已就绪")
+                        } else {
+                            tr("缺少：") + missingNames.joinToString(" / ")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = content,
+                    )
+                }
+                Text(
+                    text = if (ready) {
+                        tr("已开启")
+                    } else {
+                        String.format(Locale.getDefault(), tr("还缺 %d 项"), missingNames.size)
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = content,
+                )
+            }
+            if (!ready) {
+                FilledTonalButton(onClick = onStart) {
+                    Text(tr("一键开启"))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutomationSetupPanel(
+    notificationEnabled: Boolean,
+    pageRecognitionEnabled: Boolean,
+    postNotificationsGranted: Boolean,
+    smsGranted: Boolean,
+    missingNames: List<String>,
+    onRequestRuntimePermissions: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
+    onOpenAppSettings: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenRomGuide: () -> Unit,
+) {
+    val grantedCount = listOf(
+        postNotificationsGranted,
+        smsGranted,
+        notificationEnabled,
+        pageRecognitionEnabled,
+    ).count { it }
+    var step by remember {
+        mutableStateOf(
+            firstMissingAutomationStep(
+                notificationEnabled = notificationEnabled,
+                pageRecognitionEnabled = pageRecognitionEnabled,
+                postNotificationsGranted = postNotificationsGranted,
+                smsGranted = smsGranted,
+            ),
         )
     }
-    SettingsHint(
-        tr("历史账单请使用官方导出文件；扫描结果需逐条确认，不会自动入账。页面识别需要无障碍和系统截图能力，密码/验证页面会跳过。"),
+    var attempted by remember { mutableStateOf(false) }
+
+    LaunchedEffect(
+        notificationEnabled,
+        pageRecognitionEnabled,
+        postNotificationsGranted,
+        smsGranted,
+    ) {
+        val next = when (step) {
+            AutomationSetupStep.RUNTIME_PERMISSIONS -> {
+                if (postNotificationsGranted && smsGranted) {
+                    stepAfterRuntimePermissions(notificationEnabled, pageRecognitionEnabled)
+                } else {
+                    AutomationSetupStep.RUNTIME_PERMISSIONS
+                }
+            }
+            AutomationSetupStep.NOTIFICATION_ACCESS -> {
+                if (notificationEnabled) {
+                    if (pageRecognitionEnabled) AutomationSetupStep.RESULT
+                    else AutomationSetupStep.ACCESSIBILITY
+                } else {
+                    AutomationSetupStep.NOTIFICATION_ACCESS
+                }
+            }
+            AutomationSetupStep.ACCESSIBILITY -> {
+                if (pageRecognitionEnabled) AutomationSetupStep.RESULT
+                else AutomationSetupStep.ACCESSIBILITY
+            }
+            AutomationSetupStep.RESULT -> AutomationSetupStep.RESULT
+        }
+        if (next != step) {
+            step = next
+            attempted = false
+        }
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = String.format(
+                Locale.getDefault(),
+                tr("已完成 %d/%d 项"),
+                grantedCount,
+                AUTOMATION_CAPABILITY_COUNT,
+            ),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = if (grantedCount >= AUTOMATION_CAPABILITY_COUNT) {
+                tr("已开启")
+            } else {
+                String.format(
+                    Locale.getDefault(),
+                    tr("还缺 %d 项"),
+                    AUTOMATION_CAPABILITY_COUNT - grantedCount,
+                )
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (grantedCount >= AUTOMATION_CAPABILITY_COUNT) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+        )
+    }
+    HorizontalDivider()
+    when (step) {
+        AutomationSetupStep.RUNTIME_PERMISSIONS -> AutomationStepCard(
+            stepLabel = automationStepLabel(1),
+            title = tr("允许通知和短信"),
+            body = tr("系统会同时请求通知权限和短信权限；短信权限为可选补充，但会计入 4/4。已经允许的不会重复弹窗。"),
+            status = null,
+            statusIsError = false,
+            primaryLabel = tr("请求权限"),
+            onPrimary = {
+                onRequestRuntimePermissions()
+                step = stepAfterRuntimePermissions(
+                    notificationEnabled = notificationEnabled,
+                    pageRecognitionEnabled = pageRecognitionEnabled,
+                )
+                attempted = false
+            },
+            secondaryLabel = tr("打开应用设置"),
+            onSecondary = onOpenAppSettings,
+        )
+        AutomationSetupStep.NOTIFICATION_ACCESS -> AutomationStepCard(
+            stepLabel = automationStepLabel(2),
+            title = tr("开启通知使用权"),
+            body = tr("在系统页面找到「清衡」并打开通知使用权，然后返回。此开关只能由你在系统设置中手动确认。"),
+            status = if (attempted) tr("尚未检测到，请确认已开启后重试。") else null,
+            statusIsError = attempted,
+            primaryLabel = tr("去通知使用权设置"),
+            onPrimary = {
+                attempted = true
+                onOpenNotificationSettings()
+            },
+            secondaryLabel = if (attempted) tr("重新检查") else null,
+            onSecondary = onRefresh,
+        )
+        AutomationSetupStep.ACCESSIBILITY -> AutomationStepCard(
+            stepLabel = automationStepLabel(3),
+            title = tr("开启页面识别"),
+            body = tr("在无障碍页面找到「清衡 · 页面识别」并打开，然后返回。此开关只能由你在系统设置中手动确认。"),
+            status = if (attempted) tr("尚未检测到，请确认已开启后重试。") else null,
+            statusIsError = attempted,
+            primaryLabel = tr("去无障碍设置"),
+            onPrimary = {
+                attempted = true
+                onOpenAccessibilitySettings()
+            },
+            secondaryLabel = if (attempted) tr("重新检查") else null,
+            onSecondary = onRefresh,
+        )
+        AutomationSetupStep.RESULT -> {
+            val allGranted = grantedCount >= AUTOMATION_CAPABILITY_COUNT
+            val resultContainer = if (allGranted) MaterialTheme.colorScheme.primaryContainer
+                                  else MaterialTheme.colorScheme.errorContainer
+            val resultContent = if (allGranted) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onErrorContainer
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = resultContainer),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = if (allGranted) {
+                            tr("4/4 已开启")
+                        } else {
+                            String.format(
+                                Locale.getDefault(),
+                                tr("还缺 %d 项"),
+                                AUTOMATION_CAPABILITY_COUNT - grantedCount,
+                            )
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = resultContent,
+                    )
+                    Text(
+                        text = if (allGranted) {
+                            tr("自动记账所需的权限已全部就绪。")
+                        } else {
+                            tr("缺少：") + missingNames.joinToString(" / ")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = resultContent,
+                    )
+                    if (!allGranted) {
+                        FilledTonalButton(
+                            onClick = {
+                                step = firstMissingAutomationStep(
+                                    notificationEnabled = notificationEnabled,
+                                    pageRecognitionEnabled = pageRecognitionEnabled,
+                                    postNotificationsGranted = postNotificationsGranted,
+                                    smsGranted = smsGranted,
+                                )
+                                attempted = false
+                            },
+                        ) {
+                            Text(tr("重试"))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    HorizontalDivider()
+    Text(
+        text = tr("可选建议：国产 ROM 还需允许自启动、把省电策略设为「无限制」，并允许常驻/持续通知；这些状态无法自动检测，也不影响上面的 4 项状态。"),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    TextButton(onClick = onOpenRomGuide) {
+        Text(tr("查看 ROM 后台设置（可选）"))
+    }
 }
+
+@Composable
+private fun AutomationStepCard(
+    stepLabel: String,
+    title: String,
+    body: String,
+    status: String?,
+    statusIsError: Boolean,
+    primaryLabel: String,
+    onPrimary: () -> Unit,
+    secondaryLabel: String? = null,
+    onSecondary: (() -> Unit)? = null,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = stepLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (status != null) {
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (statusIsError) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            FilledTonalButton(onClick = onPrimary) {
+                Text(primaryLabel)
+            }
+            val secondaryAction = onSecondary
+            if (secondaryLabel != null && secondaryAction != null) {
+                TextButton(onClick = secondaryAction) {
+                    Text(secondaryLabel)
+                }
+            }
+        }
+    }
+}
+
+private fun automationStepLabel(step: Int): String =
+    String.format(Locale.getDefault(), tr("第 %d 步，共 3 步"), step)
 
 @Composable
 private fun SettingsDetailDialog(
