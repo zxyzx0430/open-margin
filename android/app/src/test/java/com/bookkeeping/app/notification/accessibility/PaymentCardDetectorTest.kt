@@ -1,0 +1,595 @@
+package com.bookkeeping.app.notification.accessibility
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.util.Calendar
+
+class PaymentCardDetectorTest {
+
+    private val capturedAt = 1_795_000_000_000L
+
+    private fun line(text: String, top: Int): BillTextLine =
+        BillTextLine(text = text, top = top, bottom = top + 40, left = 40, right = 1000)
+
+    private fun lines(vararg entries: Pair<String, Int>): List<BillTextLine> =
+        entries.map { line(it.first, it.second) }
+
+    private fun detect(
+        packageName: String,
+        lines: List<BillTextLine>,
+        pageIdentity: String = "test-page",
+    ): List<PaymentCardDetection> =
+        PaymentCardDetector.fromLines(packageName, lines, capturedAt, 2400, pageIdentity)
+
+    private fun wechatLines(vararg entries: Pair<String, Int>) =
+        detect(PaymentCardDetector.WECHAT, lines(*entries))
+
+    private fun alipayLines(vararg entries: Pair<String, Int>) =
+        detect(PaymentCardDetector.ALIPAY, lines(*entries))
+
+    // --- payments ----------------------------------------------------------
+
+    @Test
+    fun parsesWechatWalletPaymentCard() {
+        val cards = wechatLines(
+            "昨天 21:21" to 100,
+            "自来充" to 160,
+            "使用零钱支付" to 240,
+            "¥6.00" to 320,
+            "账单详情" to 400,
+        )
+        val card = cards.single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+        assertEquals(600L, card.amountCents)
+        assertEquals(listOf("自来充"), card.merchantCandidates)
+        assertTrue(card.isFinal)
+        assertNull(card.nonFinalReason)
+        assertNull(card.orderId)
+    }
+
+    @Test
+    fun parsesWechatBankCardPaymentCard() {
+        val card = wechatLines(
+            "今天 12:05" to 100,
+            "杭州游卡" to 160,
+            "使用银行卡支付" to 240,
+            "¥18.00" to 320,
+            "交易详情" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(1800L, card.amountCents)
+        assertEquals(listOf("杭州游卡"), card.merchantCandidates)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+    }
+
+    @Test
+    fun parsesAlipayScanPaymentPageWithOrderId() {
+        val card = alipayLines(
+            "10:24" to 100,
+            "杭州游卡" to 160,
+            "交易成功" to 240,
+            "￥6.00" to 320,
+            "交易号 2025111422001234567890" to 400,
+            "付款方式 余额宝" to 480,
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(600L, card.amountCents)
+        assertEquals(listOf("杭州游卡"), card.merchantCandidates)
+        assertEquals("2025111422001234567890", card.orderId)
+        assertNotNull(card.eventTimeMs)
+    }
+
+    @Test
+    fun parsesAlipayBillListPaymentCard() {
+        val card = alipayLines(
+            "10:24" to 100,
+            "饿了么" to 160,
+            "支出 ￥25.00" to 240,
+            "交易成功" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(2500L, card.amountCents)
+        assertEquals(listOf("饿了么"), card.merchantCandidates)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+    }
+
+    @Test
+    fun usesLabeledPayeeForAlipayPayment() {
+        val card = alipayLines(
+            "10:24" to 100,
+            "收款方 杭州游卡" to 160,
+            "付款成功" to 240,
+            "￥6.00" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(listOf("杭州游卡"), card.merchantCandidates)
+    }
+
+    // --- transfers ---------------------------------------------------------
+
+    @Test
+    fun parsesWechatIncomingTransfer() {
+        val card = wechatLines(
+            "昨天 18:00" to 100,
+            "微信转账" to 160,
+            "¥100.00" to 240,
+            "已收钱" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.TRANSFER, card.kind)
+        assertEquals(PaymentDirection.INCOME, card.direction)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(10000L, card.amountCents)
+        assertTrue(card.isFinal)
+        assertTrue(card.merchantCandidates.isEmpty())
+    }
+
+    @Test
+    fun parsesWechatOutgoingTransferPendingAsNonFinal() {
+        val card = wechatLines(
+            "14:20" to 100,
+            "转账给张三" to 160,
+            "¥50.00" to 240,
+            "等待对方确认" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.TRANSFER, card.kind)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+        assertEquals(PaymentCardStatus.PENDING, card.status)
+        assertEquals(5000L, card.amountCents)
+        assertEquals(listOf("张三"), card.merchantCandidates)
+        assertFalse(card.isFinal)
+        assertNotNull(card.nonFinalReason)
+    }
+
+    @Test
+    fun parsesAlipayIncomingTransferWithCounterpart() {
+        val card = alipayLines(
+            "14:20" to 100,
+            "转账-来自张三" to 160,
+            "收入 ￥50.00" to 240,
+            "已到账" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.TRANSFER, card.kind)
+        assertEquals(PaymentDirection.INCOME, card.direction)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(5000L, card.amountCents)
+        assertEquals(listOf("张三"), card.merchantCandidates)
+    }
+
+    @Test
+    fun parsesAlipayOutgoingTransferWithCounterpart() {
+        val card = alipayLines(
+            "09:10" to 100,
+            "转账-转账给李四" to 160,
+            "支出 ￥20.00" to 240,
+            "交易成功" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.TRANSFER, card.kind)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(2000L, card.amountCents)
+        assertEquals(listOf("李四"), card.merchantCandidates)
+    }
+
+    // --- red packets -------------------------------------------------------
+
+    @Test
+    fun parsesReceivedRedPacketAsIncome() {
+        val card = wechatLines(
+            "昨天 20:10" to 100,
+            "微信红包" to 160,
+            "恭喜发财，大吉大利" to 240,
+            "¥8.88" to 320,
+            "已存入零钱" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.RED_PACKET, card.kind)
+        assertEquals(PaymentDirection.INCOME, card.direction)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(888L, card.amountCents)
+        assertTrue(card.merchantCandidates.isEmpty())
+        assertTrue(card.isFinal)
+    }
+
+    @Test
+    fun parsesSentRedPacketAsExpense() {
+        val card = wechatLines(
+            "昨天 20:10" to 100,
+            "你发出的红包" to 160,
+            "恭喜发财" to 240,
+            "¥8.88" to 320,
+            "已领取" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.RED_PACKET, card.kind)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(888L, card.amountCents)
+    }
+
+    @Test
+    fun unopenedReceivedRedPacketIsNonFinal() {
+        val card = wechatLines(
+            "12:00" to 100,
+            "微信红包" to 160,
+            "恭喜发财" to 240,
+            "¥8.88" to 320,
+            "待领取" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.RED_PACKET, card.kind)
+        assertEquals(PaymentDirection.INCOME, card.direction)
+        assertEquals(PaymentCardStatus.PENDING, card.status)
+        assertFalse(card.isFinal)
+        assertNotNull(card.nonFinalReason)
+    }
+
+    // --- withdrawals and refunds ------------------------------------------
+
+    @Test
+    fun parsesWechatWithdrawal() {
+        val card = wechatLines(
+            "昨天 09:00" to 100,
+            "零钱提现" to 160,
+            "提现到银行卡" to 240,
+            "¥100.00" to 320,
+            "已到账" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.WITHDRAWAL, card.kind)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(10000L, card.amountCents)
+    }
+
+    @Test
+    fun parsesAlipayWithdrawal() {
+        val card = alipayLines(
+            "09:00" to 100,
+            "提现到银行卡" to 160,
+            "提现金额 ￥100.00" to 240,
+            "提现成功" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.WITHDRAWAL, card.kind)
+        assertEquals(10000L, card.amountCents)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+    }
+
+    @Test
+    fun parsesWechatRefundArrivalWithLabeledTime() {
+        val card = wechatLines(
+            "05:27" to 100,
+            "退款到账通知" to 180,
+            "退款金额" to 260,
+            "¥1.45" to 340,
+            "商品详情" to 420,
+            "充电订单-预付6元" to 480,
+            "商户名称" to 540,
+            "自来充" to 600,
+            "退款方式" to 660,
+            "退回零钱" to 720,
+            "到账时间" to 780,
+            "2026年11月14日 05:26:54" to 840,
+        ).single()
+        assertEquals(PaymentCardKind.REFUND, card.kind)
+        assertEquals(PaymentDirection.INCOME, card.direction)
+        assertEquals(145L, card.amountCents)
+        assertEquals(listOf("自来充"), card.merchantCandidates)
+        val time = Calendar.getInstance().apply { timeInMillis = card.eventTimeMs!! }
+        assertEquals(2026, time.get(Calendar.YEAR))
+        assertEquals(Calendar.NOVEMBER, time.get(Calendar.MONTH))
+        assertEquals(14, time.get(Calendar.DAY_OF_MONTH))
+        assertEquals(5, time.get(Calendar.HOUR_OF_DAY))
+        assertEquals(26, time.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun parsesAlipayRefund() {
+        val card = alipayLines(
+            "11:20" to 100,
+            "退款成功" to 160,
+            "退款金额 ￥12.00" to 240,
+            "商户名称 杭州游卡" to 320,
+            "退款方式 原路退回" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.REFUND, card.kind)
+        assertEquals(PaymentDirection.INCOME, card.direction)
+        assertEquals(1200L, card.amountCents)
+        assertEquals(listOf("杭州游卡"), card.merchantCandidates)
+        assertTrue(card.isFinal)
+    }
+
+    @Test
+    fun refundFailureIsRejected() {
+        val cards = wechatLines(
+            "退款失败" to 100,
+            "退款金额" to 180,
+            "¥1.45" to 240,
+        )
+        assertTrue(cards.isEmpty())
+    }
+
+    @Test
+    fun pendingRefundIsNonFinal() {
+        val card = alipayLines(
+            "11:20" to 100,
+            "退款处理中" to 160,
+            "退款金额 ￥12.00" to 240,
+        ).single()
+        assertEquals(PaymentCardKind.REFUND, card.kind)
+        assertEquals(PaymentCardStatus.PENDING, card.status)
+        assertFalse(card.isFinal)
+        assertNotNull(card.nonFinalReason)
+    }
+
+    // --- pay after use -----------------------------------------------------
+
+    @Test
+    fun payAfterUseCreatedIsNotBooked() {
+        val card = wechatLines(
+            "14:00" to 100,
+            "拼多多平台商户" to 160,
+            "先用后付订单已生成" to 240,
+            "¥39.90" to 320,
+            "下单时间 11月3日 23:36" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.PAY_AFTER_USE, card.kind)
+        assertEquals(PaymentCardStatus.CREATED, card.status)
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+        assertEquals(3990L, card.amountCents)
+        assertEquals(listOf("拼多多平台商户"), card.merchantCandidates)
+        assertFalse(card.isFinal)
+        assertNotNull(card.nonFinalReason)
+    }
+
+    @Test
+    fun payAfterUseCompletedIsFinal() {
+        val card = wechatLines(
+            "15:31" to 100,
+            "拼多多平台商户" to 160,
+            "先用后付订单已完成，已自动支付" to 240,
+            "通过零钱扣款" to 320,
+            "¥8.40" to 400,
+        ).single()
+        assertEquals(PaymentCardKind.PAY_AFTER_USE, card.kind)
+        assertEquals(PaymentCardStatus.COMPLETED, card.status)
+        assertEquals(840L, card.amountCents)
+        assertTrue(card.isFinal)
+        assertNull(card.nonFinalReason)
+        val time = Calendar.getInstance().apply { timeInMillis = card.eventTimeMs!! }
+        assertEquals(15, time.get(Calendar.HOUR_OF_DAY))
+        assertEquals(31, time.get(Calendar.MINUTE))
+    }
+
+    @Test
+    fun payAfterUseCancelledIsNotBooked() {
+        val card = wechatLines(
+            "16:00" to 100,
+            "拼多多平台商户" to 160,
+            "先用后付订单已取消" to 240,
+            "¥39.90" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.PAY_AFTER_USE, card.kind)
+        assertEquals(PaymentCardStatus.CANCELLED, card.status)
+        assertEquals(3990L, card.amountCents)
+        assertFalse(card.isFinal)
+        assertNotNull(card.nonFinalReason)
+        assertTrue(card.reason.contains("取消"))
+    }
+
+    // --- grouping and missing fields --------------------------------------
+
+    @Test
+    fun multipleCardsKeepTheirOwnMerchantAndAmount() {
+        val cards = wechatLines(
+            "10:00" to 100,
+            "早餐店" to 160,
+            "使用零钱支付" to 240,
+            "¥10.00" to 320,
+            "账单详情" to 400,
+            "10:30" to 700,
+            "咖啡店" to 760,
+            "使用银行卡支付" to 840,
+            "¥25.00" to 920,
+            "账单详情" to 1000,
+        )
+        assertEquals(2, cards.size)
+        assertEquals(listOf("早餐店"), cards.single { it.amountCents == 1000L }.merchantCandidates)
+        assertEquals(listOf("咖啡店"), cards.single { it.amountCents == 2500L }.merchantCandidates)
+    }
+
+    @Test
+    fun timeHeaderSplitsCardsWithoutALargeGap() {
+        val cards = wechatLines(
+            "10:00" to 100,
+            "早餐店" to 160,
+            "使用零钱支付" to 240,
+            "¥10.00" to 320,
+            "10:30" to 380,
+            "咖啡店" to 440,
+            "使用银行卡支付" to 520,
+            "¥25.00" to 600,
+        )
+        assertEquals(2, cards.size)
+        assertEquals(listOf("早餐店"), cards.single { it.amountCents == 1000L }.merchantCandidates)
+        assertEquals(listOf("咖啡店"), cards.single { it.amountCents == 2500L }.merchantCandidates)
+    }
+
+    @Test
+    fun cardWithoutMerchantStillReturnsAmount() {
+        val card = wechatLines(
+            "支付成功" to 100,
+            "¥9.99" to 180,
+        ).single()
+        assertEquals(999L, card.amountCents)
+        assertTrue(card.merchantCandidates.isEmpty())
+        assertNull(card.orderId)
+        assertNull(card.eventTimeMs)
+    }
+
+    @Test
+    fun cardWithoutAmountProducesNothing() {
+        val cards = wechatLines(
+            "支付成功" to 100,
+            "商户 A" to 180,
+        )
+        assertTrue(cards.isEmpty())
+    }
+
+    @Test
+    fun ambiguousStandaloneAmountsProduceNothing() {
+        val cards = wechatLines(
+            "支付成功" to 100,
+            "¥10.00" to 180,
+            "¥20.00" to 260,
+        )
+        assertTrue(cards.isEmpty())
+    }
+
+    @Test
+    fun summaryHeaderIsNotTreatedAsACard() {
+        val cards = wechatLines(
+            "本月统计" to 80,
+            "11月已支出 ¥4251.87" to 140,
+            "查看明细" to 200,
+            "日报设置" to 260,
+            "自来充" to 700,
+            "使用零钱支付" to 780,
+            "¥6.00" to 860,
+            "账单详情" to 940,
+        )
+        assertEquals(1, cards.size)
+        assertEquals(600L, cards.single().amountCents)
+        assertEquals(listOf("自来充"), cards.single().merchantCandidates)
+    }
+
+    @Test
+    fun summaryAmountDoesNotOverrideCardAmount() {
+        val card = wechatLines(
+            "支付成功" to 100,
+            "商户 A" to 160,
+            "¥10.00" to 220,
+            "本月已支出 ¥500.00" to 300,
+            "账单详情" to 360,
+        ).single()
+        assertEquals(1000L, card.amountCents)
+        assertEquals(listOf("商户 A"), card.merchantCandidates)
+    }
+
+    @Test
+    fun monthlyTransferSummaryIsNotACard() {
+        val cards = wechatLines(
+            "本月转账 ¥500.00" to 100,
+            "查看明细" to 180,
+        )
+        assertTrue(cards.isEmpty())
+    }
+
+    @Test
+    fun ordinaryBillFallbackNeedsBillPageContext() {
+        val billLines = lines(
+            "账单" to 100,
+            "10:00" to 500,
+            "便利店" to 560,
+            "¥12.50" to 640,
+            "订单号 202511140001" to 720,
+        )
+        val card = detect(PaymentCardDetector.WECHAT, billLines).single()
+        assertEquals(PaymentCardKind.BILL, card.kind)
+        assertEquals(1250L, card.amountCents)
+        assertEquals(listOf("便利店"), card.merchantCandidates)
+        assertEquals("202511140001", card.orderId)
+        assertEquals(PaymentDirection.UNKNOWN, card.direction)
+        assertFalse(card.isFinal)
+
+        val withoutBillContext = lines(
+            "10:00" to 500,
+            "便利店" to 560,
+            "¥12.50" to 640,
+            "订单号 202511140001" to 720,
+        )
+        assertTrue(detect(PaymentCardDetector.WECHAT, withoutBillContext).isEmpty())
+    }
+
+    // --- input adapters and identity --------------------------------------
+
+    @Test
+    fun supportsAlipayAccessibilitySnapshot() {
+        fun node(text: String, top: Int): SnapshotNode = SnapshotNode(
+            text = text,
+            bounds = SnapshotRect(40, top, 1000, top + 40),
+        )
+        val snapshot = ScreenSnapshot.of(
+            PaymentCardDetector.ALIPAY,
+            capturedAt,
+            SnapshotNode(
+                children = listOf(
+                    node("10:24", 100),
+                    node("杭州游卡", 160),
+                    node("交易成功", 240),
+                    node("￥6.00", 320),
+                    node("交易号 2025111422001234567890", 400),
+                ),
+            ),
+        )
+        val card = PaymentCardDetector.fromSnapshot(
+            PaymentCardDetector.ALIPAY,
+            snapshot,
+            capturedAt,
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(600L, card.amountCents)
+        assertEquals(listOf("杭州游卡"), card.merchantCandidates)
+        assertTrue(card.pageIdentity.startsWith(PaymentCardDetector.ALIPAY))
+    }
+
+    @Test
+    fun supportsOcrLikeTextInput() {
+        val cards = PaymentCardDetector.fromText(
+            PaymentCardDetector.WECHAT,
+            """
+            昨天 21:21
+            自来充
+            使用零钱支付
+            ¥6.00
+            账单详情
+            """.trimIndent(),
+            capturedAt,
+            "ocr-page",
+        )
+        val card = cards.single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(600L, card.amountCents)
+        assertEquals("ocr-page", card.pageIdentity)
+    }
+
+    @Test
+    fun cardKeyIsStableWithinAPageAndChangesAcrossPages() {
+        val cardLines = lines(
+            "支付成功" to 100,
+            "商户 A" to 160,
+            "¥15.24" to 220,
+        )
+        val first = detect(PaymentCardDetector.WECHAT, cardLines, "page-1").single()
+        val second = detect(PaymentCardDetector.WECHAT, cardLines, "page-1").single()
+        val otherPage = detect(PaymentCardDetector.WECHAT, cardLines, "page-2").single()
+        assertEquals(first.cardKey, second.cardKey)
+        assertNotEquals(first.cardKey, otherPage.cardKey)
+        assertEquals("page-1", first.pageIdentity)
+    }
+
+    @Test
+    fun unsupportedPackageIsIgnored() {
+        val cardLines = lines(
+            "支付成功" to 100,
+            "商户 A" to 160,
+            "¥15.24" to 220,
+        )
+        assertTrue(detect("com.example.other", cardLines).isEmpty())
+        assertFalse(PaymentCardDetector.isSupported("com.example.other"))
+        assertTrue(PaymentCardDetector.isSupported(PaymentCardDetector.WECHAT))
+        assertTrue(PaymentCardDetector.isSupported(PaymentCardDetector.ALIPAY))
+    }
+}
