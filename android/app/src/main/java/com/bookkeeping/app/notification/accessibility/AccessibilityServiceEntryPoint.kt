@@ -1,6 +1,7 @@
 package com.bookkeeping.app.notification.accessibility
 
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.data.settings.SettingsPreferences
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
@@ -11,4 +12,5 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 interface AccessibilityServiceEntryPoint {
     fun transactionRepository(): TransactionRepository
+    fun settingsPreferences(): SettingsPreferences
 }
