@@ -25,7 +25,7 @@ class CaptureCandidateStore(context: Context) {
                         dir,
                         "shot_${candidate.capturedAtMs}_${abs(candidate.pageIdentity.hashCode())}.jpg",
                     )
-                    runCatching { file.writeBytes(bytes) }.getOrNull()?.absolutePath
+                    if (runCatching { file.writeBytes(bytes) }.isSuccess) file.absolutePath else null
                 }
             val stored = candidate.copy(screenshotPath = screenshotPath)
             runCatching {
