@@ -5,4 +5,9 @@
         本服务只在微信、支付宝两个 app 内激活，不会读取其他应用，
         交易默认仅保存在本机；仅在您主动开启同步后上传必要的结构化交易字段。
     </string>
+    <string name="page_recognition_service_label">清衡 · 页面识别</string>
+    <string name="page_recognition_service_description">
+        可选补充识别：仅在微信/支付宝支付成功页读取页面信息，并在安全检查通过后本地截图、生成待确认候选。
+        不后台翻页、不抓取历史账单、不上传截图；关闭后不影响通知、短信和手动记账。
+    </string>
 </resources>
