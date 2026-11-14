@@ -17,6 +17,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,6 +39,7 @@ import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 @Composable
 fun RootNavigation() {
     val navController = rememberNavController()
+    var requestBillImport by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -92,10 +96,26 @@ fun RootNavigation() {
             startDestination = BottomNavItem.Transactions.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(BottomNavItem.Transactions.route) { TransactionListScreen() }
+            composable(BottomNavItem.Transactions.route) {
+                TransactionListScreen(
+                    openBillImport = requestBillImport,
+                    onBillImportOpened = { requestBillImport = false },
+                )
+            }
             composable(BottomNavItem.Stats.route) { StatsScreen() }
             composable(BottomNavItem.Budget.route) { BudgetScreen() }
-            composable(BottomNavItem.Settings.route) { SettingsScreen() }
+            composable(BottomNavItem.Settings.route) {
+                SettingsScreen(
+                    onImportBills = {
+                        requestBillImport = true
+                        navController.navigate(BottomNavItem.Transactions.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
+            }
         }
     }
 }

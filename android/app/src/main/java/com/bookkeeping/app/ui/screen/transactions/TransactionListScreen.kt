@@ -52,6 +52,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -115,6 +116,8 @@ private data class LedgerStatus(
 fun TransactionListScreen(
     viewModel: TransactionViewModel = hiltViewModel(),
     captureReviewViewModel: CaptureReviewViewModel = hiltViewModel(),
+    openBillImport: Boolean = false,
+    onBillImportOpened: () -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
@@ -134,6 +137,13 @@ fun TransactionListScreen(
     var menuExpanded by remember { mutableStateOf(false) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(openBillImport) {
+        if (openBillImport) {
+            showBillImport = true
+            onBillImportOpened()
+        }
+    }
 
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
