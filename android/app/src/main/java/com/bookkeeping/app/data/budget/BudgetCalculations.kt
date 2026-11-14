@@ -26,12 +26,13 @@ data class MonthComparison(
 
 /** Pure monthly finance math; no Android or database dependencies. */
 object BudgetCalculations {
-    const val NEAR_LIMIT_RATIO: Float = 0.8f
+    const val NEAR_LIMIT_PERCENT: Long = 80L
 
     fun status(budgetCents: Long, spentCents: Long): BudgetStatus {
         if (budgetCents <= 0L) return BudgetStatus.UNSET
         if (spentCents > budgetCents) return BudgetStatus.OVER
-        if (spentCents.toDouble() >= budgetCents.toDouble() * NEAR_LIMIT_RATIO) {
+        // Integer percentage avoids the float 0.8f rounding above 80_000.
+        if (spentCents * 100L >= budgetCents * NEAR_LIMIT_PERCENT) {
             return BudgetStatus.NEAR_LIMIT
         }
         return BudgetStatus.NORMAL

@@ -48,9 +48,9 @@ object PaymentPageDetector {
         RegexOption.IGNORE_CASE,
     )
     private val TIME = Regex(
-        """(?:今天|昨天|星期.|周.|\\d{1,2}[:：]\\d{2}|\\d{4}[-/年]\\d{1,2}[-/月]\\d{1,2}|\\d{1,2}月\\d{1,2}日)""",
+        """(?:今天|昨天|星期.|周.|\d{1,2}[:：]\d{2}|\d{4}[-/年]\d{1,2}[-/月]\d{1,2}|\d{1,2}月\d{1,2}日)""",
     )
-    private val ONLY_PUNCT_OR_NUMBERS = Regex("""[\\d\\s:：.\\-/¥￥,，]+""")
+    private val ONLY_PUNCT_OR_NUMBERS = Regex("""[\d\s:：./¥￥,，-]+""")
 
     fun detect(
         packageName: String,
@@ -127,7 +127,8 @@ object PaymentPageDetector {
             if (PAYMENT_METHOD.any { text.contains(it, ignoreCase = true) }) continue
             if (PAGE_CHROME.any { text.contains(it, ignoreCase = true) }) continue
             if (text.contains("订单号") || text.contains("交易单号") ||
-                text.contains("商户单号") || text.contains("订单编号")
+                text.contains("商户单号") || text.contains("订单编号") ||
+                text.contains("交易号")
             ) continue
             result += text.take(40)
             if (result.size >= 5) break
