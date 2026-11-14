@@ -26,6 +26,7 @@ data class MonthComparison(
 
 /** Pure monthly finance math; no Android or database dependencies. */
 object BudgetCalculations {
+    const val NEAR_LIMIT_RATIO: Float = 0.8f // UI progress/colour hint only
     const val NEAR_LIMIT_PERCENT: Long = 80L
 
     fun status(budgetCents: Long, spentCents: Long): BudgetStatus {
