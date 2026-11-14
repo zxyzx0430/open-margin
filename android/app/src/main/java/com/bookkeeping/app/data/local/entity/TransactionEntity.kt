@@ -7,7 +7,13 @@ import androidx.room.ColumnInfo
 
 // 一笔交易在数据库里的"行"。
 // @Entity 告诉 Room "这个类对应数据库表"，表名是 transactions。
-@Entity(tableName = "transactions", indices = [Index(value = ["remoteEventId"], unique = true)])
+@Entity(
+    tableName = "transactions",
+    indices = [
+        Index(value = ["remoteEventId"], unique = true),
+        Index(value = ["sourceTransactionId"]),
+    ],
+)
 data class TransactionEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -65,6 +71,11 @@ data class TransactionEntity(
     // entry; the path is reserved for a cropped local icon. Neither is uploaded.
     val merchantIconKey: String? = null,
     val merchantIconPath: String? = null,
+
+    // Official bill order ID, kept as structured evidence for import dedup.
+    // Namespaces differ per payment platform, so pair it with `source`.
+    // Local-only; not part of the sync payload.
+    val sourceTransactionId: String? = null,
 )
 
 // 收入还是支出

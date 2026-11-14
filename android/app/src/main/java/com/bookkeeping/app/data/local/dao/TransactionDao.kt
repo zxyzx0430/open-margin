@@ -19,6 +19,10 @@ interface TransactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(transaction: TransactionEntity): Long
 
+    /** Room runs a collection insert in one transaction; a failure rolls back the batch. */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertAll(transactions: List<TransactionEntity>): List<Long>
+
     @Update
     suspend fun update(transaction: TransactionEntity)
 

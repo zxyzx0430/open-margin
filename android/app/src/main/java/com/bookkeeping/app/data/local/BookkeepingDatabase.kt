@@ -16,7 +16,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
     entities = [TransactionEntity::class, ProcessedNoticeEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -35,8 +35,20 @@ abstract class BookkeepingDatabase : RoomDatabase() {
          */
         fun build(context: Context): BookkeepingDatabase =
             Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
+
+        // v7: structured official-bill order ID. Local-only, not uploaded;
+        // the index supports import deduplication without forcing a merge.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN sourceTransactionId TEXT")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_transactions_sourceTransactionId " +
+                        "ON transactions(sourceTransactionId)",
+                )
+            }
+        }
 
         // v6: local-only merchant icon metadata. Existing rows keep null and
         // continue to render with their category icon.

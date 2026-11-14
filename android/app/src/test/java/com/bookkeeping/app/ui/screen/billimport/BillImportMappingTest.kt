@@ -9,8 +9,10 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BillImportMappingTest {
@@ -22,8 +24,9 @@ class BillImportMappingTest {
         status: BillStatus = BillStatus.SUCCESS,
         orderId: String? = "ORDER-1",
         rowNumber: Int = 3,
+        source: BillSource = BillSource.WECHAT,
     ) = BillImportRow(
-        source = BillSource.WECHAT,
+        source = source,
         rowNumber = rowNumber,
         occurredAtMs = 1_700_000_000_000L,
         merchant = merchant,
@@ -85,6 +88,21 @@ class BillImportMappingTest {
         val imported = row(orderId = null)
         assertEquals(true, keys.contains(BillImportParser.duplicateKey(imported)))
         assertEquals(true, keys.contains(BillImportMapping.ledgerRowKey(imported)))
+    }
+
+    @Test
+    fun orderIdIsStructuredAndNamespacedBySource() {
+        val entity = BillImportMapping.toTransactionEntity(row(orderId = "ORDER-1"))!!
+        assertEquals("ORDER-1", entity.sourceTransactionId)
+        val keys = BillImportMapping.existingRowKeys(listOf(entity))
+        assertTrue(keys.contains(BillImportMapping.ledgerRowKey(row(orderId = "ORDER-1"))))
+        assertFalse(
+            keys.contains(
+                BillImportMapping.ledgerRowKey(
+                    row(orderId = "ORDER-1", source = BillSource.ALIPAY),
+                ),
+            ),
+        )
     }
 
     @Test

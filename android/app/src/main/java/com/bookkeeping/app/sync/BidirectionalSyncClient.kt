@@ -119,7 +119,9 @@ internal class BidirectionalSyncClient(
             syncMutationId=null,
             // A resolution made on another device clears the local review marker.
             duplicateOfId=if (reviewStatus in setOf("confirmed","excluded","transfer","refund")) null
-                          else row?.duplicateOfId
+                          else row?.duplicateOfId,
+            // Order IDs are local import evidence; keep them across server pulls.
+            sourceTransactionId=row?.sourceTransactionId
         )
     }
 
