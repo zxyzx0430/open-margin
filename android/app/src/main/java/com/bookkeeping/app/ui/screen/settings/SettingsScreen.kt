@@ -2,9 +2,17 @@ package com.bookkeeping.app.ui.screen.settings
 
 import com.bookkeeping.app.i18n.tr
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
+import com.bookkeeping.app.notification.CaptureConnectionState
+import com.bookkeeping.app.notification.CaptureHealth
+import com.bookkeeping.app.notification.CaptureHealthSnapshot
+import com.bookkeeping.app.notification.CaptureUptime
+import com.bookkeeping.app.notification.KeepAliveService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,6 +56,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureHealth
 import com.bookkeeping.app.notification.accessibility.AccessibilityConnectionState
@@ -178,6 +190,66 @@ private fun SectionTitle(text: String) {
 
 @Composable
 private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var nowElapsed by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+    var nowWall by remember { mutableStateOf(System.currentTimeMillis()) }
+    var health by remember { mutableStateOf<CaptureHealthSnapshot?>(null) }
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                nowElapsed = SystemClock.elapsedRealtime()
+                nowWall = System.currentTimeMillis()
+                health = withContext(Dispatchers.IO) {
+                    CaptureHealth.snapshot(context, KeepAliveService.startedAtMs)
+                }
+                delay(1_000L)
+            }
+        }
+    }
+    val snapshot = health
+    val uptime = CaptureUptime.format(
+        CaptureUptime.elapsed(
+            connectedAtMs = snapshot?.connectedAtMs ?: 0L,
+            connectedElapsedMs = snapshot?.connectedElapsedMs ?: 0L,
+            nowMs = nowWall,
+            nowElapsedMs = nowElapsed,
+        ),
+        tr("%02d 小时 %02d 分钟 %02d 秒"),
+    )
+    val downtime = CaptureUptime.formatDowntime(
+        CaptureUptime.elapsed(
+            connectedAtMs = snapshot?.disconnectedAtMs ?: 0L,
+            connectedElapsedMs = snapshot?.disconnectedElapsedMs ?: 0L,
+            nowMs = nowWall,
+            nowElapsedMs = nowElapsed,
+        ),
+        tr("%02d 秒"),
+        tr("%02d 分钟"),
+        tr("%d 小时 %02d 分钟"),
+    )
+    val statusText = when (snapshot?.state) {
+        null -> "⚪ " + tr("正在确认")
+        CaptureConnectionState.CONNECTED ->
+            "🟢 " + tr("已连接 · 已稳定运行") + " " + uptime
+        CaptureConnectionState.DISCONNECTED -> {
+            val disconnectedAt = snapshot.disconnectedAtMs
+            if (disconnectedAt > 0L) {
+                val wall = android.text.format.DateFormat.getTimeFormat(context)
+                    .format(Date(disconnectedAt))
+                "🔴 " + String.format(
+                    Locale.getDefault(),
+                    tr("%s 断开 · 已断开 %s"),
+                    wall,
+                    downtime,
+                )
+            } else {
+                "🔴 " + tr("尚未连接")
+            }
+        }
+        CaptureConnectionState.PERMISSION_OFF -> "🔴 " + tr("通知使用权已关闭")
+        CaptureConnectionState.UNKNOWN -> "⚪ " + tr("正在确认")
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -207,6 +279,12 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
             )
             Text(
+                text = tr("当前状态：") + statusText,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
                 text = tr("开启后通知栏会显示绿色/红色状态圆点：绿色表示通知监听已连接，红色表示已断开或权限关闭；") +
                        tr("同时显示本次连接运行时长、断开时间和最近一次成功入账。") +
                        tr("刚启动的几秒会先显示灰色确认中，避免误报。") +
@@ -214,8 +292,36 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
+            Text(
+                text = tr("如果通知栏没有状态条：请在系统设置中允许本应用的常驻/持续通知。") +
+                       tr("小米/Redmi/POCO 的路径是：应用信息 → 通知 → Permanent notifications。") +
+                       tr("同时开启自启动，并把电池策略设为「无限制」；否则小米可能不会发送开机广播。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            FilledTonalButton(
+                onClick = { openAppNotificationSettings(context) },
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                Text(tr("打开系统通知设置"))
+            }
         }
     }
+}
+
+private fun openAppNotificationSettings(context: Context) {
+    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+    } else {
+        Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:${context.packageName}"),
+        )
+    }
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
 }
 
 @Composable

@@ -73,10 +73,10 @@ data class PublishedRelease(
 )
 
 object UpdateVersionPolicy {
-    // RC7 is Android-only: it rolls the duplicate-review prompt, optional save
-    // notifications and persistent capture status into one build. Keep both
-    // release tag and Android versionCode in sync.
-    const val CURRENT_TAG = "v1.2.0-rc.7"
+    // RC8 is Android-only: inline live uptime, public lock-screen visibility,
+    // ROM notification guidance and boot restore. Keep both release tag and
+    // Android versionCode in sync.
+    const val CURRENT_TAG = "v1.2.0-rc.8"
 
     fun latestNewer(
         releases: List<PublishedRelease>,

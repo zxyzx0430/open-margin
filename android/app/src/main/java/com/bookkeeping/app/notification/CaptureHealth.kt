@@ -1,6 +1,7 @@
 package com.bookkeeping.app.notification
 
 import android.content.Context
+import android.os.SystemClock
 
 enum class CaptureConnectionState {
     PERMISSION_OFF,
@@ -36,7 +37,9 @@ data class CaptureHealthSnapshot(
     val authorized: Boolean,
     val connected: Boolean,
     val connectedAtMs: Long,
+    val connectedElapsedMs: Long,
     val disconnectedAtMs: Long,
+    val disconnectedElapsedMs: Long,
     val disconnectedReason: String,
     val lastSuccessAtMs: Long,
     val lastFailureAtMs: Long,
@@ -68,7 +71,9 @@ object CaptureHealth {
             authorized = authorized,
             connected = connectedInProcess,
             connectedAtMs = prefs.getLong(KEY_CONNECTED_AT, 0L),
+            connectedElapsedMs = prefs.getLong(KEY_CONNECTED_ELAPSED, 0L),
             disconnectedAtMs = disconnectedAt,
+            disconnectedElapsedMs = prefs.getLong(KEY_DISCONNECTED_ELAPSED, 0L),
             disconnectedReason = prefs.getString(KEY_DISCONNECTED_REASON, "").orEmpty(),
             lastSuccessAtMs = prefs.getLong(KEY_LAST_SUCCESS_AT, 0L),
             lastFailureAtMs = prefs.getLong(KEY_LAST_FAILURE_AT, 0L),
@@ -88,9 +93,11 @@ object CaptureHealth {
         connectedInProcess = true
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putLong(KEY_CONNECTED_AT, System.currentTimeMillis())
+            .putLong(KEY_CONNECTED_ELAPSED, SystemClock.elapsedRealtime())
             // A reconnect makes the previous disconnect time obsolete; keeping it
             // would show a stale "disconnected at" after the next process restart.
             .remove(KEY_DISCONNECTED_AT)
+            .remove(KEY_DISCONNECTED_ELAPSED)
             .remove(KEY_DISCONNECTED_REASON)
             .apply()
     }
@@ -99,7 +106,9 @@ object CaptureHealth {
         connectedInProcess = false
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putLong(KEY_DISCONNECTED_AT, System.currentTimeMillis())
+            .putLong(KEY_DISCONNECTED_ELAPSED, SystemClock.elapsedRealtime())
             .putString(KEY_DISCONNECTED_REASON, reason.take(48))
+            .remove(KEY_CONNECTED_ELAPSED)
             .apply()
     }
 
@@ -120,7 +129,9 @@ object CaptureHealth {
     }
 
     private const val KEY_CONNECTED_AT = "connected_at"
+    private const val KEY_CONNECTED_ELAPSED = "connected_elapsed"
     private const val KEY_DISCONNECTED_AT = "disconnected_at"
+    private const val KEY_DISCONNECTED_ELAPSED = "disconnected_elapsed"
     private const val KEY_DISCONNECTED_REASON = "disconnected_reason"
     private const val KEY_LAST_SUCCESS_AT = "last_success_at"
     private const val KEY_LAST_FAILURE_AT = "last_failure_at"

@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.format.DateFormat
 import androidx.core.app.NotificationCompat
@@ -34,9 +35,22 @@ internal object CaptureStatusNotifier {
                 "⚪ " + AppLanguage.tr(context, "正在确认运行状态")
             else -> "🔴 " + AppLanguage.tr(context, "自动记账已断开")
         }
+        val connectedLine = if (connected) {
+            AppLanguage.tr(context, "通知监听已连接，已稳定运行") + " " +
+                CaptureUptime.format(
+                    CaptureUptime.elapsed(
+                        connectedAtMs = health.connectedAtMs,
+                        connectedElapsedMs = health.connectedElapsedMs,
+                        nowMs = System.currentTimeMillis(),
+                        nowElapsedMs = SystemClock.elapsedRealtime(),
+                    ),
+                    AppLanguage.tr(context, CaptureUptime.DEFAULT_PATTERN),
+                )
+        } else {
+            ""
+        }
         val contentText = when (health.state) {
-            CaptureConnectionState.CONNECTED ->
-                AppLanguage.tr(context, "通知监听已连接 · 已稳定运行")
+            CaptureConnectionState.CONNECTED -> connectedLine
             CaptureConnectionState.UNKNOWN ->
                 AppLanguage.tr(context, "已授权，正在等待通知监听连接")
             CaptureConnectionState.PERMISSION_OFF ->
@@ -49,24 +63,17 @@ internal object CaptureStatusNotifier {
             .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(
-                NotificationCompat.BigTextStyle().bigText(buildBigText(context, health))
+                NotificationCompat.BigTextStyle()
+                    .bigText(buildBigText(context, health, contentText))
             )
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            .setShowWhen(false)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-
-        if (connected) {
-            builder
-                .setUsesChronometer(true)
-                .setWhen(health.connectedAtMs.takeIf { it > 0L } ?: System.currentTimeMillis())
-                .setChronometerCountDown(false)
-                .setShowWhen(true)
-        } else {
-            builder.setUsesChronometer(false).setShowWhen(false)
-        }
 
         if (!connected) {
             val permissionIntent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
@@ -92,10 +99,22 @@ internal object CaptureStatusNotifier {
         health: CaptureHealthSnapshot,
     ): String {
         if (health.disconnectedAtMs > 0L) {
+            val downtime = CaptureUptime.formatDowntime(
+                CaptureUptime.elapsed(
+                    connectedAtMs = health.disconnectedAtMs,
+                    connectedElapsedMs = health.disconnectedElapsedMs,
+                    nowMs = System.currentTimeMillis(),
+                    nowElapsedMs = SystemClock.elapsedRealtime(),
+                ),
+                AppLanguage.tr(context, CaptureUptime.SECONDS_PATTERN),
+                AppLanguage.tr(context, CaptureUptime.MINUTES_PATTERN),
+                AppLanguage.tr(context, CaptureUptime.HOURS_PATTERN),
+            )
             return String.format(
                 Locale.getDefault(),
-                AppLanguage.tr(context, "%s 断开 · 点击检查权限"),
+                AppLanguage.tr(context, "%s 断开 · 已断开 %s · 点击检查权限"),
                 formatTime(context, health.disconnectedAtMs),
+                downtime,
             )
         }
         if (health.connectedAtMs <= 0L) {
@@ -108,15 +127,12 @@ internal object CaptureStatusNotifier {
         )
     }
 
-    private fun buildBigText(context: Context, health: CaptureHealthSnapshot): String {
-        val lines = mutableListOf<String>()
-        lines += when (health.state) {
-            CaptureConnectionState.CONNECTED ->
-                AppLanguage.tr(context, "通知监听：已连接")
-            CaptureConnectionState.UNKNOWN ->
-                AppLanguage.tr(context, "通知监听：等待连接")
-            else -> AppLanguage.tr(context, "通知监听：未连接")
-        }
+    private fun buildBigText(
+        context: Context,
+        health: CaptureHealthSnapshot,
+        statusLine: String,
+    ): String {
+        val lines = mutableListOf(statusLine)
         lines += if (health.lastSuccessAtMs > 0L) {
             AppLanguage.tr(context, "最近成功入账：") +
                 formatTime(context, health.lastSuccessAtMs)

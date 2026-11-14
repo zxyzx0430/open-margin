@@ -14,10 +14,10 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        // RC7: single Android build containing duplicate review, optional save
-        // notifications and the persistent capture status. Keep in sync with
-        // UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.7).
-        versionCode = 12
+        // RC8: inline live uptime, public lock-screen visibility, ROM guidance
+        // and boot restore. Keep in sync with UpdateVersionPolicy.CURRENT_TAG
+        // (v1.2.0-rc.8).
+        versionCode = 13
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
