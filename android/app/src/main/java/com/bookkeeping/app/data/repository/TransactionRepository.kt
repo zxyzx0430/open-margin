@@ -154,6 +154,17 @@ class TransactionRepository @Inject constructor(
         TransactionSyncWorker.requestImmediate(context)
     }
 
+    /**
+     * Official bill imports are all-or-nothing. No success notification is
+     * emitted for bulk historical data, and sync starts once after commit.
+     */
+    suspend fun insertImportedBatch(transactions: List<TransactionEntity>): Int {
+        if (transactions.isEmpty()) return 0
+        val ids = dao.insertAll(transactions)
+        TransactionSyncWorker.requestImmediate(context)
+        return ids.count { it > 0L }
+    }
+
     suspend fun delete(transaction: TransactionEntity) {
         // Tombstone remains until the server acknowledges deletion; no stale
         // offline device may resurrect it on the next network reconnect.

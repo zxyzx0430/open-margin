@@ -88,19 +88,31 @@ class BillImportViewModel @Inject constructor(
         if (current.importing || current.done) return
         _state.value = current.copy(importing = true, error = null)
         viewModelScope.launch {
-            val inserted = withContext(Dispatchers.IO) {
-                var count = 0
-                preview.validRows.forEach { row ->
-                    val entity = BillImportMapping.toTransactionEntity(row) ?: return@forEach
-                    val id = runCatching { repository.insert(entity) }.getOrDefault(-1L)
-                    if (id > 0L) count++
-                }
-                count
+            val entities = preview.validRows.mapNotNull(BillImportMapping::toTransactionEntity)
+            if (entities.size != preview.validRows.size) {
+                _state.value = _state.value.copy(
+                    importing = false,
+                    error = "部分有效行无法映射，未写入任何记录",
+                )
+                return@launch
             }
-            _state.value = _state.value.copy(
-                importing = false,
-                importedCount = inserted,
-                done = true,
+            val result = withContext(Dispatchers.IO) {
+                runCatching { repository.insertImportedBatch(entities) }
+            }
+            _state.value = result.fold(
+                onSuccess = { inserted ->
+                    _state.value.copy(
+                        importing = false,
+                        importedCount = inserted,
+                        done = true,
+                    )
+                },
+                onFailure = { failure ->
+                    _state.value.copy(
+                        importing = false,
+                        error = "导入失败，未写入任何记录：${failure.message ?: "数据库错误"}",
+                    )
+                },
             )
         }
     }

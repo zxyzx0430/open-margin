@@ -94,7 +94,9 @@ object BillImportParser {
     fun duplicateKey(row: BillImportRow): String {
         val order = row.orderId?.trim().orEmpty()
         return if (order.isNotEmpty()) {
-            "order:$order"
+            // Order IDs are namespaced per platform; the same string can be
+            // reused by another payment provider.
+            "order:${row.source.name}:$order"
         } else {
             "row:${row.occurredAtMs}|${row.amountCents}|${row.direction.name}|${normalizeMerchant(row.merchant)}"
         }

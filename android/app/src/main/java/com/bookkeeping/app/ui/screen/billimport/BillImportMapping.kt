@@ -19,7 +19,7 @@ import com.bookkeeping.app.data.merchant.MerchantIconCatalog
 object BillImportMapping {
 
     fun ledgerRowKey(row: BillImportRow): String =
-        BillImportParser.duplicateKey(row.copy(orderId = null))
+        BillImportParser.duplicateKey(row)
 
     fun existingRowKeys(transactions: List<TransactionEntity>): Set<String> =
         transactions.mapNotNull { transaction ->
@@ -28,9 +28,14 @@ object BillImportMapping {
                 TransactionType.INCOME.name -> BillDirection.INCOME
                 else -> return@mapNotNull null
             }
+            val source = when (transaction.source) {
+                TransactionSource.WECHAT -> BillSource.WECHAT
+                TransactionSource.ALIPAY -> BillSource.ALIPAY
+                else -> BillSource.UNKNOWN
+            }
             ledgerRowKey(
                 BillImportRow(
-                    source = BillSource.UNKNOWN,
+                    source = source,
                     rowNumber = 0,
                     occurredAtMs = transaction.timestamp,
                     merchant = transaction.merchant,
@@ -38,6 +43,7 @@ object BillImportMapping {
                     direction = direction,
                     currency = transaction.currency,
                     status = BillStatus.SUCCESS,
+                    orderId = transaction.sourceTransactionId,
                 ),
             )
         }.toSet()
@@ -96,6 +102,7 @@ object BillImportMapping {
             timestamp = row.occurredAtMs,
             currency = row.currency,
             merchantIconKey = MerchantIconCatalog.forMerchant(row.merchant)?.key,
+            sourceTransactionId = row.orderId?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 }
