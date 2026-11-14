@@ -31,7 +31,9 @@ object BudgetCalculations {
     fun status(budgetCents: Long, spentCents: Long): BudgetStatus {
         if (budgetCents <= 0L) return BudgetStatus.UNSET
         if (spentCents > budgetCents) return BudgetStatus.OVER
-        if (spentCents >= budgetCents * NEAR_LIMIT_RATIO) return BudgetStatus.NEAR_LIMIT
+        if (spentCents.toDouble() >= budgetCents.toDouble() * NEAR_LIMIT_RATIO) {
+            return BudgetStatus.NEAR_LIMIT
+        }
         return BudgetStatus.NORMAL
     }
 
