@@ -117,4 +117,23 @@ interface TransactionDao {
               AND (duplicateOfId IS NOT NULL OR remoteReviewStatus = 'possible_duplicate')
               ORDER BY timestamp DESC LIMIT 20""")
     fun observeDuplicateCandidates(): Flow<List<TransactionEntity>>
+
+    @Query("""
+        SELECT * FROM transactions
+        WHERE syncDeleted = 0
+          AND (:query = '' OR merchant LIKE '%' || :query || '%'
+               OR note LIKE '%' || :query || '%' OR category LIKE '%' || :query || '%')
+          AND (:type IS NULL OR type = :type)
+          AND (:category IS NULL OR category = :category)
+          AND (:startMs IS NULL OR timestamp >= :startMs)
+          AND (:endMs IS NULL OR timestamp < :endMs)
+        ORDER BY timestamp DESC
+    """)
+    fun observeFiltered(
+        query: String,
+        type: String?,
+        category: String?,
+        startMs: Long?,
+        endMs: Long?,
+    ): Flow<List<TransactionEntity>>
 }
