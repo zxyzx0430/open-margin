@@ -84,6 +84,10 @@ import com.bookkeeping.app.ui.components.MonthlySummaryCard
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.TransactionRow
+import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
+import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
+import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
+import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
 import com.bookkeeping.app.ui.theme.QingBackground
 import com.bookkeeping.app.ui.theme.QingErrorContainer
 import com.bookkeeping.app.ui.theme.QingOutline
@@ -110,9 +114,11 @@ private data class LedgerStatus(
 @Composable
 fun TransactionListScreen(
     viewModel: TransactionViewModel = hiltViewModel(),
+    captureReviewViewModel: CaptureReviewViewModel = hiltViewModel(),
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
+    val captureReview by captureReviewViewModel.state.collectAsState()
     val monthlyExpense by viewModel.monthlyExpenseCents.collectAsState()
     val monthlyIncome by viewModel.monthlyIncomeCents.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -121,6 +127,8 @@ fun TransactionListScreen(
     val timeFilter by viewModel.timeFilter.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var showBillImport by remember { mutableStateOf(false) }
+    var showCaptureReview by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var editing by remember { mutableStateOf<TransactionEntity?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
@@ -160,6 +168,7 @@ fun TransactionListScreen(
     ) {
         while (true) {
             value = readLedgerStatus(context)
+            captureReviewViewModel.refresh()
             delay(30_000)
         }
     }
@@ -239,6 +248,30 @@ fun TransactionListScreen(
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text(tr("导入账单")) },
+                            onClick = {
+                                menuExpanded = false
+                                showBillImport = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    tr("扫描结果") +
+                                        if (captureReview.pending.isNotEmpty()) {
+                                            "（${captureReview.pending.size}）"
+                                        } else {
+                                            ""
+                                        },
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                captureReviewViewModel.refresh()
+                                showCaptureReview = true
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text(tr("清空筛选")) },
                             onClick = {
                                 menuExpanded = false
@@ -277,6 +310,18 @@ fun TransactionListScreen(
                         text = status.lastSyncText,
                         tone = StatusTone.NEUTRAL,
                         icon = Icons.Outlined.Sync,
+                    )
+                }
+            }
+
+            if (captureReview.pending.isNotEmpty()) {
+                item(key = "capture_review") {
+                    CaptureReviewCard(
+                        count = captureReview.pending.size,
+                        onOpen = {
+                            captureReviewViewModel.refresh()
+                            showCaptureReview = true
+                        },
                     )
                 }
             }
@@ -475,6 +520,17 @@ fun TransactionListScreen(
                 viewModel.updateTransaction(entry, amount, type, category, merchant, note)
                 editing = null
             },
+        )
+    }
+
+    if (showBillImport) {
+        BillImportDialog(onDismiss = { showBillImport = false })
+    }
+
+    if (showCaptureReview) {
+        CaptureReviewDialog(
+            onDismiss = { showCaptureReview = false },
+            viewModel = captureReviewViewModel,
         )
     }
 

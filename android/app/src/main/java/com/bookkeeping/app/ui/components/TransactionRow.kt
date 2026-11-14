@@ -80,6 +80,7 @@ fun TransactionRow(
             MerchantAvatar(
                 merchant = transaction.merchant,
                 merchantIconKey = transaction.merchantIconKey,
+                merchantIconPath = transaction.merchantIconPath,
                 category = category,
                 size = 42.dp,
             )
