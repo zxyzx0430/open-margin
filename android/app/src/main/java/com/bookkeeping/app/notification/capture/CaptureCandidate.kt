@@ -20,6 +20,7 @@ data class CaptureCandidate(
     val screenshotPath: String?,
     val confidence: Float,
     val reason: String,
+    val status: String = STATUS_PENDING,
 ) {
     fun isValid(): Boolean {
         if (packageName != WECHAT && packageName != ALIPAY) return false
@@ -31,8 +32,11 @@ data class CaptureCandidate(
         if (merchantCandidates.any { it.isBlank() || it.length > 80 }) return false
         if (orderId != null && (orderId.isBlank() || orderId.length > 80)) return false
         if (reason.isBlank() || reason.length > 80) return false
+        if (status !in STATUSES) return false
         return true
     }
+
+    fun stableKey(): String = pageIdentity + "|" + capturedAtMs
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("packageName", packageName)
@@ -44,6 +48,7 @@ data class CaptureCandidate(
         put("screenshotPath", screenshotPath ?: JSONObject.NULL)
         put("confidence", confidence.toDouble())
         put("reason", reason)
+        put("status", status)
     }
 
     companion object {
@@ -51,12 +56,18 @@ data class CaptureCandidate(
         const val ALIPAY = "com.eg.android.AlipayGphone"
         const val MAX_CENTS = 100_000_000_000L
         const val MAX_MERCHANTS = 5
+        const val STATUS_PENDING = "PENDING"
+        const val STATUS_APPROVED = "APPROVED"
+        const val STATUS_IGNORED = "IGNORED"
+        val STATUSES = setOf(STATUS_PENDING, STATUS_APPROVED, STATUS_IGNORED)
 
         fun fromJson(json: JSONObject): CaptureCandidate? = runCatching {
             val merchantsJson = json.optJSONArray("merchantCandidates") ?: JSONArray()
             val merchants = (0 until merchantsJson.length()).mapNotNull { index ->
                 merchantsJson.optString(index).takeIf { it.isNotBlank() }
             }
+            val status = json.optString("status", STATUS_PENDING)
+                .takeIf { it in STATUSES } ?: STATUS_PENDING
             val candidate = CaptureCandidate(
                 packageName = json.getString("packageName"),
                 pageIdentity = json.getString("pageIdentity"),
@@ -71,6 +82,7 @@ data class CaptureCandidate(
                 },
                 confidence = json.optDouble("confidence", 0.0).toFloat(),
                 reason = json.optString("reason", "ok"),
+                status = status,
             )
             candidate.takeIf { it.isValid() }
         }.getOrNull()

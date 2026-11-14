@@ -37,24 +37,41 @@ class CaptureCandidateStore(context: Context) {
     }
 
     fun latest(limit: Int = 50): List<CaptureCandidate> = synchronized(lock) {
-        if (!indexFile.isFile) return emptyList()
-        val candidates = runCatching {
-            indexFile.readLines()
-                .asSequence()
-                .mapNotNull { line ->
-                    runCatching {
-                        CaptureCandidate.fromJson(org.json.JSONObject(line))
-                    }.getOrNull()
-                }
-                .toList()
-        }.getOrElse { emptyList() }
-        candidates.sortedBy { it.capturedAtMs }.takeLast(limit.coerceIn(1, MAX_ENTRIES))
+        val collapsed = linkedMapOf<String, CaptureCandidate>()
+        readAll().forEach { candidate -> collapsed[candidate.stableKey()] = candidate }
+        collapsed.values
+            .sortedBy { it.capturedAtMs }
+            .takeLast(limit.coerceIn(1, MAX_ENTRIES))
+    }
+
+    fun pending(limit: Int = 50): List<CaptureCandidate> =
+        latest(limit).filter { it.status == CaptureCandidate.STATUS_PENDING }
+
+    /** Appends a status record; readers keep the last record for each capture. */
+    fun mark(candidate: CaptureCandidate, status: String): Boolean {
+        if (status !in CaptureCandidate.STATUSES) return false
+        synchronized(lock) {
+            if (!dir.exists() && !dir.mkdirs()) return false
+            return runCatching {
+                indexFile.appendText(candidate.copy(status = status).toJson().toString() + "\n")
+                trimIndex()
+            }.isSuccess
+        }
     }
 
     fun clear() {
         synchronized(lock) {
             dir.deleteRecursively()
         }
+    }
+
+    private fun readAll(): List<CaptureCandidate> {
+        if (!indexFile.isFile) return emptyList()
+        return runCatching {
+            indexFile.readLines().mapNotNull { line ->
+                runCatching { CaptureCandidate.fromJson(org.json.JSONObject(line)) }.getOrNull()
+            }
+        }.getOrElse { emptyList() }
     }
 
     private fun trimIndex() {
