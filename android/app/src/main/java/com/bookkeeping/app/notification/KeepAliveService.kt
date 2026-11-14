@@ -3,8 +3,10 @@ package com.bookkeeping.app.notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -17,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -28,6 +31,18 @@ class KeepAliveService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var startupRefresh: Job? = null
+    private var uptimeTicker: Job? = null
+    private var screenReceiverRegistered = false
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_ON ||
+                intent?.action == Intent.ACTION_SCREEN_OFF
+            ) {
+                refreshStatus(this@KeepAliveService)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -62,6 +77,8 @@ class KeepAliveService : Service() {
             return START_NOT_STICKY
         }
         isRunning = true
+        registerScreenReceiver()
+        startUptimeTicker()
 
         // An authorized listener that never connects must turn red after the grace
         // period instead of staying "checking" forever.
@@ -76,8 +93,45 @@ class KeepAliveService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        stopUptimeTicker()
+        if (screenReceiverRegistered) {
+            runCatching { unregisterReceiver(screenReceiver) }
+            screenReceiverRegistered = false
+        }
         scope.cancel()
         super.onDestroy()
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        runCatching {
+            ContextCompat.registerReceiver(
+                this,
+                screenReceiver,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            screenReceiverRegistered = true
+        }
+    }
+
+    private fun startUptimeTicker() {
+        if (!isRunning || uptimeTicker?.isActive == true) return
+        uptimeTicker = scope.launch {
+            while (isActive) {
+                refreshStatus(this@KeepAliveService)
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun stopUptimeTicker() {
+        uptimeTicker?.cancel()
+        uptimeTicker = null
     }
 
     companion object {
