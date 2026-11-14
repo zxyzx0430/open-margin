@@ -29,8 +29,8 @@ object BillImportMapping {
                 else -> return@mapNotNull null
             }
             val source = when (transaction.source) {
-                TransactionSource.WECHAT -> BillSource.WECHAT
-                TransactionSource.ALIPAY -> BillSource.ALIPAY
+                TransactionSource.WECHAT.name -> BillSource.WECHAT
+                TransactionSource.ALIPAY.name -> BillSource.ALIPAY
                 else -> BillSource.UNKNOWN
             }
             ledgerRowKey(
