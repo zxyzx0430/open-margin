@@ -19,8 +19,9 @@ object CaptureReviewMapping {
             else -> TransactionSource.OTHER
         }
         val name = merchant.trim().ifBlank { "未知商户" }
+        val refund = candidate.kind == CaptureCandidate.KIND_REFUND
         val note = buildString {
-            append("[扫描] ")
+            append(if (refund) "[退款] " else "[扫描] ")
             append(
                 when (candidate.packageName) {
                     CaptureCandidate.WECHAT -> "微信"
@@ -28,17 +29,20 @@ object CaptureReviewMapping {
                     else -> "页面"
                 },
             )
+            if (candidate.kind == CaptureCandidate.KIND_AUTO_PAY) append(" · 自动支付")
             candidate.orderId?.let { append(" · 单号 ").append(it) }
         }
         return TransactionEntity(
             amountCents = candidate.amountCents,
-            type = TransactionType.EXPENSE.name,
-            category = category.name,
+            type = if (refund) TransactionType.INCOME.name else TransactionType.EXPENSE.name,
+            category = if (refund) TransactionCategory.OTHER.name else category.name,
             merchant = name,
             note = note,
             source = source.name,
-            timestamp = candidate.capturedAtMs,
+            timestamp = candidate.eventTimeMs.takeIf { it > 0L } ?: candidate.capturedAtMs,
             merchantIconKey = MerchantIconCatalog.forMerchant(name)?.key,
+            remoteReviewStatus = if (refund) "refund" else "unverified",
+            sourceTransactionId = candidate.orderId,
         )
     }
 }

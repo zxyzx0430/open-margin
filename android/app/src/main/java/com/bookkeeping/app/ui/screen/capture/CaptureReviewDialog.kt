@@ -47,6 +47,7 @@ import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingIncome
 import com.bookkeeping.app.ui.theme.QingTextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -182,11 +183,13 @@ private fun CaptureCandidateCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val refund = candidate.kind == CaptureCandidate.KIND_REFUND
                     Text(
-                        text = "−¥" + "%.2f".format(Locale.CHINA, candidate.amountCents / 100.0),
+                        text = (if (refund) "+¥" else "−¥") +
+                            "%.2f".format(Locale.CHINA, candidate.amountCents / 100.0),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.error,
+                        color = if (refund) QingIncome else MaterialTheme.colorScheme.error,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
@@ -212,7 +215,7 @@ private fun CaptureCandidateCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
-                            .format(Date(candidate.capturedAtMs)) +
+                            .format(Date(candidate.eventTimeMs)) +
                             (candidate.orderId?.let { " · " + tr("单号") + " " + it } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = QingTextSecondary,
