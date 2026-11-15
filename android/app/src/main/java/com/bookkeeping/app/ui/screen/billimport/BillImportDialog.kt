@@ -35,10 +35,12 @@ import com.bookkeeping.app.billimport.BillDirection
 import com.bookkeeping.app.billimport.BillImportPreview
 import com.bookkeeping.app.billimport.BillPreviewKind
 import com.bookkeeping.app.billimport.BillPreviewRow
-import com.bookkeeping.app.billimport.BillStatus
 import com.bookkeeping.app.i18n.tr
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import com.bookkeeping.app.ui.components.formatCny
+import com.bookkeeping.app.ui.theme.QingExpense
+import com.bookkeeping.app.ui.theme.QingIncome
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,10 +57,8 @@ fun BillImportDialog(
 
     Dialog(
         onDismissRequest = {
-            if (!state.importing) {
-                viewModel.reset()
-                onDismiss()
-            }
+            viewModel.reset()
+            onDismiss()
         },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
@@ -66,11 +66,8 @@ fun BillImportDialog(
             modifier = Modifier
                 .fillMaxWidth(0.94f)
                 .then(
-                    if (state.preview != null) {
-                        Modifier.fillMaxHeight(0.88f)
-                    } else {
-                        Modifier.wrapContentHeight()
-                    },
+                    if (state.preview == null) Modifier.wrapContentHeight()
+                    else Modifier.fillMaxHeight(0.88f)
                 ),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -87,19 +84,17 @@ fun BillImportDialog(
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(
-                        onClick = {
-                            if (!state.importing) {
-                                viewModel.reset()
-                                onDismiss()
-                            }
-                        },
                         enabled = !state.importing,
+                        onClick = {
+                            viewModel.reset()
+                            onDismiss()
+                        },
                     ) { Text(tr("关闭")) }
                 }
                 Text(
                     text = tr("支持微信/支付宝官方 CSV、XLSX 或文本账单；确认前不会写入账本。"),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = QingTextSecondary,
                 )
                 OutlinedButton(
                     onClick = {
@@ -126,7 +121,7 @@ fun BillImportDialog(
                 }
                 state.error?.let { message ->
                     Text(
-                        text = tr(message),
+                        text = message,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -146,7 +141,7 @@ fun BillImportDialog(
                             Text(
                                 text = tr("已导入") + " ${state.importedCount ?: 0} " + tr("笔"),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = QingPrimary,
                                 modifier = Modifier.weight(1f),
                             )
                         } else {
@@ -177,24 +172,9 @@ private fun ImportSummary(preview: BillImportPreview) {
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.SemiBold,
     )
-    val refunds = preview.validRows.count { it.status == BillStatus.REFUND }
-    val transfers = preview.validRows.count {
-        it.direction == BillDirection.NEUTRAL ||
-            BillImportMapping.toTransactionEntity(it)?.remoteReviewStatus == "transfer"
-    }
-    val redPackets = preview.validRows.count { BillImportMapping.isRedPacketIncome(it) }
-    if (refunds > 0 || transfers > 0 || redPackets > 0) {
-        Text(
-            text = tr("其中") + " " + tr("退款") + " $refunds · " + tr("转账") + " $transfers" +
-                if (redPackets > 0) " · " + tr("红包") + " $redPackets" else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
     if (preview.validRows.isEmpty() && preview.errorRows.isNotEmpty()) {
         Text(
-            text = preview.errorRows.firstOrNull()?.message?.let { tr(it) }
-                ?: tr("没有可导入的有效记录"),
+            text = preview.errorRows.firstOrNull()?.message ?: tr("没有可导入的有效记录"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
         )
@@ -203,14 +183,13 @@ private fun ImportSummary(preview: BillImportPreview) {
 
 @Composable
 private fun ImportPreviewRow(row: BillPreviewRow) {
-    val semantic = LocalQingSemanticColors.current
     val label = when (row.kind) {
         BillPreviewKind.VALID -> tr("有效")
         BillPreviewKind.DUPLICATE -> tr("重复")
         BillPreviewKind.ERROR -> tr("错误")
     }
     val labelColor = when (row.kind) {
-        BillPreviewKind.VALID -> semantic.income
+        BillPreviewKind.VALID -> QingIncome
         BillPreviewKind.DUPLICATE -> MaterialTheme.colorScheme.tertiary
         BillPreviewKind.ERROR -> MaterialTheme.colorScheme.error
     }
@@ -234,7 +213,7 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
             Text(
                 text = " · " + tr("第") + row.rowNumber + tr("行"),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = QingTextSecondary,
             )
             Text(
                 text = row.parsed?.let {
@@ -242,18 +221,20 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
                         .format(Date(it.occurredAtMs))
                 }.orEmpty(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = QingTextSecondary,
                 modifier = Modifier.weight(1f),
             )
             row.parsed?.let { parsed ->
                 Text(
                     text = (if (parsed.direction == BillDirection.INCOME) "+" else "−") +
                         formatCny(parsed.amountCents),
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontFeatureSettings = "tnum",
-                    ),
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (parsed.direction == BillDirection.INCOME) semantic.income else semantic.expense,
+                    color = when {
+                        row.kind == BillPreviewKind.ERROR -> MaterialTheme.colorScheme.error
+                        parsed.direction == BillDirection.INCOME -> QingIncome
+                        else -> QingExpense
+                    },
                 )
             }
         }
@@ -264,33 +245,17 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
             )
-            val statusTag = when {
-                parsed.status == BillStatus.REFUND -> tr("退款")
-                BillImportMapping.isRedPacketIncome(parsed) -> tr("红包")
-                parsed.direction == BillDirection.NEUTRAL -> tr("转账")
-                BillImportMapping.toTransactionEntity(parsed)?.remoteReviewStatus == "transfer" ->
-                    tr("转账")
-                else -> null
-            }
-            if (statusTag != null) {
-                Text(
-                    text = statusTag,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
             val message = row.message ?: row.duplicateOfRow?.let { tr("与第") + it + tr("行重复") }
             if (!message.isNullOrBlank()) {
                 Text(
-                    text = tr(message),
+                    text = message,
                     style = MaterialTheme.typography.bodySmall,
                     color = labelColor,
                 )
             }
         } else {
             Text(
-                text = row.message?.let { tr(it) } ?: tr("无法解析"),
+                text = row.message ?: tr("无法解析"),
                 style = MaterialTheme.typography.bodySmall,
                 color = labelColor,
             )

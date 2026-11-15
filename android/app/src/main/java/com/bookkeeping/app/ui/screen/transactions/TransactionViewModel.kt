@@ -105,6 +105,10 @@ class TransactionViewModel @Inject constructor(
     private val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val hasAnyTransactions: StateFlow<Boolean> = allTransactions
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
         combine(

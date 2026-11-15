@@ -5,7 +5,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -19,13 +18,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.formatCny
+import com.bookkeeping.app.ui.theme.QingMint
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingPrimaryDeep
+import com.bookkeeping.app.ui.theme.QingSurface
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 import kotlin.math.min
 
 /**
@@ -38,8 +41,8 @@ fun DailyBarChart(
     monthKey: String,
     dayText: (Int) -> String,
     modifier: Modifier = Modifier,
-    barColor: Color? = null,
-    selectedColor: Color? = null,
+    barColor: Color = QingMint,
+    selectedColor: Color = QingPrimary,
 ) {
     if (dailyTotals.isEmpty()) return
 
@@ -47,29 +50,20 @@ fun DailyBarChart(
     var selectedDay by remember(dailyTotals) {
         mutableIntStateOf(dailyTotals.maxByOrNull { it.totalCents }?.day ?: -1)
     }
-    val outlineColor = MaterialTheme.colorScheme.outlineVariant
-    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val tooltipColor = MaterialTheme.colorScheme.primary
-    val tooltipTextColor = MaterialTheme.colorScheme.onPrimary
-    val resolvedBarColor = barColor ?: MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-    val resolvedSelectedColor = selectedColor ?: MaterialTheme.colorScheme.primary
-    val density = LocalDensity.current
-    val axisTextSizePx = with(density) { 9.sp.toPx() }
-    val tooltipTextSizePx = with(density) { 10.sp.toPx() }
-    val highest = dailyTotals.maxByOrNull { it.totalCents }
-    val description = tr("每日趋势") + "：" +
-        if (highest != null && highest.totalCents > 0L) {
-            "${dayText(highest.day)} ${tr("最高")} ${formatCny(highest.totalCents)}，" +
-                "${dailyTotals.size} ${tr("天")}"
-        } else {
-            tr("本月没有数据")
-        }
+    val outlineColor = QingOutline
+    val labelColor = QingTextSecondary
+    val tooltipColor = QingPrimaryDeep
+    val tooltipTextColor = QingSurface
+    val maxDay = dailyTotals.maxByOrNull { it.totalCents }
+    val nonZeroDays = dailyTotals.count { it.totalCents > 0L }
+    val chartDescription = "每日趋势：$nonZeroDays 天有支出" +
+        (maxDay?.let { "，最高 ${dayText(it.day)} ${formatCny(it.totalCents)}" } ?: "")
 
     Canvas(
         modifier = modifier
             .fillMaxWidth()
             .height(190.dp)
-            .semantics { contentDescription = description }
+            .semantics { contentDescription = chartDescription }
             .pointerInput(dailyTotals) {
                 detectTapGestures { position ->
                     val leftPad = 34.dp.toPx()
@@ -100,13 +94,13 @@ fun DailyBarChart(
         }
         val textPaint = Paint().apply {
             color = labelColor.toArgb()
-            textSize = axisTextSizePx
+            textSize = 9.sp.toPx()
             isAntiAlias = true
             textAlign = Paint.Align.RIGHT
         }
         val dayPaint = Paint().apply {
             color = labelColor.toArgb()
-            textSize = axisTextSizePx
+            textSize = 9.sp.toPx()
             isAntiAlias = true
             textAlign = Paint.Align.CENTER
         }
@@ -139,7 +133,7 @@ fun DailyBarChart(
             if (barHeight > 0f) {
                 val radius = min(barWidth / 2f, barHeight / 2f)
                 drawRoundRect(
-                    color = if (item.day == selectedDay) resolvedSelectedColor else resolvedBarColor,
+                    color = if (item.day == selectedDay) selectedColor else barColor,
                     topLeft = Offset(x, top),
                     size = Size(barWidth, barHeight),
                     cornerRadius = CornerRadius(radius, radius),
@@ -167,7 +161,7 @@ fun DailyBarChart(
             val tooltipText = "${dayText(selected.day)} ${formatCny(selected.totalCents)}"
             val tooltipPaint = Paint().apply {
                 color = tooltipTextColor.toArgb()
-                textSize = tooltipTextSizePx
+                textSize = 10.sp.toPx()
                 isAntiAlias = true
                 textAlign = Paint.Align.LEFT
             }

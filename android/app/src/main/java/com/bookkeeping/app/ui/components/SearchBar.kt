@@ -15,6 +15,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingSurface
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 
 @Composable
 fun LedgerSearchBar(
@@ -32,7 +36,7 @@ fun LedgerSearchBar(
             Icon(
                 imageVector = Icons.Outlined.Search,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = QingTextSecondary,
             )
         },
         trailingIcon = if (query.isNotBlank()) {
@@ -41,7 +45,7 @@ fun LedgerSearchBar(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = tr("清空搜索"),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = QingTextSecondary,
                     )
                 }
             }
@@ -50,17 +54,17 @@ fun LedgerSearchBar(
         },
         placeholder = {
             Text(
-                text = tr("搜索商户、备注或金额（可只输前几位）"),
+                text = tr("搜索商户、备注或精确金额"),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = QingTextSecondary,
             )
         },
         colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-            cursorColor = MaterialTheme.colorScheme.primary,
+            focusedContainerColor = QingSurface,
+            unfocusedContainerColor = QingSurface,
+            focusedBorderColor = QingPrimary,
+            unfocusedBorderColor = QingOutline,
+            cursorColor = QingPrimary,
         ),
     )
 }

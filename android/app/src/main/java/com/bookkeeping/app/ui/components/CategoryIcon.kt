@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.merchant.MerchantIconCatalog
+import com.bookkeeping.app.ui.theme.LocalQingDark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -85,11 +87,16 @@ fun MerchantAvatar(
         return
     }
     val color = Color(spec.colorArgb)
+    val displayColor = if (LocalQingDark.current) {
+        lerp(color, Color.White, 0.25f)
+    } else {
+        color
+    }
     Box(
         modifier = modifier
             .size(size)
             .clip(RoundedCornerShape(size * 0.34f))
-            .background(color.copy(alpha = 0.13f)),
+            .background(displayColor.copy(alpha = 0.13f)),
         contentAlignment = Alignment.Center,
     ) {
         val icon = merchantSystemIcon(spec.systemIcon)
@@ -97,13 +104,13 @@ fun MerchantAvatar(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = color,
+                tint = displayColor,
                 modifier = Modifier.size(size * 0.46f),
             )
         } else {
             Text(
                 text = spec.initials,
-                color = color,
+                color = displayColor,
                 fontSize = (size.value * 0.34f).sp,
                 fontWeight = FontWeight.Bold,
             )

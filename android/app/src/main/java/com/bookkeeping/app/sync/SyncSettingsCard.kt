@@ -2,6 +2,7 @@ package com.bookkeeping.app.sync
 
 import com.bookkeeping.app.i18n.tr
 import android.content.SharedPreferences
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -9,8 +10,10 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -57,45 +60,74 @@ fun SyncSettingsCard() {
             updateStatus()
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        focusedLabelColor = MaterialTheme.colorScheme.primary,
+        unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        focusedContainerColor = MaterialTheme.colorScheme.surface,
+        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+        cursorColor = MaterialTheme.colorScheme.primary,
+    )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 tr("清衡 · 双向同步（Windows / VPS）"),
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                fontWeight = FontWeight.SemiBold,
             )
-            Text(tr("手机和服务器会双向同步交易新增、修改和删除。服务器在线时下载更新，离线先保存在本机；不上传短信全文、银行卡号或个人备注。"))
-            Text(tr("Windows 和 VPS 二选一：已成功同步的手机不能直接更换服务器地址；迁移需备份原服务数据。"))
-            OutlinedTextField(value = url, onValueChange = { url=it }, label = { Text(tr("HTTPS 服务器地址")) }, singleLine = true)
-            OutlinedTextField(value = token, onValueChange = { token=it }, label = { Text(tr("设备同步密钥")) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            Text(
+                tr("手机和服务器会双向同步交易新增、修改和删除。服务器在线时下载更新，离线先保存在本机；不上传短信全文、银行卡号或个人备注。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                tr("Windows 和 VPS 二选一：已成功同步的手机不能直接更换服务器地址；迁移需备份原服务数据。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(value = url, onValueChange = { url=it }, label = { Text(tr("HTTPS 服务器地址")) }, singleLine = true, colors = fieldColors, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = token, onValueChange = { token=it }, label = { Text(tr("设备同步密钥")) }, singleLine = true, visualTransformation = PasswordVisualTransformation(), colors = fieldColors, modifier = Modifier.fillMaxWidth())
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(Modifier.weight(1f)) {
                     Text(tr("启用双向同步"), style = MaterialTheme.typography.titleSmall)
                     Text(
-                        tr("关闭后停止上传和下载，本机数据保留"),
+                        tr("新增或修改交易后立即尝试同步"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Switch(checked = enabled, onCheckedChange = { enabled = it })
             }
-            FilledTonalButton(onClick={
-                try {
-                    TransactionSyncWorker.configure(context, url, token, enabled)
-                    message = if (enabled) tr("已保存：后台自动同步已开启") else tr("已关闭同步")
-                } catch (error: IllegalArgumentException) {
-                    message = error.message ?: tr("同步配置未通过校验")
-                }
-            }) { Text(tr("保存设置")) }
+            Button(
+                onClick = {
+                    try {
+                        TransactionSyncWorker.configure(context, url, token, enabled)
+                        message = if (enabled) tr("已保存：后台自动同步已开启") else tr("已关闭同步")
+                    } catch (error: IllegalArgumentException) {
+                        message = error.message ?: tr("同步配置未通过校验")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("保存设置")) }
             if (enabled) {
-                Text(tr("新增或修改交易立即尝试同步，后台约每 15 分钟补偿同步。电脑关机或网络断开时先本地保存，重新连接后同步。"))
+                Text(
+                    tr("新增或修改交易立即尝试同步，后台约每 15 分钟补偿同步。电脑关机或网络断开时先本地保存，重新连接后同步。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 FilledTonalButton(onClick = {
                     TransactionSyncWorker.requestImmediate(context)
                     message = tr("已请求立即同步，完成后状态自动更新")
-                }) { Text(tr("立即同步")) }
+                }, modifier = Modifier.fillMaxWidth()) { Text(tr("立即同步")) }
             }
             val conflicts=prefs.getInt("pending_sync_conflicts",0)
             if (conflicts>0) {
@@ -157,17 +189,24 @@ fun SyncSettingsCard() {
                 }
                 if (matching.size>5) Text(tr("还有 ") + (matching.size-5) + tr(" 笔，请处理当前项目后继续查看。"))
             }
-            Text(tr("最近成功：") + if (lastSuccess > 0L) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(lastSuccess)) else tr("尚无"))
-            val statusIsError = message.contains("失败") ||
-                message.contains("异常") ||
-                message.contains("不可用") ||
-                message.contains("401") ||
-                message.contains("403")
+            val failed = message.contains("失败") || message.contains("异常") ||
+                message.contains("不可用") || message.contains("401") || message.contains("403")
             Text(
-                tr("状态：") + tr(message),
-                color = if (statusIsError) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                text = "${tr("最近成功")}：" + (
+                    if (lastSuccess > 0L) {
+                        SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(lastSuccess))
+                    } else {
+                        tr("尚无")
+                    }
+                ),
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "${tr("状态")}：${tr(message)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (failed) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
