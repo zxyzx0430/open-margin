@@ -3,13 +3,15 @@ package com.bookkeeping.app.notification
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 
 // 自动分类器：根据商户名 + 通知/短信文本，推测 TransactionCategory。
-// 命中第一个关键词即返回；都不命中返回 OTHER。
+// 商户字段优先；同一字段内最长关键词优先，分类顺序只做同长度兜底。
+// 都不命中返回 OTHER。
 //
 // 嵌入式类比：一个查找表（lookup table），关键词进，分类出。
 // 后续可演进为：用户手动改分类后记住"商户→分类"映射，下次自动用。
 object CategoryClassifier {
 
-    // 关键词分组。顺序敏感：更明确的规则放前面（如"工资到账"应该早于通用的"到账"）
+    // 关键词分组。匹配时先看商户、再看上下文；同一字段内最长关键词优先，
+    // 分类顺序只在关键词等长时兜底。
     private val RULES: List<Pair<List<String>, TransactionCategory>> = listOf(
         // 工资 / 收入相关（优先匹配，避免被其他分类抢走）
         listOf("工资", "薪资", "薪水", "代发", "奖金", "津贴", "年终") to TransactionCategory.SALARY,
@@ -20,7 +22,7 @@ object CategoryClassifier {
             "茶颜悦色", "喜茶", "奈雪", "蜜雪冰城", "霸王茶姬", "古茗", "茶百道", "沪上阿姨", "CoCo",
             "麦当劳", "肯德基", "KFC", "汉堡王", "Burger", "必胜客", "赛百味", "塔斯汀",
             "海底捞", "西贝", "外婆家", "呷哺", "南城香", "和府捞面",
-            "美团", "饿了么", "盒马", "叮咚",
+            "美团外卖", "美团", "饿了么", "盒马", "叮咚",
             "餐厅", "酒楼", "饭店", "茶饮", "烧烤", "火锅", "面馆", "餐饮",
             "采蝶轩", "烤鸡", "鸡腿", "炒饭", "食堂", "水果", "零食", "赵一鸣",
             "炸鸡", "luckin", "咖啡", "羊肉粉", "烧柠",
@@ -40,6 +42,7 @@ object CategoryClassifier {
         // 购物（电商 / 便利店 / 商超 / 数码）
         listOf(
             "淘宝", "天猫", "京东", "拼多多", "唯品会", "1688", "考拉",
+            "抖音商城", "多多买菜", "美团优选",
             "苹果", "Apple", "华为", "小米", "OPPO", "vivo", "荣耀",
             "Nike", "Adidas", "优衣库", "Uniqlo", "无印良品", "MUJI", "宜家", "IKEA", "网易严选",
             "7-11", "7-Eleven", "全家", "FamilyMart", "罗森", "Lawson", "便利蜂", "美宜佳", "便利店",
@@ -50,7 +53,7 @@ object CategoryClassifier {
         // 水电 / 公用事业。放在娱乐的通用“充值”之前，避免“中国电信 充值”
         // 被误判为游戏充值。
         listOf("水费", "电费", "燃气费", "燃气", "热力", "网费", "宽带", "话费", "流量充值",
-            "中国移动", "中国联通", "中国电信", "自来充") to TransactionCategory.UTILITIES,
+            "中国移动", "中国联通", "中国电信", "中国广电", "自来充") to TransactionCategory.UTILITIES,
 
         // 娱乐 / 数字订阅
         listOf(
@@ -66,7 +69,8 @@ object CategoryClassifier {
         listOf("房租", "租金", "物业", "中介费", "押金", "二房东") to TransactionCategory.HOUSING,
 
         // 医疗
-        listOf("医院", "药店", "药房", "挂号", "诊所", "体检", "口腔", "牙科", "眼科", "医药") to TransactionCategory.HEALTH,
+        listOf("医院", "药店", "药房", "挂号", "诊所", "体检", "口腔", "牙科", "眼科", "医药",
+            "美团买药", "叮当快药", "医保") to TransactionCategory.HEALTH,
 
         // 教育
         listOf("学费", "培训", "课程", "网课", "得到", "极客时间", "教材", "书店", "当当", "Kindle", "Audible",
@@ -76,19 +80,50 @@ object CategoryClassifier {
         listOf("转账", "转入", "转出", "汇款", "提现", "红包", "发给") to TransactionCategory.TRANSFER,
     )
 
-    // 输入：商户名 + 上下文文本（如通知正文、短信正文）
-    // 输出：匹配到的分类，没有就 OTHER
+    private data class Match(
+        val category: TransactionCategory,
+        val keywordLength: Int,
+        val order: Int,
+    )
+
+    /**
+     * Prefer the merchant field, but let a longer context keyword win. This
+     * handles a truncated merchant such as "美团" with page text "美团单车",
+     * while still preventing a short generic context word from beating a
+     * specific merchant.
+     */
     fun classify(merchant: String, contextText: String = ""): TransactionCategory {
-        // Bound the scan: real SMS/notifications are short, while a pathological
-        // multi-hundred-KB body would make keyword x body scanning quadratic.
-        val haystack = "$merchant $contextText".take(4_000)
-        for ((keywords, category) in RULES) {
+        val merchantMatch = bestMatch(merchant.take(4_000))
+        val contextMatch = bestMatch(contextText.take(4_000))
+        return when {
+            merchantMatch == null -> contextMatch?.category ?: TransactionCategory.OTHER
+            contextMatch == null -> merchantMatch.category
+            contextMatch.keywordLength > merchantMatch.keywordLength -> contextMatch.category
+            else -> merchantMatch.category
+        }
+    }
+
+    private fun bestMatch(text: String): Match? {
+        if (text.isBlank()) return null
+        var best: Match? = null
+        RULES.forEachIndexed { order, (keywords, category) ->
             for (keyword in keywords) {
-                if (haystack.contains(keyword, ignoreCase = true)) {
-                    return category
+                if (!text.contains(keyword, ignoreCase = true)) continue
+                // A coupon mentioning "红包" is not a red packet transfer.
+                if (keyword == "红包" && isPromotionalRedPacket(text)) continue
+                val candidate = Match(category, keyword.length, order)
+                if (best == null ||
+                    candidate.keywordLength > best.keywordLength ||
+                    (candidate.keywordLength == best.keywordLength && candidate.order < best.order)
+                ) {
+                    best = candidate
                 }
             }
         }
-        return TransactionCategory.OTHER
+        return best
     }
+
+    private fun isPromotionalRedPacket(text: String): Boolean =
+        listOf("红包抵扣", "红包优惠", "红包封面", "红包皮肤", "红包表情")
+            .any { text.contains(it, ignoreCase = true) }
 }

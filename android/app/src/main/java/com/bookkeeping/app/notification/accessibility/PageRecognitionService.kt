@@ -12,10 +12,10 @@ import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.capture.success.PaymentPage
 import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
-import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.notification.CategoryClassifier
 import com.bookkeeping.app.ocr.MlKitOcrEngine
 import com.bookkeeping.app.ocr.OcrEngine
 import com.bookkeeping.app.ocr.PaddleOcrEngine
@@ -472,11 +472,12 @@ open class PageRecognitionService : AccessibilityService() {
                     }
 
                     val result = runCatching {
+                        val merchant = stored.merchantCandidates.firstOrNull().orEmpty()
                         repository.insertIfNotDuplicate(
                             CaptureReviewMapping.toTransactionEntity(
                                 candidate = stored,
-                                merchant = stored.merchantCandidates.firstOrNull().orEmpty(),
-                                category = TransactionCategory.OTHER,
+                                merchant = merchant,
+                                category = CategoryClassifier.classify(merchant),
                             ),
                             windowMs = PAGE_DEDUP_WINDOW_MS,
                             notifySuccess = false,
