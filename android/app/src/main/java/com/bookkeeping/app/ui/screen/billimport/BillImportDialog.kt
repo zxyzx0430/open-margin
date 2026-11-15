@@ -139,13 +139,14 @@ fun BillImportDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (state.done) {
                             Text(
-                                text = tr("已导入") + " ${state.importedCount ?: 0} " + tr("笔"),
+                                text = tr("已导入") + " ${state.importedCount ?: 0} " + tr("笔") +
+                                    " · " + tr("已补齐") + " ${state.enrichedCount ?: 0} " + tr("笔"),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = QingPrimary,
                                 modifier = Modifier.weight(1f),
                             )
                         } else {
-                            val count = preview.validRows.size
+                            val count = preview.importableRows.size
                             Button(
                                 onClick = viewModel::confirm,
                                 enabled = count > 0 && !state.importing,
@@ -167,12 +168,16 @@ fun BillImportDialog(
 private fun ImportSummary(preview: BillImportPreview) {
     Text(
         text = tr("有效") + " ${preview.validRows.size} · " +
-            tr("重复") + " ${preview.duplicateRows.size} · " +
+            tr("可补齐") + " ${preview.enrichableRows.size} · " +
+            tr("重复") + " ${preview.duplicateRows.size - preview.enrichableRows.size} · " +
+            tr("已跳过") + " ${preview.skippedRows.size} · " +
             tr("错误") + " ${preview.errorRows.size}",
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.SemiBold,
     )
-    if (preview.validRows.isEmpty() && preview.errorRows.isNotEmpty()) {
+    if (preview.validRows.isEmpty() && preview.enrichableRows.isEmpty() &&
+        preview.errorRows.isNotEmpty()
+    ) {
         Text(
             text = preview.errorRows.firstOrNull()?.message ?: tr("没有可导入的有效记录"),
             style = MaterialTheme.typography.bodySmall,
@@ -185,12 +190,14 @@ private fun ImportSummary(preview: BillImportPreview) {
 private fun ImportPreviewRow(row: BillPreviewRow) {
     val label = when (row.kind) {
         BillPreviewKind.VALID -> tr("有效")
-        BillPreviewKind.DUPLICATE -> tr("重复")
+        BillPreviewKind.DUPLICATE -> if (row.enrichable) tr("可补齐") else tr("重复")
+        BillPreviewKind.SKIPPED -> tr("已跳过")
         BillPreviewKind.ERROR -> tr("错误")
     }
     val labelColor = when (row.kind) {
         BillPreviewKind.VALID -> QingIncome
         BillPreviewKind.DUPLICATE -> MaterialTheme.colorScheme.tertiary
+        BillPreviewKind.SKIPPED -> QingTextSecondary
         BillPreviewKind.ERROR -> MaterialTheme.colorScheme.error
     }
     Column(
@@ -226,12 +233,16 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
             )
             row.parsed?.let { parsed ->
                 Text(
-                    text = (if (parsed.direction == BillDirection.INCOME) "+" else "−") +
-                        formatCny(parsed.amountCents),
+                    text = when (parsed.direction) {
+                        BillDirection.INCOME -> "+"
+                        BillDirection.EXPENSE -> "−"
+                        BillDirection.NEUTRAL -> "±"
+                    } + formatCny(parsed.amountCents),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = when {
                         row.kind == BillPreviewKind.ERROR -> MaterialTheme.colorScheme.error
+                        row.kind == BillPreviewKind.SKIPPED -> QingTextSecondary
                         parsed.direction == BillDirection.INCOME -> QingIncome
                         else -> QingExpense
                     },

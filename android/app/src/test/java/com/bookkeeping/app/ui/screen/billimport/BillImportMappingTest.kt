@@ -109,11 +109,18 @@ class BillImportMappingTest {
     }
 
     @Test
-    fun rejectsFailedPendingAndNeutralRows() {
+    fun rejectsFailedPendingAndZeroRowsButKeepsNeutralAccountMoves() {
         assertNull(BillImportMapping.toTransactionEntity(row(status = BillStatus.FAILED)))
         assertNull(BillImportMapping.toTransactionEntity(row(status = BillStatus.PENDING)))
-        assertNull(BillImportMapping.toTransactionEntity(row(direction = BillDirection.NEUTRAL)))
         assertNull(BillImportMapping.toTransactionEntity(row(amountCents = 0L)))
+
+        val neutral = BillImportMapping.toTransactionEntity(
+            row(direction = BillDirection.NEUTRAL, merchant = "示例基金", orderId = "N1"),
+        )!!
+        assertEquals(TransactionType.EXPENSE.name, neutral.type)
+        assertEquals(TransactionCategory.TRANSFER.name, neutral.category)
+        assertEquals("transfer", neutral.remoteReviewStatus)
+        assertTrue(neutral.note.contains("不计收支"))
     }
 
     @Test
@@ -269,6 +276,7 @@ class BillImportMappingTest {
     @Test
     fun previewMarksFuzzyNotificationDuplicatesLikeConfirmDoes() {
         val notification = TransactionEntity(
+            id = 42,
             amountCents = 3_800L,
             type = TransactionType.EXPENSE.name,
             category = "FOOD",
@@ -294,7 +302,9 @@ class BillImportMappingTest {
             duplicateMessage = "dup",
         )
         assertEquals(BillPreviewKind.DUPLICATE, marked.rows.single().kind)
-        assertEquals("dup", marked.rows.single().message)
+        assertTrue(marked.rows.single().message!!.contains("dup"))
+        assertTrue(marked.rows.single().enrichable)
+        assertEquals(notification.id, marked.rows.single().matchedTransactionId)
         assertEquals(0, marked.validRows.size)
     }
 
@@ -492,5 +502,90 @@ class BillImportMappingTest {
         val key = BillImportMapping.rowFallbackKey(billRow)
         assertNotNull(key)
         assertFalse(key in BillImportMapping.existingFallbackKeys(listOf(notification)))
+    }
+
+    @Test
+    fun duplicateEnrichmentFillsWeakMerchantOrderAndCategory() {
+        val existing = TransactionEntity(
+            id = 7,
+            amountCents = 3_800L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.OTHER.name,
+            merchant = "微信支付",
+            note = "[扫描] 微信",
+            source = TransactionSource.WECHAT.name,
+            timestamp = 1_700_000_020_000L,
+        )
+        val imported = row(
+            merchant = "星巴克",
+            orderId = "ORDER-1",
+            rawFields = listOf("餐饮", "星巴克"),
+        ).copy(sourceCategory = "餐饮", description = "拿铁")
+
+        val enriched = BillImportMapping.enrichExisting(existing, imported)!!
+        assertEquals("星巴克", enriched.merchant)
+        assertEquals("ORDER-1", enriched.sourceTransactionId)
+        assertEquals(TransactionCategory.FOOD.name, enriched.category)
+        assertTrue(enriched.note.contains("单号 ORDER-1"))
+    }
+
+    @Test
+    fun duplicateEnrichmentDoesNotOverwriteManualOrStrongRows() {
+        val manual = TransactionEntity(
+            id = 8,
+            amountCents = 3_800L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.OTHER.name,
+            merchant = "我自己的备注",
+            source = TransactionSource.MANUAL.name,
+            timestamp = 1_700_000_020_000L,
+        )
+        assertNull(BillImportMapping.enrichExisting(manual, row()))
+
+        val strong = TransactionEntity(
+            id = 9,
+            amountCents = 3_800L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.FOOD.name,
+            merchant = "另一家咖啡",
+            source = TransactionSource.WECHAT.name,
+            timestamp = 1_700_000_020_000L,
+        )
+        val enriched = BillImportMapping.enrichExisting(strong, row(merchant = "星巴克"))!!
+        assertEquals("另一家咖啡", enriched.merchant)
+        assertEquals(TransactionCategory.FOOD.name, enriched.category)
+    }
+
+    @Test
+    fun enrichmentPreviewCountsTowardImportableRows() {
+        val existing = TransactionEntity(
+            id = 10,
+            amountCents = 3_800L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.OTHER.name,
+            merchant = "支付宝",
+            source = TransactionSource.ALIPAY.name,
+            timestamp = 1_700_000_000_000L,
+        )
+        val preview = BillImportPreview(
+            source = BillSource.ALIPAY,
+            format = BillFormat.CSV,
+            rows = listOf(
+                BillPreviewRow(
+                    kind = BillPreviewKind.VALID,
+                    rowNumber = 3,
+                    rawFields = emptyList(),
+                    parsed = row(source = BillSource.ALIPAY, merchant = "星巴克", orderId = "ORDER-1"),
+                ),
+            ),
+        )
+        val marked = BillImportMapping.markExistingRows(
+            preview = preview,
+            transactions = listOf(existing),
+            duplicateMessage = "dup",
+        )
+        assertEquals(1, marked.enrichableRows.size)
+        assertEquals(1, marked.importableRows.size)
+        assertEquals(0, marked.validRows.size)
     }
 }

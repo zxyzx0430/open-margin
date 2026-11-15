@@ -151,7 +151,7 @@ private fun CaptureCandidateCard(
                     } else {
                         TransactionCategory.TRANSFER
                     }
-                else -> TransactionCategory.OTHER
+                else -> CaptureReviewMapping.defaultCategory(candidate)
             },
         )
     }

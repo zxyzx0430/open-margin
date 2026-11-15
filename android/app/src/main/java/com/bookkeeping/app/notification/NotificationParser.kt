@@ -242,7 +242,35 @@ object NotificationParser {
         val category = if (isIncomingRedPacket(full)) {
             TransactionCategory.GIFT
         } else {
-            CategoryClassifier.classify(merchant, full)
+            val kind = when {
+                full.contains("退款") &&
+                    (full.contains("到账") || full.contains("收到") || full.contains("退回")) ->
+                    ClassificationKind.REFUND
+                isIncomingRedPacket(full) || isOutgoingRedPacket(full) ->
+                    ClassificationKind.RED_PACKET
+                isWithdrawal(full) -> ClassificationKind.WITHDRAWAL
+                isOutgoingTransfer(full) || RECEIVED_TRANSFER.containsMatchIn(full) ->
+                    ClassificationKind.TRANSFER
+                else -> ClassificationKind.PAYMENT
+            }
+            CategoryClassifier.classify(
+                ClassificationInput(
+                    merchantRaw = merchant,
+                    contextText = full,
+                    direction = if (type == TransactionType.INCOME) {
+                        ClassificationDirection.INCOME
+                    } else {
+                        ClassificationDirection.EXPENSE
+                    },
+                    source = if (source == TransactionSource.WECHAT) {
+                        ClassificationSource.WECHAT
+                    } else {
+                        ClassificationSource.ALIPAY
+                    },
+                    kind = kind,
+                    status = ClassificationStatus.COMPLETED,
+                ),
+            ).category
         }
 
         return TransactionEntity(

@@ -139,6 +139,7 @@ fun SettingsScreen(
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
     val merchantRules by viewModel.merchantRules.collectAsState()
+    val learningDisabled by viewModel.learningDisabled.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val syncPrefs = remember {
@@ -521,6 +522,19 @@ fun SettingsScreen(
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.primary,
                                         )
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.setLearningDisabled(
+                                                    merchant,
+                                                    merchant !in learningDisabled,
+                                                )
+                                            },
+                                        ) {
+                                            Text(
+                                                if (merchant in learningDisabled) tr("恢复学习")
+                                                else tr("暂停学习"),
+                                            )
+                                        }
                                         TextButton(
                                             onClick = { viewModel.removeMerchantRule(merchant) },
                                         ) {

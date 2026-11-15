@@ -7,6 +7,7 @@ import androidx.work.WorkManager
 import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.CaptureHealthWorker
+import com.bookkeeping.app.notification.CategoryLearning
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,6 +26,8 @@ class BookkeepingApplication : Application() {
         super.onCreate()
         applicationScope.launch {
             MerchantRules.replace(settings.merchantRulesBlocking())
+            val (counts, disabled) = settings.categoryLearningBlocking()
+            CategoryLearning.replace(counts, disabled)
         }
         scheduleCaptureHealthRecovery()
     }

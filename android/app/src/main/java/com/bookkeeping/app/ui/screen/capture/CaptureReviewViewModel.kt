@@ -69,7 +69,7 @@ class CaptureReviewViewModel @Inject constructor(
             val insertedId = result.getOrNull()
             val inserted = result.isSuccess && insertedId != null && insertedId > 0L
             if (result.isSuccess && merchant.isNotBlank()) {
-                settings.rememberMerchantCategory(merchant, category)
+                settings.recordCategoryLearning(merchant, category)
             }
             if (result.isSuccess) {
                 val status = if (inserted) {

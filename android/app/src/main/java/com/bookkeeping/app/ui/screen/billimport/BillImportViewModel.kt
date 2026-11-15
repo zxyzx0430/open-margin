@@ -33,6 +33,7 @@ class BillImportViewModel @Inject constructor(
         val error: String? = null,
         val importing: Boolean = false,
         val importedCount: Int? = null,
+        val enrichedCount: Int? = null,
         val done: Boolean = false,
     )
 
@@ -84,21 +85,39 @@ class BillImportViewModel @Inject constructor(
                 runCatching {
                     val latest = repository.observeAll().first()
                     val existingKeys = BillImportMapping.existingRowKeys(latest)
-                    val rows = preview.validRows.filterNot { row ->
-                        BillImportMapping.isAlreadyPresent(row, latest, existingKeys)
-                    }
-                    val entities = rows.mapNotNull(BillImportMapping::toTransactionEntity)
-                    require(entities.size == rows.size) {
+                    val validRows = preview.rows
+                        .filter { it.kind == com.bookkeeping.app.billimport.BillPreviewKind.VALID }
+                        .mapNotNull { it.parsed }
+                        .filterNot { row ->
+                            BillImportMapping.isAlreadyPresent(row, latest, existingKeys)
+                        }
+                    val entities = validRows.mapNotNull(BillImportMapping::toTransactionEntity)
+                    require(entities.size == validRows.size) {
                         AppLanguage.tr(context, "部分有效行无法映射，未写入任何记录")
                     }
-                    repository.insertImportedBatch(entities) to (preview.validRows.size - rows.size)
+                    val latestById = latest.associateBy { it.id }
+                    val updates = preview.rows
+                        .filter {
+                            it.kind == com.bookkeeping.app.billimport.BillPreviewKind.DUPLICATE &&
+                                it.enrichable
+                        }
+                        .distinctBy { it.matchedTransactionId }
+                        .mapNotNull { row ->
+                            val parsed = row.parsed ?: return@mapNotNull null
+                            val existing = row.matchedTransactionId
+                                ?.let(latestById::get)
+                                ?: return@mapNotNull null
+                            BillImportMapping.enrichExisting(existing, parsed)
+                        }
+                    repository.importBillBatch(entities, updates)
                 }
             }
             _state.value = result.fold(
-                onSuccess = { (inserted, _) ->
+                onSuccess = { (inserted, enriched) ->
                     _state.value.copy(
                         importing = false,
                         importedCount = inserted,
+                        enrichedCount = enriched,
                         done = true,
                     )
                 },

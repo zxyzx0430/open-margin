@@ -31,6 +31,9 @@ class SettingsViewModel @Inject constructor(
         prefs.observeMerchantRules()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
+    val learningDisabled: StateFlow<Set<String>> = prefs.observeLearningDisabled()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
     fun clearMerchantRules() {
         viewModelScope.launch { prefs.clearMerchantRules() }
     }
@@ -41,6 +44,10 @@ class SettingsViewModel @Inject constructor(
 
     fun removeMerchantRule(merchant: String) {
         viewModelScope.launch { prefs.removeMerchantRule(merchant) }
+    }
+
+    fun setLearningDisabled(merchant: String, disabled: Boolean) {
+        viewModelScope.launch { prefs.disableCategoryLearning(merchant, disabled) }
     }
 
     fun setKeepAlive(enabled: Boolean) {

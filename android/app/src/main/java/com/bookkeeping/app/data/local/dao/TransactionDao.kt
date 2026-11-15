@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +26,23 @@ interface TransactionDao {
 
     @Update
     suspend fun update(transaction: TransactionEntity)
+
+    @Update
+    suspend fun updateAll(transactions: List<TransactionEntity>)
+
+    /**
+     * One official-bill confirmation: insert new rows and enrich existing
+     * duplicates in a single Room transaction. A failure rolls back both.
+     */
+    @Transaction
+    suspend fun importBatch(
+        inserts: List<TransactionEntity>,
+        updates: List<TransactionEntity>,
+    ): List<Long> {
+        val ids = if (inserts.isEmpty()) emptyList() else insertAll(inserts)
+        if (updates.isNotEmpty()) updateAll(updates)
+        return ids
+    }
 
     @Delete
     suspend fun delete(transaction: TransactionEntity)

@@ -247,7 +247,7 @@ class TransactionViewModel @Inject constructor(
             )
             repository.insert(entity)
             if (merchant.isNotBlank()) {
-                settings.rememberMerchantCategory(merchant, category)
+                settings.recordCategoryLearning(merchant, category)
             }
         }
     }
@@ -273,7 +273,7 @@ class TransactionViewModel @Inject constructor(
                 )
             )
             if (original.category != category.name && merchant.isNotBlank()) {
-                settings.rememberMerchantCategory(merchant, category)
+                settings.recordCategoryLearning(merchant, category)
             }
         }
     }
@@ -287,6 +287,9 @@ class TransactionViewModel @Inject constructor(
         if (entity.category == category.name) return
         viewModelScope.launch {
             repository.update(entity.copy(category = category.name))
+            if (entity.merchant.isNotBlank()) {
+                settings.recordCategoryLearning(entity.merchant, category)
+            }
         }
     }
 
