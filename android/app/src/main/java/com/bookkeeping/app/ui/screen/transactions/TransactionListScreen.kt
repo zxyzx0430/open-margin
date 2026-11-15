@@ -8,11 +8,14 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -77,6 +80,8 @@ import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.notification.NotificationListenerHelper
 import com.bookkeeping.app.notification.SmsPermissionHelper
 import com.bookkeeping.app.sync.TransactionSyncWorker
+import com.bookkeeping.app.ui.components.AutomationSetupPrompt
+import com.bookkeeping.app.ui.components.AutomationStatus
 import com.bookkeeping.app.ui.components.DayHeader
 import com.bookkeeping.app.ui.components.LedgerEmptyState
 import com.bookkeeping.app.ui.components.LedgerFilterChip
@@ -111,14 +116,17 @@ private data class LedgerStatus(
     val syncTone: StatusTone,
     val syncIcon: ImageVector,
     val lastSyncText: String,
+    val missingSetup: List<String>,
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransactionListScreen(
     viewModel: TransactionViewModel = hiltViewModel(),
     captureReviewViewModel: CaptureReviewViewModel = hiltViewModel(),
     openBillImport: Boolean = false,
     onBillImportOpened: () -> Unit = {},
+    onSetupAutomation: () -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
@@ -129,6 +137,7 @@ fun TransactionListScreen(
     val typeFilter by viewModel.typeFilter.collectAsState()
     val categoryFilter by viewModel.categoryFilter.collectAsState()
     val timeFilter by viewModel.timeFilter.collectAsState()
+    val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showBillImport by remember { mutableStateOf(false) }
@@ -188,25 +197,19 @@ fun TransactionListScreen(
         typeFilter != null ||
         categoryFilter != null ||
         timeFilter == LedgerTimeFilter.THIS_MONTH
+    val userFilterActive = searchQuery.isNotBlank() ||
+        typeFilter != null ||
+        categoryFilter != null
 
     Scaffold(
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = QingPrimary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Icon(Icons.Default.Add, contentDescription = tr("新建账单"))
-            }
-        },
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "header") {
@@ -221,25 +224,12 @@ fun TransactionListScreen(
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.weight(1f),
                     )
-                    Box {
-                        IconButton(onClick = {
-                            openAppNotificationSettings(context)
-                        }) {
-                            Icon(
-                                imageVector = Icons.Outlined.NotificationsNone,
-                                contentDescription = tr("通知设置"),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        if (duplicateCandidates.isNotEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(end = 10.dp, top = 10.dp)
-                                    .size(7.dp)
-                                    .background(QingWarning, CircleShape),
-                            )
-                        }
+                    IconButton(onClick = { showAddDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = tr("新建账单"),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(
@@ -301,12 +291,20 @@ fun TransactionListScreen(
                 }
             }
 
+            if (status.missingSetup.isNotEmpty()) {
+                item(key = "setup") {
+                    AutomationSetupPrompt(
+                        missingNames = status.missingSetup,
+                        onStart = onSetupAutomation,
+                    )
+                }
+            }
+
             item(key = "status") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     StatusChip(
                         text = status.captureText,
@@ -338,25 +336,20 @@ fun TransactionListScreen(
                 }
             }
 
-            item(key = "summary") {
-                MonthlySummaryCard(
-                    expenseCents = monthlyExpense,
-                    incomeCents = monthlyIncome,
-                )
-            }
-
-            item(key = "search") {
-                LedgerSearchBar(
-                    query = searchQuery,
-                    onQueryChange = viewModel::setSearchQuery,
-                )
+            if (transactions.isEmpty()) {
+                item(key = "empty") {
+                    LedgerEmptyState(
+                        filterActive = userFilterActive,
+                        hasAnyTransactions = hasAnyTransactions,
+                        onClearFilters = viewModel::clearFilters,
+                        onShowAll = { viewModel.setTimeFilter(LedgerTimeFilter.ALL) },
+                    )
+                }
             }
 
             item(key = "filters") {
                 LedgerFilterRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     LedgerFilterChip(
                         label = tr("全部"),
@@ -427,6 +420,22 @@ fun TransactionListScreen(
                 }
             }
 
+            if (transactions.isNotEmpty()) {
+                item(key = "summary") {
+                    MonthlySummaryCard(
+                        expenseCents = monthlyExpense,
+                        incomeCents = monthlyIncome,
+                    )
+                }
+
+                item(key = "search") {
+                    LedgerSearchBar(
+                        query = searchQuery,
+                        onQueryChange = viewModel::setSearchQuery,
+                    )
+                }
+            }
+
             if (duplicateCandidates.isNotEmpty()) {
                 item(key = "duplicates") {
                     DuplicateReviewCard(
@@ -437,14 +446,7 @@ fun TransactionListScreen(
                 }
             }
 
-            if (transactions.isEmpty()) {
-                item(key = "empty") {
-                    LedgerEmptyState(
-                        filterActive = filterActive,
-                        onClearFilters = viewModel::clearFilters,
-                    )
-                }
-            } else {
+            if (transactions.isNotEmpty()) {
                 val groups = transactions.groupBy { dayKey(it.timestamp) }
                 items(groups.entries.toList(), key = { it.key }) { (dayKey, dayItems) ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -467,10 +469,11 @@ fun TransactionListScreen(
                         val foreignOnly = valid.isEmpty() && dayItems.any { it.currency != "CNY" }
                         DayHeader(
                             label = dayLabel(dayKey),
-                            count = dayItems.size,
+                            count = valid.size,
                             expenseCents = expense,
                             incomeCents = income,
                             hasForeignOnly = foreignOnly,
+                            excludedCount = dayItems.size - valid.size,
                         )
                         DayCard(
                             items = dayItems,
@@ -481,6 +484,7 @@ fun TransactionListScreen(
                     }
                 }
             }
+
         }
     }
 
@@ -511,8 +515,10 @@ fun TransactionListScreen(
         AddTransactionDialog(
             initial = entry,
             onDismiss = { editing = null },
-            onConfirm = { amount, type, category, merchant, note ->
-                viewModel.updateTransaction(entry, amount, type, category, merchant, note)
+            onConfirm = { amount, type, category, merchant, note, timestamp ->
+                viewModel.updateTransaction(
+                    entry, amount, type, category, merchant, note, timestamp
+                )
                 editing = null
             },
         )
@@ -532,8 +538,8 @@ fun TransactionListScreen(
     if (showAddDialog) {
         AddTransactionDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { amount, type, category, merchant, note ->
-                viewModel.addTransaction(amount, type, category, merchant, note)
+            onConfirm = { amount, type, category, merchant, note, timestamp ->
+                viewModel.addTransaction(amount, type, category, merchant, note, timestamp)
                 showAddDialog = false
             },
         )
@@ -549,8 +555,9 @@ private fun DayCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
@@ -777,6 +784,7 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
         syncTone = syncTone,
         syncIcon = syncIcon,
         lastSyncText = lastSyncText,
+        missingSetup = AutomationStatus.missingNames(context),
     )
 }
 

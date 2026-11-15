@@ -84,12 +84,16 @@ class TransactionViewModel @Inject constructor(
     private val _categoryFilter = MutableStateFlow<TransactionCategory?>(null)
     val categoryFilter: StateFlow<TransactionCategory?> = _categoryFilter
 
-    private val _timeFilter = MutableStateFlow(LedgerTimeFilter.ALL)
+    private val _timeFilter = MutableStateFlow(LedgerTimeFilter.THIS_MONTH)
     val timeFilter: StateFlow<LedgerTimeFilter> = _timeFilter
 
     // Kept for callers that only need the raw list (duplicate originals).
     private val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val hasAnyTransactions: StateFlow<Boolean> = allTransactions
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
@@ -187,6 +191,7 @@ class TransactionViewModel @Inject constructor(
         category: TransactionCategory,
         merchant: String,
         note: String,
+        timestamp: Long = System.currentTimeMillis(),
     ) {
         viewModelScope.launch {
             val entity = TransactionEntity(
@@ -196,7 +201,7 @@ class TransactionViewModel @Inject constructor(
                 merchant = merchant,
                 note = note,
                 source = TransactionSource.MANUAL.name,
-                timestamp = System.currentTimeMillis(),
+                timestamp = timestamp,
             )
             repository.insert(entity)
         }
@@ -209,6 +214,7 @@ class TransactionViewModel @Inject constructor(
         category: TransactionCategory,
         merchant: String,
         note: String,
+        timestamp: Long = original.timestamp,
     ) {
         viewModelScope.launch {
             repository.update(
@@ -218,6 +224,7 @@ class TransactionViewModel @Inject constructor(
                     category = category.name,
                     merchant = merchant,
                     note = note,
+                    timestamp = timestamp,
                 )
             )
         }

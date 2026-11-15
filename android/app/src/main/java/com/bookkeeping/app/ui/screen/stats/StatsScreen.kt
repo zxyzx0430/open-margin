@@ -15,12 +15,16 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -66,6 +70,7 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.CategoryIcon
+import com.bookkeeping.app.ui.components.MonthPickerDialog
 import com.bookkeeping.app.ui.components.SectionHeader
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingBackground
@@ -97,7 +102,6 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
     val comparison by viewModel.previousComparison.collectAsState()
 
     var showMonthPicker by remember { mutableStateOf(false) }
-    var showMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = QingBackground,
@@ -121,23 +125,6 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                         month = selectedMonth,
                         onClick = { showMonthPicker = true },
                     )
-                    Box {
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = tr("更多"))
-                        }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(tr("回到本月")) },
-                                onClick = {
-                                    viewModel.setMonth(BudgetMonth.currentKey())
-                                    showMenu = false
-                                },
-                            )
-                        }
-                    }
                 },
             )
         },
@@ -164,7 +151,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                 )
             }
             item(key = "summary_note") {
-                SummaryNote()
+                SummaryNote(type = viewingType)
             }
 
             if (stats.isEmpty()) {
@@ -217,12 +204,14 @@ private fun TypeToggle(
             selected = selected == TransactionType.EXPENSE,
             income = false,
             onClick = { onSelect(TransactionType.EXPENSE) },
+            modifier = Modifier.weight(1f),
         )
         TypePill(
             text = tr("收入"),
             selected = selected == TransactionType.INCOME,
             income = true,
             onClick = { onSelect(TransactionType.INCOME) },
+            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -233,18 +222,24 @@ private fun TypePill(
     selected: Boolean,
     income: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(50)
-    val foreground = if (selected) QingSurface else QingTextSecondary
+    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
     Row(
-        modifier = Modifier
+        modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(shape)
             .background(if (selected) QingPrimary else QingSurface)
             .border(1.dp, if (selected) QingPrimary else QingOutline, shape)
-            .clickable(onClick = onClick)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
             .padding(horizontal = 18.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.Center,
     ) {
         Icon(
             imageVector = if (income) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
@@ -271,57 +266,54 @@ private fun StatsSummaryCard(
     val income = type == TransactionType.INCOME
     val totalLabel = if (income) tr("本月总收入") else tr("本月总支出")
     val totalColor = if (income) QingIncome else QingExpense
+    val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(QingPrimaryContainer, QingPrimaryContainer.copy(alpha = 0.55f)),
-                )
-            )
+            .background(QingPrimaryContainer)
             .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        Text(
+            text = totalLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = mutedOnContainer,
+        )
+        Text(
+            text = formatCny(totalCents),
+            style = MaterialTheme.typography.headlineMedium,
+            color = totalColor,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+        )
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Column(modifier = Modifier.weight(1.35f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = totalLabel,
+                    text = if (income) tr("日均收入") else tr("日均支出"),
                     style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
-                )
-                Text(
-                    text = formatCny(totalCents),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = totalColor,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Column(modifier = Modifier.weight(0.85f)) {
-                Text(
-                    text = tr("日均支出"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
+                    color = mutedOnContainer,
                 )
                 Text(
                     text = formatCny(dailyAverageCents),
                     style = MaterialTheme.typography.titleMedium,
-                    color = QingText,
+                    color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                 )
             }
-            Column(modifier = Modifier.weight(0.95f)) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = tr("较上月"),
                     style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
+                    color = mutedOnContainer,
                 )
                 ComparisonValue(comparison = comparison, type = type)
                 Text(
@@ -331,7 +323,7 @@ private fun StatsSummaryCard(
                         tr("上月无数据")
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
+                    color = mutedOnContainer,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -365,7 +357,7 @@ private fun ComparisonValue(comparison: MonthComparison, type: TransactionType) 
 }
 
 @Composable
-private fun SummaryNote() {
+private fun SummaryNote(type: TransactionType) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -378,7 +370,11 @@ private fun SummaryNote() {
             modifier = Modifier.size(14.dp),
         )
         Text(
-            text = tr("不包含转账和退款，统计仅计入实际消费支出。"),
+            text = if (type == TransactionType.INCOME) {
+                tr("不包含转账和退款，统计仅计入实际收入。")
+            } else {
+                tr("不包含转账和退款，统计仅计入实际消费支出。")
+            },
             style = MaterialTheme.typography.bodySmall,
             color = QingTextSecondary,
         )
@@ -403,34 +399,25 @@ private fun CategoryDonutCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SectionHeader(tr("分类占比"))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CategoryPieChart(
-                    stats = stats,
-                    totalCents = totalCents,
-                    centerLabel = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
-                    modifier = Modifier
-                        .weight(0.9f)
-                        .aspectRatio(1f),
-                )
-                Column(
-                    modifier = Modifier
-                        .weight(1.1f)
-                        .padding(start = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    stats.take(5).forEach { stat ->
-                        CategoryLegendRow(stat = stat)
-                    }
-                    if (stats.size > 5) {
-                        Text(
-                            text = "+${stats.size - 5} ${tr("类")}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = QingTextSecondary,
-                        )
-                    }
+            CategoryPieChart(
+                stats = stats,
+                totalCents = totalCents,
+                centerLabel = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp),
+            )
+            HorizontalDivider(color = QingOutline)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                stats.take(6).forEach { stat ->
+                    CategoryLegendRow(stat = stat)
+                }
+                if (stats.size > 6) {
+                    Text(
+                        text = "+${stats.size - 6} ${tr("类")}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingTextSecondary,
+                    )
                 }
             }
         }
@@ -442,25 +429,25 @@ private fun CategoryLegendRow(stat: CategoryStat) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        CategoryIcon(category = stat.category, size = 22.dp)
+        CategoryIcon(category = stat.category, size = 24.dp)
         Text(
             text = tr(stat.category.displayName),
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = "${"%.1f".format(Locale.CHINA, stat.percentage * 100)}%",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = QingTextSecondary,
             maxLines = 1,
         )
         Text(
             text = formatCny(stat.totalCents),
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = QingText,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -556,35 +543,26 @@ private fun CategoryDetailCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     CategoryIcon(category = stat.category, size = 36.dp)
-                    Text(
-                        text = tr(stat.category.displayName),
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = "${"%.1f".format(Locale.CHINA, stat.percentage * 100)}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
-                        modifier = Modifier.width(42.dp),
-                        textAlign = TextAlign.End,
-                    )
-                    Text(
-                        text = "${stat.count} ${tr("笔")}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
-                        modifier = Modifier.width(52.dp),
-                        textAlign = TextAlign.End,
-                        maxLines = 1,
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tr(stat.category.displayName),
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${"%.1f".format(Locale.CHINA, stat.percentage * 100)}% · " +
+                                "${stat.count} ${tr("笔")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = QingTextSecondary,
+                            maxLines = 1,
+                        )
+                    }
                     Text(
                         text = formatCny(stat.totalCents),
                         style = MaterialTheme.typography.titleSmall,
                         color = amountColor,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.width(78.dp),
-                        textAlign = TextAlign.End,
                         maxLines = 1,
                     )
                 }
@@ -605,17 +583,39 @@ private fun EmptyStatsCard(type: TransactionType) {
         colors = CardDefaults.cardColors(containerColor = QingSurface),
         border = BorderStroke(1.dp, QingOutline),
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp),
-            contentAlignment = Alignment.Center,
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = if (type == TransactionType.INCOME) tr("本月还没有收入") else tr("本月还没有支出"),
-                style = MaterialTheme.typography.titleMedium,
-                color = QingTextSecondary,
-            )
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(QingMintSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.ReceiptLong,
+                    contentDescription = null,
+                    tint = QingPrimary,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (type == TransactionType.INCOME) tr("本月还没有收入") else tr("本月还没有支出"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = tr("记账后这里会显示分类占比和每日趋势。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = QingTextSecondary,
+                )
+            }
         }
     }
 }
@@ -628,11 +628,12 @@ private fun MonthPickerButton(
     val shape = RoundedCornerShape(50)
     Row(
         modifier = Modifier
+            .heightIn(min = 48.dp)
             .clip(shape)
             .background(QingSurface)
             .border(1.dp, QingOutline, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -656,90 +657,6 @@ private fun MonthPickerButton(
             modifier = Modifier.size(16.dp),
         )
     }
-}
-
-@Composable
-private fun MonthPickerDialog(
-    selectedMonth: String,
-    onDismiss: () -> Unit,
-    onSelect: (String) -> Unit,
-) {
-    val selectedParts = remember(selectedMonth) { BudgetMonth.parse(selectedMonth) }
-    var year by remember(selectedMonth) {
-        mutableIntStateOf(selectedParts?.year ?: Calendar.getInstance().get(Calendar.YEAR))
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(tr("选择月份")) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    IconButton(onClick = { year-- }) {
-                        Icon(Icons.Default.KeyboardArrowLeft, contentDescription = tr("上一年"))
-                    }
-                    Text(
-                        text = "$year",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    IconButton(onClick = { year++ }) {
-                        Icon(Icons.Default.KeyboardArrowRight, contentDescription = tr("下一年"))
-                    }
-                }
-                for (row in 0 until 4) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        for (col in 0 until 3) {
-                            val month = row * 3 + col + 1
-                            val key = BudgetMonth.keyOf(year, month)
-                            val selected = key == selectedMonth
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selected) QingPrimary else QingSurfaceVariant)
-                                    .clickable { onSelect(key) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = monthCellLabel(year, month),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) QingSurface else QingTextSecondary,
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(tr("取消")) }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = {
-                    onSelect(BudgetMonth.currentKey())
-                },
-            ) { Text(tr("回到本月")) }
-        },
-    )
-}
-
-private fun monthCellLabel(year: Int, month: Int): String {
-    if (AppLanguage.current() != AppLanguage.ENGLISH) return "${month}月"
-    val cal = Calendar.getInstance().apply {
-        clear()
-        set(year, month - 1, 1)
-    }
-    return SimpleDateFormat("MMM", Locale.ENGLISH).format(cal.time)
 }
 
 private fun monthLabel(key: String): String {

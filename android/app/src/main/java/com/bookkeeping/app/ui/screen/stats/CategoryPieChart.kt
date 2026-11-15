@@ -15,6 +15,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingPrimaryDeep
@@ -33,7 +35,14 @@ fun CategoryPieChart(
     modifier: Modifier = Modifier,
 ) {
     if (stats.isEmpty() || totalCents <= 0L) return
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    val largest = stats.maxByOrNull { it.totalCents }
+    val trackColor = QingSurfaceVariant
+    val description = "分类占比：${stats.size} 类，总计 ${formatCny(totalCents)}" +
+        (largest?.let { "，最高 ${it.category.displayName} ${formatCny(it.totalCents)}" } ?: "")
+    Box(
+        modifier = modifier.semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val strokeWidth = 18.dp.toPx()
             val diameter = (size.minDimension - strokeWidth).coerceAtLeast(1f)
@@ -43,7 +52,7 @@ fun CategoryPieChart(
             )
             val arcSize = Size(diameter, diameter)
             drawArc(
-                color = QingSurfaceVariant,
+                color = trackColor,
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,

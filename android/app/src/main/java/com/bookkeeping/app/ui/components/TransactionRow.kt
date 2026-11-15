@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -62,14 +68,32 @@ fun TransactionRow(
     } else {
         transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
     }
-    val amountColor = if (type == TransactionType.INCOME) QingIncome else QingExpense
+    val amountColor = when {
+        transaction.remoteReviewStatus in setOf("excluded", "transfer") -> QingTextSecondary
+        type == TransactionType.INCOME -> QingIncome
+        else -> QingExpense
+    }
     val sourceLabel = sourceLabel(transaction.source)
     val visual = categoryVisual(category)
+    val statusBadge = when {
+        duplicate -> tr("待确认重复") to StatusTone.WARNING
+        transaction.remoteReviewStatus == "excluded" -> tr("不计入") to StatusTone.NEUTRAL
+        transaction.remoteReviewStatus == "refund" -> tr("退款") to StatusTone.POSITIVE
+        transaction.remoteReviewStatus == "transfer" -> tr("转账") to StatusTone.NEUTRAL
+        else -> null
+    }
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "transaction-expand",
+    )
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded }
+            .clickable(role = Role.Button) { expanded = !expanded }
+            .semantics {
+                stateDescription = if (expanded) tr("已展开") else tr("已折叠")
+            }
             .padding(horizontal = 4.dp, vertical = 11.dp),
     ) {
         Row(
@@ -97,9 +121,9 @@ fun TransactionRow(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (duplicate) {
+                    if (statusBadge != null) {
                         Spacer(Modifier.width(6.dp))
-                        SoftBadge(tr("待确认重复"))
+                        SoftBadge(text = statusBadge.first, tone = statusBadge.second)
                     }
                 }
                 Row(
@@ -140,71 +164,67 @@ fun TransactionRow(
                 )
                 Icon(
                     imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = tr("展开详情"),
+                    contentDescription = if (expanded) tr("收起详情") else tr("展开详情"),
                     tint = QingTextSecondary.copy(alpha = 0.7f),
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier
+                        .size(18.dp)
+                        .rotate(rotation),
                 )
             }
         }
 
-        if (expanded) {
-            HorizontalDivider(
-                modifier = Modifier.padding(top = 10.dp),
-                color = MaterialTheme.colorScheme.outlineVariant,
-            )
-            if (transaction.remoteReviewStatus == "refund") {
-                Text(
-                    text = tr("已关联退款 · 请在网站管理退款关系"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = QingTextSecondary,
-                    modifier = Modifier.padding(top = 8.dp),
+        AnimatedVisibility(visible = expanded) {
+            Column {
+                HorizontalDivider(
+                    modifier = Modifier.padding(top = 10.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
                 )
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = {
-                        onReview(
-                            if (transaction.remoteReviewStatus == "excluded") "unverified"
-                            else "excluded"
-                        )
-                    }) {
-                        Text(
-                            if (transaction.remoteReviewStatus == "excluded") tr("恢复计入统计")
-                            else tr("不计入统计")
-                        )
+                if (transaction.remoteReviewStatus == "refund") {
+                    Text(
+                        text = tr("已关联退款 · 请在网站管理退款关系"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = QingTextSecondary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = {
+                            onReview(
+                                if (transaction.remoteReviewStatus == "excluded") "unverified"
+                                else "excluded"
+                            )
+                        }) {
+                            Text(
+                                if (transaction.remoteReviewStatus == "excluded") tr("恢复计入统计")
+                                else tr("不计入统计")
+                            )
+                        }
                     }
                 }
-            }
-            if (note.isNotBlank()) {
-                Text(
-                    text = note,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = QingTextSecondary,
-                    modifier = Modifier.padding(bottom = 4.dp),
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End,
-            ) {
-                Text(
-                    text = tr("修改会双向同步"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = onEdit) { Text(tr("编辑")) }
-                TextButton(onClick = onDelete) {
-                    Icon(
-                        imageVector = Icons.Outlined.Delete,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Text(
+                        text = tr("修改会双向同步"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingTextSecondary,
+                        modifier = Modifier.weight(1f),
                     )
-                    Text(tr("删除"), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = onEdit) { Text(tr("编辑")) }
+                    TextButton(onClick = onDelete) {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(tr("删除"), color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }

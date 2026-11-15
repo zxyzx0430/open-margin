@@ -4,6 +4,7 @@ import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -44,7 +45,7 @@ fun EditBudgetDialog(
     var menuExpanded by remember { mutableStateOf(false) }
 
     val amount = amountText.toDoubleOrNull()
-    val amountValid = amount != null && amount >= 0
+    val amountValid = amount != null && amount > 0
     val categoryValid = !pickCategory || selectedCategory != null
 
     val availableCategories = remember(excludeCategories) {
@@ -64,7 +65,7 @@ fun EditBudgetDialog(
                         onExpandedChange = { menuExpanded = it },
                     ) {
                         OutlinedTextField(
-                            value = selectedCategory?.displayName ?: tr("选择分类"),
+                            value = selectedCategory?.let { tr(it.displayName) } ?: tr("选择分类"),
                             onValueChange = {},
                             readOnly = true,
                             label = { Text(tr("分类")) },
@@ -74,10 +75,11 @@ fun EditBudgetDialog(
                         DropdownMenu(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
+                            modifier = Modifier.heightIn(max = 320.dp),
                         ) {
                             availableCategories.forEach { cat ->
                                 DropdownMenuItem(
-                                    text = { Text(cat.displayName) },
+                                    text = { Text(tr(cat.displayName)) },
                                     onClick = {
                                         selectedCategory = cat
                                         menuExpanded = false
@@ -95,6 +97,11 @@ fun EditBudgetDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     isError = amountText.isNotEmpty() && !amountValid,
+                    supportingText = {
+                        if (amountText.isNotEmpty() && !amountValid) {
+                            Text(tr("请输入大于 0 的金额"))
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

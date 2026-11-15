@@ -5,6 +5,7 @@ import com.bookkeeping.app.billimport.BillImportParser
 import com.bookkeeping.app.billimport.BillImportRow
 import com.bookkeeping.app.billimport.BillSource
 import com.bookkeeping.app.billimport.BillStatus
+import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
@@ -110,5 +111,137 @@ class BillImportMappingTest {
         assertEquals("FOOD", BillImportMapping.categoryFor("星巴克").name)
         assertEquals("TRANSPORT", BillImportMapping.categoryFor("地铁").name)
         assertEquals("OTHER", BillImportMapping.categoryFor("完全未知的小店").name)
+    }
+
+    @Test
+    fun categoryRulesCoverRealWechatMerchants() {
+        assertEquals(TransactionCategory.FOOD, BillImportMapping.categoryFor("星巴克"))
+        assertEquals(TransactionCategory.FOOD, BillImportMapping.categoryFor("采蝶轩"))
+        assertEquals(TransactionCategory.FOOD, BillImportMapping.categoryFor("蜜雪冰城"))
+        assertEquals(TransactionCategory.FOOD, BillImportMapping.categoryFor("luckin coffee"))
+        assertEquals(TransactionCategory.SHOPPING, BillImportMapping.categoryFor("禧迎迎生鲜超市(岭南店)"))
+        assertEquals(TransactionCategory.SHOPPING, BillImportMapping.categoryFor("美宜佳便利店"))
+        assertEquals(TransactionCategory.SHOPPING, BillImportMapping.categoryFor("岭南印象小店"))
+        assertEquals(TransactionCategory.EDUCATION, BillImportMapping.categoryFor("五邑大学"))
+        assertEquals(TransactionCategory.EDUCATION, BillImportMapping.categoryFor("墨墨背单词"))
+        assertEquals(TransactionCategory.UTILITIES, BillImportMapping.categoryFor("中国电信"))
+        assertEquals(TransactionCategory.UTILITIES, BillImportMapping.categoryFor("自来充"))
+        assertEquals(TransactionCategory.TRANSPORT, BillImportMapping.categoryFor("P云停车平台"))
+        assertEquals(TransactionCategory.TRANSPORT, BillImportMapping.categoryFor("广东联合电子服务股份有限公司"))
+        assertEquals(TransactionCategory.HEALTH, BillImportMapping.categoryFor("国控国大(江门)医药有限公司"))
+        assertEquals(TransactionCategory.ENTERTAINMENT, BillImportMapping.categoryFor("杭州游卡"))
+        assertEquals(TransactionCategory.ENTERTAINMENT, BillImportMapping.categoryFor("哔哩哔哩"))
+        assertEquals(TransactionCategory.TRANSFER, BillImportMapping.categoryFor("发给示例联系人"))
+        assertEquals(TransactionCategory.OTHER, BillImportMapping.categoryFor("腾讯公益慈善基金会"))
+    }
+
+    @Test
+    fun fallbackKeyMatchesOrderlessNotificationRecord() {
+        val amount = 840L
+        val timestamp = 1_764_000_000_000L
+        val notification = TransactionEntity(
+            amountCents = amount,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.SHOPPING.name,
+            merchant = "拼多多平台商户",
+            source = TransactionSource.WECHAT.name,
+            timestamp = timestamp,
+            sourceTransactionId = null,
+        )
+        val billRow = BillImportRow(
+            source = BillSource.WECHAT,
+            rowNumber = 17,
+            occurredAtMs = timestamp,
+            merchant = "拼多多平台商户",
+            amountCents = amount,
+            direction = BillDirection.EXPENSE,
+            status = BillStatus.SUCCESS,
+            orderId = "4200003208202611145734008044",
+        )
+
+        val keys = BillImportMapping.existingFallbackKeys(listOf(notification))
+        val rowKey = BillImportMapping.rowFallbackKey(billRow)
+
+        assertNotNull(rowKey)
+        assertTrue(rowKey in keys)
+    }
+
+    @Test
+    fun fallbackKeyDoesNotCollapseRowsThatAlreadyHaveOrderIds() {
+        val imported = TransactionEntity(
+            amountCents = 840L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.SHOPPING.name,
+            merchant = "拼多多平台商户",
+            source = TransactionSource.WECHAT.name,
+            timestamp = 1_764_000_000_000L,
+            sourceTransactionId = "another-order-id",
+        )
+
+        assertTrue(BillImportMapping.existingFallbackKeys(listOf(imported)).isEmpty())
+    }
+
+    @Test
+    fun neutralRowsHaveNoFallbackKey() {
+        val neutral = BillImportRow(
+            source = BillSource.WECHAT,
+            rowNumber = 1,
+            occurredAtMs = 1_764_000_000_000L,
+            merchant = "示例银行(0000)",
+            amountCents = 50_000L,
+            direction = BillDirection.NEUTRAL,
+            status = BillStatus.UNKNOWN,
+        )
+        assertNull(BillImportMapping.rowFallbackKey(neutral))
+    }
+
+    @Test
+    fun merchantNormalizationIgnoresWhitespaceAndParentheticalSuffix() {
+        val notification = TransactionEntity(
+            amountCents = 100L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.OTHER.name,
+            merchant = "示例联系人 (示例商户)",
+            source = TransactionSource.WECHAT.name,
+            timestamp = 1_764_000_000_000L,
+            sourceTransactionId = null,
+        )
+        val billRow = BillImportRow(
+            source = BillSource.WECHAT,
+            rowNumber = 1,
+            occurredAtMs = 1_764_000_000_000L,
+            merchant = "示例联系人(示例商户)",
+            amountCents = 100L,
+            direction = BillDirection.EXPENSE,
+            status = BillStatus.SUCCESS,
+        )
+        val key = BillImportMapping.rowFallbackKey(billRow)
+        assertNotNull(key)
+        assertTrue(key in BillImportMapping.existingFallbackKeys(listOf(notification)))
+    }
+
+    @Test
+    fun fallbackKeyRequiresSameDirectionAndAmount() {
+        val notification = TransactionEntity(
+            amountCents = 100L,
+            type = TransactionType.INCOME.name,
+            category = TransactionCategory.TRANSFER.name,
+            merchant = "示例联系人",
+            source = TransactionSource.WECHAT.name,
+            timestamp = 1_764_000_000_000L,
+            sourceTransactionId = null,
+        )
+        val billRow = BillImportRow(
+            source = BillSource.WECHAT,
+            rowNumber = 1,
+            occurredAtMs = 1_764_000_000_000L,
+            merchant = "示例联系人",
+            amountCents = 100L,
+            direction = BillDirection.EXPENSE,
+            status = BillStatus.SUCCESS,
+        )
+        val key = BillImportMapping.rowFallbackKey(billRow)
+        assertNotNull(key)
+        assertFalse(key in BillImportMapping.existingFallbackKeys(listOf(notification)))
     }
 }
