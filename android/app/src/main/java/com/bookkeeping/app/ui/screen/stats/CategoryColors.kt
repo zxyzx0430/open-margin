@@ -15,6 +15,10 @@ private val PALETTE: Map<TransactionCategory, Color> = mapOf(
     TransactionCategory.HEALTH        to Color(0xFFA98A7A),  // 棕 - 医疗
     TransactionCategory.EDUCATION     to Color(0xFFE0B25E),  // 橙 - 教育
     TransactionCategory.SALARY        to Color(0xFF7DB86A),  // 绿 - 工资
+    TransactionCategory.BONUS         to Color(0xFFD9A441),  // 金 - 奖金
+    TransactionCategory.INVESTMENT    to Color(0xFF4F9FB8),  // 蓝绿 - 理财
+    TransactionCategory.INSURANCE     to Color(0xFF6B86B8),  // 蓝 - 保险
+    TransactionCategory.GIFT          to Color(0xFFD76B6B),  // 红 - 红包
     TransactionCategory.TRANSFER      to Color(0xFF8E7DD1),  // 深紫 - 转账
     TransactionCategory.OTHER         to Color(0xFF9AA6AD),  // 灰 - 其他
 )

@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.screen.settings
 
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.data.local.entity.TransactionCategory
 import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
@@ -112,6 +113,7 @@ fun SettingsScreen(
 ) {
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
+    val merchantRules by viewModel.merchantRules.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val syncPrefs = remember {
@@ -348,6 +350,22 @@ fun SettingsScreen(
                 )
             }
 
+            item { SectionHeader(tr("自动分类")) }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Sync,
+                        title = tr("商户分类记忆"),
+                        subtitle = if (merchantRules.isEmpty()) {
+                            tr("手动修改分类后会自动记住商户")
+                        } else {
+                            merchantRules.size.toString() + " " + tr("个商户")
+                        },
+                        onClick = { detailDialog = "merchantRules" },
+                    )
+                }
+            }
+
             item { SectionHeader(tr("提醒与语言")) }
             item {
                 SettingsGroupCard {
@@ -444,6 +462,47 @@ fun SettingsScreen(
                         },
                         onOpen = { openAccessibilitySettings(context) },
                     )
+                }
+                "merchantRules" -> SettingsDetailDialog(
+                    tr("商户分类记忆"),
+                    { detailDialog = null },
+                ) {
+                    if (merchantRules.isEmpty()) {
+                        Text(
+                            text = tr("还没有商户分类记忆。手动修改交易分类后会自动保存。"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            merchantRules.entries
+                                .sortedBy { it.key }
+                                .forEach { (merchant, category) ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = merchant,
+                                            modifier = Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                        )
+                                        Text(
+                                            text = category.displayName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                        }
+                        TextButton(onClick = viewModel::clearMerchantRules) {
+                            Text(tr("清除全部分类记忆"))
+                        }
+                    }
                 }
                 "keepAlive" -> SettingsDetailDialog(tr("常驻运行状态"), { detailDialog = null }) {
                     KeepAliveCard(enabled = keepAlive, onToggle = viewModel::setKeepAlive)

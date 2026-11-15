@@ -8,6 +8,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.data.settings.SettingsPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -71,6 +72,7 @@ internal object LedgerFilter {
 class TransactionViewModel @Inject constructor(
     private val repository: TransactionRepository,
     private val dao: TransactionDao,
+    private val settings: SettingsPreferences,
 ) : ViewModel() {
 
     data class DuplicateCandidate(
@@ -221,6 +223,9 @@ class TransactionViewModel @Inject constructor(
                 timestamp = timestampMs,
             )
             repository.insert(entity)
+            if (merchant.isNotBlank()) {
+                settings.rememberMerchantCategory(merchant, category)
+            }
         }
     }
 
@@ -244,6 +249,9 @@ class TransactionViewModel @Inject constructor(
                     timestamp = timestampMs,
                 )
             )
+            if (original.category != category.name && merchant.isNotBlank()) {
+                settings.rememberMerchantCategory(merchant, category)
+            }
         }
     }
 

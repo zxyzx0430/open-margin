@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
@@ -23,6 +24,7 @@ import javax.inject.Inject
 class CaptureReviewViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: TransactionRepository,
+    private val settings: SettingsPreferences,
 ) : ViewModel() {
 
     data class UiState(
@@ -66,6 +68,9 @@ class CaptureReviewViewModel @Inject constructor(
             }
             val insertedId = result.getOrNull()
             val inserted = result.isSuccess && insertedId != null && insertedId > 0L
+            if (result.isSuccess && merchant.isNotBlank()) {
+                settings.rememberMerchantCategory(merchant, category)
+            }
             if (result.isSuccess) {
                 val status = if (inserted) {
                     CaptureCandidate.STATUS_APPROVED

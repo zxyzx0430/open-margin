@@ -24,6 +24,7 @@ CATEGORIES = {
     "ENTERTAINMENT": "娱乐", "HOUSING": "住房", "UTILITIES": "水电通信",
     "HEALTH": "医疗", "EDUCATION": "学习", "SUBSCRIPTION": "会员订阅",
     "OTHER": "其他", "SALARY": "工资", "TRANSFER": "转账",
+    "BONUS": "奖金", "INVESTMENT": "理财", "INSURANCE": "保险", "GIFT": "红包",
 }
 CURRENCIES = {"CNY","USD","HKD","EUR","JPY","GBP"}
 

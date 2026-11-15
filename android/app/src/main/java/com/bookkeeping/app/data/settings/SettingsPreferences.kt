@@ -5,12 +5,16 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.merchant.MerchantRules
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,10 +49,50 @@ class SettingsPreferences @Inject constructor(
         context.settingsDataStore.data.first()[KEY_KEEP_ALIVE] ?: false
     }
 
+    fun observeMerchantRules(): Flow<Map<String, TransactionCategory>> =
+        context.settingsDataStore.data.map { parseMerchantRules(it[KEY_MERCHANT_RULES]) }
+
+    fun merchantRulesBlocking(): Map<String, TransactionCategory> = runBlocking {
+        parseMerchantRules(context.settingsDataStore.data.first()[KEY_MERCHANT_RULES])
+    }
+
+    suspend fun rememberMerchantCategory(merchant: String, category: TransactionCategory) {
+        val key = MerchantRules.normalize(merchant)
+        if (key.isBlank()) return
+        context.settingsDataStore.edit { prefs ->
+            val rules = parseMerchantRules(prefs[KEY_MERCHANT_RULES]).toMutableMap()
+            rules[key] = category
+            val json = JSONObject()
+            rules.forEach { (merchant, value) -> json.put(merchant, value.name) }
+            prefs[KEY_MERCHANT_RULES] = json.toString()
+        }
+        MerchantRules.put(key, category)
+    }
+
+    suspend fun clearMerchantRules() {
+        context.settingsDataStore.edit { it.remove(KEY_MERCHANT_RULES) }
+        MerchantRules.clear()
+    }
+
+    private fun parseMerchantRules(raw: String?): Map<String, TransactionCategory> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val json = JSONObject(raw)
+            buildMap {
+                json.keys().forEach { merchant ->
+                    runCatching {
+                        TransactionCategory.valueOf(json.getString(merchant))
+                    }.getOrNull()?.let { put(merchant, it) }
+                }
+            }
+        }.getOrDefault(emptyMap())
+    }
+
     companion object {
         private val KEY_KEEP_ALIVE = booleanPreferencesKey("keep_alive_enabled")
         private val KEY_SUCCESS_NOTIFICATIONS =
             booleanPreferencesKey("success_notifications_enabled")
+        private val KEY_MERCHANT_RULES = stringPreferencesKey("merchant_category_rules")
         // Legacy success_page_capture_enabled and compatibility_accessibility_enabled
         // keys are intentionally ignored: page recognition now runs with the service.
     }

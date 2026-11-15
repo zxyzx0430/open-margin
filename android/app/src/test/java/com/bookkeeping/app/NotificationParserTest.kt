@@ -85,7 +85,7 @@ class NotificationParserTest {
         val incoming = wechat("微信红包", "你领取了 张三 的红包 8.88 元，已存入零钱")!!
         assertEquals(888L, incoming.amountCents)
         assertEquals(TransactionType.INCOME.name, incoming.type)
-        assertEquals(TransactionCategory.OTHER.name, incoming.category)
+        assertEquals(TransactionCategory.GIFT.name, incoming.category)
         assertEquals("张三", incoming.merchant)
         assertEquals("unverified", incoming.remoteReviewStatus)
 

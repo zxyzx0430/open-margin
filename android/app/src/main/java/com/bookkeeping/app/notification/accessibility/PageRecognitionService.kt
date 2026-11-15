@@ -129,12 +129,18 @@ open class PageRecognitionService : AccessibilityService() {
                 if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
                 capturing.set(true)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    captureScreenshotForCandidates(candidates, allowStrictAuto, snapshot.root.windowId)
+                    captureScreenshotForCandidates(
+                        candidates,
+                        allowStrictAuto,
+                        snapshot.root.windowId,
+                        contextText = snapshot.flattenText(),
+                    )
                 } else {
                     processCandidates(
                         candidates.map { it.copy(reason = "screenshot unsupported") },
                         null,
                         allowStrictAuto,
+                        contextText = snapshot.flattenText(),
                     )
                 }
                 return
@@ -215,12 +221,14 @@ open class PageRecognitionService : AccessibilityService() {
                 listOf(candidate),
                 allowStrictAuto,
                 snapshot.root.windowId,
+                contextText = snapshot.flattenText(),
             )
         } else {
             processCandidates(
                 listOf(candidate.copy(reason = "screenshot unsupported")),
                 null,
                 allowStrictAuto,
+                contextText = snapshot.flattenText(),
             )
         }
     }
@@ -280,7 +288,12 @@ open class PageRecognitionService : AccessibilityService() {
                                     lastCaptureAtMs = System.currentTimeMillis()
                                     capturing.set(false)
                                 } else {
-                                    processCandidates(candidates, bytes, allowAuto)
+                                    processCandidates(
+                                        candidates,
+                                        bytes,
+                                        allowAuto,
+                                        contextText = lines.joinToString(" ") { it.text },
+                                    )
                                 }
                             } catch (failure: Exception) {
                                 Log.e(TAG, "OCR capture failed: ${failure.javaClass.simpleName}")
@@ -376,6 +389,7 @@ open class PageRecognitionService : AccessibilityService() {
         candidates: List<CaptureCandidate>,
         allowAuto: Boolean,
         windowId: Int,
+        contextText: String? = null,
     ) {
         try {
             takeScreenshotCompat(
@@ -384,7 +398,7 @@ open class PageRecognitionService : AccessibilityService() {
                     override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                         val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
                         val bytes = bitmap?.let(::compressScreenshot)
-                        processCandidates(candidates, bytes, allowAuto)
+                        processCandidates(candidates, bytes, allowAuto, contextText)
                     }
 
                     override fun onFailure(errorCode: Int) {
@@ -392,6 +406,7 @@ open class PageRecognitionService : AccessibilityService() {
                             candidates.map { it.copy(reason = "screenshot error $errorCode") },
                             null,
                             allowAuto,
+                            contextText,
                         )
                     }
                 },
@@ -401,6 +416,7 @@ open class PageRecognitionService : AccessibilityService() {
                 candidates.map { it.copy(reason = "screenshot start failed") },
                 null,
                 allowAuto,
+                contextText,
             )
         }
     }
@@ -447,6 +463,7 @@ open class PageRecognitionService : AccessibilityService() {
         candidates: List<CaptureCandidate>,
         screenshot: ByteArray?,
         allowAuto: Boolean = true,
+        contextText: String? = null,
     ) {
         scope.launch {
             try {
@@ -477,7 +494,10 @@ open class PageRecognitionService : AccessibilityService() {
                             CaptureReviewMapping.toTransactionEntity(
                                 candidate = stored,
                                 merchant = merchant,
-                                category = CategoryClassifier.classify(merchant),
+                                category = CategoryClassifier.classify(
+                                    merchant,
+                                    contextText.orEmpty(),
+                                ),
                             ),
                             windowMs = PAGE_DEDUP_WINDOW_MS,
                             notifySuccess = false,

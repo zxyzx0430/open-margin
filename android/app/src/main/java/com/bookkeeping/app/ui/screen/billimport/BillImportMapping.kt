@@ -28,6 +28,9 @@ object BillImportMapping {
     private val TRANSFER_HINTS = listOf(
         "转账", "转入", "转出", "汇款", "提现", "发给", "微信红包", "信用卡还款",
     )
+    private val STRONG_TRANSFER_HINTS = listOf(
+        "转账", "转入", "转出", "汇款", "提现", "发给", "信用卡还款", "还款",
+    )
 
     fun ledgerRowKey(row: BillImportRow): String =
         BillImportParser.duplicateKey(row)
@@ -165,7 +168,9 @@ object BillImportMapping {
         val refund = row.status == BillStatus.REFUND
         val withdrawal = row.direction == BillDirection.NEUTRAL && isWithdrawal(row)
         val transferRow = isTransferRow(row)
+        val strongTransfer = isStrongTransferRow(row)
         val redPacketIncome = isRedPacketIncome(row)
+        val redPacketExpense = row.direction == BillDirection.EXPENSE && isRedPacketMention(row)
         val source = when (row.source) {
             BillSource.WECHAT -> TransactionSource.WECHAT
             BillSource.ALIPAY -> TransactionSource.ALIPAY
@@ -174,10 +179,10 @@ object BillImportMapping {
         val context = row.rawFields.joinToString(" ")
         val merchantCategory = categoryFor(row.merchant)
         val category = when {
-            redPacketIncome -> TransactionCategory.OTHER
-            withdrawal -> TransactionCategory.TRANSFER
-            transferRow && merchantCategory == TransactionCategory.OTHER ->
-                TransactionCategory.TRANSFER
+            redPacketIncome -> TransactionCategory.GIFT
+            withdrawal || strongTransfer -> TransactionCategory.TRANSFER
+            (redPacketExpense || transferRow) &&
+                merchantCategory == TransactionCategory.OTHER -> TransactionCategory.TRANSFER
             else -> categoryFor(row.merchant, context)
         }
         val transfer = category == TransactionCategory.TRANSFER
@@ -239,5 +244,10 @@ object BillImportMapping {
         val text = (row.rawFields + row.merchant + row.paymentMethod.orEmpty()).joinToString(" ")
         if (TRANSFER_HINTS.any { text.contains(it) }) return true
         return isRedPacketMention(row)
+    }
+
+    private fun isStrongTransferRow(row: BillImportRow): Boolean {
+        val text = (row.rawFields + row.merchant + row.paymentMethod.orEmpty()).joinToString(" ")
+        return STRONG_TRANSFER_HINTS.any { text.contains(it) }
     }
 }

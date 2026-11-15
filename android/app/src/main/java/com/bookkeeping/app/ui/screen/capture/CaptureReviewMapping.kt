@@ -25,8 +25,10 @@ object CaptureReviewMapping {
         }
         val refund = candidate.kind == CaptureCandidate.KIND_REFUND
         val income = refund || candidate.direction == CaptureCandidate.DIRECTION_INCOME
+        val redPacketIncome = candidate.kind == CaptureCandidate.KIND_RED_PACKET && income
         val transferLike = candidate.kind == CaptureCandidate.KIND_TRANSFER ||
-            candidate.kind == CaptureCandidate.KIND_WITHDRAWAL
+            candidate.kind == CaptureCandidate.KIND_WITHDRAWAL ||
+            (candidate.kind == CaptureCandidate.KIND_RED_PACKET && !income)
         val name = merchant.trim().ifBlank {
             when (candidate.kind) {
                 CaptureCandidate.KIND_REFUND -> "${sourceLabel}退款"
@@ -61,6 +63,7 @@ object CaptureReviewMapping {
             type = if (income) TransactionType.INCOME.name else TransactionType.EXPENSE.name,
             category = when {
                 refund -> TransactionCategory.OTHER.name
+                redPacketIncome -> TransactionCategory.GIFT.name
                 transferLike -> TransactionCategory.TRANSFER.name
                 else -> category.name
             },

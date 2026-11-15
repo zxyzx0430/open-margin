@@ -34,6 +34,10 @@ fun categoryVisual(category: TransactionCategory): CategoryVisual = when (catego
     TransactionCategory.HEALTH -> CategoryVisual(Color(0xFFF1E7E3), Color(0xFF7D5F55), Icons.Outlined.MedicalServices)
     TransactionCategory.EDUCATION -> CategoryVisual(Color(0xFFFFF1D6), Color(0xFFC68A1E), Icons.Outlined.School)
     TransactionCategory.SALARY -> CategoryVisual(Color(0xFFE4F5D9), Color(0xFF4F8C32), Icons.Outlined.Payments)
+    TransactionCategory.BONUS -> CategoryVisual(Color(0xFFFFF6D7), Color(0xFFA87900), Icons.Outlined.Payments)
+    TransactionCategory.INVESTMENT -> CategoryVisual(Color(0xFFE3F3F8), Color(0xFF277A91), Icons.Outlined.Payments)
+    TransactionCategory.INSURANCE -> CategoryVisual(Color(0xFFE8F0FA), Color(0xFF416B9E), Icons.Outlined.MedicalServices)
+    TransactionCategory.GIFT -> CategoryVisual(Color(0xFFFFE8E8), Color(0xFFC24B4B), Icons.Outlined.Payments)
     TransactionCategory.TRANSFER -> CategoryVisual(Color(0xFFEDE7FF), Color(0xFF6A5ACD), Icons.Outlined.SwapHoriz)
     TransactionCategory.OTHER -> CategoryVisual(Color(0xFFECEFF1), Color(0xFF607D8B), Icons.Outlined.MoreHoriz)
 }

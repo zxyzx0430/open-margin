@@ -144,6 +144,12 @@ private fun CaptureCandidateCard(
             when (candidate.kind) {
                 CaptureCandidate.KIND_TRANSFER,
                 CaptureCandidate.KIND_WITHDRAWAL -> TransactionCategory.TRANSFER
+                CaptureCandidate.KIND_RED_PACKET ->
+                    if (candidate.direction == CaptureCandidate.DIRECTION_INCOME) {
+                        TransactionCategory.GIFT
+                    } else {
+                        TransactionCategory.TRANSFER
+                    }
                 else -> TransactionCategory.OTHER
             },
         )

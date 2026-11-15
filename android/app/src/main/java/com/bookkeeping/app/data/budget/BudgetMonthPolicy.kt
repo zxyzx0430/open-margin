@@ -11,7 +11,10 @@ object BudgetMonthPolicy {
 
     private val budgetCategories: List<TransactionCategory> =
         TransactionCategory.entries.filter {
-            it != TransactionCategory.SALARY && it != TransactionCategory.TRANSFER
+            it != TransactionCategory.SALARY &&
+                it != TransactionCategory.BONUS &&
+                it != TransactionCategory.GIFT &&
+                it != TransactionCategory.TRANSFER
         }
 
     fun totalKey(month: String) = longPreferencesKey("monthly_total_$month")

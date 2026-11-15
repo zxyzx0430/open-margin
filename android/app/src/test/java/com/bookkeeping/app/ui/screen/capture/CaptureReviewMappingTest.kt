@@ -114,6 +114,7 @@ class CaptureReviewMappingTest {
             category = TransactionCategory.OTHER,
         )
         assertEquals(TransactionType.INCOME.name, income.type)
+        assertEquals(TransactionCategory.GIFT.name, income.category)
         assertEquals("微信红包", income.merchant)
         assertEquals("unverified", income.remoteReviewStatus)
 
@@ -123,7 +124,8 @@ class CaptureReviewMappingTest {
             category = TransactionCategory.OTHER,
         )
         assertEquals(TransactionType.EXPENSE.name, expense.type)
-        assertEquals("unverified", expense.remoteReviewStatus)
+        assertEquals(TransactionCategory.TRANSFER.name, expense.category)
+        assertEquals("transfer", expense.remoteReviewStatus)
     }
 
     @Test

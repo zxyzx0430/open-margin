@@ -240,7 +240,7 @@ object NotificationParser {
             if (source == TransactionSource.WECHAT) "微信支付" else "支付宝"
         } else extracted
         val category = if (isIncomingRedPacket(full)) {
-            TransactionCategory.OTHER
+            TransactionCategory.GIFT
         } else {
             CategoryClassifier.classify(merchant, full)
         }

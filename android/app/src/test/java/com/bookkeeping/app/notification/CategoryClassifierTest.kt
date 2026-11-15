@@ -1,10 +1,32 @@
 package com.bookkeeping.app.notification
 
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.merchant.MerchantRules
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 
 class CategoryClassifierTest {
+
+    @Before
+    fun resetMerchantRules() {
+        MerchantRules.clear()
+    }
+
+    @After
+    fun clearMerchantRules() {
+        MerchantRules.clear()
+    }
+
+    @Test
+    fun userCorrectionWinsAndIgnoresBranchSuffix() {
+        MerchantRules.put("星巴克(万象城店)", TransactionCategory.EDUCATION)
+        assertEquals(
+            TransactionCategory.EDUCATION,
+            CategoryClassifier.classify("星巴克(万达店)", "咖啡"),
+        )
+    }
 
     @Test
     fun longestMerchantKeywordWins() {
@@ -13,6 +35,13 @@ class CategoryClassifierTest {
         assertEquals(TransactionCategory.SHOPPING, CategoryClassifier.classify("抖音商城"))
         assertEquals(TransactionCategory.HEALTH, CategoryClassifier.classify("美团买药"))
         assertEquals(TransactionCategory.FOOD, CategoryClassifier.classify("美团外卖"))
+        assertEquals(TransactionCategory.FOOD, CategoryClassifier.classify("华莱士"))
+        assertEquals(TransactionCategory.SHOPPING, CategoryClassifier.classify("名创优品"))
+        assertEquals(TransactionCategory.HEALTH, CategoryClassifier.classify("益丰药房"))
+        assertEquals(TransactionCategory.BONUS, CategoryClassifier.classify("年终奖"))
+        assertEquals(TransactionCategory.INVESTMENT, CategoryClassifier.classify("基金收益"))
+        assertEquals(TransactionCategory.INSURANCE, CategoryClassifier.classify("重疾险"))
+        assertEquals(TransactionCategory.GIFT, CategoryClassifier.classify("随礼"))
     }
 
     @Test
@@ -28,6 +57,10 @@ class CategoryClassifierTest {
         assertEquals(
             TransactionCategory.ENTERTAINMENT,
             CategoryClassifier.classify("Apple", "Apple Music"),
+        )
+        assertEquals(
+            TransactionCategory.FOOD,
+            CategoryClassifier.classify("星巴克", "公共交通"),
         )
     }
 

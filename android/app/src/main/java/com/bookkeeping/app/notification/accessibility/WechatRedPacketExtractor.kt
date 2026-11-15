@@ -36,8 +36,8 @@ class WechatRedPacketExtractor : AccessibilityExtractor {
         return TransactionEntity(
             amountCents = amountCents,
             type = TransactionType.INCOME.name,
-            // 红包没有更合适的分类，归到 OTHER；用户可手动改
-            category = TransactionCategory.OTHER.name,
+            // 红包收入使用 GIFT 分类；用户仍可手动修改
+            category = TransactionCategory.GIFT.name,
             merchant = "",
             note = "[无障碍] 微信红包",
             source = TransactionSource.WECHAT.name,
