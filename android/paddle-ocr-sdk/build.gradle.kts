@@ -22,8 +22,10 @@ android {
 }
 
 dependencies {
-    implementation(files("libs/onnxruntime-reduced-arm64-v8a.aar"))
-    implementation(files("libs/opencv-minimal-arm64-v8a.aar"))
+    // A library AAR cannot package direct local AARs. The app module includes
+    // these runtime artifacts; the library only needs them at compile time.
+    compileOnly(files("libs/onnxruntime-reduced-arm64-v8a.aar"))
+    compileOnly(files("libs/opencv-minimal-arm64-v8a.aar"))
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.core.ktx)
 }

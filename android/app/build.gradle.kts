@@ -89,6 +89,8 @@ dependencies {
 
     // 本地中文 OCR（PaddleOCR V6 Tiny；ML Kit 仅作为非 arm64 设备回退）
     implementation(project(":paddle-ocr-sdk"))
+    implementation(files(rootProject.file("paddle-ocr-sdk/libs/onnxruntime-reduced-arm64-v8a.aar")))
+    implementation(files(rootProject.file("paddle-ocr-sdk/libs/opencv-minimal-arm64-v8a.aar")))
     implementation(libs.mlkit.text.recognition.chinese)
 
     // Background upload; default disabled until opt-in
