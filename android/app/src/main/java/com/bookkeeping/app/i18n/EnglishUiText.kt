@@ -165,6 +165,7 @@ internal object EnglishUiText {
         "教育" to "Education",
         "工资" to "Salary",
         "转账" to "Transfer",
+        "红包" to "Red packet",
         "其中" to "Including",
         "其他" to "Other",
         "分类预算" to "Category budgets",

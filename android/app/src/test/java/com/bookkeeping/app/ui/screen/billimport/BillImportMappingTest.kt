@@ -231,6 +231,23 @@ class BillImportMappingTest {
     }
 
     @Test
+    fun receivedRedPacketCountsAsIncomeInsteadOfTransfer() {
+        val entity = BillImportMapping.toTransactionEntity(
+            row(
+                merchant = "示例联系人",
+                amountCents = 888L,
+                direction = BillDirection.INCOME,
+                rawFields = listOf("微信红包"),
+                orderId = "RED-IN-1",
+            ),
+        )!!
+        assertEquals(TransactionType.INCOME.name, entity.type)
+        assertEquals(TransactionCategory.OTHER.name, entity.category)
+        assertEquals("unverified", entity.remoteReviewStatus)
+        assertTrue(entity.note.contains("红包"))
+    }
+
+    @Test
     fun previewMarksFuzzyNotificationDuplicatesLikeConfirmDoes() {
         val notification = TransactionEntity(
             amountCents = 3_800L,
