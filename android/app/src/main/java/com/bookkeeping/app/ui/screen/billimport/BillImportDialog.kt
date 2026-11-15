@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import com.bookkeeping.app.billimport.BillImportPreview
 import com.bookkeeping.app.billimport.BillPreviewKind
 import com.bookkeeping.app.billimport.BillPreviewRow
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingExpense
 import com.bookkeeping.app.ui.theme.QingIncome
 import com.bookkeeping.app.ui.theme.QingPrimary
@@ -63,7 +65,10 @@ fun BillImportDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.88f),
+                .then(
+                    if (state.preview == null) Modifier.wrapContentHeight()
+                    else Modifier.fillMaxHeight(0.88f)
+                ),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
         ) {
@@ -78,12 +83,13 @@ fun BillImportDialog(
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = {
-                        if (!state.importing) {
+                    TextButton(
+                        enabled = !state.importing,
+                        onClick = {
                             viewModel.reset()
                             onDismiss()
-                        }
-                    }) { Text(tr("关闭")) }
+                        },
+                    ) { Text(tr("关闭")) }
                 }
                 Text(
                     text = tr("支持微信/支付宝官方 CSV、XLSX 或文本账单；确认前不会写入账本。"),
@@ -97,7 +103,6 @@ fun BillImportDialog(
                                 "text/*",
                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 "application/vnd.ms-excel",
-                                "*/*",
                             ),
                         )
                     },
@@ -151,12 +156,6 @@ fun BillImportDialog(
                                 )
                             }
                         }
-                        TextButton(onClick = {
-                            if (!state.importing) {
-                                viewModel.reset()
-                                onDismiss()
-                            }
-                        }) { Text(tr("关闭")) }
                     }
                 }
             }
@@ -228,10 +227,14 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
             row.parsed?.let { parsed ->
                 Text(
                     text = (if (parsed.direction == BillDirection.INCOME) "+" else "−") +
-                        "¥" + "%.2f".format(Locale.CHINA, parsed.amountCents / 100.0),
+                        formatCny(parsed.amountCents),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (parsed.direction == BillDirection.INCOME) QingIncome else QingExpense,
+                    color = when {
+                        row.kind == BillPreviewKind.ERROR -> MaterialTheme.colorScheme.error
+                        parsed.direction == BillDirection.INCOME -> QingIncome
+                        else -> QingExpense
+                    },
                 )
             }
         }

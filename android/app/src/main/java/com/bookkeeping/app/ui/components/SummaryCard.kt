@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,13 +12,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.theme.QingExpense
 import com.bookkeeping.app.ui.theme.QingIncome
+import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimaryContainer
 import com.bookkeeping.app.ui.theme.QingPrimaryDeep
 import com.bookkeeping.app.ui.theme.QingTextSecondary
@@ -34,11 +36,8 @@ fun MonthlySummaryCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(QingPrimaryContainer, QingPrimaryContainer.copy(alpha = 0.45f)),
-                )
-            )
+            .background(QingPrimaryContainer)
+            .border(1.dp, QingOutline, RoundedCornerShape(20.dp))
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -78,8 +77,8 @@ private fun SummaryMetric(
     Column(modifier = modifier) {
         Text(
             text = label,
-            style = com.bookkeeping.app.ui.theme.Typography.labelSmall,
-            color = QingTextSecondary,
+            style = com.bookkeeping.app.ui.theme.Typography.labelMedium,
+            color = QingPrimaryDeep.copy(alpha = 0.72f),
             maxLines = 1,
         )
         Text(
@@ -88,6 +87,7 @@ private fun SummaryMetric(
             fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Start,
         )
     }

@@ -10,6 +10,7 @@ import com.bookkeeping.app.billimport.BillImportPreview
 import com.bookkeeping.app.billimport.BillParserOptions
 import com.bookkeeping.app.billimport.BillPreviewKind
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.i18n.tr
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,7 @@ class BillImportViewModel @Inject constructor(
                     require(bytes.size <= MAX_FILE_BYTES) { "文件过大" }
                     val transactions = repository.observeAll().first()
                     val existingKeys = BillImportMapping.existingRowKeys(transactions)
+                    val fallbackKeys = BillImportMapping.existingFallbackKeys(transactions)
                     val parsed = BillImportParser.parse(
                         bytes = bytes,
                         fileName = name,
@@ -59,13 +61,25 @@ class BillImportViewModel @Inject constructor(
                     parsed.copy(
                         rows = parsed.rows.map { row ->
                             val value = row.parsed
-                            if (row.kind == BillPreviewKind.VALID && value != null &&
-                                BillImportMapping.ledgerRowKey(value) in existingKeys
-                            ) {
-                                row.copy(
-                                    kind = BillPreviewKind.DUPLICATE,
-                                    message = "账本已有相同记录",
-                                )
+                            if (row.kind == BillPreviewKind.VALID && value != null) {
+                                val primaryDuplicate =
+                                    BillImportMapping.ledgerRowKey(value) in existingKeys
+                                val fallbackDuplicate =
+                                    BillImportMapping.rowFallbackKey(value)?.let {
+                                        it in fallbackKeys
+                                    } == true
+                                if (primaryDuplicate || fallbackDuplicate) {
+                                    row.copy(
+                                        kind = BillPreviewKind.DUPLICATE,
+                                        message = if (primaryDuplicate) {
+                                            "账本已有相同记录"
+                                        } else {
+                                            tr("账本已有金额/时间相同的记录")
+                                        },
+                                    )
+                                } else {
+                                    row
+                                }
                             } else {
                                 row
                             }

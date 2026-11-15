@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.theme.QingExpense
@@ -23,18 +24,25 @@ fun DayHeader(
     incomeCents: Long,
     modifier: Modifier = Modifier,
     hasForeignOnly: Boolean = false,
+    excludedCount: Int = 0,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = "$label · $count ${tr("笔")}",
+            text = buildString {
+                append("$label · $count ${tr("笔")}")
+                if (excludedCount > 0) append(" · $excludedCount ${tr("未计入")}")
+            },
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (expenseCents > 0L) {

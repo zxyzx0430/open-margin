@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.navigation
 
 import com.bookkeeping.app.i18n.tr
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -8,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -40,14 +42,17 @@ import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 fun RootNavigation() {
     val navController = rememberNavController()
     var requestBillImport by remember { mutableStateOf(false) }
+    var requestAutomationSetup by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp,
-            ) {
+            Column {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                ) {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
 
@@ -88,6 +93,7 @@ fun RootNavigation() {
                         ),
                     )
                 }
+                }
             }
         }
     ) { innerPadding ->
@@ -100,6 +106,14 @@ fun RootNavigation() {
                 TransactionListScreen(
                     openBillImport = requestBillImport,
                     onBillImportOpened = { requestBillImport = false },
+                    onSetupAutomation = {
+                        requestAutomationSetup = true
+                        navController.navigate(BottomNavItem.Settings.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable(BottomNavItem.Stats.route) { StatsScreen() }
@@ -114,6 +128,8 @@ fun RootNavigation() {
                             restoreState = true
                         }
                     },
+                    openAutomationSetup = requestAutomationSetup,
+                    onAutomationOpened = { requestAutomationSetup = false },
                 )
             }
         }

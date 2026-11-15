@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -228,6 +229,7 @@ private fun CaptureCandidateCard(
                         DropdownMenu(
                             expanded = categoryMenu,
                             onDismissRequest = { categoryMenu = false },
+                            modifier = Modifier.heightIn(max = 320.dp),
                         ) {
                             TransactionCategory.entries.forEach { option ->
                                 DropdownMenuItem(

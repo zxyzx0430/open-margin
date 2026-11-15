@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.ui.components.formatCny
@@ -52,12 +54,16 @@ fun DailyBarChart(
     val labelColor = QingTextSecondary
     val tooltipColor = QingPrimaryDeep
     val tooltipTextColor = QingSurface
-    val axisTextSize = 9.sp.value
+    val maxDay = dailyTotals.maxByOrNull { it.totalCents }
+    val nonZeroDays = dailyTotals.count { it.totalCents > 0L }
+    val chartDescription = "每日趋势：$nonZeroDays 天有支出" +
+        (maxDay?.let { "，最高 ${dayText(it.day)} ${formatCny(it.totalCents)}" } ?: "")
 
     Canvas(
         modifier = modifier
             .fillMaxWidth()
             .height(190.dp)
+            .semantics { contentDescription = chartDescription }
             .pointerInput(dailyTotals) {
                 detectTapGestures { position ->
                     val leftPad = 34.dp.toPx()
@@ -88,13 +94,13 @@ fun DailyBarChart(
         }
         val textPaint = Paint().apply {
             color = labelColor.toArgb()
-            textSize = axisTextSize * density
+            textSize = 9.sp.toPx()
             isAntiAlias = true
             textAlign = Paint.Align.RIGHT
         }
         val dayPaint = Paint().apply {
             color = labelColor.toArgb()
-            textSize = axisTextSize * density
+            textSize = 9.sp.toPx()
             isAntiAlias = true
             textAlign = Paint.Align.CENTER
         }
@@ -155,7 +161,7 @@ fun DailyBarChart(
             val tooltipText = "${dayText(selected.day)} ${formatCny(selected.totalCents)}"
             val tooltipPaint = Paint().apply {
                 color = tooltipTextColor.toArgb()
-                textSize = 10.sp.value * density
+                textSize = 10.sp.toPx()
                 isAntiAlias = true
                 textAlign = Paint.Align.LEFT
             }

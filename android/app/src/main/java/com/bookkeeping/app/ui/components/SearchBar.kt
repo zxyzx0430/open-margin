@@ -54,7 +54,7 @@ fun LedgerSearchBar(
         },
         placeholder = {
             Text(
-                text = tr("搜索商户、金额或备注"),
+                text = tr("搜索商户、备注或精确金额"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = QingTextSecondary,
             )
