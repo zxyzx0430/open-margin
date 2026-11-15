@@ -14,10 +14,9 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        // RC9: UI/UX refresh merge, inline live uptime, public lock-screen visibility,
-        // ROM guidance and boot restore. Keep in sync with UpdateVersionPolicy.CURRENT_TAG
-        // (v1.2.0-rc.9).
-        versionCode = 14
+        // RC10: UI feedback fixes, yearly stats, income totals, and rule actions.
+        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.10).
+        versionCode = 15
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

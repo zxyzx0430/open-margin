@@ -20,8 +20,154 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.util.Calendar
 import javax.inject.Inject
+import kotlin.math.roundToLong
 
-// 统计页 ViewModel：选中月份、支出/收入聚合与环比
+/** Month vs. full-year view for the stats screen. */
+enum class StatsPeriod { MONTH, YEAR }
+
+/** One month of a full-year view (month is 1..12). */
+data class MonthlyTotal(
+    val month: Int,
+    val totalCents: Long,
+)
+
+/**
+ * Single policy for every Android total (ledger header, stats page, budget).
+ * Keep it in sync with TransactionDao.observeTotalIncomeBetween /
+ * observeTotalExpenseBetween and BudgetViewModel.expenseByCategory.
+ *
+ * INCOME counts every real CNY income row, including `transfer`-status income
+ * and TRANSFER/GIFT categories (incoming transfers and red packets). Only
+ * excluded, refund, possible/confirmed duplicate and foreign-currency rows are
+ * omitted.
+ *
+ * EXPENSE keeps the original policy: no transfers, refunds, excluded rows or
+ * duplicates.
+ */
+internal object StatsTransactionPolicy {
+    private val INCOME_EXCLUDED_STATUSES = setOf(
+        "excluded",
+        "refund",
+        "possible_duplicate",
+        "duplicate",
+    )
+
+    private val EXPENSE_EXCLUDED_STATUSES = setOf(
+        "excluded",
+        "transfer",
+        "refund",
+        "possible_duplicate",
+    )
+
+    fun matches(transaction: TransactionEntity, type: TransactionType): Boolean {
+        if (transaction.type != type.name) return false
+        if (transaction.currency != "CNY") return false
+        if (transaction.duplicateOfId != null) return false
+        return when (type) {
+            TransactionType.INCOME ->
+                transaction.remoteReviewStatus !in INCOME_EXCLUDED_STATUSES
+            TransactionType.EXPENSE ->
+                transaction.remoteReviewStatus !in EXPENSE_EXCLUDED_STATUSES &&
+                    transaction.category != TransactionCategory.TRANSFER.name
+        }
+    }
+
+    fun filter(
+        transactions: List<TransactionEntity>,
+        type: TransactionType,
+    ): List<TransactionEntity> = transactions.filter { matches(it, type) }
+}
+
+/** Pure aggregation helpers so the monthly and yearly views share one pass. */
+internal object StatsAggregation {
+    fun totalCents(transactions: List<TransactionEntity>, type: TransactionType): Long =
+        StatsTransactionPolicy.filter(transactions, type).sumOf { it.amountCents }
+
+    fun categoryStats(
+        transactions: List<TransactionEntity>,
+        type: TransactionType,
+    ): List<CategoryStat> {
+        val filtered = StatsTransactionPolicy.filter(transactions, type)
+        if (filtered.isEmpty()) return emptyList()
+        val total = filtered.sumOf { it.amountCents }
+        return filtered
+            .groupBy {
+                runCatching { TransactionCategory.valueOf(it.category) }
+                    .getOrDefault(TransactionCategory.OTHER)
+            }
+            .map { (category, list) ->
+                val categoryTotal = list.sumOf { it.amountCents }
+                CategoryStat(
+                    category = category,
+                    totalCents = categoryTotal,
+                    count = list.size,
+                    percentage = if (total > 0) categoryTotal.toFloat() / total else 0f,
+                )
+            }
+            .sortedByDescending { it.totalCents }
+    }
+
+    fun dailyTotals(
+        transactions: List<TransactionEntity>,
+        type: TransactionType,
+        monthKey: String,
+    ): List<DailyTotal> {
+        val byDay = StatsTransactionPolicy.filter(transactions, type).groupBy {
+            calendarAt(it.timestamp).get(Calendar.DAY_OF_MONTH)
+        }
+        return (1..BudgetMonth.daysInMonth(monthKey)).map { day ->
+            DailyTotal(
+                day = day,
+                totalCents = byDay[day]?.sumOf { it.amountCents } ?: 0L,
+            )
+        }
+    }
+
+    /**
+     * Twelve calendar months of [year]. The caller already queries the exact
+     * year range, and the year check below keeps this correct in isolation, so
+     * every transaction is counted exactly once.
+     */
+    fun monthlyTotals(
+        transactions: List<TransactionEntity>,
+        type: TransactionType,
+        year: Int,
+    ): List<MonthlyTotal> {
+        val byMonth = StatsTransactionPolicy.filter(transactions, type)
+            .filter { calendarAt(it.timestamp).get(Calendar.YEAR) == year }
+            .groupBy { calendarAt(it.timestamp).get(Calendar.MONTH) + 1 }
+        return (1..12).map { month ->
+            MonthlyTotal(
+                month = month,
+                totalCents = byMonth[month]?.sumOf { it.amountCents } ?: 0L,
+            )
+        }
+    }
+
+    /** [Jan 1 00:00, next Jan 1 00:00) in the device timezone. */
+    fun yearRange(year: Int): Pair<Long, Long> {
+        val start = BudgetMonth.range(BudgetMonth.keyOf(year, 1)).first
+        val end = BudgetMonth.range(BudgetMonth.keyOf(year, 12)).second
+        return start to end
+    }
+
+    fun daysInYear(year: Int): Int = Calendar.getInstance().apply {
+        clear()
+        set(Calendar.YEAR, year)
+        set(Calendar.DAY_OF_YEAR, 1)
+    }.getActualMaximum(Calendar.DAY_OF_YEAR)
+
+    /** Matches the monthly rule: total divided by calendar days in the period. */
+    fun averagePerDay(totalCents: Long, year: Int): Long {
+        val days = daysInYear(year)
+        return if (days <= 0) 0L else (totalCents.toDouble() / days).roundToLong()
+    }
+
+    private fun calendarAt(timestampMs: Long): Calendar =
+        Calendar.getInstance().apply { timeInMillis = timestampMs }
+}
+
+// 统计页 ViewModel：选中月份/全年、支出/收入聚合与环比
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class StatsViewModel @Inject constructor(
@@ -35,43 +181,38 @@ class StatsViewModel @Inject constructor(
     private val _selectedMonth = MutableStateFlow(BudgetMonth.currentKey())
     val selectedMonth: StateFlow<String> = _selectedMonth
 
+    private val _period = MutableStateFlow(StatsPeriod.MONTH)
+    val period: StateFlow<StatsPeriod> = _period
+
+    /** Year of [selectedMonth]; the year stepper preserves the chosen month. */
+    val selectedYear: StateFlow<Int> = _selectedMonth
+        .map { yearOf(it) }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            yearOf(BudgetMonth.currentKey()),
+        )
+
     private val _statsLoaded = MutableStateFlow(false)
     val statsLoaded: StateFlow<Boolean> = _statsLoaded
 
-    // 选中月份按分类聚合后的列表（金额降序）
-    val categoryStats: StateFlow<List<CategoryStat>> = _selectedMonth
-        .flatMapLatest { month ->
-            _statsLoaded.value = false
-            val (start, end) = BudgetMonth.range(month)
-            combine(
-                repository.observeBetween(start, end),
-                _viewingType,
-            ) { transactions, type ->
-                _statsLoaded.value = true
-                val filtered = filterForType(transactions, type)
-                if (filtered.isEmpty()) return@combine emptyList()
-
-                val total = filtered.sumOf { it.amountCents }
-                filtered
-                    .groupBy {
-                        runCatching { TransactionCategory.valueOf(it.category) }
-                            .getOrDefault(TransactionCategory.OTHER)
-                    }
-                    .map { (cat, list) ->
-                        val catTotal = list.sumOf { it.amountCents }
-                        CategoryStat(
-                            category = cat,
-                            totalCents = catTotal,
-                            count = list.size,
-                            percentage = if (total > 0) catTotal.toFloat() / total else 0f,
-                        )
-                    }
-                    .sortedByDescending { it.totalCents }
+    // 选中月份/年份按分类聚合后的列表（金额降序）
+    val categoryStats: StateFlow<List<CategoryStat>> =
+        combine(_selectedMonth, _period) { month, period -> month to period }
+            .flatMapLatest { (month, period) ->
+                _statsLoaded.value = false
+                val (start, end) = rangeFor(month, period)
+                combine(
+                    repository.observeBetween(start, end),
+                    _viewingType,
+                ) { transactions, type ->
+                    _statsLoaded.value = true
+                    StatsAggregation.categoryStats(transactions, type)
+                }
             }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // 选中月份该方向的总金额（分）
+    // 选中月份/年份该方向的总金额（分）
     val totalCents: StateFlow<Long> = categoryStats
         .map { list -> list.sumOf { it.totalCents } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
@@ -84,42 +225,61 @@ class StatsViewModel @Inject constructor(
                 repository.observeBetween(start, end),
                 _viewingType,
             ) { transactions, type ->
-                val filtered = filterForType(transactions, type)
-                val byDay = filtered.groupBy {
-                    Calendar.getInstance().apply { timeInMillis = it.timestamp }
-                        .get(Calendar.DAY_OF_MONTH)
-                }
-                (1..BudgetMonth.daysInMonth(month)).map { day ->
-                    DailyTotal(
-                        day = day,
-                        totalCents = byDay[day]?.sumOf { it.amountCents } ?: 0L,
-                    )
-                }
+                StatsAggregation.dailyTotals(transactions, type, month)
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // 上一月同方向总额，用于环比
-    val previousMonthTotalCents: StateFlow<Long> = _selectedMonth
+    // 选中月份的 12 个月分布（全年视图用；每月恰好统计一次）
+    val monthlyTotals: StateFlow<List<MonthlyTotal>> = _selectedMonth
         .flatMapLatest { month ->
-            val (start, end) = BudgetMonth.range(BudgetMonth.previousKey(month))
+            val year = yearOf(month)
+            val (start, end) = StatsAggregation.yearRange(year)
             combine(
                 repository.observeBetween(start, end),
                 _viewingType,
             ) { transactions, type ->
-                filterForType(transactions, type).sumOf { it.amountCents }
+                StatsAggregation.monthlyTotals(transactions, type, year)
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // 目标统计页口径：月总额 / 当月天数
-    val dailyAverageCents: StateFlow<Long> = combine(totalCents, _selectedMonth) { total, month ->
-        BudgetCalculations.averagePerDay(total, month)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+    // 上一月/上一年同方向总额，用于环比
+    val previousPeriodTotalCents: StateFlow<Long> =
+        combine(_selectedMonth, _period) { month, period -> month to period }
+            .flatMapLatest { (month, period) ->
+                val range = when (period) {
+                    StatsPeriod.MONTH -> BudgetMonth.range(BudgetMonth.previousKey(month))
+                    StatsPeriod.YEAR -> {
+                        val year = yearOf(month)
+                        if (year > MIN_YEAR) {
+                            StatsAggregation.yearRange(year - 1)
+                        } else {
+                            0L to 0L
+                        }
+                    }
+                }
+                combine(
+                    repository.observeBetween(range.first, range.second),
+                    _viewingType,
+                ) { transactions, type ->
+                    StatsAggregation.totalCents(transactions, type)
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
+    // 目标统计页口径：期间总额 / 期间天数
+    val dailyAverageCents: StateFlow<Long> =
+        combine(totalCents, _selectedMonth, _period) { total, month, period ->
+            when (period) {
+                StatsPeriod.MONTH -> BudgetCalculations.averagePerDay(total, month)
+                StatsPeriod.YEAR -> StatsAggregation.averagePerDay(total, yearOf(month))
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     val previousComparison: StateFlow<MonthComparison> = combine(
         totalCents,
-        previousMonthTotalCents,
+        previousPeriodTotalCents,
     ) { current, previous ->
         BudgetCalculations.comparison(current, previous)
     }.stateIn(
@@ -132,19 +292,36 @@ class StatsViewModel @Inject constructor(
         _viewingType.value = type
     }
 
+    fun setPeriod(period: StatsPeriod) {
+        _period.value = period
+    }
+
     fun setMonth(month: String) {
         if (BudgetMonth.isValid(month)) _selectedMonth.value = month
     }
 
-    private fun filterForType(
-        transactions: List<TransactionEntity>,
-        type: TransactionType,
-    ): List<TransactionEntity> = transactions.filter {
-        it.type == type.name && it.currency == "CNY" &&
-            it.duplicateOfId == null &&
-            it.remoteReviewStatus !in setOf(
-                "excluded", "transfer", "refund", "possible_duplicate",
-            ) &&
-            (it.type == "INCOME" || it.category != "TRANSFER")
+    /** Change the year while keeping the selected month, then clamp to 2000..2099. */
+    fun setYear(year: Int) {
+        if (year !in MIN_YEAR..MAX_YEAR) return
+        val month = BudgetMonth.parse(_selectedMonth.value)?.month ?: 1
+        _selectedMonth.value = BudgetMonth.keyOf(year, month)
+    }
+
+    fun shiftYear(delta: Int) {
+        setYear(yearOf(_selectedMonth.value) + delta)
+    }
+
+    private fun rangeFor(month: String, period: StatsPeriod): Pair<Long, Long> =
+        when (period) {
+            StatsPeriod.MONTH -> BudgetMonth.range(month)
+            StatsPeriod.YEAR -> StatsAggregation.yearRange(yearOf(month))
+        }
+
+    private fun yearOf(month: String): Int =
+        BudgetMonth.parse(month)?.year ?: Calendar.getInstance().get(Calendar.YEAR)
+
+    companion object {
+        const val MIN_YEAR: Int = 2000
+        const val MAX_YEAR: Int = 2099
     }
 }

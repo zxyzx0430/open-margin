@@ -149,8 +149,8 @@ def attach(api, core):
         with core.db_connection() as db:
             totals=db.execute("""SELECT currency,direction,COUNT(*) AS count,SUM(amount_cents) AS cents
                FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<=?
-               AND review_status NOT IN ('excluded','transfer','refund')
-               AND (direction='INCOME' OR category<>'TRANSFER')
+               AND review_status NOT IN ('excluded','refund')
+               AND (direction='INCOME' OR (category<>'TRANSFER' AND review_status<>'transfer'))
                GROUP BY currency,direction""",(start_ms,end_ms)).fetchall()
             recent=db.execute("SELECT * FROM transactions ORDER BY timestamp_ms DESC LIMIT 25").fetchall()
         from wallos_api import get_all, WallosError

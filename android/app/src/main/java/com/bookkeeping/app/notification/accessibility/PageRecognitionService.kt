@@ -116,6 +116,11 @@ open class PageRecognitionService : AccessibilityService() {
         } else {
             lastWindowActivity ?: event.className?.toString().orEmpty()
         }
+        val pageText = snapshot.flattenText()
+        // WeChat's conversation list and Alipay home/chat pages contain chat
+        // names, timestamps and unread badges. Never feed them to the payment
+        // card parser: those pages can look like multiple small payments.
+        if (PageActivityGuard.isChatOrHomePage(packageName, activity, pageText)) return
         val allowStrictAuto = strictSuccessAllowance(packageName, activity, snapshot)
 
         // Payment/bill cards: merchant payment, transfer, red packet, withdrawal,
@@ -161,7 +166,6 @@ open class PageRecognitionService : AccessibilityService() {
         // If accessibility nodes are incomplete, OCR the visible payment page
         // and parse the same card layout from OCR lines. This is the fallback
         // for notification-less red packets, refunds, transfers, and withdrawals.
-        val pageText = snapshot.flattenText()
         if (PaymentCardDetector.looksLikePaymentPage(packageName, pageText)) {
             val pageIdentity = PaymentCardDetector.pageIdentity(packageName, pageText)
             if (pageIdentity == lastPageIdentity &&

@@ -46,9 +46,13 @@ interface TransactionDao {
               AND category <> 'TRANSFER' AND timestamp >= :startMs AND timestamp < :endMs""")
     fun observeTotalExpenseBetween(startMs: Long, endMs: Long): Flow<Long>
 
-    // 总收入（单位:分）
+    // Total income (cents). Product policy: every real CNY INCOME row counts,
+    // including transfer-status income and TRANSFER/GIFT categories (incoming
+    // transfers and red packets). Only excluded/refund/duplicate rows and
+    // foreign-currency rows are omitted. Keep this in sync with
+    // StatsTransactionPolicy so the ledger header, stats and budget agree.
     @Query("""SELECT COALESCE(SUM(amountCents), 0) FROM transactions WHERE type = 'INCOME' AND currency = 'CNY' AND syncDeleted = 0
-              AND remoteReviewStatus NOT IN ('excluded','transfer','refund','possible_duplicate')
+              AND remoteReviewStatus NOT IN ('excluded','refund','possible_duplicate','duplicate')
               AND duplicateOfId IS NULL
               AND timestamp >= :startMs AND timestamp < :endMs""")
     fun observeTotalIncomeBetween(startMs: Long, endMs: Long): Flow<Long>

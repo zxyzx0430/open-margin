@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,6 +34,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
+import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
@@ -41,7 +43,11 @@ import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 @Composable
 fun RootNavigation() {
     val navController = rememberNavController()
-    var requestBillImport by remember { mutableStateOf(false) }
+    // Keep the request outside the Transactions destination until the import
+    // dialog is dismissed. The previous one-shot flag was consumed during a
+    // transient composition, so state restoration could recreate the screen
+    // with the flag already cleared and no dialog visible.
+    var showBillImport by rememberSaveable { mutableStateOf(false) }
     var requestAutomationSetup by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -104,8 +110,6 @@ fun RootNavigation() {
         ) {
             composable(BottomNavItem.Transactions.route) {
                 TransactionListScreen(
-                    openBillImport = requestBillImport,
-                    onBillImportOpened = { requestBillImport = false },
                     onSetupAutomation = {
                         requestAutomationSetup = true
                         navController.navigate(BottomNavItem.Settings.route) {
@@ -115,13 +119,16 @@ fun RootNavigation() {
                         }
                     },
                 )
+                if (showBillImport) {
+                    BillImportDialog(onDismiss = { showBillImport = false })
+                }
             }
             composable(BottomNavItem.Stats.route) { StatsScreen() }
             composable(BottomNavItem.Budget.route) { BudgetScreen() }
             composable(BottomNavItem.Settings.route) {
                 SettingsScreen(
                     onImportBills = {
-                        requestBillImport = true
+                        showBillImport = true
                         navController.navigate(BottomNavItem.Transactions.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true

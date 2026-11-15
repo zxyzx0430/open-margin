@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -78,6 +79,22 @@ private fun SettingsIconBubble(icon: ImageVector, tone: StatusTone) {
 }
 
 @Composable
+private fun SettingsTrailingChevron(clickable: Boolean) {
+    if (clickable) {
+        Icon(
+            Icons.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(18.dp),
+        )
+    } else {
+        // Keep the trailing column width identical to clickable rows so badges
+        // and chevrons share the same right edge without faking a tap target.
+        Spacer(Modifier.size(18.dp))
+    }
+}
+
+@Composable
 fun SettingsStatusRow(
     icon: ImageVector,
     title: String,
@@ -110,14 +127,7 @@ fun SettingsStatusRow(
             )
         }
         SoftBadge(text = statusText, tone = tone)
-        if (onClick != null) {
-            Icon(
-                Icons.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.size(18.dp),
-            )
-        }
+        SettingsTrailingChevron(clickable = onClick != null)
     }
 }
 
@@ -189,12 +199,7 @@ fun SettingsActionRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Icon(
-            Icons.Filled.KeyboardArrowRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.size(18.dp),
-        )
+        SettingsTrailingChevron(clickable = true)
     }
 }
 

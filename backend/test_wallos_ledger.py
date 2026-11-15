@@ -109,7 +109,32 @@ class WallosLedgerTests(unittest.TestCase):
         self.assertEqual(len(transfer_only["items"]),2)
         self.assertEqual(transfer_only["totals"],result["totals"])
 
-    def test_previous_month_same_period_vs_complete_month(self):
+    def test_transfer_status_income_counts_but_transfer_status_expense_does_not(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        month=datetime.fromtimestamp(self.timestamp/1000,ZoneInfo("Asia/Shanghai")).strftime("%Y-%m")
+        ids={}
+        for direction,category,cents in (
+            ("INCOME","TRANSFER",1200), ("EXPENSE","TRANSFER",2500),
+        ):
+            payload=self.payload()
+            payload.update(direction=direction,category=category,
+                           amount_cents=cents,merchant="Synthetic")
+            created=self.client.post(self.url+"manual",headers=self.headers,json=payload)
+            self.assertEqual(created.status_code,200,created.text)
+            ids[direction]=created.json()["id"]
+            reviewed=self.client.patch(
+                self.url+f"review/{ids[direction]}",headers=self.headers,
+                json={"status":"transfer"})
+            self.assertEqual(reviewed.status_code,200,reviewed.text)
+        result=self.client.get(self.url+"month",params={"month":month},
+                               headers=self.headers).json()
+        self.assertEqual([(x["direction"],x["total_cents"]) for x in result["totals"]],
+                         [("INCOME",1200)])
+        self.assertEqual(sum(x["total_cents"] for x in result["daily_excluded_totals"]
+                             if x["direction"]=="EXPENSE"),2500)
+
+
         from datetime import datetime,timedelta
         from zoneinfo import ZoneInfo
         tz=ZoneInfo("Asia/Shanghai")

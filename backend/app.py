@@ -269,8 +269,8 @@ def summary(start_ms: int = Query(...), end_ms: int = Query(...)):
         rows = db.execute("""SELECT currency,direction,category,COUNT(*) AS tx_count,
                   SUM(amount_cents) AS total_cents FROM transactions
                   WHERE timestamp_ms>=? AND timestamp_ms<?
-                  AND review_status NOT IN ('excluded','transfer','refund')
-                  AND (direction='INCOME' OR category<>'TRANSFER')
+                  AND review_status NOT IN ('excluded','refund')
+                  AND (direction='INCOME' OR (category<>'TRANSFER' AND review_status<>'transfer'))
                   GROUP BY currency,direction,category ORDER BY currency,direction,category""",
                   (start_ms,end_ms)).fetchall()
     # Different currencies must never be added together without an FX rate.

@@ -90,7 +90,7 @@ def month_view(
     today_ms=int(today.timestamp()*1000)
     tomorrow_ms=int((today+timedelta(days=1)).timestamp()*1000)
     trailing_ms=int((today-timedelta(days=6)).timestamp()*1000)
-    valid="review_status NOT IN ('excluded','transfer','refund') AND (direction='INCOME' OR category<>'TRANSFER')"
+    valid="review_status NOT IN ('excluded','refund') AND (direction='INCOME' OR (category<>'TRANSFER' AND review_status<>'transfer'))"
     conditions=["timestamp_ms>=?","timestamp_ms<?"]
     params=[start_ms,end_ms]
     if day:
@@ -124,7 +124,7 @@ def month_view(
         daily_excluded=db.execute("""SELECT date(timestamp_ms/1000,'unixepoch','+8 hours') AS day,
                 currency,direction,SUM(amount_cents) AS total_cents, COUNT(*) AS count
                 FROM transactions WHERE timestamp_ms>=? AND timestamp_ms<?
-                AND (review_status IN ('excluded','transfer','refund') OR (category='TRANSFER' AND direction='EXPENSE'))
+                AND (review_status IN ('excluded','refund') OR (direction='EXPENSE' AND (review_status='transfer' OR category='TRANSFER')))
                 GROUP BY day,currency,direction ORDER BY day ASC""",
                 (start_ms,end_ms)).fetchall()
         def period_total(a,b):

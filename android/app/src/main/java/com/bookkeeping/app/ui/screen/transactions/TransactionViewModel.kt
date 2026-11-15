@@ -193,6 +193,25 @@ class TransactionViewModel @Inject constructor(
         _timeFilter.value = time
     }
 
+    /** Single-select chips: selecting one dimension clears the other two. */
+    fun selectTimeFilterOnly(time: LedgerTimeFilter) {
+        _typeFilter.value = null
+        _categoryFilter.value = null
+        _timeFilter.value = time
+    }
+
+    fun selectTypeFilterOnly(type: TransactionType) {
+        _categoryFilter.value = null
+        _timeFilter.value = LedgerTimeFilter.ALL
+        _typeFilter.value = type
+    }
+
+    fun selectCategoryFilterOnly(category: TransactionCategory) {
+        _typeFilter.value = null
+        _timeFilter.value = LedgerTimeFilter.ALL
+        _categoryFilter.value = category
+    }
+
     fun clearFilters() {
         _searchQuery.value = ""
         _typeFilter.value = null
@@ -256,6 +275,18 @@ class TransactionViewModel @Inject constructor(
             if (original.category != category.name && merchant.isNotBlank()) {
                 settings.rememberMerchantCategory(merchant, category)
             }
+        }
+    }
+
+    fun saveMerchantRule(merchant: String, category: TransactionCategory) {
+        if (merchant.isBlank()) return
+        viewModelScope.launch { settings.rememberMerchantCategory(merchant, category) }
+    }
+
+    fun updateCategory(entity: TransactionEntity, category: TransactionCategory) {
+        if (entity.category == category.name) return
+        viewModelScope.launch {
+            repository.update(entity.copy(category = category.name))
         }
     }
 
