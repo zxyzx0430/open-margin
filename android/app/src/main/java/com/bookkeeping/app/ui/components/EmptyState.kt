@@ -22,16 +22,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
-import com.bookkeeping.app.ui.theme.QingMintSoft
-import com.bookkeeping.app.ui.theme.QingPrimary
-import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
 @Composable
 fun LedgerEmptyState(
     filterActive: Boolean,
+    monthOnly: Boolean = false,
     onClearFilters: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val semantic = LocalQingSemanticColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -43,26 +43,33 @@ fun LedgerEmptyState(
             modifier = Modifier
                 .size(64.dp)
                 .clip(CircleShape)
-                .background(QingMintSoft),
+                .background(semantic.mintSoft),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Outlined.ReceiptLong,
                 contentDescription = null,
-                tint = QingPrimary,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(30.dp),
             )
         }
         Text(
-            text = if (filterActive) tr("没有符合条件的账单") else tr("还没有账单"),
+            text = when {
+                filterActive -> tr("没有符合条件的账单")
+                monthOnly -> tr("本月还没有账单")
+                else -> tr("还没有账单")
+            },
             style = MaterialTheme.typography.titleMedium,
             textAlign = TextAlign.Center,
         )
         Text(
-            text = if (filterActive) tr("换个关键词或清空筛选试试")
-                   else tr("点击右下角 + 添加第一笔"),
+            text = when {
+                filterActive -> tr("换个关键词或清空筛选试试")
+                monthOnly -> tr("切换到「全部」可以查看历史账单")
+                else -> tr("点击右下角 + 添加第一笔")
+            },
             style = MaterialTheme.typography.bodySmall,
-            color = QingTextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         if (filterActive && onClearFilters != null) {

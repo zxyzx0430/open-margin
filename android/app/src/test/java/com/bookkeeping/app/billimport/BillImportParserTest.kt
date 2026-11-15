@@ -29,9 +29,9 @@ class BillImportParserTest {
         assertEquals(BillFormat.CSV, preview.format)
         assertEquals(BillSource.WECHAT, preview.source)
         assertTrue(preview.requiresConfirmation)
-        assertEquals(3, preview.validRows.size)
+        assertEquals(4, preview.validRows.size)
         assertEquals(1, preview.duplicateRows.size)
-        assertEquals(2, preview.errorRows.size)
+        assertEquals(1, preview.errorRows.size)
 
         val starbucks = preview.validRows.first { it.merchant == "星巴克" }
         assertEquals(3_800L, starbucks.amountCents)
@@ -42,9 +42,9 @@ class BillImportParserTest {
         assertEquals(20_000L, income.amountCents)
         assertEquals(BillDirection.INCOME, income.direction)
 
-        val refund = preview.errorRows.first { it.parsed?.status == BillStatus.REFUND }
-        assertEquals("盒马", refund.parsed?.merchant)
-        assertNotNull(refund.message)
+        val refund = preview.validRows.first { it.merchant == "盒马" }
+        assertEquals(BillStatus.REFUND, refund.status)
+        assertEquals(112_030L, refund.amountCents)
 
         assertTrue(preview.errorRows.any { it.parsed?.status == BillStatus.FAILED })
     }
@@ -53,8 +53,8 @@ class BillImportParserTest {
     fun skipsFooterSummaryRows() {
         val withFooter = wechatCsv + "共6笔,支出：1,173.30,收入：200.00,,,,,,,\n"
         val preview = BillImportParser.parse(withFooter.toByteArray(), "wechat.csv")
-        assertEquals(3, preview.validRows.size)
-        assertEquals(2, preview.errorRows.size)
+        assertEquals(4, preview.validRows.size)
+        assertEquals(1, preview.errorRows.size)
         assertTrue(preview.rows.none { it.message?.contains("交易时间为空") == true })
     }
 
@@ -94,7 +94,7 @@ class BillImportParserTest {
             "wechat.csv",
             BillParserOptions(existingDuplicateKeys = setOf(key)),
         )
-        assertEquals(2, again.validRows.size)
+        assertEquals(3, again.validRows.size)
         assertTrue(again.duplicateRows.any { it.message?.contains("账本中已存在") == true })
     }
 
@@ -109,6 +109,21 @@ class BillImportParserTest {
     }
 
     @Test
+    fun xlsxPreviewUsesSheetRowNumbersWhenBlankRowsAreOmitted() {
+        val preview = BillImportParser.parse(buildXlsx(dataRow = 3), "wechat.xlsx")
+        assertEquals(3, preview.validRows.single().rowNumber)
+    }
+
+    @Test
+    fun xlsxSerialTimeUsesModernTimeZoneOffset() {
+        val preview = BillImportParser.parse(
+            buildXlsx(timeSerial = "46340.647199074076"),
+            "wechat.xlsx",
+        )
+        assertEquals(1_794_641_518_000L, preview.validRows.single().occurredAtMs)
+    }
+
+    @Test
     fun parsesTabSeparatedText() {
         val text = "交易时间\t交易对方\t金额\t收/支\t当前状态\t交易单号\n" +
             "2026-11-13 10:00:00\t测试商户\t12.34\t支出\t支付成功\tT1\n"
@@ -117,7 +132,7 @@ class BillImportParserTest {
         assertEquals(1, preview.validRows.size)
     }
 
-    private fun buildXlsx(): ByteArray {
+    private fun buildXlsx(dataRow: Int = 2, timeSerial: String? = null): ByteArray {
         val strings = listOf(
             "交易时间", "交易对方", "金额(元)", "收/支", "当前状态", "交易单号",
             "2026-11-13 10:08:00", "星巴克", "支出", "支付成功", "X1",
@@ -139,13 +154,17 @@ class BillImportParserTest {
             append("""<c r="E1" t="s"><v>4</v></c>""")
             append("""<c r="F1" t="s"><v>5</v></c>""")
             append("</row>")
-            append("""<row r="2">""")
-            append("""<c r="A2" t="s"><v>6</v></c>""")
-            append("""<c r="B2" t="s"><v>7</v></c>""")
-            append("""<c r="C2"><v>38.00</v></c>""")
-            append("""<c r="D2" t="s"><v>8</v></c>""")
-            append("""<c r="E2" t="s"><v>9</v></c>""")
-            append("""<c r="F2" t="s"><v>10</v></c>""")
+            append("""<row r="$dataRow">""")
+            if (timeSerial != null) {
+                append("""<c r="A$dataRow"><v>$timeSerial</v></c>""")
+            } else {
+                append("""<c r="A$dataRow" t="s"><v>6</v></c>""")
+            }
+            append("""<c r="B$dataRow" t="s"><v>7</v></c>""")
+            append("""<c r="C$dataRow"><v>38.00</v></c>""")
+            append("""<c r="D$dataRow" t="s"><v>8</v></c>""")
+            append("""<c r="E$dataRow" t="s"><v>9</v></c>""")
+            append("""<c r="F$dataRow" t="s"><v>10</v></c>""")
             append("</row>")
             append("</sheetData></worksheet>")
         }

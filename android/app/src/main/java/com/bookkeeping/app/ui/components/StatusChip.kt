@@ -16,12 +16,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.bookkeeping.app.ui.theme.QingExpense
-import com.bookkeeping.app.ui.theme.QingIncome
-import com.bookkeeping.app.ui.theme.QingMintSoft
-import com.bookkeeping.app.ui.theme.QingSurfaceVariant
-import com.bookkeeping.app.ui.theme.QingWarning
-import com.bookkeeping.app.ui.theme.QingWarningContainer
 
 enum class StatusTone { POSITIVE, WARNING, ERROR, NEUTRAL }
 
@@ -33,10 +27,14 @@ fun StatusChip(
     icon: ImageVector? = null,
 ) {
     val (background, foreground) = when (tone) {
-        StatusTone.POSITIVE -> QingMintSoft to QingIncome
-        StatusTone.WARNING -> QingWarningContainer to QingWarning
-        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to QingExpense
-        StatusTone.NEUTRAL -> QingSurfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primaryContainer to
+            MaterialTheme.colorScheme.onPrimaryContainer
+        StatusTone.WARNING -> MaterialTheme.colorScheme.tertiaryContainer to
+            MaterialTheme.colorScheme.onTertiaryContainer
+        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to
+            MaterialTheme.colorScheme.onErrorContainer
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to
+            MaterialTheme.colorScheme.onSurfaceVariant
     }
     Row(
         modifier = modifier
@@ -72,10 +70,14 @@ fun SoftBadge(
     modifier: Modifier = Modifier,
 ) {
     val (background, foreground) = when (tone) {
-        StatusTone.POSITIVE -> QingMintSoft to QingIncome
-        StatusTone.WARNING -> QingWarningContainer to QingWarning
-        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to QingExpense
-        StatusTone.NEUTRAL -> QingSurfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primaryContainer to
+            MaterialTheme.colorScheme.onPrimaryContainer
+        StatusTone.WARNING -> MaterialTheme.colorScheme.tertiaryContainer to
+            MaterialTheme.colorScheme.onTertiaryContainer
+        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to
+            MaterialTheme.colorScheme.onErrorContainer
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to
+            MaterialTheme.colorScheme.onSurfaceVariant
     }
     Text(
         text = text,

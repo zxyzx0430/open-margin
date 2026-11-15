@@ -1,13 +1,14 @@
 <resources>
     <string name="app_name">清衡</string>
     <string name="accessibility_service_description">
-        用于自动识别微信转账/红包、支付宝转账入账等通知无法覆盖的收款场景。
-        本服务只在微信、支付宝两个 app 内激活，不会读取其他应用，
+        旧版转账/红包兜底：仅在页面识别未开启时，识别微信转账/红包、支付宝转账等通知无法覆盖的场景。
+        本服务只在微信、支付宝两个 app 内激活，不会读取其他应用；
         交易默认仅保存在本机；仅在您主动开启同步后上传必要的结构化交易字段。
     </string>
+    <string name="accessibility_fallback_service_label">清衡 · 转账红包兜底</string>
     <string name="page_recognition_service_label">清衡 · 页面识别</string>
     <string name="page_recognition_service_description">
-        可选补充识别：仅在微信/支付宝支付成功页读取页面信息，并在安全检查通过后本地截图、生成待确认候选。
-        不后台翻页、不抓取历史账单、不上传截图；关闭后不影响通知、短信和手动记账。
+        识别微信/支付宝的付款、转账、红包、提现、退款和账单页面；无障碍节点不完整时由 OCR 兜底。
+        只在微信/支付宝内激活，不后台翻页、不上传截图；关闭后不影响通知、短信和手动记账。
     </string>
 </resources>

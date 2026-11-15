@@ -1,15 +1,10 @@
 package com.bookkeeping.app
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.KeepAliveService
@@ -29,16 +24,10 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(AppLanguage.wrap(newBase))
     }
 
-    // Android 13+ 必须运行时申请 POST_NOTIFICATIONS，否则前台服务的常驻通知不可见
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* 结果不需要处理：拒绝就只是看不到常驻通知，不影响其他功能 */ }
-
+    // Android 13+ 的通知权限在自动记账向导里按上下文申请；首启不弹无解释的系统框。
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        requestNotificationPermissionIfNeeded()
 
         // 如果用户开了「常驻通知保活」就启动前台服务。
         // Android 12+ 限制后台启动前台服务，这里在 Activity onCreate 是合法时机。
@@ -50,16 +39,6 @@ class MainActivity : ComponentActivity() {
             BookkeepingAppTheme {
                 RootNavigation()
             }
-        }
-    }
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val granted = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.POST_NOTIFICATIONS
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }

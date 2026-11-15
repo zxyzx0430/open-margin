@@ -18,31 +18,66 @@ object CaptureReviewMapping {
             CaptureCandidate.ALIPAY -> TransactionSource.ALIPAY
             else -> TransactionSource.OTHER
         }
-        val name = merchant.trim().ifBlank { "未知商户" }
+        val sourceLabel = when (candidate.packageName) {
+            CaptureCandidate.WECHAT -> "微信"
+            CaptureCandidate.ALIPAY -> "支付宝"
+            else -> "页面"
+        }
         val refund = candidate.kind == CaptureCandidate.KIND_REFUND
+        val income = refund || candidate.direction == CaptureCandidate.DIRECTION_INCOME
+        val transferLike = candidate.kind == CaptureCandidate.KIND_TRANSFER ||
+            candidate.kind == CaptureCandidate.KIND_WITHDRAWAL
+        val name = merchant.trim().ifBlank {
+            when (candidate.kind) {
+                CaptureCandidate.KIND_REFUND -> "${sourceLabel}退款"
+                CaptureCandidate.KIND_TRANSFER -> "${sourceLabel}转账"
+                CaptureCandidate.KIND_RED_PACKET -> "${sourceLabel}红包"
+                CaptureCandidate.KIND_WITHDRAWAL -> "${sourceLabel}提现"
+                else -> "未知商户"
+            }
+        }
         val note = buildString {
-            append(if (refund) "[退款] " else "[扫描] ")
             append(
-                when (candidate.packageName) {
-                    CaptureCandidate.WECHAT -> "微信"
-                    CaptureCandidate.ALIPAY -> "支付宝"
-                    else -> "页面"
+                when (candidate.kind) {
+                    CaptureCandidate.KIND_REFUND -> "[退款] "
+                    CaptureCandidate.KIND_TRANSFER -> "[转账] "
+                    CaptureCandidate.KIND_RED_PACKET -> "[红包] "
+                    CaptureCandidate.KIND_WITHDRAWAL -> "[提现] "
+                    CaptureCandidate.KIND_AUTO_PAY -> "[自动支付] "
+                    CaptureCandidate.KIND_BILL -> "[账单] "
+                    else -> "[扫描] "
                 },
             )
-            if (candidate.kind == CaptureCandidate.KIND_AUTO_PAY) append(" · 自动支付")
+            append(sourceLabel)
+            when (candidate.kind) {
+                CaptureCandidate.KIND_TRANSFER,
+                CaptureCandidate.KIND_RED_PACKET -> append(if (income) " · 收入" else " · 支出")
+                else -> Unit
+            }
             candidate.orderId?.let { append(" · 单号 ").append(it) }
         }
         return TransactionEntity(
             amountCents = candidate.amountCents,
-            type = if (refund) TransactionType.INCOME.name else TransactionType.EXPENSE.name,
-            category = if (refund) TransactionCategory.OTHER.name else category.name,
+            type = if (income) TransactionType.INCOME.name else TransactionType.EXPENSE.name,
+            category = when {
+                refund -> TransactionCategory.OTHER.name
+                transferLike -> TransactionCategory.TRANSFER.name
+                else -> category.name
+            },
             merchant = name,
             note = note,
             source = source.name,
             timestamp = candidate.eventTimeMs.takeIf { it > 0L } ?: candidate.capturedAtMs,
             merchantIconKey = MerchantIconCatalog.forMerchant(name)?.key,
-            remoteReviewStatus = if (refund) "refund" else "unverified",
+            remoteReviewStatus = when {
+                refund -> "refund"
+                transferLike -> "transfer"
+                else -> "unverified"
+            },
             sourceTransactionId = candidate.orderId,
+            captureConfidence = candidate.confidence,
+            captureKind = candidate.kind,
+            captureObservedAtMs = candidate.capturedAtMs,
         )
     }
 }

@@ -69,7 +69,7 @@
         <service
             android:name=".notification.accessibility.AccessibilityCaptureService"
             android:exported="true"
-            android:label="@string/app_name"
+            android:label="@string/accessibility_fallback_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -79,7 +79,8 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- 可选页面识别（成功页 OCR 补充）：独立于转账兜底服务；默认关闭。 -->
+        <!-- 主页面识别服务：覆盖微信/支付宝付款、转账、红包、提现、退款和账单页面。
+             OCR 是同一采集流程内的兜底，不是独立开关。 -->
         <!-- 用户可见名称必须是“清衡 · 页面识别”；兼容入口类名只是内部实现。 -->
         <service
             android:name="com.google.android.accessibility.selecttospeak.SelectToSpeakService"

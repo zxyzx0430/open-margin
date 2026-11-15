@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,8 +33,21 @@ class BudgetViewModel @Inject constructor(
     private val _selectedMonth = MutableStateFlow(BudgetMonth.currentKey())
     val selectedMonth: StateFlow<String> = _selectedMonth
 
+    private val _budgetMonthLoaded = MutableStateFlow<String?>(null)
+    private val _expenseMonthLoaded = MutableStateFlow<String?>(null)
+
+    val budgetLoaded: StateFlow<Boolean> = combine(
+        _selectedMonth,
+        _budgetMonthLoaded,
+        _expenseMonthLoaded,
+    ) { month, budgetMonth, expenseMonth ->
+        budgetMonth == month && expenseMonth == month
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val budget: StateFlow<BudgetSettings> = _selectedMonth
-        .flatMapLatest { month -> budgetPrefs.observe(month) }
+        .flatMapLatest { month ->
+            budgetPrefs.observe(month).onEach { _budgetMonthLoaded.value = month }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BudgetSettings())
 
     // 选中月份各分类的支出（cents）。只统计 EXPENSE。
@@ -54,7 +68,7 @@ class BudgetViewModel @Inject constructor(
                             .getOrDefault(TransactionCategory.OTHER)
                     }
                     .mapValues { (_, list) -> list.sumOf { it.amountCents } }
-            }
+            }.onEach { _expenseMonthLoaded.value = month }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 

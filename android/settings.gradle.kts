@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "BookkeepingApp"
 include(":app")
+include(":paddle-ocr-sdk")

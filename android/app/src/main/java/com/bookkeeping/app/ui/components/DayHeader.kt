@@ -11,9 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
-import com.bookkeeping.app.ui.theme.QingExpense
-import com.bookkeeping.app.ui.theme.QingIncome
-import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
 @Composable
 fun DayHeader(
@@ -23,7 +21,9 @@ fun DayHeader(
     incomeCents: Long,
     modifier: Modifier = Modifier,
     hasForeignOnly: Boolean = false,
+    excludedCount: Int = 0,
 ) {
+    val semantic = LocalQingSemanticColors.current
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -32,7 +32,19 @@ fun DayHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
-            text = "$label · $count ${tr("笔")}",
+            text = buildString {
+                append(label)
+                append(" · ")
+                append(count)
+                append(' ')
+                append(tr("笔"))
+                if (excludedCount > 0) {
+                    append(" · ")
+                    append(excludedCount)
+                    append(' ')
+                    append(tr("不计入"))
+                }
+            },
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
@@ -41,21 +53,21 @@ fun DayHeader(
                 Text(
                     text = tr("支出") + " " + formatCny(expenseCents),
                     style = MaterialTheme.typography.labelSmall,
-                    color = QingExpense,
+                    color = semantic.expenseText,
                 )
             }
             if (incomeCents > 0L) {
                 Text(
                     text = tr("收入") + " " + formatCny(incomeCents),
                     style = MaterialTheme.typography.labelSmall,
-                    color = QingIncome,
+                    color = semantic.income,
                 )
             }
             if (expenseCents <= 0L && incomeCents <= 0L) {
                 Text(
                     text = if (hasForeignOnly) tr("仅外币 · 未换算") else tr("—"),
                     style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

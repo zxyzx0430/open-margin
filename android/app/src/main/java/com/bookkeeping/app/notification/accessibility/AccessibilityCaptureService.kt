@@ -70,7 +70,13 @@ class AccessibilityCaptureService : AccessibilityService() {
     }
 
     private fun handleAccessibilityEvent(event: AccessibilityEvent) {
-        if (!this::repository.isInitialized || !this::extractors.isInitialized) return
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "EVT type=${eventTypeName(event.eventType)} pkg=${event.packageName}")
+        }
+        if (!this::repository.isInitialized || !this::extractors.isInitialized) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "  -> not initialized, skip")
+            return
+        }
         val pkg = event.packageName?.toString() ?: return
 
         // 入口处不过滤包名先打 log，方便确认事件分发是否被 vivo 拦截
@@ -80,6 +86,13 @@ class AccessibilityCaptureService : AccessibilityService() {
 
         val list = extractors[pkg] ?: return
         AccessibilityCaptureHealth.onEvent(this)
+        // PageRecognitionService now owns every supported card type, including
+        // transfers and red packets. Running the legacy extractors as well would
+        // book the same page twice under different merchant fallbacks.
+        if (PageRecognitionService.isEnabled(this)) {
+            if (BuildConfig.DEBUG) Log.v(TAG, "  -> page recognition owns capture, skip legacy extractors")
+            return
+        }
         val root = rootInActiveWindow
         if (root == null) {
             if (BuildConfig.DEBUG) Log.d(TAG, "  -> rootInActiveWindow=null, skip")

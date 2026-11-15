@@ -324,6 +324,70 @@ class PaymentCardDetectorTest {
         assertNotNull(card.nonFinalReason)
     }
 
+    @Test
+    fun pendingRefundApplicationIsNonFinal() {
+        val card = alipayLines(
+            "11:20" to 100,
+            "退款申请已提交" to 160,
+            "退款金额 ￥12.00" to 240,
+            "等待商家处理" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.REFUND, card.kind)
+        assertEquals(PaymentCardStatus.PENDING, card.status)
+        assertFalse(card.isFinal)
+        assertNotNull(card.nonFinalReason)
+    }
+
+    @Test
+    fun pendingPaymentIsNonFinal() {
+        val card = wechatLines(
+            "10:00" to 100,
+            "便利店" to 160,
+            "支付处理中" to 240,
+            "¥12.00" to 320,
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(PaymentCardStatus.PENDING, card.status)
+        assertFalse(card.isFinal)
+    }
+
+    @Test
+    fun payeeLabelIsNotMistakenForIncome() {
+        val card = alipayLines(
+            "10:24" to 100,
+            "收款方 杭州游卡" to 160,
+            "交易成功" to 240,
+            "￥6.00" to 320,
+        ).single()
+        assertEquals(PaymentDirection.EXPENSE, card.direction)
+    }
+
+    @Test
+    fun bareBadgeNumberIsNotTreatedAsMoney() {
+        val cards = wechatLines(
+            "支付成功" to 100,
+            "3" to 180,
+            "完成" to 260,
+        )
+        assertTrue(cards.isEmpty())
+    }
+
+    @Test
+    fun refundMerchantStripsRefundSuffixAndIgnoresListChrome() {
+        val card = wechatLines(
+            "更多信息" to 80,
+            "查找交易" to 140,
+            "收支统计" to 200,
+            "2026年11月" to 260,
+            "自来充-退款" to 320,
+            "11月14日 05:26" to 380,
+            "+1.45" to 440,
+        ).single()
+        assertEquals(PaymentCardKind.REFUND, card.kind)
+        assertEquals(listOf("自来充"), card.merchantCandidates)
+        assertEquals(145L, card.amountCents)
+    }
+
     // --- pay after use -----------------------------------------------------
 
     @Test
@@ -514,6 +578,52 @@ class PaymentCardDetectorTest {
     }
 
     // --- input adapters and identity --------------------------------------
+
+    @Test
+    fun ocrFallbackRecognizesNotificationlessPages() {
+        assertTrue(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.WECHAT,
+                "微信支付 退款到账通知 退款金额 ¥1.45 商户名称 自来充",
+            ),
+        )
+        assertTrue(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.ALIPAY,
+                "账单详情 转账 来自张三 收入 ￥50.00 已到账",
+            ),
+        )
+        assertTrue(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.ALIPAY,
+                "付款成功 ￥6.00 杭州游卡",
+            ),
+        )
+        assertTrue(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.WECHAT,
+                "微信红包 恭喜发财 ¥8.88 已存入零钱",
+            ),
+        )
+        assertTrue(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.WECHAT,
+                "拼多多平台商户 管理扣费服务 查看商家订单",
+            ),
+        )
+        assertFalse(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.WECHAT,
+                "微信支付 收款码 保存到相册",
+            ),
+        )
+        assertFalse(
+            PaymentCardDetector.looksLikePaymentPage(
+                PaymentCardDetector.WECHAT,
+                "张三：晚上一起吃饭吗",
+            ),
+        )
+    }
 
     @Test
     fun supportsAlipayAccessibilitySnapshot() {

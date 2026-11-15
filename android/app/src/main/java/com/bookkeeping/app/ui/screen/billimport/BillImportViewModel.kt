@@ -8,8 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.billimport.BillImportParser
 import com.bookkeeping.app.billimport.BillImportPreview
 import com.bookkeeping.app.billimport.BillParserOptions
-import com.bookkeeping.app.billimport.BillPreviewKind
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.i18n.AppLanguage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -47,8 +47,10 @@ class BillImportViewModel @Inject constructor(
                 withContext(Dispatchers.IO) {
                     val name = displayName(uri)
                     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: error("无法读取文件")
-                    require(bytes.size <= MAX_FILE_BYTES) { "文件过大" }
+                        ?: error(AppLanguage.tr(context, "无法读取文件"))
+                    require(bytes.size <= MAX_FILE_BYTES) {
+                        AppLanguage.tr(context, "文件过大")
+                    }
                     val transactions = repository.observeAll().first()
                     val existingKeys = BillImportMapping.existingRowKeys(transactions)
                     val parsed = BillImportParser.parse(
@@ -56,27 +58,17 @@ class BillImportViewModel @Inject constructor(
                         fileName = name,
                         options = BillParserOptions(existingDuplicateKeys = existingKeys),
                     )
-                    parsed.copy(
-                        rows = parsed.rows.map { row ->
-                            val value = row.parsed
-                            if (row.kind == BillPreviewKind.VALID && value != null &&
-                                BillImportMapping.ledgerRowKey(value) in existingKeys
-                            ) {
-                                row.copy(
-                                    kind = BillPreviewKind.DUPLICATE,
-                                    message = "账本已有相同记录",
-                                )
-                            } else {
-                                row
-                            }
-                        },
+                    BillImportMapping.markExistingRows(
+                        preview = parsed,
+                        transactions = transactions,
+                        duplicateMessage = AppLanguage.tr(context, "账本已有相同记录"),
                     )
                 }
             }
             _state.value = result.fold(
                 onSuccess = { preview -> UiState(preview = preview) },
                 onFailure = { failure ->
-                    UiState(error = failure.message ?: "无法解析账单文件")
+                    UiState(error = failure.message ?: AppLanguage.tr(context, "无法解析账单文件"))
                 },
             )
         }
@@ -88,19 +80,22 @@ class BillImportViewModel @Inject constructor(
         if (current.importing || current.done) return
         _state.value = current.copy(importing = true, error = null)
         viewModelScope.launch {
-            val entities = preview.validRows.mapNotNull(BillImportMapping::toTransactionEntity)
-            if (entities.size != preview.validRows.size) {
-                _state.value = _state.value.copy(
-                    importing = false,
-                    error = "部分有效行无法映射，未写入任何记录",
-                )
-                return@launch
-            }
             val result = withContext(Dispatchers.IO) {
-                runCatching { repository.insertImportedBatch(entities) }
+                runCatching {
+                    val latest = repository.observeAll().first()
+                    val existingKeys = BillImportMapping.existingRowKeys(latest)
+                    val rows = preview.validRows.filterNot { row ->
+                        BillImportMapping.isAlreadyPresent(row, latest, existingKeys)
+                    }
+                    val entities = rows.mapNotNull(BillImportMapping::toTransactionEntity)
+                    require(entities.size == rows.size) {
+                        AppLanguage.tr(context, "部分有效行无法映射，未写入任何记录")
+                    }
+                    repository.insertImportedBatch(entities) to (preview.validRows.size - rows.size)
+                }
             }
             _state.value = result.fold(
-                onSuccess = { inserted ->
+                onSuccess = { (inserted, _) ->
                     _state.value.copy(
                         importing = false,
                         importedCount = inserted,
@@ -110,7 +105,8 @@ class BillImportViewModel @Inject constructor(
                 onFailure = { failure ->
                     _state.value.copy(
                         importing = false,
-                        error = "导入失败，未写入任何记录：${failure.message ?: "数据库错误"}",
+                        error = AppLanguage.tr(context, "导入失败，未写入任何记录：") +
+                            (failure.message ?: AppLanguage.tr(context, "数据库错误")),
                     )
                 },
             )

@@ -59,12 +59,29 @@ fun SyncSettingsCard() {
     }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(tr("清衡 · 双向同步（Windows / VPS）"))
+            Text(
+                tr("清衡 · 双向同步（Windows / VPS）"),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            )
             Text(tr("手机和服务器会双向同步交易新增、修改和删除。服务器在线时下载更新，离线先保存在本机；不上传短信全文、银行卡号或个人备注。"))
             Text(tr("Windows 和 VPS 二选一：已成功同步的手机不能直接更换服务器地址；迁移需备份原服务数据。"))
             OutlinedTextField(value = url, onValueChange = { url=it }, label = { Text(tr("HTTPS 服务器地址")) }, singleLine = true)
             OutlinedTextField(value = token, onValueChange = { token=it }, label = { Text(tr("设备同步密钥")) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-            Switch(checked=enabled, onCheckedChange={ enabled=it })
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tr("启用双向同步"), style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        tr("关闭后停止上传和下载，本机数据保留"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = { enabled = it })
+            }
             FilledTonalButton(onClick={
                 try {
                     TransactionSyncWorker.configure(context, url, token, enabled)
@@ -141,7 +158,17 @@ fun SyncSettingsCard() {
                 if (matching.size>5) Text(tr("还有 ") + (matching.size-5) + tr(" 笔，请处理当前项目后继续查看。"))
             }
             Text(tr("最近成功：") + if (lastSuccess > 0L) SimpleDateFormat("MM-dd HH:mm:ss", Locale.CHINA).format(Date(lastSuccess)) else tr("尚无"))
-            Text(tr("状态：") + tr(message))
+            val statusIsError = message.contains("失败") ||
+                message.contains("异常") ||
+                message.contains("不可用") ||
+                message.contains("401") ||
+                message.contains("403")
+            Text(
+                tr("状态：") + tr(message),
+                color = if (statusIsError) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

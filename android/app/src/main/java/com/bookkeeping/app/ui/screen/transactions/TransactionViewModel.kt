@@ -50,11 +50,20 @@ internal object LedgerFilter {
         val q = query.trim()
         if (q.isEmpty()) return true
         val amount = parseAmountCents(q)
-        if (amount != null && transaction.amountCents == amount) return true
+        if (amount != null) {
+            val decimals = q.substringAfter('.', "").length
+            val amountEnd = when (decimals) {
+                0 -> amount + 99L
+                1 -> amount + 9L
+                else -> amount
+            }
+            if (transaction.amountCents in amount..amountEnd) return true
+        }
         fun contains(value: String) = value.contains(q, ignoreCase = true)
         return contains(transaction.merchant) ||
             contains(transaction.note) ||
-            contains(transaction.category)
+            contains(transaction.category) ||
+            contains(transaction.source)
     }
 }
 
@@ -84,8 +93,11 @@ class TransactionViewModel @Inject constructor(
     private val _categoryFilter = MutableStateFlow<TransactionCategory?>(null)
     val categoryFilter: StateFlow<TransactionCategory?> = _categoryFilter
 
-    private val _timeFilter = MutableStateFlow(LedgerTimeFilter.ALL)
+    private val _timeFilter = MutableStateFlow(LedgerTimeFilter.THIS_MONTH)
     val timeFilter: StateFlow<LedgerTimeFilter> = _timeFilter
+
+    private val _ledgerLoaded = MutableStateFlow(false)
+    val ledgerLoaded: StateFlow<Boolean> = _ledgerLoaded
 
     // Kept for callers that only need the raw list (duplicate originals).
     private val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
@@ -114,6 +126,7 @@ class TransactionViewModel @Inject constructor(
                     startMs = start,
                     endMs = end,
                 ).map { list ->
+                    _ledgerLoaded.value = true
                     if (amountQuery != null) {
                         list.filter {
                             LedgerFilter.matches(
@@ -178,6 +191,14 @@ class TransactionViewModel @Inject constructor(
         _searchQuery.value = ""
         _typeFilter.value = null
         _categoryFilter.value = null
+        _timeFilter.value = LedgerTimeFilter.THIS_MONTH
+    }
+
+    /** Show every transaction, used by the explicit “全部” filter chip. */
+    fun showAll() {
+        _searchQuery.value = ""
+        _typeFilter.value = null
+        _categoryFilter.value = null
         _timeFilter.value = LedgerTimeFilter.ALL
     }
 
@@ -187,6 +208,7 @@ class TransactionViewModel @Inject constructor(
         category: TransactionCategory,
         merchant: String,
         note: String,
+        timestampMs: Long = System.currentTimeMillis(),
     ) {
         viewModelScope.launch {
             val entity = TransactionEntity(
@@ -196,7 +218,7 @@ class TransactionViewModel @Inject constructor(
                 merchant = merchant,
                 note = note,
                 source = TransactionSource.MANUAL.name,
-                timestamp = System.currentTimeMillis(),
+                timestamp = timestampMs,
             )
             repository.insert(entity)
         }
@@ -209,6 +231,7 @@ class TransactionViewModel @Inject constructor(
         category: TransactionCategory,
         merchant: String,
         note: String,
+        timestampMs: Long = original.timestamp,
     ) {
         viewModelScope.launch {
             repository.update(
@@ -218,6 +241,7 @@ class TransactionViewModel @Inject constructor(
                     category = category.name,
                     merchant = merchant,
                     note = note,
+                    timestamp = timestampMs,
                 )
             )
         }

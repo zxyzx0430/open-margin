@@ -5,9 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -19,11 +16,10 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -36,6 +32,7 @@ import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
@@ -55,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,7 +73,6 @@ import com.bookkeeping.app.notification.CaptureConnectionState
 import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.notification.NotificationListenerHelper
-import com.bookkeeping.app.notification.SmsPermissionHelper
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import com.bookkeeping.app.ui.components.DayHeader
 import com.bookkeeping.app.ui.components.LedgerEmptyState
@@ -90,14 +87,9 @@ import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
-import com.bookkeeping.app.ui.theme.QingBackground
-import com.bookkeeping.app.ui.theme.QingErrorContainer
-import com.bookkeeping.app.ui.theme.QingOutline
-import com.bookkeeping.app.ui.theme.QingPrimary
-import com.bookkeeping.app.ui.theme.QingSurface
-import com.bookkeeping.app.ui.theme.QingWarning
-import com.bookkeeping.app.ui.theme.QingWarningContainer
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -110,7 +102,6 @@ private data class LedgerStatus(
     val syncText: String,
     val syncTone: StatusTone,
     val syncIcon: ImageVector,
-    val lastSyncText: String,
 )
 
 @Composable
@@ -121,6 +112,7 @@ fun TransactionListScreen(
     onBillImportOpened: () -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
+    val ledgerLoaded by viewModel.ledgerLoaded.collectAsState()
     val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
     val captureReview by captureReviewViewModel.state.collectAsState()
     val monthlyExpense by viewModel.monthlyExpenseCents.collectAsState()
@@ -138,6 +130,8 @@ fun TransactionListScreen(
     var menuExpanded by remember { mutableStateOf(false) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(openBillImport) {
         if (openBillImport) {
@@ -151,25 +145,19 @@ fun TransactionListScreen(
     var notificationListenerEnabled by remember {
         mutableStateOf(NotificationListenerHelper.isEnabled(context))
     }
-    var smsPermissionGranted by remember {
-        mutableStateOf(SmsPermissionHelper.isGranted(context))
+    var pageRecognitionEnabled by remember {
+        mutableStateOf(isPageRecognitionEnabled(context))
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationListenerEnabled = NotificationListenerHelper.isEnabled(context)
-                smsPermissionGranted = SmsPermissionHelper.isGranted(context)
+                pageRecognitionEnabled = isPageRecognitionEnabled(context)
                 statusRefresh++
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    val smsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        smsPermissionGranted = results.values.all { it }
     }
 
     val status by produceState(
@@ -184,18 +172,21 @@ fun TransactionListScreen(
         }
     }
 
-    val filterActive = searchQuery.isNotBlank() ||
-        typeFilter != null ||
-        categoryFilter != null ||
-        timeFilter == LedgerTimeFilter.THIS_MONTH
+    val noChips = searchQuery.isBlank() &&
+        typeFilter == null &&
+        categoryFilter == null
+    val filterActive = !noChips
+    val duplicatesIndex = 5 +
+        (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
+        (if (captureReview.pending.isNotEmpty()) 1 else 0)
 
     Scaffold(
-        containerColor = QingBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showAddDialog = true },
-                containerColor = QingPrimary,
+                containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary,
             ) {
                 Icon(Icons.Default.Add, contentDescription = tr("新建账单"))
@@ -203,6 +194,7 @@ fun TransactionListScreen(
         },
     ) { innerPadding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
@@ -221,25 +213,26 @@ fun TransactionListScreen(
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.weight(1f),
                     )
-                    Box {
-                        IconButton(onClick = {
-                            openAppNotificationSettings(context)
-                        }) {
-                            Icon(
-                                imageVector = Icons.Outlined.NotificationsNone,
-                                contentDescription = tr("通知设置"),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
+                    IconButton(onClick = {
+                        when {
+                            duplicateCandidates.isNotEmpty() -> {
+                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                            }
+                            captureReview.pending.isNotEmpty() -> {
+                                captureReviewViewModel.refresh()
+                                showCaptureReview = true
+                            }
+                            else -> openAppNotificationSettings(context)
                         }
-                        if (duplicateCandidates.isNotEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(end = 10.dp, top = 10.dp)
-                                    .size(7.dp)
-                                    .background(QingWarning, CircleShape),
-                            )
-                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Outlined.NotificationsNone,
+                            contentDescription = if (
+                                duplicateCandidates.isNotEmpty() ||
+                                captureReview.pending.isNotEmpty()
+                            ) tr("待确认提醒") else tr("通知设置"),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(
@@ -253,12 +246,13 @@ fun TransactionListScreen(
                         onDismissRequest = { menuExpanded = false },
                     ) {
                         DropdownMenuItem(
-                            text = { Text(tr("打开系统通知设置")) },
+                            text = { Text(tr("系统通知设置")) },
                             onClick = {
                                 menuExpanded = false
                                 openAppNotificationSettings(context)
                             },
                         )
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text(tr("导入账单")) },
                             onClick = {
@@ -283,20 +277,16 @@ fun TransactionListScreen(
                                 showCaptureReview = true
                             },
                         )
-                        DropdownMenuItem(
-                            text = { Text(tr("清空筛选")) },
-                            onClick = {
-                                menuExpanded = false
-                                viewModel.clearFilters()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(tr("刷新状态")) },
-                            onClick = {
-                                menuExpanded = false
-                                statusRefresh++
-                            },
-                        )
+                        if (filterActive || timeFilter != LedgerTimeFilter.THIS_MONTH) {
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(tr("清空筛选")) },
+                                onClick = {
+                                    menuExpanded = false
+                                    viewModel.clearFilters()
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -308,20 +298,59 @@ fun TransactionListScreen(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    StatusChip(
-                        text = status.captureText,
-                        tone = status.captureTone,
-                        icon = status.captureIcon,
-                    )
+                    Box(
+                        modifier = Modifier.clickable {
+                            if (!notificationListenerEnabled) {
+                                NotificationListenerHelper.openSettings(context)
+                            } else {
+                                statusRefresh++
+                            }
+                        },
+                    ) {
+                        StatusChip(
+                            text = status.captureText,
+                            tone = status.captureTone,
+                            icon = status.captureIcon,
+                        )
+                    }
                     StatusChip(
                         text = status.syncText,
                         tone = status.syncTone,
                         icon = status.syncIcon,
                     )
-                    StatusChip(
-                        text = status.lastSyncText,
-                        tone = StatusTone.NEUTRAL,
-                        icon = Icons.Outlined.Sync,
+                    if (duplicateCandidates.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier.clickable {
+                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                            },
+                        ) {
+                            StatusChip(
+                                text = tr("待确认重复 ") + duplicateCandidates.size,
+                                tone = StatusTone.WARNING,
+                                icon = Icons.Outlined.ErrorOutline,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (!notificationListenerEnabled || !pageRecognitionEnabled) {
+                item(key = "notification_banner") {
+                    PermissionBanner(
+                        title = tr("自动记账设置未完成"),
+                        body = tr("缺少通知使用权或页面识别；点击补全后，再到设置页做一次检查。"),
+                        onClick = {
+                            if (!notificationListenerEnabled) {
+                                NotificationListenerHelper.openSettings(context)
+                            } else {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                                    )
+                                }
+                            }
+                        },
+                        error = true,
                     )
                 }
             }
@@ -360,8 +389,8 @@ fun TransactionListScreen(
                 ) {
                     LedgerFilterChip(
                         label = tr("全部"),
-                        selected = !filterActive,
-                        onClick = { viewModel.clearFilters() },
+                        selected = timeFilter == LedgerTimeFilter.ALL && noChips,
+                        onClick = { viewModel.showAll() },
                     )
                     LedgerFilterChip(
                         label = tr("本月"),
@@ -437,10 +466,22 @@ fun TransactionListScreen(
                 }
             }
 
-            if (transactions.isEmpty()) {
+            if (!ledgerLoaded) {
+                item(key = "loading") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            } else if (transactions.isEmpty()) {
                 item(key = "empty") {
                     LedgerEmptyState(
                         filterActive = filterActive,
+                        monthOnly = timeFilter == LedgerTimeFilter.THIS_MONTH,
                         onClearFilters = viewModel::clearFilters,
                     )
                 }
@@ -467,10 +508,11 @@ fun TransactionListScreen(
                         val foreignOnly = valid.isEmpty() && dayItems.any { it.currency != "CNY" }
                         DayHeader(
                             label = dayLabel(dayKey),
-                            count = dayItems.size,
+                            count = valid.size,
                             expenseCents = expense,
                             incomeCents = income,
                             hasForeignOnly = foreignOnly,
+                            excludedCount = dayItems.size - valid.size,
                         )
                         DayCard(
                             items = dayItems,
@@ -515,6 +557,18 @@ fun TransactionListScreen(
                 viewModel.updateTransaction(entry, amount, type, category, merchant, note)
                 editing = null
             },
+            onConfirmAt = { amount, type, category, merchant, note, timestampMs ->
+                viewModel.updateTransaction(
+                    entry,
+                    amount,
+                    type,
+                    category,
+                    merchant,
+                    note,
+                    timestampMs,
+                )
+                editing = null
+            },
         )
     }
 
@@ -536,6 +590,17 @@ fun TransactionListScreen(
                 viewModel.addTransaction(amount, type, category, merchant, note)
                 showAddDialog = false
             },
+            onConfirmAt = { amount, type, category, merchant, note, timestampMs ->
+                viewModel.addTransaction(
+                    amount,
+                    type,
+                    category,
+                    merchant,
+                    note,
+                    timestampMs,
+                )
+                showAddDialog = false
+            },
         )
     }
 }
@@ -550,7 +615,7 @@ private fun DayCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
@@ -565,7 +630,7 @@ private fun DayCard(
                 if (index != items.lastIndex) {
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 4.dp),
-                        color = QingOutline,
+                        color = MaterialTheme.colorScheme.outlineVariant,
                     )
                 }
             }
@@ -579,10 +644,11 @@ private fun DuplicateReviewCard(
     onKeepBoth: (TransactionEntity) -> Unit,
     onDeleteNew: (TransactionEntity) -> Unit,
 ) {
+    val semantic = LocalQingSemanticColors.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = QingWarningContainer),
+        colors = CardDefaults.cardColors(containerColor = semantic.warningContainer),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -592,7 +658,7 @@ private fun DuplicateReviewCard(
                 text = tr("待确认重复") + "（" + candidates.size + "）",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = QingWarning,
+                color = semantic.warningText,
             )
             Text(
                 text = tr("这些记录金额和时间相近，但没有足够证据自动合并。请确认每笔是否真实；确认前不计入本机统计。"),
@@ -648,39 +714,20 @@ private fun transactionSummary(row: TransactionEntity): String {
 }
 
 @Composable
-private fun NotificationPermissionBanner(onClick: () -> Unit) {
-    PermissionBanner(
-        title = tr("未开启通知监听"),
-        body = tr("点击此处开启「通知使用权」，App 才能自动抓取支付宝 / 微信付款记录"),
-        onClick = onClick,
-        error = true,
-    )
-}
-
-@Composable
-private fun SmsPermissionBanner(onClick: () -> Unit) {
-    PermissionBanner(
-        title = tr("未开启短信权限"),
-        body = tr("可选：授予短信权限后，App 能补充抓取银行交易短信"),
-        onClick = onClick,
-        error = false,
-    )
-}
-
-@Composable
 private fun PermissionBanner(
     title: String,
     body: String,
     onClick: () -> Unit,
     error: Boolean,
 ) {
+    val semantic = LocalQingSemanticColors.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (error) QingErrorContainer else QingWarningContainer,
+            containerColor = if (error) semantic.errorContainer else semantic.warningContainer,
         ),
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -688,7 +735,8 @@ private fun PermissionBanner(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = if (error) MaterialTheme.colorScheme.error else QingWarning,
+                color = if (error) MaterialTheme.colorScheme.onErrorContainer
+                        else semantic.warningText,
             )
             Text(
                 text = body,
@@ -764,11 +812,6 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
         }
     }
 
-    val lastSyncText = if (lastSuccess > 0L) {
-        tr("最近同步 ") + relativeTime(lastSuccess)
-    } else {
-        tr("尚未同步")
-    }
     return LedgerStatus(
         captureText = captureText,
         captureTone = captureTone,
@@ -776,21 +819,19 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
         syncText = syncText,
         syncTone = syncTone,
         syncIcon = syncIcon,
-        lastSyncText = lastSyncText,
     )
 }
 
-private fun relativeTime(timestampMs: Long): String {
-    val minutes = ((System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)) / 60_000L
-    return when {
-        minutes < 1L -> if (AppLanguage.current() == AppLanguage.ENGLISH) "just now" else "刚刚"
-        minutes < 60L -> if (AppLanguage.current() == AppLanguage.ENGLISH) "$minutes min ago"
-                        else "$minutes 分钟前"
-        minutes < 24L * 60L -> if (AppLanguage.current() == AppLanguage.ENGLISH) "${minutes / 60} h ago"
-                              else "${minutes / 60} 小时前"
-        else -> if (AppLanguage.current() == AppLanguage.ENGLISH) "${minutes / (24 * 60)} d ago"
-                else "${minutes / (24 * 60)} 天前"
-    }
+private const val PAGE_RECOGNITION_COMPONENT =
+    "com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+
+private fun isPageRecognitionEnabled(context: Context): Boolean {
+    val expected = "${context.packageName}/$PAGE_RECOGNITION_COMPONENT"
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
 }
 
 private fun openAppNotificationSettings(context: Context) {

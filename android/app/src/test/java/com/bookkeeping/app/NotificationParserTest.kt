@@ -50,6 +50,50 @@ class NotificationParserTest {
         assertEquals(10_000L, tx.amountCents)
         assertEquals(TransactionType.INCOME.name, tx.type)
         assertEquals("", tx.merchant)
+
+        val spaced = wechat("微信支付", "向 你 付款 100.00 元")!!
+        assertEquals(10_000L, spaced.amountCents)
+        assertEquals(TransactionType.INCOME.name, spaced.type)
+        assertEquals("", spaced.merchant)
+    }
+
+    @Test fun wechatOutgoingTransferIsTransferExpense() {
+        val tx = wechat("微信支付", "转账给 张三 20.00 元")!!
+        assertEquals(2_000L, tx.amountCents)
+        assertEquals(TransactionType.EXPENSE.name, tx.type)
+        assertEquals(TransactionCategory.TRANSFER.name, tx.category)
+        assertEquals("张三", tx.merchant)
+        assertEquals("transfer", tx.remoteReviewStatus)
+    }
+
+    @Test fun transferToYouIsIncomeNotOutgoingExpense() {
+        val tx = wechat("微信支付", "张三转账给你 20.00 元")!!
+        assertEquals(2_000L, tx.amountCents)
+        assertEquals(TransactionType.INCOME.name, tx.type)
+        assertEquals(TransactionCategory.TRANSFER.name, tx.category)
+    }
+
+    @Test fun wechatWithdrawalIsTransferExpense() {
+        val tx = wechat("微信支付", "提现成功 100.00 元，已存入银行卡")!!
+        assertEquals(10_000L, tx.amountCents)
+        assertEquals(TransactionType.EXPENSE.name, tx.type)
+        assertEquals(TransactionCategory.TRANSFER.name, tx.category)
+        assertEquals("transfer", tx.remoteReviewStatus)
+    }
+
+    @Test fun wechatRedPacketKeepsDirectionAndCounterparty() {
+        val incoming = wechat("微信红包", "你领取了 张三 的红包 8.88 元，已存入零钱")!!
+        assertEquals(888L, incoming.amountCents)
+        assertEquals(TransactionType.INCOME.name, incoming.type)
+        assertEquals(TransactionCategory.TRANSFER.name, incoming.category)
+        assertEquals("张三", incoming.merchant)
+        assertEquals("transfer", incoming.remoteReviewStatus)
+
+        val outgoing = wechat("微信支付", "已发出红包 8.88 元")!!
+        assertEquals(888L, outgoing.amountCents)
+        assertEquals(TransactionType.EXPENSE.name, outgoing.type)
+        assertEquals(TransactionCategory.TRANSFER.name, outgoing.category)
+        assertEquals("transfer", outgoing.remoteReviewStatus)
     }
 
     @Test fun alipayExpenseKeepsMerchantAndCategory() {
@@ -75,6 +119,30 @@ class NotificationParserTest {
         assertEquals(TransactionType.INCOME.name, tx.type)
     }
 
+    @Test fun wechatReceiptAndRefundFormatsAreParsed() {
+        val receipt = wechat("微信支付", "微信支付收款到账88.00元，来自示例客户")!!
+        assertEquals(8800L, receipt.amountCents)
+        assertEquals(TransactionType.INCOME.name, receipt.type)
+        assertEquals("示例客户", receipt.merchant)
+
+        val refund = wechat("微信支付", "微信支付退款到账¥36.00")!!
+        assertEquals(3600L, refund.amountCents)
+        assertEquals(TransactionType.INCOME.name, refund.type)
+    }
+
+    @Test fun wechatReceiptWithPayVerbKeepsMerchant() {
+        val tx = wechat("微信支付", "微信支付凭证：你已向示例咖啡支付¥36.00，交易时间 2026-06-08 12:30")!!
+        assertEquals(3600L, tx.amountCents)
+        assertEquals(TransactionType.EXPENSE.name, tx.type)
+        assertEquals("示例咖啡", tx.merchant)
+    }
+
+    @Test fun wechatPaidNotificationWithoutMerchantIsValid() {
+        val tx = wechat("微信支付", "已支付¥5.00")!!
+        assertEquals(500L, tx.amountCents)
+        assertEquals(TransactionType.EXPENSE.name, tx.type)
+    }
+
     @Test fun promotionsAndBalanceAreNotTransactions() {
         assertNull(alipay("支付宝", "14元红包今晚失效"))
         assertNull(alipay("支付宝", "优惠券5元即将过期"))
@@ -82,10 +150,22 @@ class NotificationParserTest {
         assertNull(wechat("微信支付", "卡包优惠活动 点击领取 20 元"))
     }
 
+    @Test fun chatMessageTitleCannotBeBookedAsPayment() {
+        assertNull(wechat("张三", "支付成功 12.30 元"))
+        assertNull(wechat("文件传输助手", "付款成功 ￥8.00"))
+        assertEquals(
+            1230L,
+            wechat("服务通知", "微信支付 支付成功 12.30 元")!!.amountCents,
+        )
+    }
+
     @Test fun failedAndPendingPaymentsAreRejected() {
         assertNull(wechat("微信支付", "支付失败 12.30 元"))
         assertNull(alipay("支付宝", "待支付 25.00 元"))
         assertNull(alipay("支付宝", "扣款失败 25.00 元"))
+        assertNull(wechat("微信支付", "支付成功 12.30 元，处理中"))
+        assertNull(wechat("微信支付", "转账成功 20.00 元，等待对方确认"))
+        assertNull(wechat("微信支付", "验证码123456 支付成功 12.30 元"))
     }
 
     @Test fun promotionalAmountBeforeTransactionIsSkipped() {

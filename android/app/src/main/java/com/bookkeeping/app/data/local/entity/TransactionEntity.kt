@@ -76,6 +76,12 @@ data class TransactionEntity(
     // Namespaces differ per payment platform, so pair it with `source`.
     // Local-only; not part of the sync payload.
     val sourceTransactionId: String? = null,
+
+    // Local-only capture metadata for scanned rows. These fields are shown in
+    // the ledger but never uploaded or rewritten by sync.
+    val captureConfidence: Float? = null,
+    val captureKind: String? = null,
+    val captureObservedAtMs: Long? = null,
 )
 
 // 收入还是支出

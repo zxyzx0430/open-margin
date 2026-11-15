@@ -67,6 +67,14 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE remoteEventId = :eventId LIMIT 1")
     suspend fun getByRemoteEventId(eventId: String): TransactionEntity?
 
+    @Query("""SELECT * FROM transactions
+        WHERE syncDeleted = 0 AND source = :source AND sourceTransactionId = :sourceTransactionId
+        LIMIT 1""")
+    suspend fun findBySourceTransactionId(
+        source: String,
+        sourceTransactionId: String,
+    ): TransactionEntity?
+
     @Query("SELECT * FROM transactions WHERE syncDirty = 1 ORDER BY syncModifiedMs, id LIMIT :count OFFSET :offset")
     suspend fun getPendingMutations(count: Int, offset: Int = 0): List<TransactionEntity>
 

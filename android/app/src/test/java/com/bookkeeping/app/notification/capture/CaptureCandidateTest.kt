@@ -44,4 +44,39 @@ class CaptureCandidateTest {
         )
         assertFalse(tooMany.isValid())
     }
+
+    @Test
+    fun unknownDirectionAndKindAreRejected() {
+        assertFalse(candidate().copy(direction = "SIDEWAYS").isValid())
+        assertFalse(candidate().copy(kind = "UNKNOWN_KIND").isValid())
+    }
+
+    @Test
+    fun stableKeySeparatesIncomeFromExpense() {
+        val expense = candidate()
+        val income = expense.copy(direction = CaptureCandidate.DIRECTION_INCOME)
+        assertTrue(expense.stableKey() != income.stableKey())
+    }
+
+    @Test
+    fun dedupKeyIgnoresPageIdentityButKeepsOrderIdentity() {
+        val first = candidate(pageIdentity = "page-a")
+        val sameCard = first.copy(pageIdentity = "page-b")
+        assertTrue(first.dedupKey() == sameCard.dedupKey())
+
+        val differentOrder = first.copy(orderId = "4200009999999999")
+        assertTrue(first.dedupKey() != differentOrder.dedupKey())
+    }
+
+    @Test
+    fun dedupKeySeparatesAmountMerchantAndDirection() {
+        val base = candidate().copy(orderId = null)
+        assertTrue(base.dedupKey() != base.copy(amountCents = 1_525L).dedupKey())
+        assertTrue(
+            base.dedupKey() != base.copy(merchantCandidates = listOf("另一家")).dedupKey(),
+        )
+        assertTrue(
+            base.dedupKey() != base.copy(direction = CaptureCandidate.DIRECTION_INCOME).dedupKey(),
+        )
+    }
 }

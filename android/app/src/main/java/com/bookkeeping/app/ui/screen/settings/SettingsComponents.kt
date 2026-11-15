@@ -2,6 +2,7 @@ package com.bookkeeping.app.ui.screen.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,15 +26,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
-import com.bookkeeping.app.ui.theme.QingErrorContainer
-import com.bookkeeping.app.ui.theme.QingMintSoft
-import com.bookkeeping.app.ui.theme.QingPrimaryContainer
-import com.bookkeeping.app.ui.theme.QingSurfaceVariant
-import com.bookkeeping.app.ui.theme.QingWarningContainer
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
 @Composable
 fun SettingsGroupCard(
@@ -56,11 +54,14 @@ fun SettingsRowDivider() {
 
 @Composable
 private fun SettingsIconBubble(icon: ImageVector, tone: StatusTone) {
+    val semantic = LocalQingSemanticColors.current
     val (background, foreground) = when (tone) {
-        StatusTone.POSITIVE -> QingPrimaryContainer to MaterialTheme.colorScheme.primary
-        StatusTone.WARNING -> QingWarningContainer to MaterialTheme.colorScheme.primary
-        StatusTone.ERROR -> QingErrorContainer to MaterialTheme.colorScheme.error
-        StatusTone.NEUTRAL -> QingSurfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        StatusTone.POSITIVE ->
+            MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        StatusTone.WARNING -> semantic.warningContainer to semantic.warningText
+        StatusTone.ERROR -> semantic.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        StatusTone.NEUTRAL ->
+            MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Box(
         modifier = Modifier
@@ -121,6 +122,11 @@ fun SettingsSwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -137,7 +143,7 @@ fun SettingsSwitchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

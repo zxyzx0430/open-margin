@@ -46,9 +46,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.ui.components.CategoryIcon
-import com.bookkeeping.app.ui.theme.QingPrimary
-import com.bookkeeping.app.ui.theme.QingIncome
-import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -88,13 +86,13 @@ fun CaptureReviewDialog(
                 Text(
                     text = tr("扫描只在本机保存结构化字段和截图，确认后才会写入账本。"),
                     style = MaterialTheme.typography.bodySmall,
-                    color = QingTextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 state.message?.let { message ->
                     Text(
                         text = message,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = QingPrimary,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
                 if (state.busy) {
@@ -107,7 +105,7 @@ fun CaptureReviewDialog(
                     Text(
                         text = tr("没有待确认扫描结果"),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = QingTextSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
                     LazyColumn(
@@ -142,7 +140,13 @@ private fun CaptureCandidateCard(
         mutableStateOf(candidate.merchantCandidates.firstOrNull().orEmpty())
     }
     var category by remember(candidate.stableKey()) {
-        mutableStateOf(TransactionCategory.OTHER)
+        mutableStateOf(
+            when (candidate.kind) {
+                CaptureCandidate.KIND_TRANSFER,
+                CaptureCandidate.KIND_WITHDRAWAL -> TransactionCategory.TRANSFER
+                else -> TransactionCategory.OTHER
+            },
+        )
     }
     var categoryMenu by remember { mutableStateOf(false) }
     val thumbnail by produceState<ImageBitmap?>(initialValue = null, candidate.screenshotPath) {
@@ -183,19 +187,21 @@ private fun CaptureCandidateCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val refund = candidate.kind == CaptureCandidate.KIND_REFUND
+                    val income = candidate.kind == CaptureCandidate.KIND_REFUND ||
+                        candidate.direction == CaptureCandidate.DIRECTION_INCOME
                     Text(
-                        text = (if (refund) "+¥" else "−¥") +
+                        text = (if (income) "+¥" else "−¥") +
                             "%.2f".format(Locale.CHINA, candidate.amountCents / 100.0),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (refund) QingIncome else MaterialTheme.colorScheme.error,
+                        color = if (income) LocalQingSemanticColors.current.income
+                        else MaterialTheme.colorScheme.error,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
                         text = tr("置信度") + " " + (candidate.confidence * 100).toInt() + "%",
                         style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 OutlinedTextField(
@@ -209,7 +215,7 @@ private fun CaptureCandidateCard(
                     Text(
                         text = tr("候选：") + candidate.merchantCandidates.joinToString(" / "),
                         style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -218,7 +224,7 @@ private fun CaptureCandidateCard(
                             .format(Date(candidate.eventTimeMs)) +
                             (candidate.orderId?.let { " · " + tr("单号") + " " + it } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
                     Box {

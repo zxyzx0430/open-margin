@@ -112,6 +112,7 @@ object PaymentCardDetector {
     private val SUMMARY_MARKERS = listOf(
         "本月统计", "本月支出", "本月收入", "本月已支出", "本月消费", "收支明细",
         "日报设置", "年度账单", "账单统计", "月账单", "点击查看昨日收支",
+        "记账日报", "已入账", "已支出",
     )
     private val SUMMARY_PATTERN = Regex(
         """(?:本月|上月|今年|年度|累计|总)(?:已)?(?:支出|收入|消费|账单|提现|转账|红包|入账)|\d{1,2}月(?:已)?(?:支出|收入|消费|提现|转账|红包|入账)""",
@@ -120,6 +121,7 @@ object PaymentCardDetector {
     private val REFUND_MARKERS = listOf(
         "退款到账通知", "退款金额", "退款成功", "退款已到账", "退款到账",
         "已退款", "原路退回", "退款已原路退回",
+        "退款申请", "退款处理中", "退款中", "退款审核", "退款",
     )
     private val WITHDRAWAL_MARKERS = listOf("提现", "转出到银行卡", "转出至银行卡")
     private val TRANSFER_MARKERS = listOf("转账", "转给你", "转账给你")
@@ -142,14 +144,21 @@ object PaymentCardDetector {
         "支付成功", "付款成功", "交易成功", "支付完成", "付款完成", "已支付", "已付款",
         "消费成功", "扣款成功", "使用零钱支付", "使用银行卡支付", "通过零钱扣款",
         "零钱支付", "银行卡支付", "余额支付", "余额宝支付", "花呗支付", "花呗付款",
+        "支付处理中", "付款处理中", "支付中", "付款中",
         "支出", "消费",
     )
     private val BILL_PAGE_MARKERS = listOf(
         "账单", "交易记录", "支付记录", "收支明细", "交易详情", "账单详情",
     )
+    private val PAYMENT_CONTEXT_MARKERS = listOf(
+        "支付成功", "付款成功", "交易成功", "支付完成", "付款完成",
+        "已支付", "已付款", "消费成功", "扣款成功",
+        "支付处理中", "付款处理中", "支付中", "付款中",
+    )
     private val CARD_EVIDENCE = listOf(
         "支付成功", "付款成功", "交易成功", "支付完成", "付款完成", "已支付", "已付款",
         "消费成功", "扣款成功", "使用零钱支付", "使用银行卡支付", "通过零钱扣款",
+        "支付处理中", "付款处理中", "支付中", "付款中",
         "先用后付", "已自动支付", "转账给", "转账给你", "收到转账", "来自",
         "已收钱", "已收款", "已存入", "已入账", "对方已收钱", "已被收钱",
         "待确认收款", "请收钱", "收款成功", "你已收款", "已到账",
@@ -160,6 +169,12 @@ object PaymentCardDetector {
     private val PAYMENT_METHOD_LINES = listOf(
         "使用零钱支付", "使用银行卡支付", "通过零钱扣款", "零钱支付", "银行卡支付",
         "余额支付", "余额宝支付", "花呗支付", "花呗付款",
+        "支付方式", "付款方式", "退款方式",
+    )
+    private val SPARSE_PAYMENT_ANCHORS = listOf(
+        "管理扣费服务", "查看商家订单", "交易详情", "账单详情",
+        "先用后付", "支付成功", "付款成功", "退款到账", "Transactions",
+        "Payment Services", "钱包", "收付款", "账单",
     )
 
     // --- merchant filtering ------------------------------------------------
@@ -178,7 +193,10 @@ object PaymentCardDetector {
         "支付成功", "付款成功", "交易成功", "支付完成", "已支付", "已付款",
         "消费成功", "扣款成功", "先用后付", "免密支付", "自动扣款", "规则", "说明",
         "帮助", "客服", "wechat pay", "alipay", "transaction details",
-        "payment details",
+        "payment details", "更多信息", "查找交易", "收支统计", "全部账单",
+        "搜索", "设置", "通讯录", "发现", "我", "微信", "登录",
+        "记账日报", "Transactions", "Payment Services", "Coupon",
+        "切换到发消息", "查看明细", "日报设置", "留言复购", "咨询", "客服",
     )
     private val KIND_MARKERS = listOf(
         "支付成功", "付款成功", "交易成功", "支付完成", "付款完成", "已支付", "已付款",
@@ -207,6 +225,7 @@ object PaymentCardDetector {
     )
     private val ONLY_PUNCT_OR_NUMBERS = Regex("""[\d\s:：./¥￥,，+\-]+""")
     private val ORDER_ID_LIKE = Regex("""[A-Za-z0-9_-]{10,}""")
+    private val MONTH_HEADER = Regex("""\d{4}\s*年\s*\d{1,2}\s*月|\d{1,2}\s*月""")
 
     // --- amounts -----------------------------------------------------------
 
@@ -233,6 +252,29 @@ object PaymentCardDetector {
 
     fun pageIdentity(packageName: String, text: String): String =
         "$packageName|${Integer.toHexString(text.hashCode())}"
+
+    /**
+     * Whether a page is worth OCR when accessibility nodes expose no cards.
+     * Requires both payment-page context and card evidence, plus an amount, so
+     * ordinary chat or home pages do not trigger a screenshot.
+     */
+    fun looksLikePaymentPage(packageName: String, text: String): Boolean {
+        if (!isSupported(packageName)) return false
+        // Some WeChat Pay history/detail pages render the amount and status in a
+        // WebView/canvas and expose only sparse chrome nodes. These anchors are
+        // specific enough to justify one local screenshot + OCR attempt.
+        if (SPARSE_PAYMENT_ANCHORS.any { text.contains(it) }) return true
+        val hasPageContext = BILL_PAGE_MARKERS.any { text.contains(it) } ||
+            PAYMENT_CONTEXT_MARKERS.any { text.contains(it) } ||
+            text.contains("微信支付") || text.contains("支付宝") ||
+            REFUND_MARKERS.any { text.contains(it) } ||
+            WITHDRAWAL_MARKERS.any { text.contains(it) } ||
+            TRANSFER_MARKERS.any { text.contains(it) } ||
+            PAY_AFTER_USE_MARKERS.any { text.contains(it) } ||
+            text.contains("红包")
+        val hasCardEvidence = CARD_EVIDENCE.any { text.contains(it) }
+        return hasPageContext && hasCardEvidence && parseAmount(text) != null
+    }
 
     fun fromSnapshot(
         packageName: String,
@@ -327,7 +369,9 @@ object PaymentCardDetector {
     private fun startsNewCard(line: BillTextLine, current: List<BillTextLine>): Boolean {
         val text = line.text.trim()
         if (!STANDALONE_TIME.matches(text)) return false
-        if (current.none { hasCardContent(it.text) }) return false
+        // A time line can sit between the merchant and amount of the same card.
+        // Only a group that already has an amount can be a completed previous card.
+        if (current.none { parseAmount(it.text) != null }) return false
         val previous = current.lastOrNull()?.text.orEmpty()
         return TIME_LABELS.none { previous.contains(it) }
     }
@@ -413,7 +457,11 @@ object PaymentCardDetector {
             (joined.contains("自动支付") && joined.contains("扣款"))
 
     private fun classifyRefund(joined: String): Classification {
-        val pending = containsAny(joined, "退款处理中", "退款中", "预计")
+        val pending = containsAny(
+            joined,
+            "退款处理中", "退款中", "预计", "退款申请", "申请已提交",
+            "等待商家", "待商家", "商家处理", "审核中", "处理中",
+        )
         return Classification(
             kind = PaymentCardKind.REFUND,
             status = if (pending) PaymentCardStatus.PENDING else PaymentCardStatus.COMPLETED,
@@ -553,9 +601,17 @@ object PaymentCardDetector {
         val status = when {
             containsAny(joined, "已取消", "订单已取消", "交易关闭", "订单已关闭") ->
                 PaymentCardStatus.CANCELLED
-            containsAny(joined, "待支付", "等待付款", "未支付", "未付款") ->
-                PaymentCardStatus.PENDING
+            containsAny(
+                joined, "待支付", "等待付款", "未支付", "未付款",
+                "支付中", "付款中", "支付处理中", "付款处理中", "处理中",
+            ) -> PaymentCardStatus.PENDING
             else -> PaymentCardStatus.COMPLETED
+        }
+        val direction = when {
+            containsAny(joined, "收入", "入账", "到账", "成功收款", "收款成功", "已收款", "收到") &&
+                !containsAny(joined, "支出", "付款", "支付", "消费", "扣款") ->
+                PaymentDirection.INCOME
+            else -> PaymentDirection.EXPENSE
         }
         val nonFinalReason = when (status) {
             PaymentCardStatus.CANCELLED -> "支付订单已取消，未扣款"
@@ -565,7 +621,7 @@ object PaymentCardDetector {
         return Classification(
             kind = PaymentCardKind.PAYMENT,
             status = status,
-            direction = PaymentDirection.EXPENSE,
+            direction = direction,
             nonFinalReason = nonFinalReason,
         )
     }
@@ -677,15 +733,23 @@ object PaymentCardDetector {
 
     private fun parseAmount(text: String): Long? {
         AmountText.parseCents(text)?.let { return it }
-        val match = SIGNED_AMOUNT.find(text.trim()) ?: return null
-        return AmountText.toCents(match.groupValues[2])
+        val trimmed = text.trim()
+        val match = SIGNED_AMOUNT.find(trimmed) ?: return null
+        val raw = match.groupValues[2]
+        // A bare integer is usually a badge/row index, not a price. Require a
+        // currency marker or a decimal fraction before treating it as money.
+        if (!trimmed.contains('¥') && !trimmed.contains('￥') && !raw.contains('.')) {
+            return null
+        }
+        return AmountText.toCents(raw)
     }
 
     private fun isNoisyAmountLine(text: String, kind: PaymentCardKind): Boolean {
         val noisy = listOf(
             "原价", "优惠", "折扣", "立减", "节省", "积分", "券", "已支出", "本月",
             "统计", "合计", "可用", "预付", "商品详情", "服务费", "手续费", "运费",
-            "总支出", "总收入", "总消费", "累计支出", "累计收入",
+            "总支出", "总收入", "总消费", "累计支出", "累计收入", "记账日报",
+            "已入账", "本月统计",
         )
         if (noisy.any { text.contains(it) }) return true
         if (text.contains("余额") &&
@@ -712,6 +776,9 @@ object PaymentCardDetector {
         if (kind == PaymentCardKind.TRANSFER) {
             counterpart(lines)?.let { return listOf(it) }
         }
+        if (kind == PaymentCardKind.REFUND) {
+            refundMerchant(lines)?.let { return listOf(it) }
+        }
         labeledMerchant(lines)?.let { return listOf(it) }
         if (kind == PaymentCardKind.WITHDRAWAL) return emptyList()
 
@@ -723,6 +790,17 @@ object PaymentCardDetector {
             if (result.size >= 5) break
         }
         return result.toList()
+    }
+
+    private fun refundMerchant(lines: List<BillTextLine>): String? {
+        val suffix = Regex("""[\s\-—－]*(?:已)?退款(?:成功|到账)?$""")
+        for (line in lines) {
+            val base = line.text.trim().replace(suffix, "").trim()
+            if (base != line.text.trim() && isMerchantCandidate(base)) {
+                return base.take(40)
+            }
+        }
+        return null
     }
 
     private fun labeledMerchant(lines: List<BillTextLine>): String? {
@@ -756,6 +834,7 @@ object PaymentCardDetector {
         if (text.length !in 2..40) return false
         if (parseAmount(text) != null) return false
         if (ONLY_PUNCT_OR_NUMBERS.matches(text)) return false
+        if (MONTH_HEADER.matches(text)) return false
         if (TIME.containsMatchIn(text)) return false
         if (CHROME.any { text.contains(it, ignoreCase = true) }) return false
         if (KIND_MARKERS.any { text.contains(it, ignoreCase = true) }) return false
