@@ -149,7 +149,9 @@ object PaymentCardDetector {
     )
     private val NEGATIVE_PAYMENT_MARKERS = listOf(
         "你无需支付", "无需支付", "他人已支付", "对方已支付", "由对方支付",
+        "好友代付", "他人代付", "找人代付", "请人代付",
     )
+    private val GROUP_COLLECTION_MARKERS = listOf("群收款", "活动收款")
     private val STRONG_COMPLETED_PAYMENT = listOf(
         "支付成功", "付款成功", "交易成功", "支付完成", "付款完成",
         "扣款成功", "已扣款", "消费成功",
@@ -404,6 +406,13 @@ object PaymentCardDetector {
         if (SENSITIVE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (NEGATIVE_PAYMENT_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
+        // A group collection page lists what everyone paid. Only a strong
+        // completed payment on the same page proves the user paid it.
+        if (GROUP_COLLECTION_MARKERS.any { joined.contains(it) } &&
+            !STRONG_COMPLETED_PAYMENT.any { joined.contains(it) }
+        ) {
+            return null
+        }
         if (isSummaryGroup(joined)) return null
 
         val classification = classify(lines, joined, pageText) ?: return null
@@ -614,13 +623,13 @@ object PaymentCardDetector {
         lines: List<BillTextLine>,
         joined: String,
     ): Classification? {
-        val weakPaid = containsAny(joined, "已支付", "已付款")
+        val weakPaid = containsAny(joined, "已支付", "已付款", "支出", "消费")
         val strongPaid = STRONG_COMPLETED_PAYMENT.any { joined.contains(it) }
         val hasContext = PAYMENT_CONTEXT_LABELS.any { joined.contains(it) } ||
             labeledMerchant(lines) != null
-        // "已支付¥2.00" is a common chat/service-message preview. Without a
-        // merchant, order or payment-method field it is not proof that the
-        // user paid this amount on this page.
+        // "已支付¥2.00" and "消费¥2.00" are common chat/service-message
+        // previews. Without a merchant, order or payment-method field they are
+        // not proof that the user paid this amount on this page.
         if (weakPaid && !strongPaid && !hasContext) return null
         val status = when {
             containsAny(joined, "已取消", "订单已取消", "交易关闭", "订单已关闭") ->

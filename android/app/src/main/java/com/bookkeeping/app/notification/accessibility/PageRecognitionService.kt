@@ -111,11 +111,18 @@ open class PageRecognitionService : AccessibilityService() {
 
         val now = System.currentTimeMillis()
         val snapshot = root.toSnapshot(packageName, now)
-        val activity = if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            event.className?.toString().orEmpty().also { lastWindowActivity = it }
-        } else {
-            lastWindowActivity ?: event.className?.toString().orEmpty()
+        val eventClass = event.className?.toString().orEmpty()
+        // Window-state events also carry dialogs, popups and input methods.
+        // Letting those replace the remembered activity would either block a
+        // real payment page or strip the activity evidence from a chat page.
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            PageActivityGuard.isActivityClassName(packageName, eventClass)
+        ) {
+            lastWindowActivity = eventClass
         }
+        val activity = lastWindowActivity
+            ?: eventClass.takeIf { PageActivityGuard.isActivityClassName(packageName, it) }
+            ?: ""
         val pageText = snapshot.flattenText()
         // WeChat's conversation list and Alipay home/chat pages contain chat
         // names, timestamps and unread badges. Never feed them to the payment
@@ -129,6 +136,15 @@ open class PageRecognitionService : AccessibilityService() {
         if (cards.isNotEmpty()) {
             val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
             if (candidates.isNotEmpty()) {
+                // A page with several completed cards is a bill/history list,
+                // not one payment result. Booking it in bulk duplicates history;
+                // that belongs to the explicit bill-import flow.
+                if (candidates.size > 1) {
+                    if (BuildConfig.DEBUG) {
+                        Log.v(TAG, "skip multi-card page cards=${candidates.size}")
+                    }
+                    return
+                }
                 val pageIdentity = candidates.first().pageIdentity
                 if (pageIdentity == lastPageIdentity && now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS) return
                 if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
@@ -285,9 +301,10 @@ open class PageRecognitionService : AccessibilityService() {
                                     pageIdentity = pageIdentity,
                                 )
                                 val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
-                                if (candidates.isEmpty()) {
-                                    // The screenshot worked; do not retry the same
-                                    // page until its content changes.
+                                if (candidates.size != 1) {
+                                    // Zero: the screenshot worked; do not retry the
+                                    // same page until its content changes.
+                                    // Several: a history list, never bulk-book it.
                                     lastPageIdentity = pageIdentity
                                     lastCaptureAtMs = System.currentTimeMillis()
                                     capturing.set(false)
