@@ -14,9 +14,10 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        // RC10: UI feedback fixes, yearly stats, income totals, and rule actions.
-        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.10).
-        versionCode = 15
+        // RC11: import completeness, duplicate enrichment, classifier v2,
+        // learning loop and enhanced WebView accessibility.
+        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.11).
+        versionCode = 16
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

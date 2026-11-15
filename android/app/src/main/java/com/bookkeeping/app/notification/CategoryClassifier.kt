@@ -142,12 +142,292 @@ object CategoryClassifier {
         val order: Int,
     )
 
+    private data class RuleMatch(val rule: CategoryRule, val keywordLength: Int)
+
+    private val SPECIFIC_RULES: List<CategoryRule> = listOf(
+        CategoryRule(
+            id = "health:medicine",
+            stage = RuleStage.DEFAULT,
+            specificity = 130,
+            category = TransactionCategory.HEALTH,
+            merchantKeywords = listOf("美团买药", "饿了么买药", "京东买药", "京东健康", "阿里健康", "叮当快药"),
+            contextKeywords = listOf("买药", "处方药", "药品"),
+            reason = "specific medicine phrase",
+        ),
+        CategoryRule(
+            id = "utilities:topup",
+            stage = RuleStage.DEFAULT,
+            specificity = 125,
+            category = TransactionCategory.UTILITIES,
+            contextKeywords = listOf("话费充值", "流量充值", "燃气充值", "电费充值", "水费充值", "固话充值"),
+            reason = "specific utility top-up phrase",
+        ),
+        CategoryRule(
+            id = "transport:transit-card-topup",
+            stage = RuleStage.DEFAULT,
+            specificity = 125,
+            category = TransactionCategory.TRANSPORT,
+            contextKeywords = listOf("公交卡充值", "地铁卡充值", "交通卡充值"),
+            reason = "transit card top-up",
+        ),
+        CategoryRule(
+            id = "entertainment:apple-media",
+            stage = RuleStage.DEFAULT,
+            specificity = 120,
+            category = TransactionCategory.ENTERTAINMENT,
+            contextKeywords = listOf("apple music", "apple tv", "apple one", "icloud+"),
+            reason = "apple media subscription",
+        ),
+        CategoryRule(
+            id = "entertainment:wanda-cinema",
+            stage = RuleStage.DEFAULT,
+            specificity = 120,
+            category = TransactionCategory.ENTERTAINMENT,
+            merchantKeywords = listOf("万达影城", "万达电影"),
+            reason = "cinema, not shopping mall",
+        ),
+        CategoryRule(
+            id = "shopping:wanda-plaza",
+            stage = RuleStage.DEFAULT,
+            specificity = 115,
+            category = TransactionCategory.SHOPPING,
+            merchantKeywords = listOf("万达广场"),
+            reason = "shopping mall",
+        ),
+        CategoryRule(
+            id = "food:xiaomi-porridge",
+            stage = RuleStage.DEFAULT,
+            specificity = 120,
+            category = TransactionCategory.FOOD,
+            merchantKeywords = listOf("小米粥", "小米椒"),
+            reason = "food, not Xiaomi brand",
+        ),
+        CategoryRule(
+            id = "food:kfc",
+            stage = RuleStage.DEFAULT,
+            specificity = 110,
+            category = TransactionCategory.FOOD,
+            merchantKeywords = listOf("KFC", "肯德基"),
+            reason = "KFC brand",
+        ),
+        CategoryRule(
+            id = "shopping:meituan-grocery",
+            stage = RuleStage.DEFAULT,
+            specificity = 110,
+            category = TransactionCategory.SHOPPING,
+            merchantKeywords = listOf("美团买菜", "美团优选"),
+            reason = "grocery, not restaurant",
+        ),
+        CategoryRule(
+            id = "health:pharmacy",
+            stage = RuleStage.DEFAULT,
+            specificity = 100,
+            category = TransactionCategory.HEALTH,
+            contextKeywords = listOf("药店", "药房"),
+            reason = "pharmacy",
+        ),
+        CategoryRule(
+            id = "housing:rent",
+            stage = RuleStage.DEFAULT,
+            specificity = 100,
+            category = TransactionCategory.HOUSING,
+            contextKeywords = listOf("房租", "物业费", "租金"),
+            reason = "housing",
+        ),
+        CategoryRule(
+            id = "education:tuition",
+            stage = RuleStage.DEFAULT,
+            specificity = 100,
+            category = TransactionCategory.EDUCATION,
+            contextKeywords = listOf("学费", "培训费", "课程费"),
+            reason = "education",
+        ),
+        CategoryRule(
+            id = "insurance:premium",
+            stage = RuleStage.DEFAULT,
+            specificity = 100,
+            category = TransactionCategory.INSURANCE,
+            contextKeywords = listOf("保费", "保险"),
+            reason = "insurance",
+        ),
+        CategoryRule(
+            id = "gift:gift-money",
+            stage = RuleStage.DEFAULT,
+            specificity = 100,
+            category = TransactionCategory.GIFT,
+            merchantKeywords = listOf("礼金", "份子钱", "随礼"),
+            contextKeywords = listOf("礼金", "份子钱", "随礼"),
+            reason = "gift money",
+        ),
+        CategoryRule(
+            id = "transfer:repayment",
+            stage = RuleStage.POST,
+            specificity = 100,
+            category = TransactionCategory.TRANSFER,
+            contextKeywords = listOf("信用卡还款", "还款"),
+            reason = "credit-card repayment",
+        ),
+    )
+
+    private val SOURCE_CATEGORY_MAP: List<Pair<String, TransactionCategory>> = listOf(
+        "餐饮" to TransactionCategory.FOOD,
+        "交通" to TransactionCategory.TRANSPORT,
+        "日用百货" to TransactionCategory.SHOPPING,
+        "文化休闲" to TransactionCategory.ENTERTAINMENT,
+        "住房" to TransactionCategory.HOUSING,
+        "通讯" to TransactionCategory.UTILITIES,
+        "医疗" to TransactionCategory.HEALTH,
+        "教育" to TransactionCategory.EDUCATION,
+        "投资" to TransactionCategory.INVESTMENT,
+        "信用" to TransactionCategory.TRANSFER,
+        "转账" to TransactionCategory.TRANSFER,
+        "账户" to TransactionCategory.TRANSFER,
+        "退款" to TransactionCategory.OTHER,
+    )
+
     /**
-     * Prefer the merchant field, but let a longer context keyword win. This
-     * handles a truncated merchant such as "美团" with page text "美团单车",
-     * while still preventing a short generic context word from beating a
-     * specific merchant.
+     * Classify a structured source event. This is the entry point used by all
+     * capture paths; [classify] below remains as a compatibility overload.
      */
+    fun classify(input: ClassificationInput): ClassificationResult {
+        postClassification(input)?.let { return it }
+        userRuleClassification(input)?.let { return it }
+        learnedClassification(input)?.let { return it }
+        sourceCategoryClassification(input)?.let { return it }
+        specificRuleClassification(input)?.let { return it }
+
+        val merchant = MerchantNormalizer.normalize(input.merchantRaw)
+        val fromMerchant = bestMatch(merchant)
+        val fromContext = bestMatch(input.contextText.take(4_000))
+        val category = when {
+            MerchantRules.categoryFor(input.merchantRaw) != null ->
+                MerchantRules.categoryFor(input.merchantRaw)!!
+            fromMerchant == null -> fromContext?.category ?: TransactionCategory.OTHER
+            fromContext == null -> fromMerchant.category
+            fromContext.keywordLength > fromMerchant.keywordLength &&
+                input.contextText.contains(fromMerchant.keyword, ignoreCase = true) ->
+                fromContext.category
+            else -> fromMerchant.category
+        }
+        val userRule = MerchantRules.categoryFor(input.merchantRaw) != null
+        val confidence = when {
+            userRule -> 0.99f
+            category == TransactionCategory.OTHER -> 0f
+            else -> 0.85f
+        }
+        val alternatives = listOfNotNull(fromMerchant?.category, fromContext?.category)
+            .distinct()
+            .filter { it != category }
+            .take(2)
+            .map { it to 0.75f }
+        return ClassificationResult(
+            category = category,
+            confidence = confidence,
+            ruleId = if (userRule) "user:${MerchantRules.normalize(input.merchantRaw)}" else "keyword:${category.name}",
+            reason = if (userRule) "user merchant rule" else "keyword match",
+            alternatives = alternatives,
+        )
+    }
+
+    private fun postClassification(input: ClassificationInput): ClassificationResult? = when (input.kind) {
+        ClassificationKind.REFUND -> ClassificationResult(
+            category = TransactionCategory.OTHER,
+            confidence = 0.95f,
+            ruleId = "post:refund",
+            reason = "refund is settled by refund status, not consumption category",
+        )
+        ClassificationKind.TRANSFER,
+        ClassificationKind.WITHDRAWAL -> ClassificationResult(
+            category = TransactionCategory.TRANSFER,
+            confidence = 0.95f,
+            ruleId = "post:transfer",
+            reason = "internal money movement",
+        )
+        ClassificationKind.RED_PACKET -> ClassificationResult(
+            category = if (input.direction == ClassificationDirection.INCOME) {
+                TransactionCategory.GIFT
+            } else {
+                TransactionCategory.TRANSFER
+            },
+            confidence = 0.95f,
+            ruleId = "post:red-packet",
+            reason = "red packet",
+        )
+        else -> null
+    }
+
+    private fun userRuleClassification(input: ClassificationInput): ClassificationResult? {
+        val category = MerchantRules.categoryFor(input.merchantRaw) ?: return null
+        return ClassificationResult(
+            category = category,
+            confidence = 0.99f,
+            ruleId = "user:${MerchantRules.normalize(input.merchantRaw)}",
+            reason = "user merchant rule",
+        )
+    }
+
+    private fun learnedClassification(input: ClassificationInput): ClassificationResult? {
+        val category = CategoryLearning.bestCategory(input.merchantRaw) ?: return null
+        return ClassificationResult(
+            category = category,
+            confidence = 0.95f,
+            ruleId = "learned:${MerchantRules.normalize(input.merchantRaw)}",
+            reason = "learned from repeated user corrections",
+        )
+    }
+
+    private fun sourceCategoryClassification(input: ClassificationInput): ClassificationResult? {
+        val raw = input.sourceCategory?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        val match = SOURCE_CATEGORY_MAP.firstOrNull { raw.contains(it.first) } ?: return null
+        return ClassificationResult(
+            category = match.second,
+            confidence = 0.9f,
+            ruleId = "source-category:${match.first}",
+            reason = "official source category",
+        )
+    }
+
+    private fun specificRuleClassification(input: ClassificationInput): ClassificationResult? {
+        val merchant = MerchantNormalizer.normalize(input.merchantRaw)
+        val context = input.contextText
+        val match = SPECIFIC_RULES
+            .asSequence()
+            .filter { rule -> rule.matches(input, merchant, context) }
+            .map { rule -> RuleMatch(rule, rule.keywordLength(merchant, context)) }
+            .maxWithOrNull(compareBy<RuleMatch> { it.rule.specificity }.thenBy { it.keywordLength })
+            ?: return null
+        return ClassificationResult(
+            category = match.rule.category,
+            confidence = 0.95f,
+            ruleId = match.rule.id,
+            reason = match.rule.reason,
+        )
+    }
+
+    private fun CategoryRule.matches(
+        input: ClassificationInput,
+        merchant: String,
+        context: String,
+    ): Boolean {
+        if (directions.isNotEmpty() && input.direction !in directions) return false
+        if (kinds.isNotEmpty() && input.kind !in kinds) return false
+        if (sourceCategories.isNotEmpty() &&
+            sourceCategories.none { input.sourceCategory?.contains(it, ignoreCase = true) == true }
+        ) {
+            return false
+        }
+        val merchantHit = merchantKeywords.any { merchant.contains(it.lowercase()) }
+        val contextHit = contextKeywords.any { context.contains(it, ignoreCase = true) }
+        return merchantHit || contextHit
+    }
+
+    private fun CategoryRule.keywordLength(merchant: String, context: String): Int =
+        (merchantKeywords.filter { merchant.contains(it.lowercase()) } +
+            contextKeywords.filter { context.contains(it, ignoreCase = true) })
+            .maxOfOrNull { it.length }
+            ?: 0
+
     fun classify(merchant: String, contextText: String = ""): TransactionCategory {
         MerchantRules.categoryFor(merchant)?.let { return it }
         val merchantMatch = bestMatch(merchant.take(4_000))

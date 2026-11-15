@@ -49,6 +49,14 @@ object BillImportParser {
             "支付方式", "收/付款方式", "付款方式", "收付款方式",
             "paymentmethod", "payment",
         ),
+        "category" to setOf(
+            "交易分类", "分类",
+            "category",
+        ),
+        "description" to setOf(
+            "商品说明", "商品", "商品名称",
+            "description", "product",
+        ),
     )
 
     fun parse(
@@ -143,6 +151,8 @@ object BillImportParser {
             val statusRaw = value(raw, columns.status)
             val orderId = value(raw, columns.orderId).takeIf { it.isNotBlank() }
             val payment = value(raw, columns.payment).takeIf { it.isNotBlank() }
+            val sourceCategory = value(raw, columns.category).takeIf { it.isNotBlank() }
+            val description = value(raw, columns.description).takeIf { it.isNotBlank() }
 
             val occurredAt = parseTime(timeRaw, options.timeZoneId)
             val amount = parseAmount(amountRaw)
@@ -166,36 +176,52 @@ object BillImportParser {
                     status = status,
                     orderId = orderId,
                     paymentMethod = payment,
+                    sourceCategory = sourceCategory,
+                    description = description,
                     rawFields = raw,
                 )
             } else {
                 null
             }
 
-            val error = when {
+            val parseError = when {
                 timeRaw.isBlank() -> "交易时间为空"
                 occurredAt == null -> "无法解析交易时间：$timeRaw"
                 amountRaw.isBlank() -> "金额为空"
-                amount == null || amount.cents <= 0L -> "无法解析金额：$amountRaw"
+                amount == null -> "无法解析金额：$amountRaw"
                 merchant.isBlank() -> "商户为空，需人工确认"
-                direction == BillDirection.NEUTRAL && !isWithdrawalRaw(raw) ->
-                    "不计收支，需人工确认"
-                status !in setOf(BillStatus.SUCCESS, BillStatus.REFUND) ->
-                    "状态需人工确认：${statusRaw.ifBlank { status.name }}"
                 else -> null
             }
-            if (error != null) {
+            if (parseError != null) {
                 previewRows += BillPreviewRow(
                     kind = BillPreviewKind.ERROR,
                     rowNumber = rowNumber,
                     rawFields = raw,
                     parsed = parsed,
-                    message = error,
+                    message = parseError,
                 )
                 continue
             }
 
             val valid = parsed ?: continue
+            val skipReason = when {
+                valid.amountCents == 0L -> "0 元授权/非交易，已跳过"
+                valid.status == BillStatus.FAILED -> "交易未成功，已跳过"
+                valid.status == BillStatus.PENDING -> "交易处理中，已跳过"
+                valid.status == BillStatus.UNKNOWN -> "状态未识别/非交易，已跳过"
+                else -> null
+            }
+            if (skipReason != null) {
+                previewRows += BillPreviewRow(
+                    kind = BillPreviewKind.SKIPPED,
+                    rowNumber = rowNumber,
+                    rawFields = raw,
+                    parsed = valid,
+                    message = skipReason,
+                )
+                continue
+            }
+
             val key = duplicateKey(valid)
             val existing = options.existingDuplicateKeys.contains(key)
             val duplicateOf = seen[key]
@@ -228,7 +254,8 @@ object BillImportParser {
         }
 
         if (previewRows.none { it.kind == BillPreviewKind.VALID } &&
-            previewRows.none { it.kind == BillPreviewKind.DUPLICATE }
+            previewRows.none { it.kind == BillPreviewKind.DUPLICATE } &&
+            previewRows.none { it.kind == BillPreviewKind.SKIPPED }
         ) {
             previewRows += BillPreviewRow(
                 kind = BillPreviewKind.ERROR,
@@ -248,6 +275,8 @@ object BillImportParser {
         val status: Int,
         val orderId: Int,
         val payment: Int,
+        val category: Int,
+        val description: Int,
     )
 
     private data class HeaderMatch(val rowIndex: Int, val columns: ColumnMap, val score: Int)
@@ -265,6 +294,8 @@ object BillImportParser {
                 status = findColumn(row, HEADER_ALIASES.getValue("status")),
                 orderId = findColumn(row, HEADER_ALIASES.getValue("orderId")),
                 payment = findColumn(row, HEADER_ALIASES.getValue("payment")),
+                category = findColumn(row, HEADER_ALIASES.getValue("category")),
+                description = findColumn(row, HEADER_ALIASES.getValue("description")),
             )
             if (columns.time < 0 || columns.amount < 0) continue
             val score = listOf(columns.time, columns.merchant, columns.amount, columns.direction, columns.status)
@@ -368,12 +399,11 @@ object BillImportParser {
             negative = !negative
             value = value.abs()
         }
-        if (value == BigDecimal.ZERO) return null
         return try {
             val cents = value.setScale(2, RoundingMode.HALF_UP)
                 .movePointRight(2)
                 .longValueExact()
-            if (cents > 0L) AmountParse(cents, negative) else null
+            if (cents >= 0L) AmountParse(cents, negative) else null
         } catch (_: ArithmeticException) {
             null
         }
@@ -487,9 +517,6 @@ object BillImportParser {
         if (joined.isEmpty()) return false
         return listOf("共", "合计", "总计", "已显示", "导出时间", "说明").any { joined.contains(it) }
     }
-
-    private fun isWithdrawalRaw(raw: List<String>): Boolean =
-        raw.any { it.contains("提现") }
 
     private fun normalizeNumericText(value: String): String = buildString(value.length) {
         for (char in value) {

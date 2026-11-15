@@ -12,11 +12,13 @@ class CategoryClassifierTest {
     @Before
     fun resetMerchantRules() {
         MerchantRules.clear()
+        CategoryLearning.clear()
     }
 
     @After
     fun clearMerchantRules() {
         MerchantRules.clear()
+        CategoryLearning.clear()
     }
 
     @Test
@@ -98,5 +100,78 @@ class CategoryClassifierTest {
     fun redPacketCouponIsNotATransfer() {
         assertEquals(TransactionCategory.OTHER, CategoryClassifier.classify("未知商户", "红包抵扣"))
         assertEquals(TransactionCategory.TRANSFER, CategoryClassifier.classify("未知商户", "收到红包"))
+    }
+
+    @Test
+    fun structuredInputUsesSourceCategoryAndPostRules() {
+        assertEquals(
+            TransactionCategory.FOOD,
+            CategoryClassifier.classify(
+                ClassificationInput(merchantRaw = "麦当劳", sourceCategory = "餐饮美食"),
+            ).category,
+        )
+        assertEquals(
+            TransactionCategory.OTHER,
+            CategoryClassifier.classify(
+                ClassificationInput(merchantRaw = "麦当劳", kind = ClassificationKind.REFUND),
+            ).category,
+        )
+        assertEquals(
+            TransactionCategory.TRANSFER,
+            CategoryClassifier.classify(
+                ClassificationInput(merchantRaw = "张三", kind = ClassificationKind.TRANSFER),
+            ).category,
+        )
+        assertEquals(
+            TransactionCategory.GIFT,
+            CategoryClassifier.classify(
+                ClassificationInput(
+                    merchantRaw = "李四",
+                    direction = ClassificationDirection.INCOME,
+                    kind = ClassificationKind.RED_PACKET,
+                ),
+            ).category,
+        )
+    }
+
+    @Test
+    fun specificPhrasesBeatBrandAndGenericKeywords() {
+        assertEquals(
+            TransactionCategory.HEALTH,
+            CategoryClassifier.classify(
+                ClassificationInput(merchantRaw = "美团", contextText = "美团买药"),
+            ).category,
+        )
+        assertEquals(
+            TransactionCategory.UTILITIES,
+            CategoryClassifier.classify(
+                ClassificationInput(merchantRaw = "中国移动", contextText = "话费充值"),
+            ).category,
+        )
+        assertEquals(
+            TransactionCategory.ENTERTAINMENT,
+            CategoryClassifier.classify(
+                ClassificationInput(merchantRaw = "Apple", contextText = "Apple Music"),
+            ).category,
+        )
+        assertEquals(
+            TransactionCategory.SHOPPING,
+            CategoryClassifier.classify(ClassificationInput(merchantRaw = "万达广场")).category,
+        )
+        assertEquals(
+            TransactionCategory.ENTERTAINMENT,
+            CategoryClassifier.classify(ClassificationInput(merchantRaw = "万达影城")).category,
+        )
+        assertEquals(
+            TransactionCategory.FOOD,
+            CategoryClassifier.classify(ClassificationInput(merchantRaw = "小米粥")).category,
+        )
+    }
+
+    @Test
+    fun merchantNormalizerStripsChannelCardAndBranchNoise() {
+        assertEquals("星巴克", MerchantNormalizer.normalize("支付宝-星巴克(万象城店)-1234"))
+        assertEquals("美团买药", MerchantNormalizer.normalize("微信支付-美团买药"))
+        assertEquals("五邑大学", MerchantNormalizer.normalize("五邑大学"))
     }
 }

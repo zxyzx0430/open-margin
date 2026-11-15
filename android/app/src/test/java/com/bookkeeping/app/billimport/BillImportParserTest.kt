@@ -31,7 +31,8 @@ class BillImportParserTest {
         assertTrue(preview.requiresConfirmation)
         assertEquals(4, preview.validRows.size)
         assertEquals(1, preview.duplicateRows.size)
-        assertEquals(1, preview.errorRows.size)
+        assertEquals(1, preview.skippedRows.size)
+        assertEquals(0, preview.errorRows.size)
 
         val starbucks = preview.validRows.first { it.merchant == "星巴克" }
         assertEquals(3_800L, starbucks.amountCents)
@@ -46,7 +47,7 @@ class BillImportParserTest {
         assertEquals(BillStatus.REFUND, refund.status)
         assertEquals(112_030L, refund.amountCents)
 
-        assertTrue(preview.errorRows.any { it.parsed?.status == BillStatus.FAILED })
+        assertTrue(preview.skippedRows.any { it.parsed?.status == BillStatus.FAILED })
     }
 
     @Test
@@ -54,7 +55,8 @@ class BillImportParserTest {
         val withFooter = wechatCsv + "共6笔,支出：1,173.30,收入：200.00,,,,,,,\n"
         val preview = BillImportParser.parse(withFooter.toByteArray(), "wechat.csv")
         assertEquals(4, preview.validRows.size)
-        assertEquals(1, preview.errorRows.size)
+        assertEquals(1, preview.skippedRows.size)
+        assertEquals(0, preview.errorRows.size)
         assertTrue(preview.rows.none { it.message?.contains("交易时间为空") == true })
     }
 
@@ -70,6 +72,23 @@ class BillImportParserTest {
         assertEquals(2, preview.validRows.size)
         assertEquals(23_800L, preview.validRows.first().amountCents)
         assertEquals("海底捞", preview.validRows.first().merchant)
+        assertEquals("餐饮", preview.validRows.first().sourceCategory)
+    }
+
+    @Test
+    fun zeroFailedAndNeutralAlipayRowsAreNotParseErrors() {
+        val csv = """
+            交易时间,交易分类,交易对方,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注
+            2026-11-13 20:11:12,投资理财,示例基金,自动转入,不计收支,100.00,余额宝,交易成功,N1,,
+            2026-11-12 08:32:00,信用借还,示例银行,还款,不计收支,200.00,银行卡,还款成功,N2,,
+            2026-11-11 08:00:00,日用百货,示例商户,授权,支出,0.00,银行卡,交易成功,N3,,
+            2026-11-10 08:00:00,日用百货,示例商户,关闭,支出,10.00,银行卡,交易关闭,N4,,
+        """.trimIndent() + "\n"
+        val preview = BillImportParser.parse(csv.toByteArray(), "alipay.csv")
+        assertEquals(2, preview.validRows.size)
+        assertTrue(preview.validRows.all { it.direction == BillDirection.NEUTRAL })
+        assertEquals(2, preview.skippedRows.size)
+        assertEquals(0, preview.errorRows.size)
     }
 
     @Test

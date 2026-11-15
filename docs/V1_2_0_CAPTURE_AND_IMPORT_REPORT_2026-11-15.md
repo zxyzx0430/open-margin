@@ -116,6 +116,16 @@
 
 ## 4. 构建与测试
 
+### rc.11
+
+- Release 签名 APK：`releases/open-margin-v1.2.0-rc.11-signed.apk`
+- 包名：`com.bookkeeping.app`，versionCode `16`，versionName `1.2.0`
+- Release SHA-256：`6d3f03ca0f0bc95a3a34e6ebaf62cc5c73ffe8b0c4035e92fb70cdeb45418c05`
+- 签名证书 SHA-256：`0029505dc7dde6eff220b37e9db8cbe467235dfc9d3a948519f3f5b722c354ad`
+- JVM 单测：401 项通过，0 失败（1 项真实账单测试在未设置 `ALIPAY_BILL_CSV` 时跳过）
+- 真实支付宝年度账单：415 行 → 346 可导入、69 跳过、0 解析错误
+- 后端 Wallos/API/integration：23 项通过
+
 ### rc.10
 
 - Release 签名 APK：`open-margin-v1.2.0-rc.10-signed.apk`
@@ -177,4 +187,39 @@
 - 真机回归：打开微信聊天列表再返回 App，月度支出保持 `¥492.87`，未新增 `-¥2.00` 记录；页面识别与无障碍兜底服务已恢复。
 - 误记防护新增单测覆盖：聊天列表、聊天页、搜索、小程序、文章、群收款、负向代付、容器强成功放行、Activity 类名过滤。
 - 未验证：真实微信小程序/服务号支付结果页的放行路径只做了 JVM 文本测试，未在真机完成一次真实支付；群收款“本人已支付”路径同样未实测。
+
+## 6. rc.11 导入完整性与分类收尾（2026-11-16）
+
+### 6.1 账单导入
+
+- 预览分为 `VALID / DUPLICATE / SKIPPED / ERROR`；0 元授权、失败/关闭/待处理不再算“解析错误”，单独显示为“已跳过”。
+- “不计收支”成功/退款行按转账/退款入账，保留金额、商户、单号、支付方式和支付宝交易分类；状态为 `transfer`/`refund`，统计排除。
+- 重复行不再直接丢弃：按单号精确匹配或金额/来源/时间窗口模糊匹配旧记录；只补空商户、单号、支付方式、OTHER 分类，不覆盖手工记录或已有强分类；新插入与补齐同一 Room 事务。
+- 真实支付宝年度账单（415 行）本地回归：`valid=346`、`skipped=69`、`errors=0`、文件内重复 0。账单内容不进入仓库。
+
+### 6.2 分类器 v2
+
+- 新增结构化输入 `ClassificationInput`（商户、上下文、方向、来源、kind、status、官方来源分类）和 `ClassificationResult`（分类、置信度、ruleId、reason、alternatives）。
+- 新增 `MerchantNormalizer`：剥离支付宝/微信支付/财付通/银联/云闪付前缀、卡尾号、括号后缀、分店后缀；保留业务词。
+- 新增 `CategoryRule`：阶段（PRE/DEFAULT/POST）、specificity、方向/kind/来源分类条件；具体短语规则覆盖美团买药、京东健康、话费/流量/燃气充值、公交卡充值、Apple Music/TV、万达影城/万达广场、小米粥/小米椒、KFC、美团买菜、药店、房租、学费、保费、礼金、信用卡还款。
+- 15 个分类全部保留；通知、短信、账单导入、无障碍扫描、复核弹窗统一使用分类器结果。
+
+### 6.3 学习闭环
+
+- 新增 `CategoryLearning`：单次修正只计数；同一商户连续两次一致修正且严格多数时生效；票数相同回退规则。
+- 支持按商户暂停/恢复学习；设置页删除或清除同时移除显式规则与学习计数。
+- 学习只存 `merchantKey + category + count`，不含通知原文、金额或截图。
+
+### 6.4 采集增强
+
+- 页面识别配置增加 `flagRequestEnhancedWebAccessibility`，尽量暴露 WebView 子节点；节点不足仍走截图 OCR。
+- 复核弹窗 PAYMENT 默认分类改为分类器结果，不再固定 OTHER。
+- 页面记忆仍不作为主采集门；root/LSPatch 直采仍列为后续可选。
+
+### 6.5 验证状态
+
+- Android JVM 单测与 release 构建结果见第 4 节（构建后更新）。
+- 后端 23 项 Wallos/API/integration 测试本轮实际运行通过。
+- 真实支付宝账单：415 行 → 346 可导入、69 跳过、0 解析错误。
+- 未验证：真实微信/支付宝 WebView 开启增强无障碍后的节点覆盖率；微信 XLSX/CSV 真实导出复验；分类/学习设置页的完整视觉验收。
 

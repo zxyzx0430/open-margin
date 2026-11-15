@@ -158,4 +158,18 @@ class CaptureReviewMappingTest {
         assertEquals(TransactionCategory.SHOPPING.name, entity.category)
         assertTrue(entity.note.contains("[自动支付]"))
     }
+
+    @Test
+    fun defaultCategoryClassifiesPaymentMerchantInsteadOfFallingBackToOther() {
+        assertEquals(
+            TransactionCategory.FOOD,
+            CaptureReviewMapping.defaultCategory(candidate(merchant = "星巴克")),
+        )
+        assertEquals(
+            TransactionCategory.TRANSFER,
+            CaptureReviewMapping.defaultCategory(
+                candidate(kind = CaptureCandidate.KIND_TRANSFER),
+            ),
+        )
+    }
 }

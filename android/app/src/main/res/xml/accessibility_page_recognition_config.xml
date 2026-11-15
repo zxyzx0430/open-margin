@@ -10,7 +10,7 @@
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagRequestEnhancedWebAccessibility"
     android:canRetrieveWindowContent="true"
     android:canTakeScreenshot="true"
     android:description="@string/page_recognition_service_description"

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.merchant.MerchantRules
+import com.bookkeeping.app.notification.CategoryLearning
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -50,10 +51,69 @@ class SettingsPreferences @Inject constructor(
     }
 
     fun observeMerchantRules(): Flow<Map<String, TransactionCategory>> =
-        context.settingsDataStore.data.map { parseMerchantRules(it[KEY_MERCHANT_RULES]) }
+        context.settingsDataStore.data.map { prefs ->
+            val (counts, disabled) = parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING])
+            val learned = counts.mapNotNull { (merchant, categories) ->
+                if (merchant in disabled) return@mapNotNull null
+                val sorted = categories.entries.sortedByDescending { it.value }
+                val first = sorted.firstOrNull() ?: return@mapNotNull null
+                val second = sorted.getOrNull(1)?.value ?: 0
+                if (first.value >= 2 && first.value > second) merchant to first.key else null
+            }.toMap()
+            learned + parseMerchantRules(prefs[KEY_MERCHANT_RULES])
+        }
 
     fun merchantRulesBlocking(): Map<String, TransactionCategory> = runBlocking {
         parseMerchantRules(context.settingsDataStore.data.first()[KEY_MERCHANT_RULES])
+    }
+
+    fun observeLearningDisabled(): Flow<Set<String>> =
+        context.settingsDataStore.data.map { prefs ->
+            parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING]).second
+        }
+
+    fun categoryLearningBlocking(): Pair<Map<String, Map<TransactionCategory, Int>>, Set<String>> =
+        runBlocking {
+            parseCategoryLearning(context.settingsDataStore.data.first()[KEY_CATEGORY_LEARNING])
+        }
+
+    suspend fun recordCategoryLearning(merchant: String, category: TransactionCategory) {
+        val key = MerchantRules.normalize(merchant)
+        if (key.isBlank()) return
+        context.settingsDataStore.edit { prefs ->
+            val (counts, disabled) = parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING])
+            val updated = counts.toMutableMap()
+            val merchantCounts = updated[key].orEmpty().toMutableMap()
+            merchantCounts[category] = (merchantCounts[category] ?: 0) + 1
+            updated[key] = merchantCounts
+            prefs[KEY_CATEGORY_LEARNING] = encodeCategoryLearning(updated, disabled)
+        }
+        CategoryLearning.record(key, category)
+    }
+
+    suspend fun removeCategoryLearning(merchant: String) {
+        val key = MerchantRules.normalize(merchant)
+        if (key.isBlank()) return
+        context.settingsDataStore.edit { prefs ->
+            val (counts, disabled) = parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING])
+            val updated = counts.toMutableMap()
+            updated.remove(key)
+            val updatedDisabled = disabled.toMutableSet().also { it.remove(key) }
+            prefs[KEY_CATEGORY_LEARNING] = encodeCategoryLearning(updated, updatedDisabled)
+        }
+        CategoryLearning.remove(key)
+    }
+
+    suspend fun disableCategoryLearning(merchant: String, disabled: Boolean) {
+        val key = MerchantRules.normalize(merchant)
+        if (key.isBlank()) return
+        context.settingsDataStore.edit { prefs ->
+            val (counts, currentDisabled) = parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING])
+            val updatedDisabled = currentDisabled.toMutableSet()
+            if (disabled) updatedDisabled.add(key) else updatedDisabled.remove(key)
+            prefs[KEY_CATEGORY_LEARNING] = encodeCategoryLearning(counts, updatedDisabled)
+        }
+        if (disabled) CategoryLearning.disable(key) else CategoryLearning.enable(key)
     }
 
     suspend fun rememberMerchantCategory(merchant: String, category: TransactionCategory) {
@@ -70,8 +130,12 @@ class SettingsPreferences @Inject constructor(
     }
 
     suspend fun clearMerchantRules() {
-        context.settingsDataStore.edit { it.remove(KEY_MERCHANT_RULES) }
+        context.settingsDataStore.edit {
+            it.remove(KEY_MERCHANT_RULES)
+            it.remove(KEY_CATEGORY_LEARNING)
+        }
         MerchantRules.clear()
+        CategoryLearning.clear()
     }
 
     suspend fun removeMerchantRule(merchant: String) {
@@ -83,8 +147,65 @@ class SettingsPreferences @Inject constructor(
             val json = JSONObject()
             rules.forEach { (name, category) -> json.put(name, category.name) }
             prefs[KEY_MERCHANT_RULES] = json.toString()
+
+            val (counts, disabled) = parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING])
+            val updatedCounts = counts.toMutableMap()
+            updatedCounts.remove(key)
+            val updatedDisabled = disabled.toMutableSet().also { it.remove(key) }
+            prefs[KEY_CATEGORY_LEARNING] = encodeCategoryLearning(updatedCounts, updatedDisabled)
         }
         MerchantRules.remove(key)
+        CategoryLearning.remove(key)
+    }
+
+    private fun parseCategoryLearning(
+        raw: String?,
+    ): Pair<Map<String, Map<TransactionCategory, Int>>, Set<String>> {
+        if (raw.isNullOrBlank()) return emptyMap<String, Map<TransactionCategory, Int>>() to emptySet()
+        return runCatching {
+            val json = JSONObject(raw)
+            val countsJson = json.optJSONObject("counts") ?: JSONObject()
+            val counts = buildMap {
+                countsJson.keys().forEach { merchant ->
+                    val categoriesJson = countsJson.optJSONObject(merchant) ?: return@forEach
+                    val values = buildMap {
+                        categoriesJson.keys().forEach { category ->
+                            runCatching {
+                                TransactionCategory.valueOf(category) to categoriesJson.optInt(category)
+                            }.getOrNull()
+                                ?.takeIf { it.second > 0 }
+                                ?.let { put(it.first, it.second) }
+                        }
+                    }
+                    if (values.isNotEmpty()) put(merchant, values)
+                }
+            }
+            val disabledJson = json.optJSONArray("disabled") ?: org.json.JSONArray()
+            val disabled = buildSet {
+                for (index in 0 until disabledJson.length()) {
+                    disabledJson.optString(index).takeIf { it.isNotBlank() }?.let(::add)
+                }
+            }
+            counts to disabled
+        }.getOrDefault(emptyMap<String, Map<TransactionCategory, Int>>() to emptySet())
+    }
+
+    private fun encodeCategoryLearning(
+        counts: Map<String, Map<TransactionCategory, Int>>,
+        disabled: Set<String>,
+    ): String {
+        val countsJson = JSONObject()
+        counts.forEach { (merchant, categories) ->
+            val merchantJson = JSONObject()
+            categories.forEach { (category, count) -> merchantJson.put(category.name, count) }
+            countsJson.put(merchant, merchantJson)
+        }
+        val disabledJson = org.json.JSONArray()
+        disabled.sorted().forEach(disabledJson::put)
+        return JSONObject().apply {
+            put("counts", countsJson)
+            put("disabled", disabledJson)
+        }.toString()
     }
 
     private fun parseMerchantRules(raw: String?): Map<String, TransactionCategory> {
@@ -106,6 +227,7 @@ class SettingsPreferences @Inject constructor(
         private val KEY_SUCCESS_NOTIFICATIONS =
             booleanPreferencesKey("success_notifications_enabled")
         private val KEY_MERCHANT_RULES = stringPreferencesKey("merchant_category_rules")
+        private val KEY_CATEGORY_LEARNING = stringPreferencesKey("category_learning")
         // Legacy success_page_capture_enabled and compatibility_accessibility_enabled
         // keys are intentionally ignored: page recognition now runs with the service.
     }

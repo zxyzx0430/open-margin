@@ -15,7 +15,6 @@ import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDet
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
-import com.bookkeeping.app.notification.CategoryClassifier
 import com.bookkeeping.app.ocr.MlKitOcrEngine
 import com.bookkeeping.app.ocr.OcrEngine
 import com.bookkeeping.app.ocr.PaddleOcrEngine
@@ -515,10 +514,11 @@ open class PageRecognitionService : AccessibilityService() {
                             CaptureReviewMapping.toTransactionEntity(
                                 candidate = stored,
                                 merchant = merchant,
-                                category = CategoryClassifier.classify(
-                                    merchant,
-                                    contextText.orEmpty(),
-                                ),
+                                category = CaptureReviewMapping.classificationFor(
+                                    candidate = stored,
+                                    merchant = merchant,
+                                    contextText = contextText.orEmpty(),
+                                ).category,
                             ),
                             windowMs = PAGE_DEDUP_WINDOW_MS,
                             notifySuccess = false,

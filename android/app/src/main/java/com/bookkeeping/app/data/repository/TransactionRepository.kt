@@ -160,15 +160,30 @@ class TransactionRepository @Inject constructor(
     }
 
     /**
-     * Official bill imports are all-or-nothing. No success notification is
-     * emitted for bulk historical data, and sync starts once after commit.
+     * Official bill imports are all-or-nothing. New rows are inserted and
+     * duplicates are enriched in one Room transaction. No success notification
+     * is emitted for bulk historical data, and sync starts once after commit.
      */
-    suspend fun insertImportedBatch(transactions: List<TransactionEntity>): Int {
-        if (transactions.isEmpty()) return 0
-        val ids = dao.insertAll(transactions)
+    suspend fun importBillBatch(
+        inserts: List<TransactionEntity>,
+        updates: List<TransactionEntity> = emptyList(),
+    ): Pair<Int, Int> {
+        if (inserts.isEmpty() && updates.isEmpty()) return 0 to 0
+        val now = System.currentTimeMillis()
+        val markedUpdates = updates.map {
+            it.copy(
+                syncDirty = true,
+                syncModifiedMs = now,
+                syncMutationId = UUID.randomUUID().toString(),
+            )
+        }
+        val ids = dao.importBatch(inserts, markedUpdates)
         TransactionSyncWorker.requestImmediate(context)
-        return ids.count { it > 0L }
+        return ids.count { it > 0L } to markedUpdates.size
     }
+
+    suspend fun insertImportedBatch(transactions: List<TransactionEntity>): Int =
+        importBillBatch(inserts = transactions).first
 
     suspend fun delete(transaction: TransactionEntity) {
         // Tombstone remains until the server acknowledges deletion; no stale

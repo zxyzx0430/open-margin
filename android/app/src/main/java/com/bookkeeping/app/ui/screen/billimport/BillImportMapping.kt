@@ -13,6 +13,12 @@ import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.merchant.MerchantIconCatalog
 import com.bookkeeping.app.notification.CategoryClassifier
+import com.bookkeeping.app.notification.ClassificationDirection
+import com.bookkeeping.app.notification.ClassificationInput
+import com.bookkeeping.app.notification.ClassificationKind
+import com.bookkeeping.app.notification.ClassificationResult
+import com.bookkeeping.app.notification.ClassificationSource
+import com.bookkeeping.app.notification.ClassificationStatus
 import java.util.Locale
 import kotlin.math.abs
 
@@ -147,38 +153,139 @@ object BillImportMapping {
         row: BillImportRow,
         transactions: List<TransactionEntity>,
         existingKeys: Set<String> = existingRowKeys(transactions),
-    ): Boolean {
-        if (ledgerRowKey(row) in existingKeys) return true
-        val rowType = when (row.direction) {
-            BillDirection.EXPENSE -> TransactionType.EXPENSE.name
-            BillDirection.INCOME -> TransactionType.INCOME.name
-            BillDirection.NEUTRAL ->
-                if (isWithdrawal(row)) TransactionType.EXPENSE.name else return false
-        }
+    ): Boolean = findExistingMatch(row, transactions, existingKeys) != null
+
+    /**
+     * Return the existing ledger row for an import row. Order ID wins; without
+     * one, amount/currency/source and a tight time window are required. Neutral
+     * rows may match either direction because "不计收支" does not tell us which
+     * side of the ledger the existing notification used.
+     */
+    fun findExistingMatch(
+        row: BillImportRow,
+        transactions: List<TransactionEntity>,
+        existingKeys: Set<String> = existingRowKeys(transactions),
+    ): TransactionEntity? {
+        val rowOrder = row.orderId?.trim()?.takeIf { it.isNotEmpty() }
         val rowSource = when (row.source) {
             BillSource.WECHAT -> TransactionSource.WECHAT.name
             BillSource.ALIPAY -> TransactionSource.ALIPAY.name
             BillSource.UNKNOWN -> null
         }
-        val rowOrder = row.orderId?.trim()?.takeIf { it.isNotEmpty() }
+        if (rowOrder != null && rowSource != null) {
+            transactions.firstOrNull { tx ->
+                !tx.syncDeleted &&
+                    tx.source == rowSource &&
+                    tx.sourceTransactionId?.trim() == rowOrder
+            }?.let { return it }
+        }
+
+        val rowType = when (row.direction) {
+            BillDirection.EXPENSE -> TransactionType.EXPENSE.name
+            BillDirection.INCOME -> TransactionType.INCOME.name
+            BillDirection.NEUTRAL -> null
+        }
         val rowMerchant = normalizeMerchant(row.merchant)
-        return transactions.any { tx ->
-            if (tx.amountCents != row.amountCents) return@any false
-            if (tx.currency != row.currency) return@any false
-            if (tx.type != rowType) return@any false
-            if (rowSource != null && tx.source != rowSource) return@any false
+        return transactions.firstOrNull { tx ->
+            if (tx.syncDeleted) return@firstOrNull false
+            if (tx.amountCents != row.amountCents) return@firstOrNull false
+            if (tx.currency != row.currency) return@firstOrNull false
+            if (rowSource != null && tx.source != rowSource) return@firstOrNull false
+            if (rowType != null && tx.type != rowType) return@firstOrNull false
             val txOrder = tx.sourceTransactionId?.trim()?.takeIf { it.isNotEmpty() }
-            if (rowOrder != null && txOrder != null) return@any rowOrder == txOrder
-            if (abs(tx.timestamp - row.occurredAtMs) > IMPORT_MATCH_WINDOW_MS) return@any false
+            if (rowOrder != null && txOrder != null) return@firstOrNull rowOrder == txOrder
+            if (abs(tx.timestamp - row.occurredAtMs) > IMPORT_MATCH_WINDOW_MS) {
+                return@firstOrNull false
+            }
             // A notification/page record may have no order ID while the official
             // import row does. At payment time these are the same event; do not
             // let a fallback merchant name defeat deduplication.
             if (rowOrder != null || txOrder != null) {
-                return@any abs(tx.timestamp - row.occurredAtMs) <= ORDERLESS_MATCH_WINDOW_MS
+                return@firstOrNull abs(tx.timestamp - row.occurredAtMs) <= ORDERLESS_MATCH_WINDOW_MS
             }
             val txMerchant = normalizeMerchant(tx.merchant)
             rowMerchant.isBlank() || txMerchant.isBlank() || rowMerchant == txMerchant
         }
+    }
+
+    /**
+     * Fill gaps on an auto-captured row from the official bill. Never touches
+     * manual rows, never overwrites an existing merchant/category, and never
+     * changes amount, timestamp or direction.
+     */
+    fun enrichExisting(
+        transaction: TransactionEntity,
+        row: BillImportRow,
+    ): TransactionEntity? {
+        if (transaction.syncDeleted) return null
+        if (transaction.source == TransactionSource.MANUAL.name) return null
+        if (transaction.duplicateOfId != null) return null
+
+        val merchant = if (isWeakMerchant(transaction.merchant) && !isWeakMerchant(row.merchant)) {
+            row.merchant
+        } else {
+            transaction.merchant
+        }
+        val orderId = transaction.sourceTransactionId?.trim()?.takeIf { it.isNotEmpty() }
+            ?: row.orderId?.trim()?.takeIf { it.isNotEmpty() }
+        val importedCategory = categoryFor(row.merchant, row.rawFields.joinToString(" "))
+        val category = when {
+            row.direction == BillDirection.NEUTRAL &&
+                transaction.category == TransactionCategory.OTHER.name ->
+                TransactionCategory.TRANSFER.name
+            transaction.category == TransactionCategory.OTHER.name &&
+                importedCategory != TransactionCategory.OTHER ->
+                importedCategory.name
+            else -> transaction.category
+        }
+        val note = enrichedNote(transaction.note, row)
+        val icon = if (merchant != transaction.merchant) {
+            MerchantIconCatalog.forMerchant(merchant)?.key ?: transaction.merchantIconKey
+        } else {
+            transaction.merchantIconKey
+        }
+        if (merchant == transaction.merchant &&
+            orderId == transaction.sourceTransactionId &&
+            category == transaction.category &&
+            note == transaction.note &&
+            icon == transaction.merchantIconKey
+        ) {
+            return null
+        }
+        return transaction.copy(
+            merchant = merchant,
+            sourceTransactionId = orderId,
+            category = category,
+            note = note,
+            merchantIconKey = icon,
+        )
+    }
+
+    private fun enrichedNote(existingNote: String, row: BillImportRow): String {
+        if (existingNote.isBlank()) {
+            return toTransactionEntity(row)?.note.orEmpty()
+        }
+        val additions = buildList {
+            row.orderId?.trim()?.takeIf { it.isNotEmpty() && !existingNote.contains(it) }
+                ?.let { add("单号 $it") }
+            row.paymentMethod?.trim()?.takeIf { it.isNotEmpty() && !existingNote.contains(it) }
+                ?.let(::add)
+            row.sourceCategory?.trim()?.takeIf { it.isNotEmpty() && !existingNote.contains(it) }
+                ?.let { add("分类 $it") }
+        }
+        if (additions.isEmpty()) return existingNote
+        return (existingNote + " · 导入补齐：" + additions.joinToString(" · ")).take(500)
+    }
+
+    private fun isWeakMerchant(value: String): Boolean {
+        val normalized = normalizeMerchant(value)
+        return normalized.isBlank() ||
+            normalized in GENERIC_PAYMENT_MERCHANTS ||
+            value.contains("[扫描]") ||
+            normalized == "未知商户" ||
+            normalized == "其他" ||
+            normalized == "账单" ||
+            normalized == "页面"
     }
 
     private fun normalizeMerchant(value: String): String =
@@ -201,27 +308,81 @@ object BillImportMapping {
         return preview.copy(
             rows = preview.rows.map { row ->
                 val value = row.parsed
-                if (row.kind == BillPreviewKind.VALID && value != null &&
-                    isAlreadyPresent(value, transactions, existingKeys)
+                if (value == null ||
+                    row.kind !in setOf(BillPreviewKind.VALID, BillPreviewKind.DUPLICATE) ||
+                    row.duplicateOfRow != null
                 ) {
-                    row.copy(kind = BillPreviewKind.DUPLICATE, message = duplicateMessage)
-                } else {
-                    row
+                    return@map row
                 }
+                val existing = findExistingMatch(value, transactions, existingKeys)
+                    ?: return@map row
+                val enriched = enrichExisting(existing, value)
+                row.copy(
+                    kind = BillPreviewKind.DUPLICATE,
+                    message = if (enriched != null) "$duplicateMessage，可补齐" else duplicateMessage,
+                    enrichable = enriched != null,
+                    matchedTransactionId = existing.id,
+                )
             },
+        )
+    }
+
+    fun classificationFor(row: BillImportRow): ClassificationResult {
+        val merchantCategory = categoryFor(row.merchant)
+        val direction = when (row.direction) {
+            BillDirection.EXPENSE -> ClassificationDirection.EXPENSE
+            BillDirection.INCOME -> ClassificationDirection.INCOME
+            BillDirection.NEUTRAL -> ClassificationDirection.NEUTRAL
+        }
+        val kind = when {
+            row.status == BillStatus.REFUND -> ClassificationKind.REFUND
+            row.direction == BillDirection.NEUTRAL && isWithdrawal(row) -> ClassificationKind.WITHDRAWAL
+            row.direction == BillDirection.NEUTRAL -> ClassificationKind.TRANSFER
+            isStrongTransferRow(row) -> ClassificationKind.TRANSFER
+            isRedPacketMention(row) &&
+                (row.direction == BillDirection.INCOME ||
+                    merchantCategory == TransactionCategory.OTHER) -> ClassificationKind.RED_PACKET
+            else -> ClassificationKind.PAYMENT
+        }
+        val source = when (row.source) {
+            BillSource.WECHAT -> ClassificationSource.WECHAT
+            BillSource.ALIPAY -> ClassificationSource.ALIPAY
+            BillSource.UNKNOWN -> ClassificationSource.OTHER
+        }
+        val status = when (row.status) {
+            BillStatus.SUCCESS -> ClassificationStatus.COMPLETED
+            BillStatus.REFUND -> ClassificationStatus.COMPLETED
+            BillStatus.PENDING -> ClassificationStatus.PENDING
+            BillStatus.FAILED -> ClassificationStatus.FAILED
+            BillStatus.UNKNOWN -> ClassificationStatus.UNKNOWN
+        }
+        return CategoryClassifier.classify(
+            ClassificationInput(
+                merchantRaw = row.merchant,
+                contextText = row.rawFields.joinToString(" "),
+                direction = direction,
+                source = source,
+                kind = kind,
+                status = status,
+                sourceCategory = row.sourceCategory,
+                amountCents = row.amountCents,
+            ),
         )
     }
 
     fun toTransactionEntity(row: BillImportRow): TransactionEntity? {
         if (row.amountCents <= 0L) return null
         if (row.status !in setOf(BillStatus.SUCCESS, BillStatus.REFUND)) return null
-        val type = when (row.direction) {
-            BillDirection.EXPENSE -> TransactionType.EXPENSE
-            BillDirection.INCOME -> TransactionType.INCOME
-            BillDirection.NEUTRAL -> if (isWithdrawal(row)) TransactionType.EXPENSE else return null
-        }
+        val neutral = row.direction == BillDirection.NEUTRAL
         val refund = row.status == BillStatus.REFUND
-        val withdrawal = row.direction == BillDirection.NEUTRAL && isWithdrawal(row)
+        val type = when {
+            neutral && refund -> TransactionType.INCOME
+            row.direction == BillDirection.INCOME -> TransactionType.INCOME
+            row.direction == BillDirection.EXPENSE -> TransactionType.EXPENSE
+            neutral -> TransactionType.EXPENSE
+            else -> TransactionType.EXPENSE
+        }
+        val withdrawal = neutral && isWithdrawal(row)
         val transferRow = isTransferRow(row)
         val strongTransfer = isStrongTransferRow(row)
         val redPacketIncome = isRedPacketIncome(row)
@@ -231,14 +392,17 @@ object BillImportMapping {
             BillSource.ALIPAY -> TransactionSource.ALIPAY
             BillSource.UNKNOWN -> TransactionSource.OTHER
         }
-        val context = row.rawFields.joinToString(" ")
         val merchantCategory = categoryFor(row.merchant)
         val category = when {
+            // Alipay "不计收支" is an account-to-account move (investment,
+            // repayment, withdrawal, red packet, ...). Keep it visible but out
+            // of spending/income totals; do not guess a consumption category.
+            neutral -> TransactionCategory.TRANSFER
             redPacketIncome -> TransactionCategory.GIFT
             withdrawal || strongTransfer -> TransactionCategory.TRANSFER
             (redPacketExpense || transferRow) &&
                 merchantCategory == TransactionCategory.OTHER -> TransactionCategory.TRANSFER
-            else -> categoryFor(row.merchant, context)
+            else -> classificationFor(row).category
         }
         val transfer = category == TransactionCategory.TRANSFER
         val note = buildString {
@@ -251,6 +415,7 @@ object BillImportMapping {
                 },
             )
             if (refund) append(" · 退款")
+            if (neutral) append(" · 不计收支")
             if (withdrawal) append(" · 提现")
             if (redPacketIncome) append(" · 红包")
             append(" 第")
@@ -258,6 +423,7 @@ object BillImportMapping {
             append("行")
             row.orderId?.let { append(" · 单号 ").append(it) }
             row.paymentMethod?.let { append(" · ").append(it) }
+            row.sourceCategory?.let { append(" · 分类 ").append(it) }
         }
         return TransactionEntity(
             amountCents = row.amountCents,

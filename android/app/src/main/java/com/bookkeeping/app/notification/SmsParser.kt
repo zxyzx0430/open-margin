@@ -97,7 +97,20 @@ object SmsParser {
         val account = if (cardLast4.isNotEmpty()) "$bank ($cardLast4)" else bank
 
         // 5. 自动分类（基于短信正文：能识别"工资到账"→SALARY、"加油"→TRANSPORT 等）
-        val category = CategoryClassifier.classify(merchant = "", contextText = normalized)
+        val category = CategoryClassifier.classify(
+            ClassificationInput(
+                merchantRaw = "",
+                contextText = normalized,
+                direction = if (type == TransactionType.INCOME) {
+                    ClassificationDirection.INCOME
+                } else {
+                    ClassificationDirection.EXPENSE
+                },
+                source = ClassificationSource.BANK_SMS,
+                kind = ClassificationKind.PAYMENT,
+                status = ClassificationStatus.COMPLETED,
+            ),
+        ).category
 
         return TransactionEntity(
             amountCents = amountCents,

@@ -5,9 +5,59 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.merchant.MerchantIconCatalog
+import com.bookkeeping.app.notification.CategoryClassifier
+import com.bookkeeping.app.notification.ClassificationDirection
+import com.bookkeeping.app.notification.ClassificationInput
+import com.bookkeeping.app.notification.ClassificationKind
+import com.bookkeeping.app.notification.ClassificationResult
+import com.bookkeeping.app.notification.ClassificationSource
+import com.bookkeeping.app.notification.ClassificationStatus
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 
 object CaptureReviewMapping {
+    fun classificationFor(
+        candidate: CaptureCandidate,
+        merchant: String,
+        contextText: String = "",
+    ): ClassificationResult {
+        val kind = when (candidate.kind) {
+            CaptureCandidate.KIND_REFUND -> ClassificationKind.REFUND
+            CaptureCandidate.KIND_TRANSFER -> ClassificationKind.TRANSFER
+            CaptureCandidate.KIND_WITHDRAWAL -> ClassificationKind.WITHDRAWAL
+            CaptureCandidate.KIND_RED_PACKET -> ClassificationKind.RED_PACKET
+            CaptureCandidate.KIND_AUTO_PAY -> ClassificationKind.PAY_AFTER_USE
+            CaptureCandidate.KIND_BILL -> ClassificationKind.BILL
+            else -> ClassificationKind.PAYMENT
+        }
+        val direction = when (candidate.direction) {
+            CaptureCandidate.DIRECTION_INCOME -> ClassificationDirection.INCOME
+            CaptureCandidate.DIRECTION_EXPENSE -> ClassificationDirection.EXPENSE
+            else -> ClassificationDirection.NEUTRAL
+        }
+        val source = when (candidate.packageName) {
+            CaptureCandidate.WECHAT -> ClassificationSource.WECHAT
+            CaptureCandidate.ALIPAY -> ClassificationSource.ALIPAY
+            else -> ClassificationSource.OTHER
+        }
+        return CategoryClassifier.classify(
+            ClassificationInput(
+                merchantRaw = merchant,
+                contextText = contextText,
+                direction = direction,
+                source = source,
+                kind = kind,
+                status = ClassificationStatus.COMPLETED,
+                amountCents = candidate.amountCents,
+            ),
+        )
+    }
+
+    fun defaultCategory(candidate: CaptureCandidate): TransactionCategory =
+        classificationFor(
+            candidate = candidate,
+            merchant = candidate.merchantCandidates.firstOrNull().orEmpty(),
+        ).category
+
     fun toTransactionEntity(
         candidate: CaptureCandidate,
         merchant: String,

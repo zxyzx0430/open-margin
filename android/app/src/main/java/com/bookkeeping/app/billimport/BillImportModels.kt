@@ -9,7 +9,7 @@ enum class BillDirection { EXPENSE, INCOME, NEUTRAL }
 
 enum class BillStatus { SUCCESS, REFUND, FAILED, PENDING, UNKNOWN }
 
-enum class BillPreviewKind { VALID, DUPLICATE, ERROR }
+enum class BillPreviewKind { VALID, DUPLICATE, SKIPPED, ERROR }
 
 /**
  * One parsed bill row. The preview never writes to the ledger; the caller must
@@ -26,6 +26,10 @@ data class BillImportRow(
     val status: BillStatus,
     val orderId: String? = null,
     val paymentMethod: String? = null,
+    /** Official source category column, e.g. Alipay "餐饮美食". */
+    val sourceCategory: String? = null,
+    /** Official product/description column, used only as classification context. */
+    val description: String? = null,
     val rawFields: List<String> = emptyList(),
 )
 
@@ -36,6 +40,9 @@ data class BillPreviewRow(
     val parsed: BillImportRow? = null,
     val message: String? = null,
     val duplicateOfRow: Int? = null,
+    /** A duplicate that can fill missing fields on the existing ledger row. */
+    val enrichable: Boolean = false,
+    val matchedTransactionId: Long? = null,
 )
 
 data class BillImportPreview(
@@ -49,8 +56,24 @@ data class BillImportPreview(
     val duplicateRows: List<BillPreviewRow>
         get() = rows.filter { it.kind == BillPreviewKind.DUPLICATE }
 
+    val enrichableRows: List<BillPreviewRow>
+        get() = duplicateRows.filter { it.enrichable }
+
+    val skippedRows: List<BillPreviewRow>
+        get() = rows.filter { it.kind == BillPreviewKind.SKIPPED }
+
     val errorRows: List<BillPreviewRow>
         get() = rows.filter { it.kind == BillPreviewKind.ERROR }
+
+    /** Rows the confirm button will write: new inserts plus duplicate enrichment. */
+    val importableRows: List<BillImportRow>
+        get() = rows.mapNotNull { row ->
+            when {
+                row.kind == BillPreviewKind.VALID -> row.parsed
+                row.kind == BillPreviewKind.DUPLICATE && row.enrichable -> row.parsed
+                else -> null
+            }
+        }
 
     /** Import is always a user-confirmed action; there is no auto-write path. */
     val requiresConfirmation: Boolean get() = true
