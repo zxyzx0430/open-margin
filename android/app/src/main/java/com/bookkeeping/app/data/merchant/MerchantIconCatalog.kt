@@ -72,6 +72,10 @@ object MerchantIconCatalog {
         TransactionCategory.HEALTH -> "health"
         TransactionCategory.EDUCATION -> "education"
         TransactionCategory.SALARY -> "salary"
+        TransactionCategory.BONUS -> "bonus"
+        TransactionCategory.INVESTMENT -> "investment"
+        TransactionCategory.INSURANCE -> "insurance"
+        TransactionCategory.GIFT -> "gift"
         TransactionCategory.TRANSFER -> "transfer"
         TransactionCategory.OTHER -> "other"
     }

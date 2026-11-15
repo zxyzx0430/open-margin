@@ -3,6 +3,7 @@ package com.bookkeeping.app.ui.screen.settings
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.KeepAliveService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,6 +26,14 @@ class SettingsViewModel @Inject constructor(
     val successNotificationsEnabled: StateFlow<Boolean> =
         prefs.observeSuccessNotificationsEnabled()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
+    val merchantRules: StateFlow<Map<String, TransactionCategory>> =
+        prefs.observeMerchantRules()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun clearMerchantRules() {
+        viewModelScope.launch { prefs.clearMerchantRules() }
+    }
 
     fun setKeepAlive(enabled: Boolean) {
         viewModelScope.launch {

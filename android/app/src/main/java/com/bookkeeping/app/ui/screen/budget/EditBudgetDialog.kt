@@ -49,7 +49,11 @@ fun EditBudgetDialog(
 
     val availableCategories = remember(excludeCategories) {
         TransactionCategory.entries.filter {
-            it !in excludeCategories && it != TransactionCategory.SALARY && it != TransactionCategory.TRANSFER
+            it !in excludeCategories &&
+                it != TransactionCategory.SALARY &&
+                it != TransactionCategory.BONUS &&
+                it != TransactionCategory.GIFT &&
+                it != TransactionCategory.TRANSFER
         }
     }
 

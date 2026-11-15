@@ -12,6 +12,7 @@ import com.bookkeeping.app.billimport.BillStatus
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
+import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.local.entity.TransactionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -198,6 +199,24 @@ class BillImportMappingTest {
     }
 
     @Test
+    fun userRuleCannotReclassifyAStrongTransfer() {
+        try {
+            MerchantRules.put("张三", TransactionCategory.FOOD)
+            val entity = BillImportMapping.toTransactionEntity(
+                row(
+                    merchant = "张三",
+                    rawFields = listOf("转账"),
+                    orderId = "TRANSFER-3",
+                ),
+            )!!
+            assertEquals(TransactionCategory.TRANSFER.name, entity.category)
+            assertEquals("transfer", entity.remoteReviewStatus)
+        } finally {
+            MerchantRules.clear()
+        }
+    }
+
+    @Test
     fun redPacketUsesRawHintButDiscountIsNotTransfer() {
         val redPacket = BillImportMapping.toTransactionEntity(
             row(
@@ -242,7 +261,7 @@ class BillImportMappingTest {
             ),
         )!!
         assertEquals(TransactionType.INCOME.name, entity.type)
-        assertEquals(TransactionCategory.OTHER.name, entity.category)
+        assertEquals(TransactionCategory.GIFT.name, entity.category)
         assertEquals("unverified", entity.remoteReviewStatus)
         assertTrue(entity.note.contains("红包"))
     }

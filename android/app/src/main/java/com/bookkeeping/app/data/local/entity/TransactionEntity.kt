@@ -101,6 +101,10 @@ enum class TransactionCategory(val displayName: String) {
     HEALTH("医疗"),
     EDUCATION("教育"),
     SALARY("工资"),
+    BONUS("奖金"),
+    INVESTMENT("理财"),
+    INSURANCE("保险"),
+    GIFT("红包"),
     TRANSFER("转账"),
     OTHER("其他"),
 }
