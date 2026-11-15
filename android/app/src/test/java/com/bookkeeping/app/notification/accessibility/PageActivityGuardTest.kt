@@ -113,6 +113,115 @@ class PageActivityGuardTest {
     }
 
     @Test
+    fun containerPagesAllowOnlyStrongPaymentResults() {
+        assertTrue(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.plugin.lite.ui.WxaLiteAppLiteUI",
+                "小程序订单 已支付 ¥2.00",
+            ),
+        )
+        assertTrue(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.plugin.webview.ui.tools.WebViewUI",
+                "客服会话 消费 ¥2.00",
+            ),
+        )
+        assertFalse(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.plugin.lite.ui.WxaLiteAppLiteUI",
+                "支付成功 ¥2.00 完成",
+            ),
+        )
+        assertFalse(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.plugin.webview.ui.tools.WebViewUI",
+                "支付成功 ￥12.00 返回商家",
+            ),
+        )
+        assertTrue(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.plugin.brandservice.ui.BrandServiceUI",
+                "支付成功 ￥12.00 麦当劳",
+            ),
+        )
+    }
+
+    @Test
+    fun groupCollectionNeedsOwnStrongPayment() {
+        assertTrue(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "android.widget.TextView",
+                "群收款 ¥54.70 他人已支付",
+            ),
+        )
+        assertTrue(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "android.widget.TextView",
+                "群收款 ¥54.70",
+            ),
+        )
+        assertFalse(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.plugin.wallet.pay.ui.WalletPayUI",
+                "群收款 支付成功 ¥54.70",
+            ),
+        )
+    }
+
+    @Test
+    fun onlyActivityClassNamesMayReplaceCurrentActivity() {
+        assertTrue(
+            PageActivityGuard.isActivityClassName(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.ui.LauncherUI",
+            ),
+        )
+        assertTrue(
+            PageActivityGuard.isActivityClassName(
+                PaymentPageDetector.PKG_ALIPAY,
+                "com.eg.android.AlipayGphone.HomeActivity",
+            ),
+        )
+        assertFalse(
+            PageActivityGuard.isActivityClassName(
+                PaymentPageDetector.PKG_WECHAT,
+                "android.widget.FrameLayout",
+            ),
+        )
+        assertFalse(
+            PageActivityGuard.isActivityClassName(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.ui.base.FullScreenDialog",
+            ),
+        )
+        assertFalse(
+            PageActivityGuard.isActivityClassName(
+                PaymentPageDetector.PKG_WECHAT,
+                "com.tencent.mm.ui.widget.MMEditText",
+            ),
+        )
+    }
+
+    @Test
+    fun alipayTabShellDoesNotBlockStrongResultPage() {
+        assertFalse(
+            PageActivityGuard.isChatOrHomePage(
+                PaymentPageDetector.PKG_ALIPAY,
+                "com.eg.android.AlipayGphone.BillActivity",
+                "首页 理财 生活 消息 我的 支付成功 ￥12.00",
+            ),
+        )
+    }
+
+    @Test
     fun alipayHomeIsBlockedButBillPageIsAllowed() {
         assertTrue(
             PageActivityGuard.isChatOrHomePage(

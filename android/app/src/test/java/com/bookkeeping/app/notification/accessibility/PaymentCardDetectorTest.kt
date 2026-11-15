@@ -704,6 +704,62 @@ class PaymentCardDetectorTest {
     }
 
     @Test
+    fun chatExpensePreviewIsNotAPaymentCard() {
+        val chatLines = lines(
+            "微信支付" to 100,
+            "昨天" to 140,
+            "消费¥2.00" to 180,
+            "615 宿舍" to 300,
+            "昨天" to 340,
+        )
+        assertTrue(detect(PaymentCardDetector.WECHAT, chatLines).isEmpty())
+    }
+
+    @Test
+    fun groupCollectionWithoutOwnPaymentIsNotACard() {
+        val negative = lines(
+            "群收款" to 100,
+            "¥54.70" to 160,
+            "你无需支付" to 220,
+            "他人已支付" to 280,
+        )
+        assertTrue(detect(PaymentCardDetector.WECHAT, negative).isEmpty())
+        val summary = lines(
+            "群收款" to 100,
+            "¥54.70" to 160,
+            "昨天 18:00" to 220,
+        )
+        assertTrue(detect(PaymentCardDetector.WECHAT, summary).isEmpty())
+    }
+
+    @Test
+    fun groupCollectionOwnCompletedPaymentIsStillABill() {
+        val card = detect(
+            PaymentCardDetector.WECHAT,
+            lines(
+                "群收款" to 100,
+                "支付成功" to 160,
+                "¥54.70" to 220,
+            ),
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(5470L, card.amountCents)
+    }
+
+    @Test
+    fun weakExpenseWithMerchantContextIsStillABill() {
+        val card = detect(
+            PaymentCardDetector.ALIPAY,
+            lines(
+                "支出 ¥25.00" to 100,
+                "商户名称 饿了么" to 160,
+            ),
+        ).single()
+        assertEquals(PaymentCardKind.PAYMENT, card.kind)
+        assertEquals(2500L, card.amountCents)
+    }
+
+    @Test
     fun unsupportedPackageIsIgnored() {
         val cardLines = lines(
             "支付成功" to 100,
