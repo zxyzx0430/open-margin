@@ -35,6 +35,61 @@ object BillImportMapping {
     fun ledgerRowKey(row: BillImportRow): String =
         BillImportParser.duplicateKey(row)
 
+    fun existingFallbackKeys(transactions: List<TransactionEntity>): Set<String> =
+        transactions.mapNotNull { transaction ->
+            if (transaction.syncDeleted || !transaction.sourceTransactionId.isNullOrBlank()) {
+                return@mapNotNull null
+            }
+            val type = when (transaction.type) {
+                TransactionType.EXPENSE.name -> TransactionType.EXPENSE
+                TransactionType.INCOME.name -> TransactionType.INCOME
+                else -> return@mapNotNull null
+            }
+            val source = billSource(transaction.source) ?: return@mapNotNull null
+            fallbackKey(
+                source = source,
+                type = type,
+                amountCents = transaction.amountCents,
+                merchant = transaction.merchant,
+                occurredAtMs = transaction.timestamp,
+            )
+        }.toSet()
+
+    fun rowFallbackKey(row: BillImportRow): String? {
+        val type = when (row.direction) {
+            BillDirection.EXPENSE -> TransactionType.EXPENSE
+            BillDirection.INCOME -> TransactionType.INCOME
+            BillDirection.NEUTRAL -> return null
+        }
+        return fallbackKey(
+            source = row.source,
+            type = type,
+            amountCents = row.amountCents,
+            merchant = row.merchant,
+            occurredAtMs = row.occurredAtMs,
+        )
+    }
+
+    private fun fallbackKey(
+        source: BillSource,
+        type: TransactionType,
+        amountCents: Long,
+        merchant: String,
+        occurredAtMs: Long,
+    ): String = listOf(
+        source.name,
+        type.name,
+        occurredAtMs.toString(),
+        amountCents.toString(),
+        normalizeMerchant(merchant),
+    ).joinToString("|")
+
+    private fun billSource(source: String): BillSource? = when (source) {
+        TransactionSource.WECHAT.name -> BillSource.WECHAT
+        TransactionSource.ALIPAY.name -> BillSource.ALIPAY
+        else -> null
+    }
+
     fun existingRowKeys(transactions: List<TransactionEntity>): Set<String> =
         transactions.mapNotNull { transaction ->
             val direction = when (transaction.type) {

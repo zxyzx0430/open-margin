@@ -15,13 +15,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.formatCny
-import java.util.Locale
+import com.bookkeeping.app.ui.theme.QingPrimaryDeep
+import com.bookkeeping.app.ui.theme.QingSurfaceVariant
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 
 /**
  * Donut category chart. The legend lives in the parent so it can use the
@@ -35,12 +35,10 @@ fun CategoryPieChart(
     modifier: Modifier = Modifier,
 ) {
     if (stats.isEmpty() || totalCents <= 0L) return
-    val description = tr("分类占比") + "：" + stats.joinToString("，") { stat ->
-        "${tr(stat.category.displayName)} ${
-            "%.1f".format(Locale.CHINA, stat.percentage * 100)
-        }% ${formatCny(stat.totalCents)}"
-    }
-    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val largest = stats.maxByOrNull { it.totalCents }
+    val trackColor = QingSurfaceVariant
+    val description = "分类占比：${stats.size} 类，总计 ${formatCny(totalCents)}" +
+        (largest?.let { "，最高 ${it.category.displayName} ${formatCny(it.totalCents)}" } ?: "")
     Box(
         modifier = modifier.semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
@@ -81,22 +79,19 @@ fun CategoryPieChart(
             }
         }
         Column(
-            modifier = Modifier.padding(horizontal = 28.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = formatCny(totalCents),
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleLarge,
+                color = QingPrimaryDeep,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = centerLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = QingTextSecondary,
             )
         }
     }

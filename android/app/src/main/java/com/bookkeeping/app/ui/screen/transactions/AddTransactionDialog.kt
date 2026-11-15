@@ -4,11 +4,16 @@ import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -18,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -25,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,15 +62,8 @@ fun AddTransactionDialog(
         category: TransactionCategory,
         merchant: String,
         note: String,
+        timestamp: Long,
     ) -> Unit,
-    onConfirmAt: ((
-        amountCents: Long,
-        type: TransactionType,
-        category: TransactionCategory,
-        merchant: String,
-        note: String,
-        timestampMs: Long,
-    ) -> Unit)? = null,
 ) {
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
     var amountText by remember(initial?.id) {
@@ -83,43 +83,12 @@ fun AddTransactionDialog(
     var merchant by remember(initial?.id) { mutableStateOf(initial?.merchant ?: "") }
     var note by remember(initial?.id) { mutableStateOf(initial?.note ?: "") }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
-    var datePickerOpen by remember { mutableStateOf(false) }
-    var occurredAtMs by remember(initial?.id) {
-        mutableStateOf(initial?.timestamp ?: System.currentTimeMillis())
+    var timestamp by remember(initial?.id) {
+        mutableLongStateOf(initial?.timestamp ?: System.currentTimeMillis())
     }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     val amountValid = MoneyAmount.cents(amountText) != null
-    val dateLabel = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA)
-        .format(Date(occurredAtMs))
-
-    if (datePickerOpen) {
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = occurredAtMs)
-        DatePickerDialog(
-            onDismissRequest = { datePickerOpen = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { selected ->
-                        val calendar = Calendar.getInstance().apply {
-                            timeInMillis = occurredAtMs
-                            val chosen = Calendar.getInstance(
-                                TimeZone.getTimeZone("UTC"),
-                            ).apply { timeInMillis = selected }
-                            set(Calendar.YEAR, chosen.get(Calendar.YEAR))
-                            set(Calendar.MONTH, chosen.get(Calendar.MONTH))
-                            set(Calendar.DAY_OF_MONTH, chosen.get(Calendar.DAY_OF_MONTH))
-                        }
-                        occurredAtMs = calendar.timeInMillis
-                    }
-                    datePickerOpen = false
-                }) { Text(tr("确定")) }
-            },
-            dismissButton = {
-                TextButton(onClick = { datePickerOpen = false }) { Text(tr("取消")) }
-            },
-        ) {
-            DatePicker(state = pickerState)
-        }
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -153,13 +122,16 @@ fun AddTransactionDialog(
                     )
                 }
 
-                if (onConfirmAt != null) {
-                    OutlinedButton(
-                        onClick = { datePickerOpen = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(tr("日期") + ": " + dateLabel)
-                    }
+                OutlinedButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("${tr("日期")}：${formatDate(timestamp)}")
                 }
 
                 OutlinedTextField(
@@ -171,7 +143,7 @@ fun AddTransactionDialog(
                     isError = amountText.isNotEmpty() && !amountValid,
                     supportingText = {
                         if (amountText.isNotEmpty() && !amountValid) {
-                            Text(tr("金额格式不正确"))
+                            Text(tr("请输入有效金额"))
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -192,7 +164,8 @@ fun AddTransactionDialog(
                     )
                     DropdownMenu(
                         expanded = categoryMenuExpanded,
-                        onDismissRequest = { categoryMenuExpanded = false }
+                        onDismissRequest = { categoryMenuExpanded = false },
+                        modifier = Modifier.heightIn(max = 320.dp),
                     ) {
                         TransactionCategory.entries.forEach { cat ->
                             DropdownMenuItem(
@@ -227,18 +200,7 @@ fun AddTransactionDialog(
             TextButton(
                 onClick = {
                     val amount = MoneyAmount.cents(amountText) ?: return@TextButton
-                    if (onConfirmAt != null) {
-                        onConfirmAt(
-                            amount,
-                            selectedType,
-                            selectedCategory,
-                            merchant,
-                            note,
-                            occurredAtMs,
-                        )
-                    } else {
-                        onConfirm(amount, selectedType, selectedCategory, merchant, note)
-                    }
+                    onConfirm(amount, selectedType, selectedCategory, merchant, note, timestamp)
                 },
                 enabled = amountValid
             ) { Text(tr("保存")) }
@@ -247,4 +209,54 @@ fun AddTransactionDialog(
             TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
+
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = localDateToUtc(timestamp),
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let {
+                        timestamp = applyUtcDate(it, timestamp)
+                    }
+                    showDatePicker = false
+                }) { Text(tr("确定")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text(tr("取消")) }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+}
+
+private fun formatDate(timestampMs: Long): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestampMs))
+
+private fun localDateToUtc(timestampMs: Long): Long {
+    val local = Calendar.getInstance().apply { timeInMillis = timestampMs }
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(
+            local.get(Calendar.YEAR),
+            local.get(Calendar.MONTH),
+            local.get(Calendar.DAY_OF_MONTH),
+        )
+    }.timeInMillis
+}
+
+private fun applyUtcDate(utcDateMs: Long, keepTimeFromMs: Long): Long {
+    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        timeInMillis = utcDateMs
+    }
+    val local = Calendar.getInstance().apply { timeInMillis = keepTimeFromMs }
+    local.set(
+        utc.get(Calendar.YEAR),
+        utc.get(Calendar.MONTH),
+        utc.get(Calendar.DAY_OF_MONTH),
+    )
+    return local.timeInMillis
 }

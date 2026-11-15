@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,7 +47,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.ui.components.CategoryIcon
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import com.bookkeeping.app.ui.theme.QingIncome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -200,7 +201,7 @@ private fun CaptureCandidateCard(
                             "%.2f".format(Locale.CHINA, candidate.amountCents / 100.0),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (income) LocalQingSemanticColors.current.income
+                        color = if (income) QingIncome
                         else MaterialTheme.colorScheme.error,
                         modifier = Modifier.weight(1f),
                     )
@@ -240,6 +241,7 @@ private fun CaptureCandidateCard(
                         DropdownMenu(
                             expanded = categoryMenu,
                             onDismissRequest = { categoryMenu = false },
+                            modifier = Modifier.heightIn(max = 320.dp),
                         ) {
                             TransactionCategory.entries.forEach { option ->
                                 DropdownMenuItem(

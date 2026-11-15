@@ -22,41 +22,43 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import com.bookkeeping.app.ui.theme.QingMintSoft
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 
 @Composable
 fun LedgerEmptyState(
     filterActive: Boolean,
-    monthOnly: Boolean = false,
+    hasAnyTransactions: Boolean = true,
     onClearFilters: (() -> Unit)? = null,
+    onShowAll: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val semantic = LocalQingSemanticColors.current
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(PaddingValues(horizontal = 32.dp, vertical = 56.dp)),
+            .padding(PaddingValues(horizontal = 32.dp, vertical = 24.dp)),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
             modifier = Modifier
-                .size(64.dp)
+                .size(56.dp)
                 .clip(CircleShape)
-                .background(semantic.mintSoft),
+                .background(QingMintSoft),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Outlined.ReceiptLong,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(30.dp),
+                tint = QingPrimary,
+                modifier = Modifier.size(26.dp),
             )
         }
         Text(
             text = when {
                 filterActive -> tr("没有符合条件的账单")
-                monthOnly -> tr("本月还没有账单")
+                hasAnyTransactions -> tr("本月还没有账单")
                 else -> tr("还没有账单")
             },
             style = MaterialTheme.typography.titleMedium,
@@ -65,15 +67,17 @@ fun LedgerEmptyState(
         Text(
             text = when {
                 filterActive -> tr("换个关键词或清空筛选试试")
-                monthOnly -> tr("切换到「全部」可以查看历史账单")
-                else -> tr("点击右下角 + 添加第一笔")
+                hasAnyTransactions -> tr("查看全部账单，或切换月份范围")
+                else -> tr("点击右上角 + 添加第一笔")
             },
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = QingTextSecondary,
             textAlign = TextAlign.Center,
         )
         if (filterActive && onClearFilters != null) {
             TextButton(onClick = onClearFilters) { Text(tr("清空筛选")) }
+        } else if (hasAnyTransactions && onShowAll != null) {
+            TextButton(onClick = onShowAll) { Text(tr("查看全部账单")) }
         }
     }
 }

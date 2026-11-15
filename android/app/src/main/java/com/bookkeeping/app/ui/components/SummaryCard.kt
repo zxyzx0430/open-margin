@@ -1,23 +1,28 @@
 package com.bookkeeping.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import com.bookkeeping.app.ui.theme.QingExpense
+import com.bookkeeping.app.ui.theme.QingIncome
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimaryContainer
+import com.bookkeeping.app.ui.theme.QingPrimaryDeep
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 
 @Composable
 fun MonthlySummaryCard(
@@ -26,18 +31,13 @@ fun MonthlySummaryCard(
     modifier: Modifier = Modifier,
 ) {
     val diff = incomeCents - expenseCents
-    val semantic = LocalQingSemanticColors.current
-    val container = MaterialTheme.colorScheme.primaryContainer
-    val diffColor = if (diff >= 0) semantic.income else semantic.expenseText
+    val diffColor = if (diff >= 0) QingIncome else QingExpense
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(container, container.copy(alpha = 0.72f)),
-                )
-            )
+            .background(QingPrimaryContainer)
+            .border(1.dp, QingOutline, RoundedCornerShape(20.dp))
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -48,13 +48,13 @@ fun MonthlySummaryCard(
             SummaryMetric(
                 label = tr("本月支出"),
                 value = formatCny(expenseCents),
-                color = semantic.expenseText,
+                color = QingExpense,
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
                 label = tr("本月收入"),
                 value = formatCny(incomeCents),
-                color = semantic.income,
+                color = QingIncome,
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
@@ -77,8 +77,8 @@ private fun SummaryMetric(
     Column(modifier = modifier) {
         Text(
             text = label,
-            style = com.bookkeeping.app.ui.theme.Typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = com.bookkeeping.app.ui.theme.Typography.labelMedium,
+            color = QingPrimaryDeep.copy(alpha = 0.72f),
             maxLines = 1,
         )
         Text(
@@ -87,6 +87,7 @@ private fun SummaryMetric(
             fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Start,
         )
     }

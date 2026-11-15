@@ -2,6 +2,7 @@ package com.bookkeeping.app.sync
 
 import com.bookkeeping.app.i18n.tr
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,7 +33,12 @@ fun WindowsFirstConnectionWizard() {
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
-    Card(Modifier.fillMaxWidth()) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = MaterialTheme.shapes.large,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(tr("Windows 首次连接向导"), style = MaterialTheme.typography.titleMedium)
             Text(tr("3 步连接自己的电脑。已使用 VPS 的用户无需运行此向导。"))
