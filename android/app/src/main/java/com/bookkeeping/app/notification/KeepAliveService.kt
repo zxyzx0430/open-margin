@@ -123,6 +123,7 @@ class KeepAliveService : Service() {
         if (!isRunning || uptimeTicker?.isActive == true) return
         uptimeTicker = scope.launch {
             while (isActive) {
+                CaptureHealth.onHeartbeat(this@KeepAliveService)
                 refreshStatus(this@KeepAliveService)
                 delay(1_000L)
             }

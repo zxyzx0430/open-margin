@@ -74,6 +74,19 @@ class SettingsPreferences @Inject constructor(
         MerchantRules.clear()
     }
 
+    suspend fun removeMerchantRule(merchant: String) {
+        val key = MerchantRules.normalize(merchant)
+        if (key.isBlank()) return
+        context.settingsDataStore.edit { prefs ->
+            val rules = parseMerchantRules(prefs[KEY_MERCHANT_RULES]).toMutableMap()
+            rules.remove(key)
+            val json = JSONObject()
+            rules.forEach { (name, category) -> json.put(name, category.name) }
+            prefs[KEY_MERCHANT_RULES] = json.toString()
+        }
+        MerchantRules.remove(key)
+    }
+
     private fun parseMerchantRules(raw: String?): Map<String, TransactionCategory> {
         if (raw.isNullOrBlank()) return emptyMap()
         return runCatching {

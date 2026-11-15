@@ -26,6 +26,11 @@ class CategoryClassifierTest {
             TransactionCategory.EDUCATION,
             CategoryClassifier.classify("星巴克(万达店)", "咖啡"),
         )
+        MerchantRules.remove("星巴克(万达店)")
+        assertEquals(
+            TransactionCategory.FOOD,
+            CategoryClassifier.classify("星巴克(万达店)", "咖啡"),
+        )
     }
 
     @Test
@@ -80,6 +85,13 @@ class CategoryClassifierTest {
     fun contextIsUsedOnlyWhenMerchantHasNoKeyword() {
         assertEquals(TransactionCategory.FOOD, CategoryClassifier.classify("", "麦当劳"))
         assertEquals(TransactionCategory.TRANSPORT, CategoryClassifier.classify("未知商户", "地铁"))
+    }
+
+    @Test
+    fun adversarialLongTextDoesNotThrow() {
+        val huge = "美团" + "啊".repeat(100_000)
+        assertEquals(TransactionCategory.FOOD, CategoryClassifier.classify(huge, huge))
+        assertEquals(TransactionCategory.OTHER, CategoryClassifier.classify("", ""))
     }
 
     @Test

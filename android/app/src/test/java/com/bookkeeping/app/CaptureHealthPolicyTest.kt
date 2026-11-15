@@ -89,4 +89,66 @@ class CaptureHealthPolicyTest {
             ),
         )
     }
+
+    @Test fun recentHeartbeatPreservesConnectionAcrossProcessRestart() {
+        assertTrue(
+            CaptureHealthPolicy.shouldPreserveConnection(
+                previousConnectedAtMs = 10_000L,
+                previousConnectedElapsedMs = 10_000L,
+                nowWallMs = 70_000L,
+                nowElapsedMs = 20_000L,
+                disconnectedAtMs = 0L,
+                lastSeenAtMs = 50_000L,
+            ),
+        )
+    }
+
+    @Test fun staleHeartbeatStartsAFreshConnection() {
+        assertFalse(
+            CaptureHealthPolicy.shouldPreserveConnection(
+                previousConnectedAtMs = 10_000L,
+                previousConnectedElapsedMs = 10_000L,
+                nowWallMs = 10_000_000L,
+                nowElapsedMs = 20_000L,
+                disconnectedAtMs = 0L,
+                lastSeenAtMs = 50_000L,
+            ),
+        )
+    }
+
+    @Test fun rebootStartsAFreshConnection() {
+        assertFalse(
+            CaptureHealthPolicy.shouldPreserveConnection(
+                previousConnectedAtMs = 10_000L,
+                previousConnectedElapsedMs = 10_000L,
+                nowWallMs = 70_000L,
+                nowElapsedMs = 5_000L,
+                disconnectedAtMs = 0L,
+                lastSeenAtMs = 50_000L,
+            ),
+        )
+    }
+
+    @Test fun shortDisconnectIsPreservedButLongDisconnectResets() {
+        assertTrue(
+            CaptureHealthPolicy.shouldPreserveConnection(
+                previousConnectedAtMs = 10_000L,
+                previousConnectedElapsedMs = 10_000L,
+                nowWallMs = 70_000L,
+                nowElapsedMs = 20_000L,
+                disconnectedAtMs = 50_000L,
+                lastSeenAtMs = 50_000L,
+            ),
+        )
+        assertFalse(
+            CaptureHealthPolicy.shouldPreserveConnection(
+                previousConnectedAtMs = 10_000L,
+                previousConnectedElapsedMs = 10_000L,
+                nowWallMs = 10_000_000L,
+                nowElapsedMs = 20_000L,
+                disconnectedAtMs = 50_000L,
+                lastSeenAtMs = 50_000L,
+            ),
+        )
+    }
 }

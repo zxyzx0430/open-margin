@@ -33,9 +33,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -467,17 +471,76 @@ fun SettingsScreen(
                     tr("商户分类记忆"),
                     { detailDialog = null },
                 ) {
-                    if (merchantRules.isEmpty()) {
+                    var ruleMerchant by remember { mutableStateOf("") }
+                    var ruleCategory by remember { mutableStateOf(TransactionCategory.OTHER) }
+                    var ruleMenu by remember { mutableStateOf(false) }
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         Text(
-                            text = tr("还没有商户分类记忆。手动修改交易分类后会自动保存。"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = tr("添加分类规则"),
+                            style = MaterialTheme.typography.titleSmall,
                         )
-                    } else {
-                        Column(
+                        OutlinedTextField(
+                            value = ruleMerchant,
+                            onValueChange = { ruleMerchant = it },
+                            label = { Text(tr("商户名")) },
+                            singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        )
+                        ExposedDropdownMenuBox(
+                            expanded = ruleMenu,
+                            onExpandedChange = { ruleMenu = it },
                         ) {
+                            OutlinedTextField(
+                                value = tr(ruleCategory.displayName),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text(tr("分类")) },
+                                trailingIcon = {
+                                    ExposedDropdownMenuDefaults.TrailingIcon(
+                                        expanded = ruleMenu,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .menuAnchor()
+                                    .fillMaxWidth(),
+                            )
+                            ExposedDropdownMenu(
+                                expanded = ruleMenu,
+                                onDismissRequest = { ruleMenu = false },
+                            ) {
+                                TransactionCategory.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(tr(option.displayName)) },
+                                        onClick = {
+                                            ruleCategory = option
+                                            ruleMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                if (ruleMerchant.isNotBlank()) {
+                                    viewModel.saveMerchantRule(ruleMerchant, ruleCategory)
+                                    ruleMerchant = ""
+                                }
+                            },
+                            enabled = ruleMerchant.isNotBlank(),
+                        ) {
+                            Text(tr("保存规则"))
+                        }
+                        HorizontalDivider()
+                        if (merchantRules.isEmpty()) {
+                            Text(
+                                text = tr("还没有商户分类记忆。手动修改交易分类后会自动保存。"),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
                             merchantRules.entries
                                 .sortedBy { it.key }
                                 .forEach { (merchant, category) ->
@@ -492,15 +555,20 @@ fun SettingsScreen(
                                             maxLines = 1,
                                         )
                                         Text(
-                                            text = category.displayName,
+                                            text = tr(category.displayName),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.primary,
                                         )
+                                        TextButton(
+                                            onClick = { viewModel.removeMerchantRule(merchant) },
+                                        ) {
+                                            Text(tr("删除"))
+                                        }
                                     }
                                 }
-                        }
-                        TextButton(onClick = viewModel::clearMerchantRules) {
-                            Text(tr("清除全部分类记忆"))
+                            TextButton(onClick = viewModel::clearMerchantRules) {
+                                Text(tr("清除全部分类记忆"))
+                            }
                         }
                     }
                 }

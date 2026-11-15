@@ -176,6 +176,11 @@ internal object EnglishUiText {
         "还没有商户分类记忆。手动修改交易分类后会自动保存。" to
             "No merchant category memory yet. Manual category edits are saved automatically.",
         "清除全部分类记忆" to "Clear all category memory",
+        "添加分类规则" to "Add category rule",
+        "商户名" to "Merchant",
+        "分类" to "Category",
+        "保存规则" to "Save rule",
+        "删除" to "Delete",
         "其中" to "Including",
         "其他" to "Other",
         "分类预算" to "Category budgets",
