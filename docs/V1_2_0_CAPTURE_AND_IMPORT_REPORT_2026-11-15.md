@@ -116,9 +116,12 @@
 
 ## 4. 构建与测试
 
-- Android debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`
-- 大小：约 82 MB
-- SHA-256：`c3c4f8ef97a8ebd7b3bb4af8372d00aad4ce7833eabd8e4bbb038a6fb4edd5bf`
+- Release 签名 APK：`releases/open-margin-v1.2.0-rc.8-signed.apk`
+- 包名：`com.bookkeeping.app`，versionCode `13`，versionName `1.2.0`
+- Release SHA-256：`93b71ee2e510fe032d6ef7763b8949269af4c0b4c7d68dca99ffd27242df7a36`
+- 签名证书 SHA-256：`0029505dc7dde6eff220b37e9db8cbe467235dfc9d3a948519f3f5b722c354ad`
+- Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`
+- Debug SHA-256：`c3c4f8ef97a8ebd7b3bb4af8372d00aad4ce7833eabd8e4bbb038a6fb4edd5bf`
 - JVM 单测：358 项通过（含分类器长文本/对抗输入、运行状态保持策略）
 - 后端压力/功能测试：24 项通过（同步压力 + Wallos ledger）
 - 实际微信 XLSX：368 条有效、0 错误；重复导入 `reimportValid=0`
