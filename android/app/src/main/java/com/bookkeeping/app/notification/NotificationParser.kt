@@ -231,7 +231,7 @@ object NotificationParser {
             else -> TransactionType.EXPENSE
         }
         val transferLike = isWithdrawal(full) || isOutgoingTransfer(full) ||
-            isIncomingRedPacket(full) || isOutgoingRedPacket(full)
+            isOutgoingRedPacket(full)
 
         // 3. 提商户名 + 自动分类
         val extracted = extractMerchant(full)
@@ -239,7 +239,11 @@ object NotificationParser {
         val merchant = if (extracted.lowercase() in setOf("paid", "payment", "success", "付款成功")) {
             if (source == TransactionSource.WECHAT) "微信支付" else "支付宝"
         } else extracted
-        val category = CategoryClassifier.classify(merchant, full)
+        val category = if (isIncomingRedPacket(full)) {
+            TransactionCategory.OTHER
+        } else {
+            CategoryClassifier.classify(merchant, full)
+        }
 
         return TransactionEntity(
             amountCents = amountCents,

@@ -165,6 +165,7 @@ object BillImportMapping {
         val refund = row.status == BillStatus.REFUND
         val withdrawal = row.direction == BillDirection.NEUTRAL && isWithdrawal(row)
         val transferRow = isTransferRow(row)
+        val redPacketIncome = isRedPacketIncome(row)
         val source = when (row.source) {
             BillSource.WECHAT -> TransactionSource.WECHAT
             BillSource.ALIPAY -> TransactionSource.ALIPAY
@@ -173,6 +174,7 @@ object BillImportMapping {
         val context = row.rawFields.joinToString(" ")
         val merchantCategory = categoryFor(row.merchant)
         val category = when {
+            redPacketIncome -> TransactionCategory.OTHER
             withdrawal -> TransactionCategory.TRANSFER
             transferRow && merchantCategory == TransactionCategory.OTHER ->
                 TransactionCategory.TRANSFER
@@ -190,6 +192,7 @@ object BillImportMapping {
             )
             if (refund) append(" · 退款")
             if (withdrawal) append(" · 提现")
+            if (redPacketIncome) append(" · 红包")
             append(" 第")
             append(row.rowNumber)
             append("行")
@@ -208,6 +211,7 @@ object BillImportMapping {
             merchantIconKey = MerchantIconCatalog.forMerchant(row.merchant)?.key,
             remoteReviewStatus = when {
                 refund -> "refund"
+                redPacketIncome -> "unverified"
                 transfer -> "transfer"
                 else -> "unverified"
             },
@@ -215,16 +219,25 @@ object BillImportMapping {
         )
     }
 
+    /** A received red packet is real income, not an account-to-account move. */
+    fun isRedPacketIncome(row: BillImportRow): Boolean =
+        row.direction == BillDirection.INCOME && isRedPacketMention(row)
+
     private fun isWithdrawal(row: BillImportRow): Boolean =
         (row.rawFields + row.merchant + row.paymentMethod.orEmpty())
             .any { it.contains("提现") }
 
-    private fun isTransferRow(row: BillImportRow): Boolean {
+    private fun isRedPacketMention(row: BillImportRow): Boolean {
         val text = (row.rawFields + row.merchant + row.paymentMethod.orEmpty()).joinToString(" ")
-        if (TRANSFER_HINTS.any { text.contains(it) }) return true
         return text.contains("红包") &&
             !text.contains("抵扣") &&
             !text.contains("优惠") &&
             !text.contains("封面")
+    }
+
+    private fun isTransferRow(row: BillImportRow): Boolean {
+        val text = (row.rawFields + row.merchant + row.paymentMethod.orEmpty()).joinToString(" ")
+        if (TRANSFER_HINTS.any { text.contains(it) }) return true
+        return isRedPacketMention(row)
     }
 }

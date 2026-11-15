@@ -182,9 +182,11 @@ private fun ImportSummary(preview: BillImportPreview) {
         it.direction == BillDirection.NEUTRAL ||
             BillImportMapping.toTransactionEntity(it)?.remoteReviewStatus == "transfer"
     }
-    if (refunds > 0 || transfers > 0) {
+    val redPackets = preview.validRows.count { BillImportMapping.isRedPacketIncome(it) }
+    if (refunds > 0 || transfers > 0 || redPackets > 0) {
         Text(
-            text = tr("其中") + " " + tr("退款") + " $refunds · " + tr("转账") + " $transfers",
+            text = tr("其中") + " " + tr("退款") + " $refunds · " + tr("转账") + " $transfers" +
+                if (redPackets > 0) " · " + tr("红包") + " $redPackets" else "",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -264,6 +266,7 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
             )
             val statusTag = when {
                 parsed.status == BillStatus.REFUND -> tr("退款")
+                BillImportMapping.isRedPacketIncome(parsed) -> tr("红包")
                 parsed.direction == BillDirection.NEUTRAL -> tr("转账")
                 BillImportMapping.toTransactionEntity(parsed)?.remoteReviewStatus == "transfer" ->
                     tr("转账")
