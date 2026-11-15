@@ -116,13 +116,14 @@
 
 ## 4. 构建与测试
 
-- Release 签名 APK：`releases/open-margin-v1.2.0-rc.8-signed.apk`
-- 包名：`com.bookkeeping.app`，versionCode `13`，versionName `1.2.0`
-- Release SHA-256：`93b71ee2e510fe032d6ef7763b8949269af4c0b4c7d68dca99ffd27242df7a36`
+- Release 签名 APK：`releases/open-margin-v1.2.0-rc.9-signed.apk`
+- 包名：`com.bookkeeping.app`，versionCode `14`，versionName `1.2.0`
+- Release SHA-256：`7164ad6f6e6544d1faa58a94ee28922c73d6b3ab6c5a4ee534ae533a26a7cded`
 - 签名证书 SHA-256：`0029505dc7dde6eff220b37e9db8cbe467235dfc9d3a948519f3f5b722c354ad`
+- 包含 UI/UX 审查刷新与 1080P 对齐修复合并；正式包基于 main。
 - Debug APK：`android/app/build/outputs/apk/debug/app-debug.apk`
 - Debug SHA-256：`c3c4f8ef97a8ebd7b3bb4af8372d00aad4ce7833eabd8e4bbb038a6fb4edd5bf`
-- JVM 单测：358 项通过（含分类器长文本/对抗输入、运行状态保持策略）
+- JVM 单测：364 项通过（含分类器长文本/对抗输入、运行状态保持策略，以及 UIUX 分支合并后的测试）
 - 后端压力/功能测试：24 项通过（同步压力 + Wallos ledger）
 - 实际微信 XLSX：368 条有效、0 错误；重复导入 `reimportValid=0`
 - 最终实机导入：预览/确认 368 条，退款 49、转账 60、红包 5；收入恢复 5 笔红包；第 19 行时间已修复；炸鸡店已归餐饮
