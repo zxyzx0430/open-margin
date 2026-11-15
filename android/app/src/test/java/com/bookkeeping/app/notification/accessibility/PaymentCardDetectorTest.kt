@@ -691,6 +691,19 @@ class PaymentCardDetectorTest {
     }
 
     @Test
+    fun chatServicePreviewIsNotAPaymentCard() {
+        val chatLines = lines(
+            "微信支付" to 100,
+            "昨天" to 140,
+            "已支付¥2.00" to 180,
+            "615 宿舍" to 300,
+            "昨天" to 340,
+            "神经研究所邑大分所" to 380,
+        )
+        assertTrue(detect(PaymentCardDetector.WECHAT, chatLines).isEmpty())
+    }
+
+    @Test
     fun unsupportedPackageIsIgnored() {
         val cardLines = lines(
             "支付成功" to 100,

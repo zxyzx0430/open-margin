@@ -3,8 +3,11 @@ package com.bookkeeping.app.ui.screen.settings
 import com.bookkeeping.app.i18n.tr
 import android.Manifest
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -71,6 +74,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -95,7 +100,6 @@ import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
 import com.bookkeeping.app.update.UpdateComponentScope
-import com.bookkeeping.app.update.UpdateVersionPolicy
 import com.bookkeeping.app.sync.SyncSettingsCard
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessibilityNew
@@ -276,6 +280,7 @@ fun SettingsScreen(
                     conflicts = conflicts,
                     lastSyncMs = lastSyncMs,
                     lastSyncMessage = lastSyncMessage,
+                    onOpenSyncDetails = { detailDialog = "sync" },
                 )
             }
             item {
@@ -587,6 +592,7 @@ private fun SyncOverviewGroup(
     conflicts: Int,
     lastSyncMs: Long,
     lastSyncMessage: String,
+    onOpenSyncDetails: () -> Unit,
 ) {
     val syncTone = when {
         lastSyncMs <= 0L -> StatusTone.NEUTRAL
@@ -599,6 +605,7 @@ private fun SyncOverviewGroup(
             subtitle = endpoint.ifBlank { tr("未配置") },
             statusText = if (enabled) tr("已开启") else tr("未开启"),
             tone = if (enabled) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+            onClick = onOpenSyncDetails,
         )
         SettingsRowDivider()
         SettingsStatusRow(
@@ -611,6 +618,7 @@ private fun SyncOverviewGroup(
                 conflicts,
             ) else tr("正常"),
             tone = if (conflicts > 0) StatusTone.WARNING else StatusTone.POSITIVE,
+            onClick = onOpenSyncDetails,
         )
         SettingsRowDivider()
         SettingsStatusRow(
@@ -619,6 +627,7 @@ private fun SyncOverviewGroup(
             subtitle = lastSyncMessage.ifBlank { tr("尚未执行同步") }.let { tr(it) },
             statusText = relativeSyncTime(lastSyncMs),
             tone = syncTone,
+            onClick = onOpenSyncDetails,
         )
     }
 }
@@ -1541,7 +1550,10 @@ private fun LanguageCard() {
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(tr("界面语言"), style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 listOf(
                     AppLanguage.CHINESE to "简体中文",
                     AppLanguage.ENGLISH to "English"
@@ -1556,7 +1568,17 @@ private fun LanguageCard() {
                                 } else error = true
                             }
                         },
-                        label = { Text(label) },
+                        label = {
+                            Text(
+                                text = label,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -1566,17 +1588,44 @@ private fun LanguageCard() {
     }
 }
 
-/** Read-only public version check. APK upgrades always remain user-initiated. */
+/** Stable-release check with an in-app DownloadManager download. */
 @Composable
 private fun AboutUpdateCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var includePrereleases by remember {
-        mutableStateOf(UpdateVersionPolicy.CURRENT_TAG.contains("-rc."))
-    }
     var checking by remember { mutableStateOf(false) }
     var result by remember {
         mutableStateOf<GitHubReleaseUpdateChecker.CheckResult?>(null)
+    }
+    var pendingDownloadId by remember { mutableStateOf<Long?>(null) }
+    var downloadMessage by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(receiverContext: Context, intent: Intent) {
+                if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+                val completedId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+                if (completedId != pendingDownloadId) return
+                pendingDownloadId = null
+                when (GitHubReleaseUpdateChecker.openDownloadedApk(context, completedId)) {
+                    GitHubReleaseUpdateChecker.InstallResult.OPENED_INSTALLER ->
+                        downloadMessage = null
+                    GitHubReleaseUpdateChecker.InstallResult.NEEDS_USER_ACTION -> {
+                        downloadMessage = aboutTr("已下载，请在下载管理中点击安装")
+                        GitHubReleaseUpdateChecker.openSystemDownloads(context)
+                    }
+                    GitHubReleaseUpdateChecker.InstallResult.FAILED ->
+                        downloadMessage = aboutTr("下载失败，请稍后重试")
+                }
+            }
+        }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+            ContextCompat.RECEIVER_EXPORTED,
+        )
+        onDispose { context.unregisterReceiver(receiver) }
     }
 
     Card(
@@ -1591,105 +1640,114 @@ private fun AboutUpdateCard() {
         ) {
             Text(
                 tr("当前版本") + ": " + BuildConfig.VERSION_NAME +
-                    " (Build " + BuildConfig.VERSION_CODE + ")",
+                    " (" + BuildConfig.VERSION_CODE + ")",
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(
-                tr("发布标识") + ": " + UpdateVersionPolicy.CURRENT_TAG,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    tr("包含测试版本（RC）"),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Switch(
-                    checked = includePrereleases,
-                    onCheckedChange = {
-                        includePrereleases = it
-                        result = null
-                    },
-                    enabled = !checking,
-                )
-            }
             FilledTonalButton(
                 enabled = !checking,
+                modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     checking = true
                     result = null
+                    downloadMessage = null
                     scope.launch {
                         result = withContext(Dispatchers.IO) {
-                            GitHubReleaseUpdateChecker.check(includePrereleases)
+                            GitHubReleaseUpdateChecker.checkStable()
                         }
                         checking = false
                     }
                 },
             ) {
-                Text(if (checking) tr("正在检查更新…") else tr("检查更新"))
+                Text(
+                    text = if (checking) tr("正在检查更新…") else tr("检查更新"),
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             when (val state = result) {
                 null -> Unit
                 GitHubReleaseUpdateChecker.CheckResult.UpToDate ->
-                    Text(tr("没有找到更新的 GitHub 发布版本；未检测电脑/VPS 的实际部署版本。"))
+                    Text(
+                        tr("已是最新版本"),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 GitHubReleaseUpdateChecker.CheckResult.Unavailable ->
                     Text(
                         tr("检查更新失败，请检查网络或稍后重试"),
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                     )
                 is GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable -> {
-                    Text(tr("发现新版本：") + state.tag)
-                    val (scopeTitle, scopeAdvice) = when (state.componentScope) {
-                        UpdateComponentScope.ANDROID_ONLY ->
-                            tr("仅 Android APP 更新") to tr("此次只需更新手机 APP；电脑/VPS 不需要因这个版本重新部署。")
-                        UpdateComponentScope.SERVER_ONLY ->
-                            tr("仅 Windows / VPS 更新") to tr("此次只更新电脑或 VPS 服务端；手机 APP 无需因这个版本重装。")
-                        UpdateComponentScope.BOTH ->
-                            tr("Android APP 与 Windows / VPS 都有更新") to tr("此次两个组件都要更新，请按发布说明的步骤执行。")
-                        UpdateComponentScope.UNSPECIFIED ->
-                            tr("更新范围未注明") to tr("不能确定该版本需要更新哪些组件，请先阅读发布说明。")
-                    }
                     Text(
-                        tr("待更新组件：") + scopeTitle,
+                        tr("发现新版本：") + state.tag,
                         style = MaterialTheme.typography.titleSmall,
                     )
-                    Text(scopeAdvice, style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        tr("此处显示发行版本的更新范围，并未检测你电脑/VPS 的实际安装版本。"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutlinedButton(onClick = {
-                        // The checker constructs only github.com/zxyzx0430/open-margin
-                        // release URLs from strictly parsed version tags.
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(state.releaseUrl))
+                    if (state.apkUrl == null) {
+                        Text(
+                            text = if (
+                                state.componentScope == UpdateComponentScope.SERVER_ONLY
+                            ) {
+                                tr("仅 Windows / VPS 更新")
+                            } else {
+                                aboutTr("没有可下载的正式版 APK")
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else {
+                        Button(
+                            enabled = pendingDownloadId == null,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                downloadMessage = null
+                                val id = GitHubReleaseUpdateChecker.enqueueApkDownload(
+                                    context,
+                                    state,
+                                )
+                                if (id == null) {
+                                    downloadMessage = aboutTr("下载失败，请稍后重试")
+                                } else {
+                                    pendingDownloadId = id
+                                }
+                            },
+                        ) {
+                            Text(
+                                text = if (pendingDownloadId != null) {
+                                    aboutTr("正在下载…")
+                                } else {
+                                    aboutTr("下载并安装正式版")
+                                },
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    }) {
-                        Text(tr("查看 GitHub 发布页"))
+                    }
+                    downloadMessage?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
-            OutlinedButton(onClick = {
-                runCatching {
-                    context.startActivity(
-                        Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("https://github.com/zxyzx0430/open-margin/releases")
-                        )
-                    )
-                }
-            }) {
-                Text(tr("浏览全部发布版本"))
-            }
-            Text(
-                tr("检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
+
+// About-card labels not yet covered by the shared translation table.
+private val ABOUT_UPDATE_ENGLISH = mapOf(
+    "下载并安装正式版" to "Download stable release",
+    "正在下载…" to "Downloading…",
+    "下载失败，请稍后重试" to "Download failed. Try again later.",
+    "已下载，请在下载管理中点击安装" to "Downloaded. Tap the file in Downloads to install.",
+    "没有可下载的正式版 APK" to "No stable APK is available for download.",
+)
+
+private fun aboutTr(chinese: String): String =
+    if (AppLanguage.current() == AppLanguage.ENGLISH) {
+        ABOUT_UPDATE_ENGLISH[chinese] ?: tr(chinese)
+    } else {
+        chinese
+    }

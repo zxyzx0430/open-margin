@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -100,6 +101,9 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
     val selectedMonth by viewModel.selectedMonth.collectAsState()
     val dailyAverage by viewModel.dailyAverageCents.collectAsState()
     val comparison by viewModel.previousComparison.collectAsState()
+    val period by viewModel.period.collectAsState()
+    val selectedYear by viewModel.selectedYear.collectAsState()
+    val monthlyTotals by viewModel.monthlyTotals.collectAsState()
 
     var showMonthPicker by remember { mutableStateOf(false) }
 
@@ -121,10 +125,17 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                     )
                 },
                 actions = {
-                    MonthPickerButton(
-                        month = selectedMonth,
-                        onClick = { showMonthPicker = true },
-                    )
+                    when (period) {
+                        StatsPeriod.MONTH -> MonthPickerButton(
+                            month = selectedMonth,
+                            onClick = { showMonthPicker = true },
+                        )
+                        StatsPeriod.YEAR -> YearStepper(
+                            year = selectedYear,
+                            onPrevious = { viewModel.shiftYear(-1) },
+                            onNext = { viewModel.shiftYear(1) },
+                        )
+                    }
                 },
             )
         },
@@ -136,6 +147,12 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item(key = "period_toggle") {
+                PeriodToggle(
+                    selected = period,
+                    onSelect = viewModel::setPeriod,
+                )
+            }
             item(key = "type_toggle") {
                 TypeToggle(
                     selected = viewingType,
@@ -148,6 +165,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                     dailyAverageCents = dailyAverage,
                     comparison = comparison,
                     type = viewingType,
+                    period = period,
                 )
             }
             item(key = "summary_note") {
@@ -155,7 +173,9 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
             }
 
             if (stats.isEmpty()) {
-                item(key = "empty") { EmptyStatsCard(type = viewingType) }
+                item(key = "empty") {
+                    EmptyStatsCard(type = viewingType, period = period)
+                }
             } else {
                 item(key = "donut") {
                     CategoryDonutCard(
@@ -164,12 +184,21 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                         type = viewingType,
                     )
                 }
-                item(key = "daily_trend") {
-                    DailyTrendCard(
-                        dailyTotals = dailyTotals,
-                        dailyAverageCents = dailyAverage,
-                        monthKey = selectedMonth,
-                    )
+                when (period) {
+                    StatsPeriod.MONTH -> item(key = "daily_trend") {
+                        DailyTrendCard(
+                            dailyTotals = dailyTotals,
+                            dailyAverageCents = dailyAverage,
+                            monthKey = selectedMonth,
+                        )
+                    }
+                    StatsPeriod.YEAR -> item(key = "monthly_trend") {
+                        MonthlyTrendCard(
+                            monthlyTotals = monthlyTotals,
+                            year = selectedYear,
+                            type = viewingType,
+                        )
+                    }
                 }
                 item(key = "category_detail") {
                     CategoryDetailCard(stats = stats, type = viewingType)
@@ -257,14 +286,78 @@ private fun TypePill(
 }
 
 @Composable
+private fun PeriodToggle(
+    selected: StatsPeriod,
+    onSelect: (StatsPeriod) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        PeriodPill(
+            text = statsText("月度", "Monthly"),
+            selected = selected == StatsPeriod.MONTH,
+            onClick = { onSelect(StatsPeriod.MONTH) },
+            modifier = Modifier.weight(1f),
+        )
+        PeriodPill(
+            text = statsText("全年", "Year"),
+            selected = selected == StatsPeriod.YEAR,
+            onClick = { onSelect(StatsPeriod.YEAR) },
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun PeriodPill(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(50)
+    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
+    Box(
+        modifier = modifier
+            .heightIn(min = 44.dp)
+            .clip(shape)
+            .background(if (selected) QingPrimary else QingSurface)
+            .border(1.dp, if (selected) QingPrimary else QingOutline, shape)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = foreground,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun StatsSummaryCard(
     totalCents: Long,
     dailyAverageCents: Long,
     comparison: MonthComparison,
     type: TransactionType,
+    period: StatsPeriod,
 ) {
     val income = type == TransactionType.INCOME
-    val totalLabel = if (income) tr("本月总收入") else tr("本月总支出")
+    val annual = period == StatsPeriod.YEAR
+    val totalLabel = when {
+        annual && income -> statsText("全年总收入", "Total annual income")
+        annual -> statsText("全年总支出", "Total annual expenses")
+        income -> tr("本月总收入")
+        else -> tr("本月总支出")
+    }
     val totalColor = if (income) QingIncome else QingExpense
     val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
     Column(
@@ -311,16 +404,24 @@ private fun StatsSummaryCard(
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = tr("较上月"),
+                    text = if (annual) {
+                        statsText("较上一年", "vs last year")
+                    } else {
+                        tr("较上月")
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = mutedOnContainer,
                 )
                 ComparisonValue(comparison = comparison, type = type)
                 Text(
-                    text = if (comparison.previousCents > 0L) {
-                        "${tr("上月")} ${formatCny(comparison.previousCents)}"
-                    } else {
-                        tr("上月无数据")
+                    text = when {
+                        comparison.previousCents > 0L && annual ->
+                            "${statsText("上一年", "Last year")} " +
+                                formatCny(comparison.previousCents)
+                        comparison.previousCents > 0L ->
+                            "${tr("上月")} ${formatCny(comparison.previousCents)}"
+                        annual -> statsText("上一年无数据", "No data last year")
+                        else -> tr("上月无数据")
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = mutedOnContainer,
@@ -371,7 +472,11 @@ private fun SummaryNote(type: TransactionType) {
         )
         Text(
             text = if (type == TransactionType.INCOME) {
-                tr("不包含转账和退款，统计仅计入实际收入。")
+                statsText(
+                    "收入包含转入、红包等实际入账，仅排除退款和未计入记录。",
+                    "Income includes incoming transfers and red packets; only refunds " +
+                        "and excluded records are omitted.",
+                )
             } else {
                 tr("不包含转账和退款，统计仅计入实际消费支出。")
             },
@@ -503,6 +608,99 @@ private fun DailyTrendCard(
 }
 
 @Composable
+private fun MonthlyTrendCard(
+    monthlyTotals: List<MonthlyTotal>,
+    year: Int,
+    type: TransactionType,
+) {
+    if (monthlyTotals.isEmpty()) return
+    val shape = RoundedCornerShape(20.dp)
+    val amountColor = if (type == TransactionType.INCOME) QingIncome else QingExpense
+    val maxCents = monthlyTotals.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = statsText("月度趋势", "Monthly trend"),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = yearLabel(year),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = QingPrimaryDeep,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(QingMintSoft)
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                )
+            }
+            monthlyTotals.forEach { item ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = monthShortLabel(item.month),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingTextSecondary,
+                        modifier = Modifier.width(34.dp),
+                        maxLines = 1,
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(QingSurfaceVariant),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (item.totalCents > 0L) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(
+                                        item.totalCents.toFloat() / maxCents.toFloat()
+                                    )
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(50))
+                                    .background(amountColor),
+                            )
+                        }
+                    }
+                    Text(
+                        text = formatCny(item.totalCents),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (item.totalCents > 0L) amountColor else QingTextSecondary,
+                        fontWeight = if (item.totalCents > 0L) {
+                            FontWeight.SemiBold
+                        } else {
+                            FontWeight.Normal
+                        },
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.width(88.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CategoryDetailCard(
     stats: List<CategoryStat>,
     type: TransactionType,
@@ -575,7 +773,8 @@ private fun CategoryDetailCard(
 }
 
 @Composable
-private fun EmptyStatsCard(type: TransactionType) {
+private fun EmptyStatsCard(type: TransactionType, period: StatsPeriod) {
+    val annual = period == StatsPeriod.YEAR
     val shape = RoundedCornerShape(20.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -606,12 +805,27 @@ private fun EmptyStatsCard(type: TransactionType) {
             }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (type == TransactionType.INCOME) tr("本月还没有收入") else tr("本月还没有支出"),
+                    text = when {
+                        annual && type == TransactionType.INCOME ->
+                            statsText("该年还没有收入", "No income recorded for this year")
+                        annual ->
+                            statsText("该年还没有支出", "No expenses recorded for this year")
+                        type == TransactionType.INCOME -> tr("本月还没有收入")
+                        else -> tr("本月还没有支出")
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = tr("记账后这里会显示分类占比和每日趋势。"),
+                    text = if (annual) {
+                        statsText(
+                            "记账后这里会显示分类占比和每月趋势。",
+                            "After you add records, category shares and the monthly " +
+                                "trend will appear here.",
+                        )
+                    } else {
+                        tr("记账后这里会显示分类占比和每日趋势。")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
                 )
@@ -657,6 +871,77 @@ private fun MonthPickerButton(
             modifier = Modifier.size(16.dp),
         )
     }
+}
+
+@Composable
+private fun YearStepper(
+    year: Int,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val shape = RoundedCornerShape(50)
+    val canGoPrevious = year > StatsViewModel.MIN_YEAR
+    val canGoNext = year < StatsViewModel.MAX_YEAR
+    Row(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(QingSurface)
+            .border(1.dp, QingOutline, shape),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(
+            onClick = onPrevious,
+            enabled = canGoPrevious,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowLeft,
+                contentDescription = tr("上一年"),
+                tint = if (canGoPrevious) QingPrimary else QingTextSecondary.copy(alpha = 0.38f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Text(
+            text = yearLabel(year),
+            style = MaterialTheme.typography.labelMedium,
+            color = QingPrimaryDeep,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+        IconButton(
+            onClick = onNext,
+            enabled = canGoNext,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowRight,
+                contentDescription = tr("下一年"),
+                tint = if (canGoNext) QingPrimary else QingTextSecondary.copy(alpha = 0.38f),
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Stats-only bilingual strings added after the shared EnglishUiText map was
+ * frozen for this change. Move these keys into EnglishUiText when that file is
+ * next touched.
+ */
+private fun statsText(chinese: String, english: String): String =
+    if (AppLanguage.current() == AppLanguage.ENGLISH) english else chinese
+
+private fun yearLabel(year: Int): String =
+    if (AppLanguage.current() == AppLanguage.ENGLISH) year.toString() else "${year}年"
+
+private fun monthShortLabel(month: Int): String {
+    if (AppLanguage.current() != AppLanguage.ENGLISH) return "${month}月"
+    val cal = Calendar.getInstance().apply {
+        clear()
+        set(Calendar.MONTH, month - 1)
+    }
+    return SimpleDateFormat("MMM", Locale.ENGLISH).format(cal.time)
 }
 
 private fun monthLabel(key: String): String {

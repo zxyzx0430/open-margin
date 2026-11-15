@@ -147,6 +147,18 @@ object PaymentCardDetector {
         "支付处理中", "付款处理中", "支付中", "付款中",
         "支出", "消费",
     )
+    private val NEGATIVE_PAYMENT_MARKERS = listOf(
+        "你无需支付", "无需支付", "他人已支付", "对方已支付", "由对方支付",
+    )
+    private val STRONG_COMPLETED_PAYMENT = listOf(
+        "支付成功", "付款成功", "交易成功", "支付完成", "付款完成",
+        "扣款成功", "已扣款", "消费成功",
+    )
+    private val PAYMENT_CONTEXT_LABELS = listOf(
+        "商户名称", "商户全称", "收款方", "收款人", "付款方", "订单号",
+        "交易单号", "商户单号", "支付方式", "付款方式", "交易详情", "账单详情",
+        "使用零钱支付", "使用银行卡支付", "通过零钱扣款",
+    )
     private val BILL_PAGE_MARKERS = listOf(
         "账单", "交易记录", "支付记录", "收支明细", "交易详情", "账单详情",
     )
@@ -391,6 +403,7 @@ object PaymentCardDetector {
         val joined = lines.joinToString(" ") { it.text }
         if (SENSITIVE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
+        if (NEGATIVE_PAYMENT_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (isSummaryGroup(joined)) return null
 
         val classification = classify(lines, joined, pageText) ?: return null
@@ -448,7 +461,7 @@ object PaymentCardDetector {
         if (joined.contains("红包")) return classifyRedPacket(joined)
         if (WITHDRAWAL_MARKERS.any { joined.contains(it) }) return classifyWithdrawal(joined)
         if (TRANSFER_MARKERS.any { joined.contains(it) }) return classifyTransfer(joined)
-        if (PAYMENT_MARKERS.any { joined.contains(it) }) return classifyPayment(joined)
+        if (PAYMENT_MARKERS.any { joined.contains(it) }) return classifyPayment(lines, joined)
         return classifyBill(lines, joined, pageText)
     }
 
@@ -597,7 +610,18 @@ object PaymentCardDetector {
         )
     }
 
-    private fun classifyPayment(joined: String): Classification {
+    private fun classifyPayment(
+        lines: List<BillTextLine>,
+        joined: String,
+    ): Classification? {
+        val weakPaid = containsAny(joined, "已支付", "已付款")
+        val strongPaid = STRONG_COMPLETED_PAYMENT.any { joined.contains(it) }
+        val hasContext = PAYMENT_CONTEXT_LABELS.any { joined.contains(it) } ||
+            labeledMerchant(lines) != null
+        // "已支付¥2.00" is a common chat/service-message preview. Without a
+        // merchant, order or payment-method field it is not proof that the
+        // user paid this amount on this page.
+        if (weakPaid && !strongPaid && !hasContext) return null
         val status = when {
             containsAny(joined, "已取消", "订单已取消", "交易关闭", "订单已关闭") ->
                 PaymentCardStatus.CANCELLED

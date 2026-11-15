@@ -87,6 +87,7 @@ import com.bookkeeping.app.ui.components.LedgerEmptyState
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.components.LedgerFilterRow
 import com.bookkeeping.app.ui.components.LedgerSearchBar
+import com.bookkeeping.app.ui.components.MerchantRuleDialog
 import com.bookkeeping.app.ui.components.MonthlySummaryCard
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
@@ -119,6 +120,9 @@ private data class LedgerStatus(
     val missingSetup: List<String>,
 )
 
+/** The filter chips behave as one single-select group. */
+private enum class LedgerFilterSelection { ALL, MONTH, EXPENSE, INCOME, CATEGORY }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransactionListScreen(
@@ -144,6 +148,7 @@ fun TransactionListScreen(
     var showCaptureReview by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var editing by remember { mutableStateOf<TransactionEntity?>(null) }
+    var ruleTarget by remember { mutableStateOf<TransactionEntity?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
@@ -193,13 +198,16 @@ fun TransactionListScreen(
         }
     }
 
-    val filterActive = searchQuery.isNotBlank() ||
-        typeFilter != null ||
-        categoryFilter != null ||
-        timeFilter == LedgerTimeFilter.THIS_MONTH
     val userFilterActive = searchQuery.isNotBlank() ||
         typeFilter != null ||
         categoryFilter != null
+    val selectedFilter = when {
+        categoryFilter != null -> LedgerFilterSelection.CATEGORY
+        typeFilter == TransactionType.EXPENSE -> LedgerFilterSelection.EXPENSE
+        typeFilter == TransactionType.INCOME -> LedgerFilterSelection.INCOME
+        timeFilter == LedgerTimeFilter.THIS_MONTH -> LedgerFilterSelection.MONTH
+        else -> LedgerFilterSelection.ALL
+    }
 
     Scaffold(
         containerColor = QingBackground,
@@ -231,62 +239,66 @@ fun TransactionListScreen(
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = tr("更多"),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(tr("打开系统通知设置")) },
-                            onClick = {
-                                menuExpanded = false
-                                openAppNotificationSettings(context)
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(tr("导入账单")) },
-                            onClick = {
-                                menuExpanded = false
-                                showBillImport = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    tr("扫描结果") +
-                                        if (captureReview.pending.isNotEmpty()) {
-                                            "（${captureReview.pending.size}）"
-                                        } else {
-                                            ""
-                                        },
-                                )
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                captureReviewViewModel.refresh()
-                                showCaptureReview = true
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(tr("清空筛选")) },
-                            onClick = {
-                                menuExpanded = false
-                                viewModel.clearFilters()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(tr("刷新状态")) },
-                            onClick = {
-                                menuExpanded = false
-                                statusRefresh++
-                            },
-                        )
+                    // Anchor the menu to the overflow button so it opens from
+                    // the right edge instead of the row's left edge.
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = tr("更多"),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(tr("打开系统通知设置")) },
+                                onClick = {
+                                    menuExpanded = false
+                                    openAppNotificationSettings(context)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(tr("导入账单")) },
+                                onClick = {
+                                    menuExpanded = false
+                                    showBillImport = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        tr("扫描结果") +
+                                            if (captureReview.pending.isNotEmpty()) {
+                                                "（${captureReview.pending.size}）"
+                                            } else {
+                                                ""
+                                            },
+                                    )
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    captureReviewViewModel.refresh()
+                                    showCaptureReview = true
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(tr("清空筛选")) },
+                                onClick = {
+                                    menuExpanded = false
+                                    viewModel.clearFilters()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(tr("刷新状态")) },
+                                onClick = {
+                                    menuExpanded = false
+                                    statusRefresh++
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -336,63 +348,34 @@ fun TransactionListScreen(
                 }
             }
 
-            if (transactions.isEmpty()) {
-                item(key = "empty") {
-                    LedgerEmptyState(
-                        filterActive = userFilterActive,
-                        hasAnyTransactions = hasAnyTransactions,
-                        onClearFilters = viewModel::clearFilters,
-                        onShowAll = { viewModel.setTimeFilter(LedgerTimeFilter.ALL) },
-                    )
-                }
-            }
-
             item(key = "filters") {
                 LedgerFilterRow(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     LedgerFilterChip(
                         label = tr("全部"),
-                        selected = !filterActive,
-                        onClick = { viewModel.clearFilters() },
+                        selected = selectedFilter == LedgerFilterSelection.ALL,
+                        onClick = viewModel::showAll,
                     )
                     LedgerFilterChip(
                         label = tr("本月"),
-                        selected = timeFilter == LedgerTimeFilter.THIS_MONTH,
-                        onClick = {
-                            viewModel.setTimeFilter(
-                                if (timeFilter == LedgerTimeFilter.THIS_MONTH) {
-                                    LedgerTimeFilter.ALL
-                                } else {
-                                    LedgerTimeFilter.THIS_MONTH
-                                }
-                            )
-                        },
+                        selected = selectedFilter == LedgerFilterSelection.MONTH,
+                        onClick = { viewModel.selectTimeFilterOnly(LedgerTimeFilter.THIS_MONTH) },
                     )
                     LedgerFilterChip(
                         label = tr("支出"),
-                        selected = typeFilter == TransactionType.EXPENSE,
-                        onClick = {
-                            viewModel.setTypeFilter(
-                                if (typeFilter == TransactionType.EXPENSE) null
-                                else TransactionType.EXPENSE
-                            )
-                        },
+                        selected = selectedFilter == LedgerFilterSelection.EXPENSE,
+                        onClick = { viewModel.selectTypeFilterOnly(TransactionType.EXPENSE) },
                     )
                     LedgerFilterChip(
                         label = tr("收入"),
-                        selected = typeFilter == TransactionType.INCOME,
-                        onClick = {
-                            viewModel.setTypeFilter(
-                                if (typeFilter == TransactionType.INCOME) null
-                                else TransactionType.INCOME
-                            )
-                        },
+                        selected = selectedFilter == LedgerFilterSelection.INCOME,
+                        onClick = { viewModel.selectTypeFilterOnly(TransactionType.INCOME) },
                     )
                     Box {
                         LedgerFilterChip(
                             label = categoryFilter?.let { tr(it.displayName) } ?: tr("分类"),
-                            selected = categoryFilter != null,
+                            selected = selectedFilter == LedgerFilterSelection.CATEGORY,
                             onClick = { categoryMenuExpanded = true },
                         )
                         DropdownMenu(
@@ -411,7 +394,7 @@ fun TransactionListScreen(
                                     text = { Text(tr(category.displayName)) },
                                     onClick = {
                                         categoryMenuExpanded = false
-                                        viewModel.setCategoryFilter(category)
+                                        viewModel.selectCategoryFilterOnly(category)
                                     },
                                 )
                             }
@@ -427,11 +410,24 @@ fun TransactionListScreen(
                         incomeCents = monthlyIncome,
                     )
                 }
+            }
 
+            if (transactions.isNotEmpty() || userFilterActive) {
                 item(key = "search") {
                     LedgerSearchBar(
                         query = searchQuery,
                         onQueryChange = viewModel::setSearchQuery,
+                    )
+                }
+            }
+
+            if (transactions.isEmpty()) {
+                item(key = "empty") {
+                    LedgerEmptyState(
+                        filterActive = userFilterActive,
+                        hasAnyTransactions = hasAnyTransactions,
+                        onClearFilters = viewModel::showAll,
+                        onShowAll = viewModel::showAll,
                     )
                 }
             }
@@ -450,36 +446,40 @@ fun TransactionListScreen(
                 val groups = transactions.groupBy { dayKey(it.timestamp) }
                 items(groups.entries.toList(), key = { it.key }) { (dayKey, dayItems) ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        val valid = dayItems.filter {
+                        val visible = dayItems.filter {
                             it.currency == "CNY" &&
                                 it.duplicateOfId == null &&
                                 it.remoteReviewStatus !in setOf(
                                     "excluded",
-                                    "transfer",
                                     "refund",
                                     "possible_duplicate",
                                 )
                         }
-                        val expense = valid
+                        val counted = visible.filter {
+                            it.type == "INCOME" ||
+                                (it.type == "EXPENSE" && it.category != "TRANSFER")
+                        }
+                        val expense = visible
                             .filter { it.type == "EXPENSE" && it.category != "TRANSFER" }
                             .sumOf { it.amountCents }
-                        val income = valid
+                        val income = visible
                             .filter { it.type == "INCOME" }
                             .sumOf { it.amountCents }
-                        val foreignOnly = valid.isEmpty() && dayItems.any { it.currency != "CNY" }
+                        val foreignOnly = visible.isEmpty() && dayItems.any { it.currency != "CNY" }
                         DayHeader(
                             label = dayLabel(dayKey),
-                            count = valid.size,
+                            count = counted.size,
                             expenseCents = expense,
                             incomeCents = income,
                             hasForeignOnly = foreignOnly,
-                            excludedCount = dayItems.size - valid.size,
+                            excludedCount = dayItems.size - counted.size,
                         )
                         DayCard(
                             items = dayItems,
                             onEdit = { editing = it },
                             onDelete = { pendingDelete = it },
                             onReview = viewModel::setReviewStatus,
+                            onAddCategoryRule = { ruleTarget = it },
                         )
                     }
                 }
@@ -524,6 +524,21 @@ fun TransactionListScreen(
         )
     }
 
+    ruleTarget?.let { entry ->
+        MerchantRuleDialog(
+            merchant = entry.merchant,
+            initialCategory = runCatching {
+                TransactionCategory.valueOf(entry.category)
+            }.getOrNull(),
+            onDismiss = { ruleTarget = null },
+            onSave = { merchant, category ->
+                viewModel.saveMerchantRule(merchant, category)
+                viewModel.updateCategory(entry, category)
+                ruleTarget = null
+            },
+        )
+    }
+
     if (showBillImport) {
         BillImportDialog(onDismiss = { showBillImport = false })
     }
@@ -552,6 +567,7 @@ private fun DayCard(
     onEdit: (TransactionEntity) -> Unit,
     onDelete: (TransactionEntity) -> Unit,
     onReview: (TransactionEntity, String) -> Unit,
+    onAddCategoryRule: (TransactionEntity) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -568,6 +584,7 @@ private fun DayCard(
                     onEdit = { onEdit(transaction) },
                     onDelete = { onDelete(transaction) },
                     onReview = { status -> onReview(transaction, status) },
+                    onAddCategoryRule = { onAddCategoryRule(transaction) },
                 )
                 if (index != items.lastIndex) {
                     HorizontalDivider(
