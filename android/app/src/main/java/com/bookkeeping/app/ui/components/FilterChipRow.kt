@@ -14,10 +14,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.bookkeeping.app.ui.theme.QingOutline
-import com.bookkeeping.app.ui.theme.QingPrimary
-import com.bookkeeping.app.ui.theme.QingSurface
-import com.bookkeeping.app.ui.theme.QingTextSecondary
 
 @Composable
 fun LedgerFilterChip(
@@ -42,12 +38,12 @@ fun LedgerFilterChip(
                 )
             }
         },
-        border = if (selected) null else BorderStroke(1.dp, QingOutline),
+        border = if (selected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         colors = FilterChipDefaults.filterChipColors(
-            containerColor = QingSurface,
-            labelColor = QingTextSecondary,
-            iconColor = QingTextSecondary,
-            selectedContainerColor = QingPrimary,
+            containerColor = MaterialTheme.colorScheme.surface,
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
             selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
             selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
         ),

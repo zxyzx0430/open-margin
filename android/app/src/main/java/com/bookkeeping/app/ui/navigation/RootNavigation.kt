@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.navigation
 
 import com.bookkeeping.app.i18n.tr
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -8,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -21,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -44,49 +47,58 @@ fun RootNavigation() {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp,
-            ) {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+            Column {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                ) {
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentDestination = navBackStackEntry?.destination
+                    val showLabels = LocalDensity.current.fontScale <= 1.3f
 
-                BottomNavItem.ALL.forEach { item ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+                    BottomNavItem.ALL.forEach { item ->
+                        val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                        val label: (@Composable () -> Unit)? = if (showLabels) {
+                            {
+                                Text(
+                                    text = tr(item.label),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
-                        },
-                        icon = {
-                            Icon(
-                                item.icon,
-                                contentDescription = tr(item.label),
-                                modifier = Modifier.size(24.dp),
-                            )
-                        },
-                        // Keep navigation compact at large system font sizes:
-                        // English "Transactions" previously wrapped to two lines.
-                        label = {
-                            Text(
-                                text = tr(item.label),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    )
+                        } else {
+                            null
+                        }
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    item.icon,
+                                    contentDescription = tr(item.label),
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            },
+                            label = label,
+                            alwaysShowLabel = showLabels,
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -102,7 +114,17 @@ fun RootNavigation() {
                     onBillImportOpened = { requestBillImport = false },
                 )
             }
-            composable(BottomNavItem.Stats.route) { StatsScreen() }
+            composable(BottomNavItem.Stats.route) {
+                StatsScreen(
+                    onOpenLedger = {
+                        navController.navigate(BottomNavItem.Transactions.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
+            }
             composable(BottomNavItem.Budget.route) { BudgetScreen() }
             composable(BottomNavItem.Settings.route) {
                 SettingsScreen(

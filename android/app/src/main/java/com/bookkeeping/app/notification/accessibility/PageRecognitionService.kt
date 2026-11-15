@@ -1,18 +1,24 @@
 package com.bookkeeping.app.notification.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.capture.success.PaymentPage
+import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.ocr.MlKitOcrEngine
+import com.bookkeeping.app.ocr.OcrEngine
+import com.bookkeeping.app.ocr.PaddleOcrEngine
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewMapping
 import kotlinx.coroutines.withContext
 import dagger.hilt.android.EntryPointAccessors
@@ -28,8 +34,9 @@ import kotlinx.coroutines.launch
  * Page recognition service.
  *
  * It only reads WeChat/Alipay pages, only captures after the page passes the
- * pure PaymentPageDetector safety checks, and only writes a local candidate.
- * It never inserts a ledger row and never scrolls the source app.
+ * safety checks, and only writes local candidates. Completed cards go through
+ * the normal deduplicating repository path; unfinished cards are never booked.
+ * It never scrolls the source app.
  *
  * OCR is part of this single capture pipeline, not a separate opt-in feature.
  * The service runs whenever the user enables it in system accessibility.
@@ -44,10 +51,13 @@ open class PageRecognitionService : AccessibilityService() {
 
     private lateinit var store: CaptureCandidateStore
     private lateinit var repository: TransactionRepository
-    private var ocrEngine: MlKitOcrEngine? = null
+    private var ocrEngine: OcrEngine? = null
 
     private var lastPageIdentity: String? = null
     private var lastCaptureAtMs: Long = 0L
+    private var lastWindowActivity: String? = null
+    private var lastWindowPackage: String? = null
+    private val recentCaptureKeys = mutableMapOf<String, Long>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -65,6 +75,9 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        if (BuildConfig.DEBUG) {
+            Log.v(TAG, "EVT type=${event.eventType} pkg=${event.packageName} capturing=${capturing.get()}")
+        }
         try {
             handleEvent(event)
         } catch (failure: Exception) {
@@ -89,49 +102,62 @@ open class PageRecognitionService : AccessibilityService() {
         if (root.packageName?.toString() != packageName) return
         runCatching { root.refresh() }
 
-        val now = System.currentTimeMillis()
-        val snapshot = root.toSnapshot(packageName, now)
-
-        // WeChat Pay bill cards: refund arrival, pay-after-use, merchant payment.
-        // They are not "success pages"; parse them as separate card candidates.
-        val billCards = WechatBillCardDetector.fromSnapshot(packageName, snapshot, now)
-        if (billCards.isNotEmpty()) {
-            val pageIdentity = billCards.first().pageIdentity
-            if (pageIdentity == lastPageIdentity && now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS) return
-            if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
-            val candidates = billCards.map { card ->
-                CaptureCandidate(
-                    packageName = packageName,
-                    pageIdentity = card.pageIdentity,
-                    amountCents = card.amountCents,
-                    merchantCandidates = card.merchantCandidates,
-                    orderId = card.orderId,
-                    capturedAtMs = now,
-                    screenshotPath = null,
-                    confidence = card.confidence,
-                    reason = card.reason,
-                    kind = when (card.kind) {
-                        BillCardKind.REFUND -> CaptureCandidate.KIND_REFUND
-                        BillCardKind.AUTO_PAY -> CaptureCandidate.KIND_AUTO_PAY
-                        BillCardKind.PAYMENT -> CaptureCandidate.KIND_PAYMENT
-                    },
-                    eventTimeMs = card.eventTimeMs ?: now,
-                )
-            }
-            capturing.set(true)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                captureScreenshotForCandidates(candidates)
-            } else {
-                processCandidates(candidates.map { it.copy(reason = "screenshot unsupported") }, null)
-            }
-            return
+        if (lastWindowPackage != packageName) {
+            lastWindowPackage = packageName
+            lastWindowActivity = null
+            lastPageIdentity = null
+            lastCaptureAtMs = 0L
         }
 
-        // If accessibility nodes are incomplete, OCR the visible WeChat Pay bill
-        // page and parse the same card layout from OCR lines.
+        val now = System.currentTimeMillis()
+        val snapshot = root.toSnapshot(packageName, now)
+        val activity = if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            event.className?.toString().orEmpty().also { lastWindowActivity = it }
+        } else {
+            lastWindowActivity ?: event.className?.toString().orEmpty()
+        }
+        val allowStrictAuto = strictSuccessAllowance(packageName, activity, snapshot)
+
+        // Payment/bill cards: merchant payment, transfer, red packet, withdrawal,
+        // refund, and pay-after-use. Only explicitly completed cards may be booked.
+        val cards = PaymentCardDetector.fromSnapshot(packageName, snapshot, now)
+        if (cards.isNotEmpty()) {
+            val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
+            if (candidates.isNotEmpty()) {
+                val pageIdentity = candidates.first().pageIdentity
+                if (pageIdentity == lastPageIdentity && now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS) return
+                if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
+                capturing.set(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    captureScreenshotForCandidates(candidates, allowStrictAuto, snapshot.root.windowId)
+                } else {
+                    processCandidates(
+                        candidates.map { it.copy(reason = "screenshot unsupported") },
+                        null,
+                        allowStrictAuto,
+                    )
+                }
+                return
+            }
+            if (BuildConfig.DEBUG) {
+                cards.forEach {
+                    Log.v(
+                        TAG,
+                        "skip card kind=${it.kind} status=${it.status} " +
+                            "reason=${it.nonFinalReason ?: it.reason}",
+                    )
+                }
+            }
+            // No completed card in the node tree; OCR may still see a completed
+            // card that accessibility exposed only as a non-final placeholder.
+        }
+
+        // If accessibility nodes are incomplete, OCR the visible payment page
+        // and parse the same card layout from OCR lines. This is the fallback
+        // for notification-less red packets, refunds, transfers, and withdrawals.
         val pageText = snapshot.flattenText()
-        if (packageName == PaymentPageDetector.PKG_WECHAT && looksLikeWechatBill(pageText)) {
-            val pageIdentity = "wechat-bill|${Integer.toHexString(pageText.hashCode())}"
+        if (PaymentCardDetector.looksLikePaymentPage(packageName, pageText)) {
+            val pageIdentity = PaymentCardDetector.pageIdentity(packageName, pageText)
             if (pageIdentity == lastPageIdentity &&
                 now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS
             ) {
@@ -139,17 +165,23 @@ open class PageRecognitionService : AccessibilityService() {
             }
             if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
             capturing.set(true)
-            lastPageIdentity = pageIdentity
-            lastCaptureAtMs = now
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                captureScreenshotForOcr(pageIdentity, now)
+                captureScreenshotForOcr(
+                    packageName,
+                    pageIdentity,
+                    now,
+                    allowStrictAuto,
+                    snapshot.root.windowId,
+                )
             } else {
                 capturing.set(false)
             }
             return
         }
 
-        // Success-page fallback is part of the same pipeline.
+        // Success-page fallback is part of the same pipeline. A page that already
+        // produced a known non-final card must never be reinterpreted as success.
+        if (cards.isNotEmpty()) return
         val detection = PaymentPageDetector.detect(packageName, snapshot, now)
         if (!detection.isSuccessPage) {
             if (BuildConfig.DEBUG) {
@@ -179,24 +211,31 @@ open class PageRecognitionService : AccessibilityService() {
         )
         capturing.set(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            captureScreenshotForCandidates(listOf(candidate))
+            captureScreenshotForCandidates(
+                listOf(candidate),
+                allowStrictAuto,
+                snapshot.root.windowId,
+            )
         } else {
-            processCandidates(listOf(candidate.copy(reason = "screenshot unsupported")), null)
+            processCandidates(
+                listOf(candidate.copy(reason = "screenshot unsupported")),
+                null,
+                allowStrictAuto,
+            )
         }
     }
 
-    private fun looksLikeWechatBill(text: String): Boolean =
-        text.contains("微信支付") &&
-            (text.contains("账单") || text.contains("退款") ||
-                text.contains("先用后付") || text.contains("已支付") ||
-                text.contains("交易详情"))
-
     @android.annotation.SuppressLint("NewApi")
-    private fun captureScreenshotForOcr(pageIdentity: String, now: Long) {
+    private fun captureScreenshotForOcr(
+        packageName: String,
+        pageIdentity: String,
+        now: Long,
+        allowAuto: Boolean,
+        windowId: Int,
+    ) {
         try {
-            takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                mainExecutor,
+            takeScreenshotCompat(
+                windowId,
                 object : AccessibilityService.TakeScreenshotCallback {
                     override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                         val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
@@ -208,7 +247,10 @@ open class PageRecognitionService : AccessibilityService() {
                         scope.launch {
                             try {
                                 val bytes = encodeScreenshot(bitmap)
-                                val engine = ocrEngine ?: MlKitOcrEngine().also { ocrEngine = it }
+                                val engine = ocrEngine ?: PaddleOcrEngine(
+                                    applicationContext,
+                                    fallback = MlKitOcrEngine(),
+                                ).also { ocrEngine = it }
                                 val result = withContext(Dispatchers.Default) {
                                     engine.recognize(bitmap)
                                 }
@@ -223,20 +265,22 @@ open class PageRecognitionService : AccessibilityService() {
                                         )
                                     }
                                 }
-                                val cards = WechatBillCardDetector.fromLines(
-                                    packageName = PaymentPageDetector.PKG_WECHAT,
+                                val cards = PaymentCardDetector.fromLines(
+                                    packageName = packageName,
                                     lines = lines,
                                     capturedAtMs = now,
                                     screenHeightPx = height,
                                     pageIdentity = pageIdentity,
                                 )
-                                val candidates = cards.map { card ->
-                                    billCardCandidate(PaymentPageDetector.PKG_WECHAT, pageIdentity, card, now)
-                                }
+                                val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
                                 if (candidates.isEmpty()) {
+                                    // The screenshot worked; do not retry the same
+                                    // page until its content changes.
+                                    lastPageIdentity = pageIdentity
+                                    lastCaptureAtMs = System.currentTimeMillis()
                                     capturing.set(false)
                                 } else {
-                                    processCandidates(candidates, bytes)
+                                    processCandidates(candidates, bytes, allowAuto)
                                 }
                             } catch (failure: Exception) {
                                 Log.e(TAG, "OCR capture failed: ${failure.javaClass.simpleName}")
@@ -259,28 +303,37 @@ open class PageRecognitionService : AccessibilityService() {
         }
     }
 
-    private fun billCardCandidate(
-        packageName: String,
-        pageIdentity: String,
-        card: BillCardDetection,
-        now: Long,
-    ): CaptureCandidate = CaptureCandidate(
-        packageName = packageName,
-        pageIdentity = pageIdentity,
-        amountCents = card.amountCents,
-        merchantCandidates = card.merchantCandidates,
-        orderId = card.orderId,
-        capturedAtMs = now,
-        screenshotPath = null,
-        confidence = card.confidence,
-        reason = card.reason,
-        kind = when (card.kind) {
-            BillCardKind.REFUND -> CaptureCandidate.KIND_REFUND
-            BillCardKind.AUTO_PAY -> CaptureCandidate.KIND_AUTO_PAY
-            BillCardKind.PAYMENT -> CaptureCandidate.KIND_PAYMENT
-        },
-        eventTimeMs = card.eventTimeMs ?: now,
-    )
+    private fun PaymentCardDetection.toCaptureCandidate(now: Long): CaptureCandidate? {
+        if (!isFinal) return null
+        val candidateKind = when (kind) {
+            PaymentCardKind.PAYMENT -> CaptureCandidate.KIND_PAYMENT
+            PaymentCardKind.REFUND -> CaptureCandidate.KIND_REFUND
+            PaymentCardKind.PAY_AFTER_USE -> CaptureCandidate.KIND_AUTO_PAY
+            PaymentCardKind.TRANSFER -> CaptureCandidate.KIND_TRANSFER
+            PaymentCardKind.RED_PACKET -> CaptureCandidate.KIND_RED_PACKET
+            PaymentCardKind.WITHDRAWAL -> CaptureCandidate.KIND_WITHDRAWAL
+            PaymentCardKind.BILL -> CaptureCandidate.KIND_BILL
+        }
+        val candidateDirection = when (direction) {
+            PaymentDirection.EXPENSE -> CaptureCandidate.DIRECTION_EXPENSE
+            PaymentDirection.INCOME -> CaptureCandidate.DIRECTION_INCOME
+            PaymentDirection.UNKNOWN -> return null
+        }
+        return CaptureCandidate(
+            packageName = source.packageName,
+            pageIdentity = pageIdentity,
+            amountCents = amountCents,
+            merchantCandidates = merchantCandidates,
+            orderId = orderId,
+            capturedAtMs = now,
+            screenshotPath = null,
+            confidence = confidence,
+            reason = reason.ifBlank { "ok" }.take(80),
+            kind = candidateKind,
+            eventTimeMs = eventTimeMs ?: now,
+            direction = candidateDirection,
+        )
+    }
 
     private fun encodeScreenshot(bitmap: Bitmap): ByteArray? = try {
         ByteArrayOutputStream().use { out ->
@@ -300,23 +353,45 @@ open class PageRecognitionService : AccessibilityService() {
         return active.packageName?.toString() == packageName && active.windowId == windowId
     }
 
+    private fun strictSuccessAllowance(
+        packageName: String,
+        activity: String,
+        snapshot: ScreenSnapshot,
+    ): Boolean {
+        if (activity.isBlank() || !SuccessPageDetector.eligibleActivity(packageName, activity)) {
+            return true
+        }
+        val page = PaymentPage(
+            packageName = packageName,
+            windowId = snapshot.root.windowId,
+            activity = activity,
+            texts = snapshot.root.subtreeTexts(),
+            editable = snapshot.root.walk().any { it.editable },
+        )
+        return SuccessPageDetector.detect(page) != null
+    }
+
     @android.annotation.SuppressLint("NewApi")
-    private fun captureScreenshotForCandidates(candidates: List<CaptureCandidate>) {
+    private fun captureScreenshotForCandidates(
+        candidates: List<CaptureCandidate>,
+        allowAuto: Boolean,
+        windowId: Int,
+    ) {
         try {
-            takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                mainExecutor,
+            takeScreenshotCompat(
+                windowId,
                 object : AccessibilityService.TakeScreenshotCallback {
                     override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                         val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
                         val bytes = bitmap?.let(::compressScreenshot)
-                        processCandidates(candidates, bytes)
+                        processCandidates(candidates, bytes, allowAuto)
                     }
 
                     override fun onFailure(errorCode: Int) {
                         processCandidates(
                             candidates.map { it.copy(reason = "screenshot error $errorCode") },
                             null,
+                            allowAuto,
                         )
                     }
                 },
@@ -325,36 +400,103 @@ open class PageRecognitionService : AccessibilityService() {
             processCandidates(
                 candidates.map { it.copy(reason = "screenshot start failed") },
                 null,
+                allowAuto,
             )
         }
     }
 
-    private fun processCandidates(candidates: List<CaptureCandidate>, screenshot: ByteArray?) {
+    @android.annotation.SuppressLint("NewApi")
+    private fun takeScreenshotCompat(
+        windowId: Int,
+        callback: AccessibilityService.TakeScreenshotCallback,
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && windowId != 0) {
+            takeScreenshotOfWindow(
+                windowId,
+                mainExecutor,
+                object : AccessibilityService.TakeScreenshotCallback {
+                    override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
+                        callback.onSuccess(screenshot)
+                    }
+
+                    override fun onFailure(errorCode: Int) {
+                        if (errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) {
+                            // Some OEMs still expose a readable full-display
+                            // composition for windows that reject a window-only
+                            // capture. Try it once; OCR/auto-insert still requires
+                            // a successfully decoded image.
+                            Log.w(TAG, "window screenshot secure, retry display")
+                            try {
+                                takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, callback)
+                            } catch (_: RuntimeException) {
+                                callback.onFailure(errorCode)
+                            }
+                        } else {
+                            callback.onFailure(errorCode)
+                        }
+                    }
+                },
+            )
+        } else {
+            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, callback)
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun processCandidates(
+        candidates: List<CaptureCandidate>,
+        screenshot: ByteArray?,
+        allowAuto: Boolean = true,
+    ) {
         scope.launch {
             try {
                 candidates.forEach { candidate ->
                     val stored = store.save(candidate, screenshot) ?: return@forEach
-                    if (stored.confidence >= AUTO_INSERT_CONFIDENCE &&
-                        stored.merchantCandidates.isNotEmpty()
-                    ) {
-                        val inserted = runCatching {
-                            repository.insertIfNotDuplicate(
-                                CaptureReviewMapping.toTransactionEntity(
-                                    candidate = stored,
-                                    merchant = stored.merchantCandidates.first(),
-                                    category = TransactionCategory.OTHER,
-                                ),
-                                notifySuccess = false,
-                            )
-                        }.getOrNull()
-                        if (inserted != null) {
-                            store.mark(
-                                stored,
-                                if (inserted > 0L) CaptureCandidate.STATUS_APPROVED
-                                else CaptureCandidate.STATUS_IGNORED,
-                            )
+                    val now = System.currentTimeMillis()
+                    val dedupKey = stored.dedupKey()
+                    val recentlyCaptured = synchronized(recentCaptureKeys) {
+                        val firstSeen = recentCaptureKeys[dedupKey]
+                        if (firstSeen != null && now - firstSeen < CAPTURE_KEY_TTL_MS) {
+                            true
+                        } else {
+                            recentCaptureKeys[dedupKey] = now
+                            recentCaptureKeys.entries.removeAll {
+                                now - it.value > CAPTURE_KEY_TTL_MS
+                            }
+                            false
                         }
                     }
+                    if (recentlyCaptured) {
+                        store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+                        return@forEach
+                    }
+
+                    val result = runCatching {
+                        repository.insertIfNotDuplicate(
+                            CaptureReviewMapping.toTransactionEntity(
+                                candidate = stored,
+                                merchant = stored.merchantCandidates.firstOrNull().orEmpty(),
+                                category = TransactionCategory.OTHER,
+                            ),
+                            windowMs = PAGE_DEDUP_WINDOW_MS,
+                            notifySuccess = false,
+                        )
+                    }
+                    if (result.isFailure) {
+                        // Allow a later accessibility event to retry a transient
+                        // DB failure; a duplicate result stays deduplicated.
+                        synchronized(recentCaptureKeys) { recentCaptureKeys.remove(dedupKey) }
+                        return@forEach
+                    }
+                    val inserted = result.getOrNull()
+                    store.mark(
+                        stored,
+                        if (inserted != null && inserted > 0L) {
+                            CaptureCandidate.STATUS_APPROVED
+                        } else {
+                            CaptureCandidate.STATUS_IGNORED
+                        },
+                    )
                 }
                 lastPageIdentity = candidates.firstOrNull()?.pageIdentity
                 lastCaptureAtMs = System.currentTimeMillis()
@@ -407,7 +549,11 @@ open class PageRecognitionService : AccessibilityService() {
         return try {
             val wrapped = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace) ?: return null
             try {
-                wrapped.copy(Bitmap.Config.ARGB_8888, false)
+                // Copy through Canvas instead of Bitmap.copy: some vendor
+                // screenshot buffers expose a row stride that copy() mishandles.
+                Bitmap.createBitmap(wrapped.width, wrapped.height, Bitmap.Config.ARGB_8888).also {
+                    android.graphics.Canvas(it).drawBitmap(wrapped, 0f, 0f, null)
+                }
             } finally {
                 wrapped.recycle()
             }
@@ -463,7 +609,20 @@ open class PageRecognitionService : AccessibilityService() {
     companion object {
         private const val TAG = "BkPageRecognition"
         private const val PAGE_CAPTURE_DEDUP_MS = 5 * 60_000L
-        private const val AUTO_INSERT_CONFIDENCE = 0.85f
+        private const val PAGE_DEDUP_WINDOW_MS = 30_000L
+        private const val CAPTURE_KEY_TTL_MS = 10 * 60_000L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
+        private const val PAGE_RECOGNITION_CLASS =
+            "com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+
+        /** True when the compatibility page-recognition service is enabled. */
+        fun isEnabled(context: Context): Boolean {
+            val expected = "${context.packageName}/$PAGE_RECOGNITION_CLASS"
+            val enabled = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            ).orEmpty()
+            return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+        }
     }
 }

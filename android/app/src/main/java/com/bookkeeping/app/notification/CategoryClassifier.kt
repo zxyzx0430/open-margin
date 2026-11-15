@@ -22,6 +22,8 @@ object CategoryClassifier {
             "海底捞", "西贝", "外婆家", "呷哺", "南城香", "和府捞面",
             "美团", "饿了么", "盒马", "叮咚",
             "餐厅", "酒楼", "饭店", "茶饮", "烧烤", "火锅", "面馆", "餐饮",
+            "采蝶轩", "烤鸡", "鸡腿", "炒饭", "食堂", "水果", "零食", "赵一鸣",
+            "炸鸡", "luckin", "咖啡", "羊肉粉", "烧柠",
         ) to TransactionCategory.FOOD,
 
         // 交通
@@ -30,7 +32,8 @@ object CategoryClassifier {
             "12306", "高铁", "动车", "火车", "铁路",
             "航空", "机票", "民航", "南航", "国航", "东航", "海航",
             "地铁", "公交", "公共交通",
-            "ETC", "停车", "加油", "中石化", "中石油", "充电站",
+            "ETC", "停车", "加油", "中石化", "中石油", "充电站", "充电",
+            "广东联合电子",
             "共享单车", "哈啰", "美团单车", "青桔",
         ) to TransactionCategory.TRANSPORT,
 
@@ -41,31 +44,36 @@ object CategoryClassifier {
             "Nike", "Adidas", "优衣库", "Uniqlo", "无印良品", "MUJI", "宜家", "IKEA", "网易严选",
             "7-11", "7-Eleven", "全家", "FamilyMart", "罗森", "Lawson", "便利蜂", "美宜佳", "便利店",
             "永辉", "沃尔玛", "Walmart", "Costco", "山姆", "家乐福", "超市",
+            "印象小店", "宠物用品", "快印", "生鲜", "商场", "丰巢",
         ) to TransactionCategory.SHOPPING,
+
+        // 水电 / 公用事业。放在娱乐的通用“充值”之前，避免“中国电信 充值”
+        // 被误判为游戏充值。
+        listOf("水费", "电费", "燃气费", "燃气", "热力", "网费", "宽带", "话费", "流量充值",
+            "中国移动", "中国联通", "中国电信", "自来充") to TransactionCategory.UTILITIES,
 
         // 娱乐 / 数字订阅
         listOf(
             "Steam", "Epic", "PlayStation", "PSN", "Switch", "任天堂", "Xbox",
             "腾讯视频", "爱奇艺", "优酷", "Netflix", "Disney", "HBO", "Spotify", "Apple Music", "网易云",
             "电影院", "万达", "CGV", "UME", "大地影院",
-            "B站", "bilibili", "抖音", "快手",
+            "B站", "bilibili", "哔哩哔哩", "抖音", "快手",
             "KTV", "唱吧", "游戏", "氪金", "充值",
+            "游卡", "桌游", "网吧",
         ) to TransactionCategory.ENTERTAINMENT,
 
         // 住房
         listOf("房租", "租金", "物业", "中介费", "押金", "二房东") to TransactionCategory.HOUSING,
 
-        // 水电 / 公用事业
-        listOf("水费", "电费", "燃气费", "燃气", "热力", "网费", "宽带", "话费", "流量充值") to TransactionCategory.UTILITIES,
-
         // 医疗
-        listOf("医院", "药店", "药房", "挂号", "诊所", "体检", "口腔", "牙科", "眼科") to TransactionCategory.HEALTH,
+        listOf("医院", "药店", "药房", "挂号", "诊所", "体检", "口腔", "牙科", "眼科", "医药") to TransactionCategory.HEALTH,
 
         // 教育
-        listOf("学费", "培训", "课程", "网课", "得到", "极客时间", "教材", "书店", "当当", "Kindle", "Audible") to TransactionCategory.EDUCATION,
+        listOf("学费", "培训", "课程", "网课", "得到", "极客时间", "教材", "书店", "当当", "Kindle", "Audible",
+            "大学", "背单词", "墨墨") to TransactionCategory.EDUCATION,
 
-        // 转账
-        listOf("转账", "转入", "转出", "汇款") to TransactionCategory.TRANSFER,
+        // 转账 / 红包 / 提现
+        listOf("转账", "转入", "转出", "汇款", "提现", "红包", "发给") to TransactionCategory.TRANSFER,
     )
 
     // 输入：商户名 + 上下文文本（如通知正文、短信正文）

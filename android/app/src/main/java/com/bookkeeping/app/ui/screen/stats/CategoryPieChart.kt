@@ -15,11 +15,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.formatCny
-import com.bookkeeping.app.ui.theme.QingPrimaryDeep
-import com.bookkeeping.app.ui.theme.QingSurfaceVariant
-import com.bookkeeping.app.ui.theme.QingTextSecondary
+import java.util.Locale
 
 /**
  * Donut category chart. The legend lives in the parent so it can use the
@@ -33,7 +35,16 @@ fun CategoryPieChart(
     modifier: Modifier = Modifier,
 ) {
     if (stats.isEmpty() || totalCents <= 0L) return
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+    val description = tr("分类占比") + "：" + stats.joinToString("，") { stat ->
+        "${tr(stat.category.displayName)} ${
+            "%.1f".format(Locale.CHINA, stat.percentage * 100)
+        }% ${formatCny(stat.totalCents)}"
+    }
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    Box(
+        modifier = modifier.semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val strokeWidth = 18.dp.toPx()
             val diameter = (size.minDimension - strokeWidth).coerceAtLeast(1f)
@@ -43,7 +54,7 @@ fun CategoryPieChart(
             )
             val arcSize = Size(diameter, diameter)
             drawArc(
-                color = QingSurfaceVariant,
+                color = trackColor,
                 startAngle = 0f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -70,19 +81,22 @@ fun CategoryPieChart(
             }
         }
         Column(
-            modifier = Modifier.padding(horizontal = 8.dp),
+            modifier = Modifier.padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = formatCny(totalCents),
-                style = MaterialTheme.typography.titleLarge,
-                color = QingPrimaryDeep,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = centerLabel,
                 style = MaterialTheme.typography.labelSmall,
-                color = QingTextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

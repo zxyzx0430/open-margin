@@ -33,7 +33,7 @@ object NotificationParser {
 
     // 收入关键词
     private val INCOME_KEYWORDS = listOf(
-        "成功收款", "收款成功", "已收款", "您已收款",
+        "成功收款", "收款成功", "已收款", "您已收款", "收款到账",
         "已到账", "到账成功", "已存入零钱",
         "收到转账", "转账到账",
         "向你付款", "向您付款",  // 别人付给你（微信）
@@ -63,48 +63,101 @@ object NotificationParser {
         "你有一笔", "您有一笔",
     )
     private val COMPLETED_INCOME_HINTS = listOf(
-        "成功收款", "收款成功", "已收款", "您已收款",
+        "成功收款", "收款成功", "已收款", "您已收款", "收款到账",
         "已到账", "到账成功", "收到转账", "向你付款", "向您付款",
         "收到退款", "退款到账", "退款成功", "已存入零钱",
     )
     private val ENGLISH_PAID = Regex("""\bpaid\b""", RegexOption.IGNORE_CASE)
+    private val SENSITIVE_HINTS = listOf("验证码", "动态密码", "支付密码", "付款密码", "口令")
+    private val INCOMPLETE_HINTS = listOf(
+        "处理中", "待支付", "待付款", "退款中", "退款申请", "等待商家",
+        "待领取", "未领取", "等待对方确认", "待对方确认", "待确认收款",
+    )
+    // Transfers, withdrawals and red packets are not always phrased with a
+    // payment verb. Keep these separate so the generic promotion filter does
+    // not mistake a real red packet for a coupon.
+    private val WITHDRAWAL_HINTS = listOf(
+        "提现成功", "提现已到账", "提现到账", "提现到银行卡", "零钱提现",
+    )
+    private val OUTGOING_TRANSFER_REGEX = Regex("""(?:转账给|已转账给)(?!\s*[你您])""")
+    private val OUTGOING_TRANSFER_HINTS = listOf(
+        "你已转账", "您已转账",
+    )
+    private val INCOMING_RED_PACKET_REGEX =
+        Regex("""(?:收到|领取了|已领取)\s*\S{0,20}\s*的?红包""")
+    private val INCOMING_RED_PACKET_SETTLED = listOf("红包到账", "红包已存入零钱")
+    private val OUTGOING_RED_PACKET_HINTS = listOf(
+        "已发出红包", "红包已发出", "发红包成功", "已发红包",
+    )
+
+    private fun isWithdrawal(full: String): Boolean =
+        WITHDRAWAL_HINTS.any { full.contains(it) }
+
+    private fun isOutgoingTransfer(full: String): Boolean =
+        OUTGOING_TRANSFER_REGEX.containsMatchIn(full) ||
+            OUTGOING_TRANSFER_HINTS.any { full.contains(it) }
+
+    private fun isIncomingRedPacket(full: String): Boolean =
+        (INCOMING_RED_PACKET_REGEX.containsMatchIn(full) ||
+            INCOMING_RED_PACKET_SETTLED.any { full.contains(it) }) &&
+            !full.contains("封面") && !full.contains("皮肤") && !full.contains("表情")
+
+    private fun isOutgoingRedPacket(full: String): Boolean =
+        OUTGOING_RED_PACKET_HINTS.any { full.contains(it) }
 
     /** Fail closed on generic amount-only notifications and redemption prompts. */
     internal fun isSettledPaymentNotification(full: String): Boolean {
+        if (SENSITIVE_HINTS.any { full.contains(it) }) return false
+        if (INCOMPLETE_HINTS.any { full.contains(it) }) return false
         val explicitExpense = COMPLETED_EXPENSE_HINTS.any { full.contains(it) } &&
             !(full.contains("你有一笔") || full.contains("您有一笔")) ||
             (full.contains("你有一笔") || full.contains("您有一笔")) &&
                 (full.contains("的支出") || full.contains("支出，") || full.contains("支出。"))
         val explicitIncome = COMPLETED_INCOME_HINTS.any { full.contains(it) }
         val payToMerchant = PAY_TO_MERCHANT_REGEX.containsMatchIn(full)
+        val payToYou = PAY_TO_YOU_REGEX.containsMatchIn(full)
         val receivedTransfer = RECEIVED_TRANSFER.containsMatchIn(full)
         val englishPaid = ENGLISH_PAID.containsMatchIn(full)
+        val withdrawal = isWithdrawal(full)
+        val outgoingTransfer = isOutgoingTransfer(full)
+        val incomingRedPacket = isIncomingRedPacket(full)
+        val outgoingRedPacket = isOutgoingRedPacket(full)
         val confirmed = explicitExpense || explicitIncome || payToMerchant ||
-            receivedTransfer || englishPaid
+            payToYou || receivedTransfer || englishPaid || withdrawal ||
+            outgoingTransfer || incomingRedPacket || outgoingRedPacket
         if (!confirmed) return false
         if (PROMOTION_HINTS.any { full.contains(it) } &&
-            !explicitExpense && !explicitIncome && !payToMerchant &&
-            !receivedTransfer && !englishPaid) return false
+            !explicitExpense && !explicitIncome && !payToMerchant && !payToYou &&
+            !receivedTransfer && !englishPaid && !withdrawal && !outgoingTransfer &&
+            !incomingRedPacket && !outgoingRedPacket) return false
         // "红包" must not be taken as a credit merely because a notification
-        // says "收到红包"; opening/settlement is checked by the UI extractor.
+        // says "收到红包"; a genuine red packet has an explicit settlement
+        // phrase, while a coupon only mentions the word.
         if (full.contains("红包") && !explicitExpense && !explicitIncome &&
-            !payToMerchant && !receivedTransfer && !englishPaid) return false
+            !payToMerchant && !payToYou && !receivedTransfer && !englishPaid &&
+            !incomingRedPacket && !outgoingRedPacket) return false
         return true
     }
 
-    // "向 商户名 付款" 模式（区分于"向你/您 付款"）= 支出
-    private val PAY_TO_MERCHANT_REGEX = Regex("""向\s*(?!你|您)(\S+?)\s*付款""")
-    // "收到 张三 的转账" 是微信个人转账的真实通知格式。
-    private val RECEIVED_TRANSFER = Regex("""收到\s*\S{1,20}\s*的转账""")
+    // "向 商户名 付款/支付" 模式（区分于"向你/您 付款"）= 支出
+    private val PAY_TO_MERCHANT_REGEX = Regex("""向(?!\s*[你您])\s*(\S+?)\s*(?:付款|支付)""")
+    private val PAY_TO_YOU_REGEX = Regex("""向\s*(?:你|您)\s*(?:付款|支付)""")
+    // "收到 张三 的转账" 和 "张三转账给你" 都是微信个人转账的真实格式。
+    private val RECEIVED_TRANSFER = Regex("""(?:收到\s*\S{1,20}\s*的转账|转账给(?:你|您))""")
 
     // 商户提取模式（按优先级试，命中即用）
     private val MERCHANT_PATTERNS = listOf(
-        Regex("""向\s*(?!你|您)(\S+?)\s*付款"""),  // 微信：向 麦当劳 付款（排除"向你/您"）
+        Regex("""向(?!\s*[你您])\s*(\S+?)\s*(?:付款|支付)"""),  // 微信：向 麦当劳 付款/向商户支付（排除"向你/您"）
         Regex("""付款给\s*(\S+?)(?:[\s，,。.！!]|$)"""),
         Regex("""付给\s*(\S+?)(?:[\s，,。.！!]|$)"""),
         Regex("""收到\s*(\S+?)\s*的转账"""),     // 微信：收到 张三 的转账
+        Regex("""收到\s*(\S+?)\s*的红包"""),     // 微信：收到 张三 的红包
+        Regex("""(?:领取了|已领取)\s*(\S+?)\s*的红包"""),
+        Regex("""给\s*(\S+?)\s*(?:发|送)红包"""),
+        Regex("""提现(?:到|至)\s*(\S+?)(?:[\s，,。.！!]|$)"""),
         Regex("""来自\s*(\S+?)(?:[\s，,。.！!]|$)"""),
-        Regex("""转账给\s*(\S+?)(?:[\s，,。.！!]|$)"""),
+        Regex("""转账给(?!\s*[你您])\s*(\S+?)(?:[\s，,。.！!]|$)"""),
+        Regex("""收款方\s*(\S+?)(?:[\s，,。.！!]|$)"""),
         // 支付宝付款成功后面跟商户："付款成功￥3.00 (AB)湖北武汉..."
         Regex("""[¥￥][0-9.]+\s*[-—]?\s*(\S{2,})"""),
     )
@@ -120,12 +173,28 @@ object NotificationParser {
             PKG_WECHAT -> TransactionSource.WECHAT
             else -> return null
         }
+        // A chat message such as "张三: 支付成功 ¥12.30" is not a payment
+        // notification. WeChat/Alipay payment notices have a service title.
+        if (!title.isNullOrBlank() && !isPaymentTitle(source, title)) return null
         return parseCore(
             full = "${title.orEmpty()} ${text.orEmpty()}".trim(),
             source = source,
             timestampMs = timestampMs,
         )
     }
+
+    private fun isPaymentTitle(source: TransactionSource, title: String): Boolean =
+        when (source) {
+            TransactionSource.WECHAT -> listOf(
+                "微信支付", "微信收款", "服务通知", "支付通知", "收款通知", "退款到账",
+                "微信红包", "Weixin Pay", "WeChat Pay",
+            ).any { title.contains(it, ignoreCase = true) }
+            TransactionSource.ALIPAY -> listOf(
+                "支付宝", "付款成功", "收款成功", "支付助手", "交易提醒", "支付提醒",
+                "到账通知", "退款",
+            ).any { title.contains(it, ignoreCase = true) }
+            else -> false
+        }
 
     private fun parseCore(
         full: String,
@@ -136,7 +205,10 @@ object NotificationParser {
         if (!isSettledPaymentNotification(full)) return null
 
         // 1. 提金额
-        val amountCents = extractAmountCents(full) ?: return null
+        val amountCents = extractAmountCents(
+            full,
+            allowRedPacketAmount = isIncomingRedPacket(full) || isOutgoingRedPacket(full),
+        ) ?: return null
 
         // 2. 判收支方向。优先级：
         //    a. INCOME 关键词（包括"向你付款"这种明确信号）
@@ -144,12 +216,22 @@ object NotificationParser {
         //    c. "向 商户 付款"模式（排除"向你/您"）
         //    d. 默认 EXPENSE
         val type = when {
+            // A payment notification can mention a reward red packet after
+            // the actual amount; the payment verb must win over the word
+            // "领取...红包".
             INCOME_KEYWORDS.any { full.contains(it) } -> TransactionType.INCOME
+            PAY_TO_YOU_REGEX.containsMatchIn(full) -> TransactionType.INCOME
             RECEIVED_TRANSFER.containsMatchIn(full) -> TransactionType.INCOME
             EXPENSE_KEYWORDS.any { full.contains(it) } -> TransactionType.EXPENSE
             PAY_TO_MERCHANT_REGEX.containsMatchIn(full) -> TransactionType.EXPENSE
+            isIncomingRedPacket(full) -> TransactionType.INCOME
+            isOutgoingRedPacket(full) -> TransactionType.EXPENSE
+            isWithdrawal(full) -> TransactionType.EXPENSE
+            isOutgoingTransfer(full) -> TransactionType.EXPENSE
             else -> TransactionType.EXPENSE
         }
+        val transferLike = isWithdrawal(full) || isOutgoingTransfer(full) ||
+            isIncomingRedPacket(full) || isOutgoingRedPacket(full)
 
         // 3. 提商户名 + 自动分类
         val extracted = extractMerchant(full)
@@ -168,6 +250,7 @@ object NotificationParser {
             source = source.name,
             account = if (source == TransactionSource.ALIPAY) "支付宝" else "微信",
             timestamp = timestampMs,
+            remoteReviewStatus = if (transferLike) "transfer" else "unverified",
         )
     }
 
@@ -183,7 +266,10 @@ object NotificationParser {
         """(?:付款成功|支付成功|成功付款|成功支付|已付款|已支付|成功收款|收款成功|收到退款|退款到账|到账成功|已到账|的支出|付款|收款|扣款|扣费)\s*[：:]?\s*$"""
     )
 
-    private fun extractAmountCents(text: String): Long? {
+    private fun extractAmountCents(
+        text: String,
+        allowRedPacketAmount: Boolean = false,
+    ): Long? {
         // Bank/payment texts may use thousands separators. Normalize before
         // matching, otherwise "￥1,234.56" is read as ￥1 or 234.56.
         val cleaned = text.replace(Regex("""(?<=\d),(?=\d)"""), "")
@@ -200,8 +286,14 @@ object NotificationParser {
             val after = cleaned.substring(match.range.last + 1, (match.range.last + 13).coerceAtMost(cleaned.length))
             val isConfirmed = TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before)
             // An amount immediately preceded by "优惠券/红包/余额" is a
-            // promotional value even if "付款成功" appears earlier.
-            if (NON_TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before)) continue
+            // promotional value even if "付款成功" appears earlier. A real
+            // red-packet notification is the one exception: its amount is
+            // often written directly after "红包".
+            if (NON_TRANSACTION_AMOUNT_BEFORE.containsMatchIn(before)) {
+                val redPacketAmount = allowRedPacketAmount &&
+                    Regex("""红包\s*[：:]?\s*$""").containsMatchIn(before)
+                if (!redPacketAmount) continue
+            }
             // A trailing promo label is allowed only for an amount already
             // confirmed by a transaction verb ("付款成功 ￥3.00 红包抵扣").
             if (NON_TRANSACTION_AMOUNT_AFTER.containsMatchIn(after) && !isConfirmed) continue

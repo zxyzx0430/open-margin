@@ -35,14 +35,19 @@ class StatsViewModel @Inject constructor(
     private val _selectedMonth = MutableStateFlow(BudgetMonth.currentKey())
     val selectedMonth: StateFlow<String> = _selectedMonth
 
+    private val _statsLoaded = MutableStateFlow(false)
+    val statsLoaded: StateFlow<Boolean> = _statsLoaded
+
     // 选中月份按分类聚合后的列表（金额降序）
     val categoryStats: StateFlow<List<CategoryStat>> = _selectedMonth
         .flatMapLatest { month ->
+            _statsLoaded.value = false
             val (start, end) = BudgetMonth.range(month)
             combine(
                 repository.observeBetween(start, end),
                 _viewingType,
             ) { transactions, type ->
+                _statsLoaded.value = true
                 val filtered = filterForType(transactions, type)
                 if (filtered.isEmpty()) return@combine emptyList()
 

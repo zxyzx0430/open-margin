@@ -84,3 +84,11 @@ val Typography = Typography(
         letterSpacing = 0.2.sp,
     ),
 )
+
+/** Named type roles so screens do not pick unrelated Material styles. */
+object QingType {
+    val pageTitle = Typography.headlineSmall
+    val primaryKpi = Typography.headlineMedium
+    val secondaryKpi = Typography.titleMedium
+    val metricLabel = Typography.labelSmall
+}

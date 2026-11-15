@@ -6,17 +6,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +35,11 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.MoneyAmount
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 // "新建账单"对话框
 // 这是个无状态 Composable：所有数据从外部传入，所有事件通过回调传出。
@@ -45,6 +56,14 @@ fun AddTransactionDialog(
         merchant: String,
         note: String,
     ) -> Unit,
+    onConfirmAt: ((
+        amountCents: Long,
+        type: TransactionType,
+        category: TransactionCategory,
+        merchant: String,
+        note: String,
+        timestampMs: Long,
+    ) -> Unit)? = null,
 ) {
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
     var amountText by remember(initial?.id) {
@@ -64,26 +83,83 @@ fun AddTransactionDialog(
     var merchant by remember(initial?.id) { mutableStateOf(initial?.merchant ?: "") }
     var note by remember(initial?.id) { mutableStateOf(initial?.note ?: "") }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
+    var datePickerOpen by remember { mutableStateOf(false) }
+    var occurredAtMs by remember(initial?.id) {
+        mutableStateOf(initial?.timestamp ?: System.currentTimeMillis())
+    }
 
     val amountValid = MoneyAmount.cents(amountText) != null
+    val dateLabel = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA)
+        .format(Date(occurredAtMs))
+
+    if (datePickerOpen) {
+        val pickerState = rememberDatePickerState(initialSelectedDateMillis = occurredAtMs)
+        DatePickerDialog(
+            onDismissRequest = { datePickerOpen = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    pickerState.selectedDateMillis?.let { selected ->
+                        val calendar = Calendar.getInstance().apply {
+                            timeInMillis = occurredAtMs
+                            val chosen = Calendar.getInstance(
+                                TimeZone.getTimeZone("UTC"),
+                            ).apply { timeInMillis = selected }
+                            set(Calendar.YEAR, chosen.get(Calendar.YEAR))
+                            set(Calendar.MONTH, chosen.get(Calendar.MONTH))
+                            set(Calendar.DAY_OF_MONTH, chosen.get(Calendar.DAY_OF_MONTH))
+                        }
+                        occurredAtMs = calendar.timeInMillis
+                    }
+                    datePickerOpen = false
+                }) { Text(tr("确定")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { datePickerOpen = false }) { Text(tr("取消")) }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if(initial==null)tr("新建账单") else tr("编辑账单（将同步）")) },
+        title = { Text(if (initial == null) tr("新建账单") else tr("编辑账单")) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 // 收入 / 支出 切换
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = selectedType == TransactionType.EXPENSE,
-                        onClick = { selectedType = TransactionType.EXPENSE },
+                        onClick = {
+                            selectedType = TransactionType.EXPENSE
+                            if (selectedCategory == TransactionCategory.SALARY) {
+                                selectedCategory = TransactionCategory.FOOD
+                            }
+                        },
                         label = { Text(tr("支出")) }
                     )
                     FilterChip(
                         selected = selectedType == TransactionType.INCOME,
-                        onClick = { selectedType = TransactionType.INCOME },
+                        onClick = {
+                            selectedType = TransactionType.INCOME
+                            if (selectedCategory == TransactionCategory.FOOD) {
+                                selectedCategory = TransactionCategory.SALARY
+                            }
+                        },
                         label = { Text(tr("收入")) }
                     )
+                }
+
+                if (onConfirmAt != null) {
+                    OutlinedButton(
+                        onClick = { datePickerOpen = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(tr("日期") + ": " + dateLabel)
+                    }
                 }
 
                 OutlinedTextField(
@@ -93,6 +169,11 @@ fun AddTransactionDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     isError = amountText.isNotEmpty() && !amountValid,
+                    supportingText = {
+                        if (amountText.isNotEmpty() && !amountValid) {
+                            Text(tr("金额格式不正确"))
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -146,7 +227,18 @@ fun AddTransactionDialog(
             TextButton(
                 onClick = {
                     val amount = MoneyAmount.cents(amountText) ?: return@TextButton
-                    onConfirm(amount, selectedType, selectedCategory, merchant, note)
+                    if (onConfirmAt != null) {
+                        onConfirmAt(
+                            amount,
+                            selectedType,
+                            selectedCategory,
+                            merchant,
+                            note,
+                            occurredAtMs,
+                        )
+                    } else {
+                        onConfirm(amount, selectedType, selectedCategory, merchant, note)
+                    }
                 },
                 enabled = amountValid
             ) { Text(tr("保存")) }

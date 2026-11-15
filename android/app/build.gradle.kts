@@ -28,6 +28,9 @@ android {
             // Different Actions runners produce different debug signing keys.
             // Keep the original installed app/data untouched during migration.
             applicationIdSuffix = ".sync2"
+            resValue("string", "app_name", "清衡测试")
+            resValue("string", "page_recognition_service_label", "清衡测试 · 页面识别")
+            resValue("string", "accessibility_fallback_service_label", "清衡测试 · 转账红包兜底")
         }
         release {
             isMinifyEnabled = false
@@ -84,7 +87,8 @@ dependencies {
     // Vico 图表
     implementation(libs.vico.compose.m3)
 
-    // 本地中文 OCR（支付成功页补充识别，图片不出本机）
+    // 本地中文 OCR（PaddleOCR V6 Tiny；ML Kit 仅作为非 arm64 设备回退）
+    implementation(project(":paddle-ocr-sdk"))
     implementation(libs.mlkit.text.recognition.chinese)
 
     // Background upload; default disabled until opt-in

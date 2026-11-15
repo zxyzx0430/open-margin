@@ -81,6 +81,11 @@ class TransactionRepository @Inject constructor(
         windowMs: Long = 8_000L,
         notifySuccess: Boolean = true,
     ): Long? = duplicateMutex.withLock {
+        transaction.sourceTransactionId?.let { orderId ->
+            if (dao.findBySourceTransactionId(transaction.source, orderId) != null) {
+                return@withLock null
+            }
+        }
         val existing = dao.findRecentSameAmount(
             source = transaction.source,
             merchant = transaction.merchant,

@@ -78,6 +78,15 @@ internal object XlsxReader {
         for (rowIndex in 0 until rowNodes.length) {
             if (rows.size >= maxRows) break
             val row = (rowNodes.item(rowIndex) as? Element) ?: continue
+            // Excel may omit empty <row> elements. Use the sheet's real row
+            // number so preview messages match the file the user sees.
+            val excelRow = row.getAttribute("r").toIntOrNull()
+            if (excelRow != null) {
+                while (rows.size < excelRow - 1 && rows.size < maxRows) {
+                    rows.add(emptyList())
+                }
+                if (rows.size >= maxRows) break
+            }
             val cells = row.getElementsByTagName("c")
             val values = mutableListOf<String>()
             var sequentialColumn = 0

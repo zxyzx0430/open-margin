@@ -3,7 +3,9 @@ package com.bookkeeping.app.ui.screen.settings
 import com.bookkeeping.app.i18n.tr
 import android.Manifest
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -52,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,11 +96,13 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.bookkeeping.app.notification.NotificationListenerHelper
+import com.bookkeeping.app.notification.PaymentNotificationListenerService
 import com.bookkeeping.app.notification.SmsPermissionHelper
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import com.bookkeeping.app.ui.components.SectionHeader
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
+import com.google.android.accessibility.selecttospeak.SelectToSpeakService
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -142,6 +147,68 @@ fun SettingsScreen(
         postNotificationsGranted = areNotificationsGranted(context)
         smsGranted = SmsPermissionHelper.isGranted(context)
         permissionRefreshKey++
+    }
+
+    var notificationPermissionRequested by rememberSaveable { mutableStateOf(false) }
+    var smsPermissionRequested by rememberSaveable { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        postNotificationsGranted = areNotificationsGranted(context)
+        permissionRefreshKey++
+    }
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        smsGranted = SmsPermissionHelper.isGranted(context)
+        permissionRefreshKey++
+    }
+
+    fun requestNotificationPermissionOrOpenSettings() {
+        if (postNotificationsGranted) {
+            openAppNotificationSettings(context)
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            openAppNotificationSettings(context)
+            return
+        }
+        val permissionGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (permissionGranted) {
+            openAppNotificationSettings(context)
+            return
+        }
+        val activity = context.findActivity()
+        val canAsk = !notificationPermissionRequested ||
+            activity?.shouldShowRequestPermissionRationale(
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != false
+        if (canAsk) {
+            notificationPermissionRequested = true
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            openAppDetailsSettings(context)
+        }
+    }
+
+    fun requestSmsPermissionOrOpenSettings() {
+        if (smsGranted) {
+            openAppDetailsSettings(context)
+            return
+        }
+        val activity = context.findActivity()
+        val permission = Manifest.permission.READ_SMS
+        val canAsk = !smsPermissionRequested ||
+            activity?.shouldShowRequestPermissionRationale(permission) != false
+        if (canAsk) {
+            smsPermissionRequested = true
+            smsPermissionLauncher.launch(SmsPermissionHelper.REQUIRED_PERMISSIONS)
+        } else {
+            openAppDetailsSettings(context)
+        }
     }
 
     LaunchedEffect(lifecycleOwner, permissionRefreshKey) {
@@ -214,19 +281,29 @@ fun SettingsScreen(
             item {
                 CaptureStatusGroup(
                     notificationEnabled = notificationEnabled,
+                    pageRecognitionEnabled = pageRecognitionEnabled,
+                    postNotificationsGranted = postNotificationsGranted,
                     accessibilityHealth = accessibilityHealth,
                     smsGranted = smsGranted,
                     lastSyncMs = lastSyncMs,
                     lastSyncMessage = lastSyncMessage,
+                    onOpenAutomation = { detailDialog = "automation" },
                     onOpenNotificationSettings = {
-                        NotificationListenerHelper.openSettings(context)
+                        openNotificationListenerDetails(context)
                     },
-                    onOpenAccessibilitySettings = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
+                    onOpenPageRecognitionSettings = {
+                        openAccessibilityServiceDetails(context, SelectToSpeakService::class.java)
                     },
-                    onOpenAppSettings = { openAppDetailsSettings(context) },
+                    onOpenFallbackServiceDetails = {
+                        openAccessibilityServiceDetails(
+                            context,
+                            AccessibilityCaptureService::class.java,
+                        )
+                    },
+                    onOpenNotificationPermission = {
+                        requestNotificationPermissionOrOpenSettings()
+                    },
+                    onOpenSmsPermission = { requestSmsPermissionOrOpenSettings() },
                 )
             }
 
@@ -256,20 +333,6 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("权限授权")) }
-            item {
-                PermissionStatusGroup(
-                    notificationEnabled = notificationEnabled,
-                    smsGranted = smsGranted,
-                    accessibilityHealth = accessibilityHealth,
-                    onOpenNotificationSettings = {
-                        NotificationListenerHelper.openSettings(context)
-                    },
-                    onOpenSmsSettings = { openAppDetailsSettings(context) },
-                    onOpenAccessibilityDetails = { detailDialog = "accessibility" },
-                )
-            }
-
             item { SectionHeader(tr("账单导入")) }
             item {
                 SettingsGroupCard {
@@ -281,7 +344,7 @@ fun SettingsScreen(
                     )
                 }
                 SettingsHint(
-                    tr("历史账单请使用官方导出文件。自动采集的高置信度记录会自动入账，低置信度记录进入待确认；密码/验证页面会跳过。"),
+                    tr("历史账单请使用官方导出文件。扫描到的已完成记录会直接入账，并在交易行标注置信度和账单日期；密码/验证页面会跳过。"),
                 )
             }
 
@@ -347,12 +410,16 @@ fun SettingsScreen(
                             runtimePermissionLauncher.launch(runtimePermissionsToRequest())
                         },
                         onOpenNotificationSettings = {
-                            NotificationListenerHelper.openSettings(context)
+                            openNotificationListenerDetails(context)
                         },
-                        onOpenAccessibilitySettings = {
-                            runCatching {
-                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            }
+                        onOpenPageRecognitionDetails = {
+                            openAccessibilityServiceDetails(context, SelectToSpeakService::class.java)
+                        },
+                        onOpenFallbackDetails = {
+                            openAccessibilityServiceDetails(
+                                context,
+                                AccessibilityCaptureService::class.java,
+                            )
                         },
                         onOpenAppSettings = { openAppDetailsSettings(context) },
                         onRefresh = { permissionRefreshKey++ },
@@ -375,11 +442,7 @@ fun SettingsScreen(
                         onRefresh = {
                             accessibilityHealth = AccessibilityCaptureHealth.snapshot(context)
                         },
-                        onOpen = {
-                            runCatching {
-                                context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            }
-                        },
+                        onOpen = { openAccessibilitySettings(context) },
                     )
                 }
                 "keepAlive" -> SettingsDetailDialog(tr("常驻运行状态"), { detailDialog = null }) {
@@ -402,15 +465,86 @@ private fun isAccessibilityServiceEnabled(context: Context, className: String): 
     return list.split(':').any { it.equals(expected, ignoreCase = true) }
 }
 
-private fun openAppDetailsSettings(context: Context) {
-    runCatching {
-        context.startActivity(
-            Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.fromParts("package", context.packageName, null),
-            ),
-        )
+private const val ACTION_ACCESSIBILITY_DETAILS_SETTINGS =
+    "android.settings.ACCESSIBILITY_DETAILS_SETTINGS"
+
+private fun isMiuiOrHyperOs(): Boolean {
+    val names = listOf(Build.MANUFACTURER, Build.BRAND).map {
+        it.orEmpty().lowercase(Locale.ROOT)
     }
+    if (names.any { it == "xiaomi" || it == "redmi" || it == "poco" }) return true
+    return runCatching {
+        val systemProperties = Class.forName("android.os.SystemProperties")
+        val get = systemProperties.getMethod("get", String::class.java)
+        (get.invoke(null, "ro.miui.ui.version.name") as? String).orEmpty().isNotEmpty()
+    }.getOrDefault(false)
+}
+
+private fun openAccessibilityServiceDetails(context: Context, serviceClass: Class<*>) {
+    if (!isMiuiOrHyperOs() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val detailIntent = Intent(ACTION_ACCESSIBILITY_DETAILS_SETTINGS)
+            .putExtra(Intent.EXTRA_COMPONENT_NAME, ComponentName(context, serviceClass))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (startActivitySafely(context, detailIntent)) return
+    }
+    openAccessibilitySettings(context)
+}
+
+private fun openAccessibilitySettings(context: Context) {
+    if (startActivitySafely(
+            context,
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    ) {
+        return
+    }
+    openAppDetailsSettings(context)
+}
+
+private fun openNotificationListenerDetails(context: Context) {
+    if (!isMiuiOrHyperOs() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val detailIntent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+            .putExtra(
+                Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                ComponentName(context, PaymentNotificationListenerService::class.java),
+            )
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (startActivitySafely(context, detailIntent)) return
+    }
+    if (startActivitySafely(
+            context,
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    ) {
+        return
+    }
+    openAppDetailsSettings(context)
+}
+
+private fun startActivitySafely(context: Context, intent: Intent): Boolean =
+    runCatching {
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
+
+private fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+private fun openAppDetailsSettings(context: Context) {
+    val appDetails = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", context.packageName, null),
+    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (startActivitySafely(context, appDetails)) return
+    startActivitySafely(
+        context,
+        Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
 }
 
 private fun relativeSyncTime(timestampMs: Long): String {
@@ -436,19 +570,25 @@ private fun relativeSyncTime(timestampMs: Long): String {
 @Composable
 private fun CaptureStatusGroup(
     notificationEnabled: Boolean,
+    pageRecognitionEnabled: Boolean,
+    postNotificationsGranted: Boolean,
     accessibilityHealth: AccessibilityCaptureHealth.Snapshot,
     smsGranted: Boolean,
     lastSyncMs: Long,
     lastSyncMessage: String,
+    onOpenAutomation: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
-    onOpenAppSettings: () -> Unit,
+    onOpenPageRecognitionSettings: () -> Unit,
+    onOpenFallbackServiceDetails: () -> Unit,
+    onOpenNotificationPermission: () -> Unit,
+    onOpenSmsPermission: () -> Unit,
 ) {
-    val accessibilityStatus = when (accessibilityHealth.state) {
-        AccessibilityConnectionState.CONNECTED -> tr("已连接")
-        AccessibilityConnectionState.PERMISSION_OFF -> tr("未开启")
-        else -> tr("已授权未连接")
-    }
+    val automationReady = requiredAutomationReady(
+        notificationListenerEnabled = notificationEnabled,
+        pageRecognitionEnabled = pageRecognitionEnabled,
+        fallbackAccessibilityEnabled = accessibilityHealth.authorized,
+        postNotificationsGranted = postNotificationsGranted,
+    )
     val accessibilityTone = when (accessibilityHealth.state) {
         AccessibilityConnectionState.CONNECTED -> StatusTone.POSITIVE
         AccessibilityConnectionState.PERMISSION_OFF -> StatusTone.ERROR
@@ -462,28 +602,55 @@ private fun CaptureStatusGroup(
         SettingsStatusRow(
             icon = Icons.Filled.Notifications,
             title = tr("自动记账"),
-            subtitle = tr("自动识别消费并生成账单"),
-            statusText = if (notificationEnabled) tr("已开启") else tr("未开启"),
+            subtitle = tr("通知、页面识别、无障碍兜底和通知权限的总状态"),
+            statusText = if (automationReady) tr("已就绪") else tr("未就绪"),
+            tone = if (automationReady) StatusTone.POSITIVE else StatusTone.ERROR,
+            onClick = onOpenAutomation,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.Notifications,
+            title = tr("通知权限"),
+            subtitle = tr("用于常驻状态条和成功提醒，不影响通知监听"),
+            statusText = if (postNotificationsGranted) tr("已就绪") else tr("未就绪"),
+            tone = if (postNotificationsGranted) StatusTone.POSITIVE else StatusTone.WARNING,
+            onClick = onOpenNotificationPermission,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.Notifications,
+            title = tr("通知使用权"),
+            subtitle = tr("用于抓取支付宝/微信支付通知"),
+            statusText = if (notificationEnabled) tr("已就绪") else tr("未就绪"),
             tone = if (notificationEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
             onClick = onOpenNotificationSettings,
         )
         SettingsRowDivider()
         SettingsStatusRow(
             icon = Icons.Filled.AccessibilityNew,
+            title = tr("页面识别"),
+            subtitle = tr("识别支付/账单页面，OCR 兜底"),
+            statusText = if (pageRecognitionEnabled) tr("已就绪") else tr("未就绪"),
+            tone = if (pageRecognitionEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
+            onClick = onOpenPageRecognitionSettings,
+        )
+        SettingsRowDivider()
+        SettingsStatusRow(
+            icon = Icons.Filled.AccessibilityNew,
             title = tr("无障碍兜底"),
-            subtitle = tr("增强采集稳定性"),
-            statusText = accessibilityStatus,
+            subtitle = tr("页面识别开启时自动让位，避免重复记账"),
+            statusText = if (accessibilityHealth.authorized) tr("已就绪") else tr("未就绪"),
             tone = accessibilityTone,
-            onClick = onOpenAccessibilitySettings,
+            onClick = onOpenFallbackServiceDetails,
         )
         SettingsRowDivider()
         SettingsStatusRow(
             icon = Icons.Filled.Sms,
             title = tr("短信权限"),
             subtitle = tr("可选，用于补充识别部分账单短信"),
-            statusText = if (smsGranted) tr("已开启") else tr("可选，未开启"),
+            statusText = if (smsGranted) tr("已就绪") else tr("可选"),
             tone = if (smsGranted) StatusTone.POSITIVE else StatusTone.NEUTRAL,
-            onClick = onOpenAppSettings,
+            onClick = onOpenSmsPermission,
         )
         SettingsRowDivider()
         SettingsStatusRow(
@@ -525,45 +692,6 @@ private fun SyncOverviewGroup(
     }
 }
 
-@Composable
-private fun PermissionStatusGroup(
-    notificationEnabled: Boolean,
-    smsGranted: Boolean,
-    accessibilityHealth: AccessibilityCaptureHealth.Snapshot,
-    onOpenNotificationSettings: () -> Unit,
-    onOpenSmsSettings: () -> Unit,
-    onOpenAccessibilityDetails: () -> Unit,
-) {
-    SettingsGroupCard {
-        SettingsStatusRow(
-            icon = Icons.Filled.Notifications,
-            title = tr("通知使用权"),
-            subtitle = tr("用于抓取支付宝/微信支付通知"),
-            statusText = if (notificationEnabled) tr("已授权") else tr("未授权"),
-            tone = if (notificationEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
-            onClick = onOpenNotificationSettings,
-        )
-        SettingsRowDivider()
-        SettingsStatusRow(
-            icon = Icons.Filled.Sms,
-            title = tr("短信权限"),
-            subtitle = tr("可选，用于读取银行交易短信"),
-            statusText = if (smsGranted) tr("已授权") else tr("可选，未开启"),
-            tone = if (smsGranted) StatusTone.POSITIVE else StatusTone.NEUTRAL,
-            onClick = onOpenSmsSettings,
-        )
-        SettingsRowDivider()
-        SettingsStatusRow(
-            icon = Icons.Filled.AccessibilityNew,
-            title = tr("无障碍兜底"),
-            subtitle = tr("微信转账/红包、支付宝转账入账"),
-            statusText = if (accessibilityHealth.authorized) tr("已授权") else tr("未授权"),
-            tone = if (accessibilityHealth.authorized) StatusTone.POSITIVE else StatusTone.WARNING,
-            onClick = onOpenAccessibilityDetails,
-        )
-    }
-}
-
 private fun areNotificationsGranted(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
@@ -596,9 +724,8 @@ private fun initialWizardStep(
     pageRecognitionEnabled: Boolean,
     fallbackAccessibilityEnabled: Boolean,
     postNotificationsGranted: Boolean,
-    smsGranted: Boolean,
 ): AutomationWizardStep = when {
-    !postNotificationsGranted || !smsGranted -> AutomationWizardStep.RUNTIME_PERMISSIONS
+    !postNotificationsGranted -> AutomationWizardStep.RUNTIME_PERMISSIONS
     !notificationListenerEnabled -> AutomationWizardStep.NOTIFICATION_ACCESS
     !pageRecognitionEnabled -> AutomationWizardStep.PAGE_RECOGNITION
     !fallbackAccessibilityEnabled -> AutomationWizardStep.ACCESSIBILITY_FALLBACK
@@ -642,7 +769,7 @@ private fun AutomationSetupCard(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = tr("一键开启自动记账"),
+                        text = tr("完成自动记账设置"),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = content,
@@ -670,7 +797,7 @@ private fun AutomationSetupCard(
             }
             if (!ready) {
                 FilledTonalButton(onClick = onStart) {
-                    Text(tr("一键开启"))
+                    Text(tr("开始设置自动记账"))
                 }
             }
         }
@@ -687,7 +814,8 @@ private fun AutomationSetupPanel(
     missingNames: List<String>,
     onRequestRuntimePermissions: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
+    onOpenPageRecognitionDetails: () -> Unit,
+    onOpenFallbackDetails: () -> Unit,
     onOpenAppSettings: () -> Unit,
     onRefresh: () -> Unit,
     onOpenRomGuide: () -> Unit,
@@ -700,7 +828,6 @@ private fun AutomationSetupPanel(
                 pageRecognitionEnabled = pageRecognitionEnabled,
                 fallbackAccessibilityEnabled = fallbackAccessibilityEnabled,
                 postNotificationsGranted = postNotificationsGranted,
-                smsGranted = smsGranted,
             ),
         )
     }
@@ -769,7 +896,7 @@ private fun AutomationSetupPanel(
         AutomationWizardStep.PAGE_RECOGNITION -> AutomationStepCard(
             stepLabel = wizardProgress(step),
             title = tr("开启页面识别"),
-            body = tr("在无障碍页面找到「清衡 · 页面识别」并打开，用于识别微信/支付宝支付页面。此开关只能由你在系统设置中手动确认。"),
+            body = tr("在无障碍页面找到「清衡 · 页面识别」并打开，用于识别微信/支付宝的付款、转账、红包、提现、退款和账单页面；节点不完整时由 OCR 兜底。此开关只能由你在系统设置中手动确认。"),
             status = if (attempted && !pageRecognitionEnabled) {
                 tr("尚未检测到，请确认已开启后重试。")
             } else null,
@@ -781,7 +908,7 @@ private fun AutomationSetupPanel(
                     attempted = false
                 } else {
                     attempted = true
-                    onOpenAccessibilitySettings()
+                    onOpenPageRecognitionDetails()
                 }
             },
             secondaryLabel = if (attempted && !pageRecognitionEnabled) tr("重新检查") else null,
@@ -790,7 +917,7 @@ private fun AutomationSetupPanel(
         AutomationWizardStep.ACCESSIBILITY_FALLBACK -> AutomationStepCard(
             stepLabel = wizardProgress(step),
             title = tr("开启无障碍兜底"),
-            body = tr("在无障碍页面找到「清衡」并打开，用于微信转账/红包、支付宝转账入账。此开关只能由你在系统设置中手动确认。"),
+            body = tr("在无障碍页面找到「清衡 · 转账红包兜底」并打开。它只在「页面识别」未开启时兜底转账/红包；页面识别开启后会自动让位，避免同一笔记两次。此开关只能由你在系统设置中手动确认。"),
             status = if (attempted && !fallbackAccessibilityEnabled) {
                 tr("尚未检测到，请确认已开启后重试。")
             } else null,
@@ -802,7 +929,7 @@ private fun AutomationSetupPanel(
                     attempted = false
                 } else {
                     attempted = true
-                    onOpenAccessibilitySettings()
+                    onOpenFallbackDetails()
                 }
             },
             secondaryLabel = if (attempted && !fallbackAccessibilityEnabled) tr("重新检查") else null,
@@ -837,7 +964,6 @@ private fun AutomationSetupPanel(
                             pageRecognitionEnabled = pageRecognitionEnabled,
                             fallbackAccessibilityEnabled = fallbackAccessibilityEnabled,
                             postNotificationsGranted = postNotificationsGranted,
-                            smsGranted = smsGranted,
                         )
                         attempted = false
                     },
@@ -995,27 +1121,34 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
         tr("%d 小时 %02d 分钟"),
     )
     val statusText = when (snapshot?.state) {
-        null -> "⚪ " + tr("正在确认")
+        null -> tr("正在确认")
         CaptureConnectionState.CONNECTED ->
-            "🟢 " + tr("已连接 · 已稳定运行") + " " + uptime
+            tr("已连接 · 已稳定运行") + " " + uptime
         CaptureConnectionState.DISCONNECTED -> {
             val disconnectedAt = snapshot.disconnectedAtMs
             if (disconnectedAt > 0L) {
                 val wall = android.text.format.DateFormat.getTimeFormat(context)
                     .format(Date(disconnectedAt))
-                "🔴 " + String.format(
+                String.format(
                     Locale.getDefault(),
                     tr("%s 断开 · 已断开 %s"),
                     wall,
                     downtime,
                 )
             } else {
-                "🔴 " + tr("尚未连接")
+                tr("尚未连接")
             }
         }
-        CaptureConnectionState.PERMISSION_OFF -> "🔴 " + tr("通知使用权已关闭")
-        CaptureConnectionState.UNKNOWN -> "⚪ " + tr("正在确认")
+        CaptureConnectionState.PERMISSION_OFF -> tr("通知使用权已关闭")
+        CaptureConnectionState.UNKNOWN -> tr("正在确认")
     }
+    val statusColor = when (snapshot?.state) {
+        CaptureConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+        CaptureConnectionState.DISCONNECTED,
+        CaptureConnectionState.PERMISSION_OFF -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    var showHelp by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -1044,28 +1177,40 @@ private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 modifier = Modifier.padding(vertical = 8.dp),
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
             )
-            Text(
-                text = tr("当前状态：") + statusText,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                text = tr("开启后通知栏会显示绿色/红色状态圆点：绿色表示通知监听已连接，红色表示已断开或权限关闭；") +
-                       tr("同时显示本次连接运行时长、断开时间和最近一次成功入账。") +
-                       tr("刚启动的几秒会先显示灰色确认中，避免误报。") +
-                       tr("Android 13 及以上需要通知权限，否则状态条不会显示。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                text = tr("如果通知栏没有状态条：请在系统设置中允许本应用的常驻/持续通知。") +
-                       tr("小米/Redmi/POCO 的路径是：应用信息 → 通知 → Permanent notifications。") +
-                       tr("同时开启自启动，并把电池策略设为「无限制」；否则小米可能不会发送开机广播。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "●",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = statusColor,
+                )
+                Text(
+                    text = tr("当前状态：") + statusText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
+            if (showHelp) {
+                Text(
+                    text = tr("绿色表示通知监听已连接，红色表示已断开或权限关闭；同时显示本次连接运行时长、断开时间和最近一次成功入账。") +
+                           tr("刚启动的几秒会先显示灰色确认中，避免误报。") +
+                           tr("Android 13 及以上需要通知权限，否则状态条不会显示。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    text = tr("如果通知栏没有状态条：请在系统设置中允许本应用的常驻/持续通知。") +
+                           tr("小米/Redmi/POCO 的路径是：应用信息 → 通知 → Permanent notifications。") +
+                           tr("同时开启自启动，并把电池策略设为「无限制」；否则小米可能不会发送开机广播。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            TextButton(onClick = { showHelp = !showHelp }) {
+                Text(if (showHelp) tr("收起通知与后台说明") else tr("查看通知与后台说明"))
+            }
             FilledTonalButton(
                 onClick = { openAppNotificationSettings(context) },
                 modifier = Modifier.padding(top = 8.dp),
@@ -1087,68 +1232,8 @@ private fun openAppNotificationSettings(context: Context) {
         )
     }
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    runCatching { context.startActivity(intent) }
-}
-
-@Composable
-private fun SuccessNotificationCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = tr("自动记账成功提醒"),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = if (enabled) tr("已开启：保存后显示金额、商户和时间")
-                               else tr("已关闭：不显示成功通知"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = enabled, onCheckedChange = onToggle)
-            }
-            HorizontalDivider()
-            Text(
-                text = tr("使用低优先级、静音通知，不打断正在进行的支付。只有实际保存成功后才提示；") +
-                       tr("采集失败、权限异常等重要告警不受此开关影响。待确认重复提示也不受此开关影响。若系统通知权限未开启，此开关不会生效。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PermissionCard(
-    title: String,
-    desc: String,
-    buttonText: String,
-    onClick: () -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = desc,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
-            )
-            FilledTonalButton(onClick = onClick) {
-                Text(buttonText)
-            }
-        }
-    }
+    if (startActivitySafely(context, intent)) return
+    openAppDetailsSettings(context)
 }
 
 @Composable
@@ -1157,6 +1242,7 @@ private fun AccessibilityCard(
     onRefresh: () -> Unit,
     onOpen: () -> Unit,
 ) {
+    var showDetails by remember { mutableStateOf(false) }
     val enabled = health.authorized
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1173,9 +1259,9 @@ private fun AccessibilityCard(
             )
             Text(
                 text = if (enabled)
-                    tr("微信转账/红包、支付宝转账入账等没有通知的场景会自动抓取。")
+                    tr("没有通知的转账、红包等页面会由本服务兜底；页面识别开启时它会自动让位。")
                 else
-                    tr("微信转账、微信红包、支付宝转账入账等场景，通知里不含金额，必须靠无障碍服务兜底。") +
+                    tr("微信转账、微信红包、支付宝转账入账等场景，通知里不含金额，需要无障碍服务兜底。") +
                     tr("未开启会漏抓这些交易。"),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
@@ -1183,46 +1269,57 @@ private fun AccessibilityCard(
 
             HorizontalDivider(modifier = Modifier.padding(bottom = 10.dp))
             val statusText = when (health.state) {
-                AccessibilityConnectionState.PERMISSION_OFF -> "未授权：无法采集"
+                AccessibilityConnectionState.PERMISSION_OFF -> tr("未授权：无法采集")
                 AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED ->
-                    "已授权，但服务未连接（可能被系统停止或尚未启动）"
-                AccessibilityConnectionState.CONNECTED -> "服务已连接（不代表已抓取支付记录）"
+                    tr("已授权，但服务未连接（可能被系统停止或尚未启动）")
+                AccessibilityConnectionState.CONNECTED -> tr("服务已连接（不代表已抓取支付记录）")
             }
-            Text("实际运行状态：$statusText", style = MaterialTheme.typography.bodyMedium)
+            Text(tr("实际运行状态：") + statusText, style = MaterialTheme.typography.bodyMedium)
             Text(
-                "上次连接：${formatHealthTime(health.connectedAtMs)}",
+                tr("上次连接：") + formatHealthTime(health.connectedAtMs),
                 style = MaterialTheme.typography.bodySmall,
             )
-            Text(
-                "上次页面事件：${formatHealthTime(health.eventAtMs)}",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (health.disconnectedAtMs > 0L) {
+            if (showDetails) {
                 Text(
-                    "上次断开：${formatHealthTime(health.disconnectedAtMs)}（${health.disconnectedReason}）",
+                    tr("上次页面事件：") + formatHealthTime(health.eventAtMs),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (health.disconnectedAtMs > 0L) {
+                    Text(
+                        tr("上次断开：") + formatHealthTime(health.disconnectedAtMs) +
+                            "（" + health.disconnectedReason + "）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (health.errorAtMs > 0L) {
+                    Text(
+                        tr("上次异常：") + formatHealthTime(health.errorAtMs) +
+                            tr("，阶段 ") + health.errorStage +
+                            tr("，类型 ") + health.errorKind +
+                            tr("（累计 ") + health.errorCount + tr(" 次）"),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (health.interruptedAtMs > 0L) {
+                    Text(
+                        tr("上次系统中断通知：") + formatHealthTime(health.interruptedAtMs) +
+                            tr("（不代表断连）"),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    tr("仅在本机保存连接时间、事件时间和异常类名；不会在诊断信息中保存聊天内容、商户或金额。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            if (health.errorAtMs > 0L) {
-                Text(
-                    "上次异常：${formatHealthTime(health.errorAtMs)}，阶段 ${health.errorStage}，类型 ${health.errorKind}（累计 ${health.errorCount} 次）",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onRefresh) {
+                    Text(tr("刷新实际运行状态"))
+                }
+                TextButton(onClick = { showDetails = !showDetails }) {
+                    Text(if (showDetails) tr("收起技术详情") else tr("技术详情"))
+                }
             }
-            if (health.interruptedAtMs > 0L) {
-                Text(
-                    "上次系统中断通知：${formatHealthTime(health.interruptedAtMs)}（不代表断连）",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            OutlinedButton(onClick = onRefresh) {
-                Text("刷新实际运行状态")
-            }
-            Text(
-                "仅在本机保存连接时间、事件时间和异常类名；不会在诊断信息中保存聊天内容、商户或金额。",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(bottom = 10.dp),
-            )
 
             // 强提示：隐私边界
             Text(
@@ -1246,7 +1343,7 @@ private fun AccessibilityCard(
 }
 
 private fun formatHealthTime(timestampMs: Long): String =
-    if (timestampMs <= 0L) "尚无记录"
+    if (timestampMs <= 0L) tr("尚无记录")
     else DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(timestampMs))
 
 @Composable

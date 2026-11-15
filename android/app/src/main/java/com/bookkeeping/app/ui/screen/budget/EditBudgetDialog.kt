@@ -77,7 +77,7 @@ fun EditBudgetDialog(
                         ) {
                             availableCategories.forEach { cat ->
                                 DropdownMenuItem(
-                                    text = { Text(cat.displayName) },
+                                    text = { Text(tr(cat.displayName)) },
                                     onClick = {
                                         selectedCategory = cat
                                         menuExpanded = false

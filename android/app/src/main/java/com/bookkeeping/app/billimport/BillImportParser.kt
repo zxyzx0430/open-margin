@@ -178,8 +178,10 @@ object BillImportParser {
                 amountRaw.isBlank() -> "金额为空"
                 amount == null || amount.cents <= 0L -> "无法解析金额：$amountRaw"
                 merchant.isBlank() -> "商户为空，需人工确认"
-                direction == BillDirection.NEUTRAL -> "不计收支，需人工确认"
-                status != BillStatus.SUCCESS -> "状态需人工确认：${statusRaw.ifBlank { status.name }}"
+                direction == BillDirection.NEUTRAL && !isWithdrawalRaw(raw) ->
+                    "不计收支，需人工确认"
+                status !in setOf(BillStatus.SUCCESS, BillStatus.REFUND) ->
+                    "状态需人工确认：${statusRaw.ifBlank { status.name }}"
                 else -> null
             }
             if (error != null) {
@@ -395,7 +397,10 @@ object BillImportParser {
             text.contains("退款") -> BillStatus.REFUND
             text.contains("失败") || text.contains("关闭") || text.contains("取消") -> BillStatus.FAILED
             text.contains("待") || text.contains("处理中") || text.contains("等待") -> BillStatus.PENDING
-            text.contains("成功") || text.contains("完成") || text.contains("收款") -> BillStatus.SUCCESS
+            text.contains("成功") || text.contains("完成") || text.contains("收款") ||
+                text.contains("已转账") || text.contains("已存入") ||
+                text.contains("已到账") || text.contains("已收钱") ||
+                text.contains("提现已到账") -> BillStatus.SUCCESS
             else -> BillStatus.UNKNOWN
         }
     }
@@ -434,11 +439,30 @@ object BillImportParser {
     }
 
     private fun excelSerialToMillis(serial: BigDecimal, timeZoneId: String): Long {
-        val calendar = Calendar.getInstance(TimeZone.getTimeZone(timeZoneId), Locale.CHINA)
-        calendar.clear()
-        calendar.set(1899, Calendar.DECEMBER, 30, 0, 0, 0)
+        // Excel serials are local wall-clock values. Do not anchor them in the
+        // target time zone: Asia/Shanghai had a +08:05:43 offset in 1899, and
+        // using that historical offset makes every modern timestamp 343s early.
+        val wall = Calendar.getInstance(TimeZone.getTimeZone("UTC"), Locale.CHINA)
+        wall.clear()
+        wall.set(1899, Calendar.DECEMBER, 30, 0, 0, 0)
         val days = serial.toDouble()
-        return calendar.timeInMillis + (days * 86_400_000.0).toLong()
+        val wholeDays = kotlin.math.floor(days).toInt()
+        val millisOfDay = Math.round((days - wholeDays) * 86_400_000.0).toInt()
+        wall.add(Calendar.DAY_OF_MONTH, wholeDays)
+        wall.add(Calendar.MILLISECOND, millisOfDay)
+
+        val target = Calendar.getInstance(TimeZone.getTimeZone(timeZoneId), Locale.CHINA)
+        target.clear()
+        target.set(
+            wall.get(Calendar.YEAR),
+            wall.get(Calendar.MONTH),
+            wall.get(Calendar.DAY_OF_MONTH),
+            wall.get(Calendar.HOUR_OF_DAY),
+            wall.get(Calendar.MINUTE),
+            wall.get(Calendar.SECOND),
+        )
+        target.set(Calendar.MILLISECOND, wall.get(Calendar.MILLISECOND))
+        return target.timeInMillis
     }
 
     private fun normalizeHeader(value: String): String =
@@ -463,6 +487,9 @@ object BillImportParser {
         if (joined.isEmpty()) return false
         return listOf("共", "合计", "总计", "已显示", "导出时间", "说明").any { joined.contains(it) }
     }
+
+    private fun isWithdrawalRaw(raw: List<String>): Boolean =
+        raw.any { it.contains("提现") }
 
     private fun normalizeNumericText(value: String): String = buildString(value.length) {
         for (char in value) {

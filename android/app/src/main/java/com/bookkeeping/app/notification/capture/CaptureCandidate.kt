@@ -2,13 +2,14 @@ package com.bookkeeping.app.notification.capture
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * A local, reviewable payment candidate captured from a supported page.
  *
  * It deliberately stores only structured fields and a local screenshot path;
- * the raw page text is not persisted. Nothing here is inserted into the ledger
- * until the normal review/deduplication path accepts it.
+ * the raw page text is not persisted. Completed cards are written through the
+ * normal deduplicating ledger path; the record remains for audit and display.
  */
 data class CaptureCandidate(
     val packageName: String,
@@ -23,6 +24,7 @@ data class CaptureCandidate(
     val status: String = STATUS_PENDING,
     val kind: String = KIND_PAYMENT,
     val eventTimeMs: Long = capturedAtMs,
+    val direction: String = DIRECTION_EXPENSE,
 ) {
     fun isValid(): Boolean {
         if (packageName != WECHAT && packageName != ALIPAY) return false
@@ -36,6 +38,7 @@ data class CaptureCandidate(
         if (reason.isBlank() || reason.length > 80) return false
         if (status !in STATUSES) return false
         if (kind !in KINDS) return false
+        if (direction !in DIRECTIONS) return false
         return true
     }
 
@@ -45,7 +48,29 @@ data class CaptureCandidate(
         amountCents.toString(),
         merchantCandidates.firstOrNull().orEmpty(),
         eventTimeMs.toString(),
+        direction,
     ).joinToString("|")
+
+    /**
+     * Duplicate key for repeated accessibility/OCR passes over the same card.
+     * Page identity is deliberately excluded because the page text can change
+     * between events while the underlying transaction stays the same.
+     */
+    fun dedupKey(): String {
+        orderId?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            return "order|$packageName|$it"
+        }
+        val merchant = merchantCandidates.firstOrNull()
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            .orEmpty()
+        val timeKey = if (eventTimeMs != capturedAtMs) {
+            "event:$eventTimeMs"
+        } else {
+            "bucket:${capturedAtMs / DEDUP_BUCKET_MS}"
+        }
+        return "$packageName|$kind|$amountCents|$direction|$merchant|$timeKey"
+    }
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("packageName", packageName)
@@ -60,6 +85,7 @@ data class CaptureCandidate(
         put("status", status)
         put("kind", kind)
         put("eventTimeMs", eventTimeMs)
+        put("direction", direction)
     }
 
     companion object {
@@ -67,14 +93,30 @@ data class CaptureCandidate(
         const val ALIPAY = "com.eg.android.AlipayGphone"
         const val MAX_CENTS = 100_000_000_000L
         const val MAX_MERCHANTS = 5
+        const val DEDUP_BUCKET_MS = 60_000L
         const val STATUS_PENDING = "PENDING"
         const val STATUS_APPROVED = "APPROVED"
         const val STATUS_IGNORED = "IGNORED"
         const val KIND_PAYMENT = "PAYMENT"
         const val KIND_REFUND = "REFUND"
         const val KIND_AUTO_PAY = "AUTO_PAY"
+        const val KIND_TRANSFER = "TRANSFER"
+        const val KIND_RED_PACKET = "RED_PACKET"
+        const val KIND_WITHDRAWAL = "WITHDRAWAL"
+        const val KIND_BILL = "BILL"
+        const val DIRECTION_EXPENSE = "EXPENSE"
+        const val DIRECTION_INCOME = "INCOME"
         val STATUSES = setOf(STATUS_PENDING, STATUS_APPROVED, STATUS_IGNORED)
-        val KINDS = setOf(KIND_PAYMENT, KIND_REFUND, KIND_AUTO_PAY)
+        val KINDS = setOf(
+            KIND_PAYMENT,
+            KIND_REFUND,
+            KIND_AUTO_PAY,
+            KIND_TRANSFER,
+            KIND_RED_PACKET,
+            KIND_WITHDRAWAL,
+            KIND_BILL,
+        )
+        val DIRECTIONS = setOf(DIRECTION_EXPENSE, DIRECTION_INCOME)
 
         fun fromJson(json: JSONObject): CaptureCandidate? = runCatching {
             val merchantsJson = json.optJSONArray("merchantCandidates") ?: JSONArray()
@@ -103,6 +145,8 @@ data class CaptureCandidate(
                 status = status,
                 kind = kind,
                 eventTimeMs = json.optLong("eventTimeMs", capturedAt),
+                direction = json.optString("direction", DIRECTION_EXPENSE)
+                    .takeIf { it in DIRECTIONS } ?: DIRECTION_EXPENSE,
             )
             candidate.takeIf { it.isValid() }
         }.getOrNull()

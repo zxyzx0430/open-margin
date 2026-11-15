@@ -55,4 +55,24 @@ class EnglishUiTextTest {
         // Never translate free-form user data or bank/notification parser data.
         assertEquals("我的自定义商户", EnglishUiText.translate("我的自定义商户"))
     }
+
+    @Test
+    fun transactionDialogAndImportMessagesTranslate() {
+        assertEquals("Edit transaction", EnglishUiText.translate("编辑账单"))
+        assertEquals("Date", EnglishUiText.translate("日期"))
+        assertEquals("Invalid amount", EnglishUiText.translate("金额格式不正确"))
+        assertEquals("Refund", EnglishUiText.translate("退款"))
+        assertEquals(
+            "Could not parse amount: 12.3.4",
+            EnglishUiText.translate("无法解析金额：12.3.4"),
+        )
+        assertEquals(
+            "Duplicate in this file; first occurrence on row 7",
+            EnglishUiText.translate("文件内重复，首次出现在第 7 行"),
+        )
+        assertEquals("Daily average income", EnglishUiText.translate("日均收入"))
+        assertEquals("Total expenses this month", EnglishUiText.translate("该月总支出"))
+        assertEquals("Set this month's budget", EnglishUiText.translate("设置该月预算"))
+        assertEquals("No data this month", EnglishUiText.translate("本月没有数据"))
+    }
 }

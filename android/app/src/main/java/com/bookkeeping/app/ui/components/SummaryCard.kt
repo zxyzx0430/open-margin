@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -16,11 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
-import com.bookkeeping.app.ui.theme.QingExpense
-import com.bookkeeping.app.ui.theme.QingIncome
-import com.bookkeeping.app.ui.theme.QingPrimaryContainer
-import com.bookkeeping.app.ui.theme.QingPrimaryDeep
-import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
 @Composable
 fun MonthlySummaryCard(
@@ -29,14 +26,16 @@ fun MonthlySummaryCard(
     modifier: Modifier = Modifier,
 ) {
     val diff = incomeCents - expenseCents
-    val diffColor = if (diff >= 0) QingIncome else QingExpense
+    val semantic = LocalQingSemanticColors.current
+    val container = MaterialTheme.colorScheme.primaryContainer
+    val diffColor = if (diff >= 0) semantic.income else semantic.expenseText
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(
                 Brush.linearGradient(
-                    listOf(QingPrimaryContainer, QingPrimaryContainer.copy(alpha = 0.45f)),
+                    listOf(container, container.copy(alpha = 0.72f)),
                 )
             )
             .padding(horizontal = 18.dp, vertical = 16.dp),
@@ -49,13 +48,13 @@ fun MonthlySummaryCard(
             SummaryMetric(
                 label = tr("本月支出"),
                 value = formatCny(expenseCents),
-                color = QingExpense,
+                color = semantic.expenseText,
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
                 label = tr("本月收入"),
                 value = formatCny(incomeCents),
-                color = QingIncome,
+                color = semantic.income,
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
@@ -79,7 +78,7 @@ private fun SummaryMetric(
         Text(
             text = label,
             style = com.bookkeeping.app.ui.theme.Typography.labelSmall,
-            color = QingTextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
         )
         Text(

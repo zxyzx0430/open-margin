@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,7 +21,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class CaptureReviewViewModel @Inject constructor(
-    @ApplicationContext context: Context,
+    @ApplicationContext private val context: Context,
     private val repository: TransactionRepository,
 ) : ViewModel() {
 
@@ -78,9 +79,9 @@ class CaptureReviewViewModel @Inject constructor(
                 pending = pending,
                 busy = false,
                 message = when {
-                    result.isFailure -> "记入失败，请稍后重试"
-                    inserted -> "已记入账本"
-                    else -> "这笔记录已存在，已从待确认中移除"
+                    result.isFailure -> AppLanguage.tr(context, "记入失败，请稍后重试")
+                    inserted -> AppLanguage.tr(context, "已记入账本")
+                    else -> AppLanguage.tr(context, "这笔记录已存在，已从待确认中移除")
                 },
             )
         }
@@ -97,7 +98,7 @@ class CaptureReviewViewModel @Inject constructor(
             _state.value = UiState(
                 pending = pending,
                 busy = false,
-                message = "扫描结果已忽略",
+                message = AppLanguage.tr(context, "扫描结果已忽略"),
             )
         }
     }
