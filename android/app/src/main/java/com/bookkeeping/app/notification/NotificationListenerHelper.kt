@@ -1,8 +1,10 @@
 package com.bookkeeping.app.notification
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 
 // 通知监听权限的工具类
 // Android 要求 NotificationListenerService 必须由用户在系统设置里手动授权。
@@ -25,5 +27,14 @@ object NotificationListenerHelper {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+    }
+
+    /** Best-effort rebind after a ROM unbinds the listener. */
+    fun requestRebind(context: Context) {
+        if (!isEnabled(context)) return
+        val component = ComponentName(context, PaymentNotificationListenerService::class.java)
+        runCatching {
+            NotificationListenerService.requestRebind(component)
+        }
     }
 }

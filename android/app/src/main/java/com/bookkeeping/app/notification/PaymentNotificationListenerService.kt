@@ -1,7 +1,10 @@
 package com.bookkeeping.app.notification
 
 import android.app.Notification
+import android.content.ComponentName
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -54,7 +57,20 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         }
         CaptureHealth.onListenerDisconnected(applicationContext, reason)
         KeepAliveService.refreshStatus(applicationContext)
+        if (NotificationListenerHelper.isEnabled(this)) {
+            scheduleRebind()
+        }
         super.onListenerDisconnected()
+    }
+
+    private fun scheduleRebind() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            runCatching {
+                requestRebind(ComponentName(this, PaymentNotificationListenerService::class.java))
+            }.onFailure {
+                Log.e(TAG, "Listener rebind failed: ${it.javaClass.simpleName}")
+            }
+        }, REBIND_DELAY_MS)
     }
 
     // 通知到达时回调（关键入口）。任何解析/入库异常只记录类型，不能打崩监听服务。
@@ -163,5 +179,6 @@ class PaymentNotificationListenerService : NotificationListenerService() {
 
     companion object {
         private const val TAG = "BkNotifListener"
+        private const val REBIND_DELAY_MS = 3_000L
     }
 }

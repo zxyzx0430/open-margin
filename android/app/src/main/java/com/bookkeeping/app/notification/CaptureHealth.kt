@@ -13,11 +13,36 @@ enum class CaptureConnectionState {
 /** Pure state rules, kept free of Android types so they can be unit-tested. */
 object CaptureHealthPolicy {
     const val STARTUP_GRACE_MS: Long = 15_000L
+    const val RECONNECT_PRESERVE_MS: Long = 5 * 60_000L
 
     fun withinStartupGrace(serviceStartedAtMs: Long, nowMs: Long): Boolean =
         serviceStartedAtMs > 0L &&
             nowMs >= serviceStartedAtMs &&
             nowMs - serviceStartedAtMs < STARTUP_GRACE_MS
+
+    /**
+     * Keep the original connection start across a process restart or a short
+     * listener rebind. A reboot, a long disconnect, or a stale heartbeat starts
+     * a fresh connection instead of showing a fictitious multi-hour uptime.
+     */
+    fun shouldPreserveConnection(
+        previousConnectedAtMs: Long,
+        previousConnectedElapsedMs: Long,
+        nowWallMs: Long,
+        nowElapsedMs: Long,
+        disconnectedAtMs: Long,
+        lastSeenAtMs: Long,
+        graceMs: Long = RECONNECT_PRESERVE_MS,
+    ): Boolean {
+        if (previousConnectedAtMs <= 0L || previousConnectedElapsedMs <= 0L) return false
+        if (nowElapsedMs < previousConnectedElapsedMs) return false
+        if (disconnectedAtMs > 0L) {
+            return nowWallMs >= disconnectedAtMs &&
+                nowWallMs - disconnectedAtMs <= graceMs
+        }
+        if (lastSeenAtMs <= 0L || nowWallMs < lastSeenAtMs) return false
+        return nowWallMs - lastSeenAtMs <= graceMs
+    }
 
     fun resolve(
         authorized: Boolean,
@@ -57,6 +82,7 @@ object CaptureHealth {
     private const val PREFS = "capture_health"
 
     @Volatile private var connectedInProcess = false
+    @Volatile private var lastHeartbeatWriteMs = 0L
 
     fun snapshot(
         context: Context,
@@ -91,14 +117,40 @@ object CaptureHealth {
 
     fun onListenerConnected(context: Context) {
         connectedInProcess = true
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putLong(KEY_CONNECTED_AT, System.currentTimeMillis())
-            .putLong(KEY_CONNECTED_ELAPSED, SystemClock.elapsedRealtime())
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val nowWall = System.currentTimeMillis()
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val previousConnectedAt = prefs.getLong(KEY_CONNECTED_AT, 0L)
+        val previousConnectedElapsed = prefs.getLong(KEY_CONNECTED_ELAPSED, 0L)
+        val disconnectedAt = prefs.getLong(KEY_DISCONNECTED_AT, 0L)
+        val lastSeenAt = prefs.getLong(KEY_LAST_SEEN_AT, 0L)
+        val preserve = CaptureHealthPolicy.shouldPreserveConnection(
+            previousConnectedAtMs = previousConnectedAt,
+            previousConnectedElapsedMs = previousConnectedElapsed,
+            nowWallMs = nowWall,
+            nowElapsedMs = nowElapsed,
+            disconnectedAtMs = disconnectedAt,
+            lastSeenAtMs = lastSeenAt,
+        )
+        prefs.edit()
+            .putLong(KEY_CONNECTED_AT, if (preserve) previousConnectedAt else nowWall)
+            .putLong(KEY_CONNECTED_ELAPSED, nowElapsed)
+            .putLong(KEY_LAST_SEEN_AT, nowWall)
             // A reconnect makes the previous disconnect time obsolete; keeping it
             // would show a stale "disconnected at" after the next process restart.
             .remove(KEY_DISCONNECTED_AT)
             .remove(KEY_DISCONNECTED_ELAPSED)
             .remove(KEY_DISCONNECTED_REASON)
+            .apply()
+    }
+
+    /** Records that the capture process was alive without writing on every tick. */
+    fun onHeartbeat(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastHeartbeatWriteMs < HEARTBEAT_INTERVAL_MS) return
+        lastHeartbeatWriteMs = now
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_LAST_SEEN_AT, now)
             .apply()
     }
 
@@ -130,6 +182,8 @@ object CaptureHealth {
 
     private const val KEY_CONNECTED_AT = "connected_at"
     private const val KEY_CONNECTED_ELAPSED = "connected_elapsed"
+    private const val KEY_LAST_SEEN_AT = "last_seen_at"
+    private const val HEARTBEAT_INTERVAL_MS = 30_000L
     private const val KEY_DISCONNECTED_AT = "disconnected_at"
     private const val KEY_DISCONNECTED_ELAPSED = "disconnected_elapsed"
     private const val KEY_DISCONNECTED_REASON = "disconnected_reason"

@@ -37,6 +37,14 @@ object MerchantRules {
         }
     }
 
+    fun remove(merchant: String) {
+        val key = normalize(merchant)
+        if (key.isBlank()) return
+        synchronized(lock) {
+            rules = rules - key
+        }
+    }
+
     fun categoryFor(merchant: String): TransactionCategory? =
         rules[normalize(merchant)]
 

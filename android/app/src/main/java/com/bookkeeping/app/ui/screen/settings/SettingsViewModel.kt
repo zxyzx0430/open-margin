@@ -35,6 +35,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { prefs.clearMerchantRules() }
     }
 
+    fun saveMerchantRule(merchant: String, category: TransactionCategory) {
+        viewModelScope.launch { prefs.rememberMerchantCategory(merchant, category) }
+    }
+
+    fun removeMerchantRule(merchant: String) {
+        viewModelScope.launch { prefs.removeMerchantRule(merchant) }
+    }
+
     fun setKeepAlive(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setKeepAliveEnabled(enabled)
