@@ -36,7 +36,7 @@ v1 **没有购买 Windows 代码签名证书**。双击安装器时 SmartScreen 
 - 开始菜单创建：
   - **清衡设置**：启动本机向导（`http://127.0.0.1:18770/` 起，端口被占用时顺延到 18779）并打开浏览器。
   - **清衡账本**：打开 `http://127.0.0.1:18082/`。
-- 不要求 Git、Python、Node 或 PowerShell 7；网页向导本身以 Windows PowerShell 5.1 启动。
+- 不要求 Git、Python、Node 或 PowerShell 7；网页向导本身以 Windows PowerShell 5.1 启动（依赖安装步骤目前仍有 PowerShell 7 缺口，见 0.4）。
 - **不打包** `secrets/`、`.env`、数据库、Docker 卷或设备令牌。运行期密钥由向导在本机生成。
 - 安装器需要管理员权限（一次 UAC）。安装本身只写程序目录和开始菜单，不安装 Docker/Tailscale。
 - 支持 Windows 10/11 64 位。Windows 10 22H2 已停止支持：向导会警告并建议升级 Windows 11，但不会直接阻止安装。
