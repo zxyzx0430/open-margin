@@ -16,8 +16,30 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
 enum class StatusTone { POSITIVE, WARNING, ERROR, NEUTRAL }
+
+/**
+ * 状态色唯一映射：tone → (底色, 前景色)。
+ *
+ * 主题里的 tertiaryContainer 是薄荷绿，此前被当作 WARNING 用，导致「同步异常」
+ * 和「同步正常」看起来一样。警告统一走语义盘的橙色，阻断/授权失败走红色，
+ * 中性灰只留给未配置、未开启这类无风险状态。
+ */
+@Composable
+internal fun statusToneColors(tone: StatusTone): Pair<Color, Color> {
+    val semantic = LocalQingSemanticColors.current
+    return when (tone) {
+        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primaryContainer to
+            MaterialTheme.colorScheme.onPrimaryContainer
+        StatusTone.WARNING -> semantic.warningContainer to semantic.warningText
+        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to
+            MaterialTheme.colorScheme.onErrorContainer
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to
+            MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
 
 @Composable
 fun StatusChip(
@@ -26,16 +48,7 @@ fun StatusChip(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
 ) {
-    val (background, foreground) = when (tone) {
-        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primaryContainer to
-            MaterialTheme.colorScheme.onPrimaryContainer
-        StatusTone.WARNING -> MaterialTheme.colorScheme.tertiaryContainer to
-            MaterialTheme.colorScheme.onTertiaryContainer
-        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to
-            MaterialTheme.colorScheme.onErrorContainer
-        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to
-            MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val (background, foreground) = statusToneColors(tone)
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
@@ -69,16 +82,7 @@ fun SoftBadge(
     tone: StatusTone = StatusTone.WARNING,
     modifier: Modifier = Modifier,
 ) {
-    val (background, foreground) = when (tone) {
-        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primaryContainer to
-            MaterialTheme.colorScheme.onPrimaryContainer
-        StatusTone.WARNING -> MaterialTheme.colorScheme.tertiaryContainer to
-            MaterialTheme.colorScheme.onTertiaryContainer
-        StatusTone.ERROR -> MaterialTheme.colorScheme.errorContainer to
-            MaterialTheme.colorScheme.onErrorContainer
-        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to
-            MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val (background, foreground) = statusToneColors(tone)
     Text(
         text = text,
         color = foreground,

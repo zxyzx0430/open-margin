@@ -1094,12 +1094,12 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
         }
         resultCode == SyncResultCode.BLOCKED -> {
             syncText = tr("同步已阻断")
-            syncTone = StatusTone.WARNING
+            syncTone = StatusTone.ERROR
             syncIcon = Icons.Outlined.ErrorOutline
         }
         resultCode == SyncResultCode.AUTH -> {
             syncText = tr("授权失败")
-            syncTone = StatusTone.WARNING
+            syncTone = StatusTone.ERROR
             syncIcon = Icons.Outlined.ErrorOutline
         }
         resultCode == SyncResultCode.CONFIG -> {
