@@ -125,10 +125,17 @@ The Inno Setup script installs to `%ProgramData%\OpenMargin\app`, creates the st
 `Build-OfflineBundle.ps1` builds the compose services, saves built images plus compose-declared base images to `images.tar`, compresses to `OpenMargin-Offline-<version>.tar.gz`, and writes `.sha256` and `.manifest.json`. It is a separate Release asset, never part of the installer.
 
 ```powershell
+# Validate image classification without building, pulling or writing output:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -DryRun
+
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -Version 1.3.0
 ```
 
-Safety: it never runs `docker compose down`, never deletes volumes, and only removes placeholder secret files it created itself.
+Safety: it never runs `docker compose down`, never deletes volumes, and only
+removes placeholder secret files it created itself. Base images declared by
+Dockerfiles, `compose.yaml` image-only services and the explicit
+nginx/python/Wallos defaults are pulled if missing; a failed pull stops with a
+clear error before `docker save`.
 
 ## 测试 / Tests
 

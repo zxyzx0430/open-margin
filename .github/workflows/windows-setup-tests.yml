@@ -52,3 +52,28 @@ jobs:
           if ($result.FailedCount -gt 0) {
             throw ('Pester failures: ' + $result.FailedCount)
           }
+
+  offline-bundle-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate offline bundle image classification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lines = @(& ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -Version 0.0.0-dryrun)
+          $lines | ForEach-Object { Write-Host $_ }
+          $built = ($lines | Where-Object { $_ -like 'built=*' } | Select-Object -First 1)
+          $base = ($lines | Where-Object { $_ -like 'base=*' } | Select-Object -First 1)
+          if (-not $built -or -not $base) { throw 'dry run did not print built= and base= lines' }
+          foreach ($required in @('finance-api', 'wallos')) {
+            if ($built -notmatch [regex]::Escape($required)) { throw "built image plan is missing $required" }
+          }
+          foreach ($required in @('nginx:1.28-alpine', 'python:3.11-slim', 'bellamy/wallos')) {
+            if ($base -notmatch [regex]::Escape($required)) { throw "base image plan is missing $required" }
+          }
+          if ($base -match 'finance-api|personal-finance-system-wallos') {
+            throw 'built images must not be classified as base images'
+          }
