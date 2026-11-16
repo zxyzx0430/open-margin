@@ -128,14 +128,19 @@ The Inno Setup script installs to `%ProgramData%\OpenMargin\app`, creates the st
 # Validate image classification without building, pulling or writing output:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -DryRun
 
+# Exercise the portable YAML fallback used when --format json is unavailable:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -DryRun -ForceLegacyComposeConfig
+
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -Version 1.3.0
 ```
 
 Safety: it never runs `docker compose down`, never deletes volumes, and only
-removes placeholder secret files it created itself. Base images declared by
-Dockerfiles, `compose.yaml` image-only services and the explicit
-nginx/python/Wallos defaults are pulled if missing; a failed pull stops with a
-clear error before `docker save`.
+removes placeholder files it created itself. It creates temporary `.env`,
+`secrets/backend.env` and `secrets/wallos-ledger.env` placeholders before any
+compose command (needed on a clean checkout) and removes only those it created.
+Base images declared by Dockerfiles, `compose.yaml` image-only services and the
+explicit nginx/python/Wallos defaults are pulled if missing; a failed pull stops
+with a clear error before `docker save`.
 
 ## 测试 / Tests
 

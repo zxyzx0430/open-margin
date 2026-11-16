@@ -26,7 +26,12 @@
         clear error before docker save.
 
     Use -DryRun to print the built/base image plan without building, pulling,
-    saving, or creating any output.
+    saving, or creating any output. Use -ForceLegacyComposeConfig to exercise
+    the YAML fallback (`config --services` + per-service config) in CI.
+
+    compose config needs the referenced env files to exist. The script creates
+    temporary .env / secrets/backend.env / secrets/wallos-ledger.env placeholders
+    before any compose call and removes only the files it created in finally.
 
     Note: the setup CLI supports `open-margin-setup.ps1 deploy --no-build`, so
     a loaded bundle can be used without rebuilding. The web wizard still runs
@@ -45,7 +50,8 @@ param(
     [switch]$SkipBuild,
     [switch]$Force,
     [switch]$KeepStaging,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$ForceLegacyComposeConfig
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,71 +109,173 @@ function Test-ImagePresent {
     }
 }
 
-function Get-ComposeConfig {
-    param([switch]$AllProfiles)
+function Invoke-ComposeCommand {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $arguments = @('compose', '--project-name', $ProjectName)
+        $output = & $script:DockerPath @Arguments 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw ($Description + ' failed (exit ' + $LASTEXITCODE + '): ' + $output.Trim())
+        }
+        return $output
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+function New-ComposeArguments {
+    param(
+        [switch]$AllProfiles,
+        [switch]$NoProfiles
+    )
+    $arguments = @('compose', '--project-name', $ProjectName)
+    if (-not $NoProfiles) {
         if ($AllProfiles) {
             $arguments += @('--profile', '*')
         } else {
             $arguments += @('--profile', 'windows-public-sync')
         }
-        $arguments += @('config', '--format', 'json')
-        $output = & $script:DockerPath @arguments 2>$null | Out-String
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) {
-            throw 'docker compose config --format json failed; Docker Compose v2 is required.'
-        }
-        return ($output | ConvertFrom-Json)
-    } finally {
-        $ErrorActionPreference = $previous
     }
+    return $arguments
+}
+
+function Get-ComposeServiceInfoFromJson {
+    param([switch]$AllProfiles)
+    $arguments = @(New-ComposeArguments -AllProfiles:$AllProfiles) + @('config', '--format', 'json')
+    $output = Invoke-ComposeCommand -Arguments $arguments -Description 'docker compose config --format json'
+    try {
+        $config = $output | ConvertFrom-Json
+    } catch {
+        throw ('docker compose config --format json returned invalid JSON: ' + $_.Exception.Message + ' Output: ' + $output.Trim())
+    }
+
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($property in @($config.services.PSObject.Properties)) {
+        $service = $property.Value
+        $buildProperty = $service.PSObject.Properties['build']
+        $imageProperty = $service.PSObject.Properties['image']
+        $context = ''
+        $dockerfile = 'Dockerfile'
+        if ($buildProperty) {
+            $build = $buildProperty.Value
+            if ($build -is [string]) {
+                $context = $build
+            } else {
+                if ($build.PSObject.Properties['context']) { $context = [string]$build.context }
+                if ($build.PSObject.Properties['dockerfile']) { $dockerfile = [string]$build.dockerfile }
+            }
+        }
+        $result.Add([pscustomobject]@{
+            Name = [string]$property.Name
+            HasBuild = ($null -ne $buildProperty)
+            Image = $(if ($imageProperty) { [string]$imageProperty.Value } else { '' })
+            Context = $context
+            Dockerfile = $dockerfile
+        })
+    }
+    return $result.ToArray()
+}
+
+function Get-ComposeServiceInfoFromYaml {
+    param([switch]$AllProfiles)
+    $baseArguments = @(New-ComposeArguments -AllProfiles:$AllProfiles)
+    $serviceOutput = $null
+    try {
+        $serviceOutput = Invoke-ComposeCommand -Arguments (@($baseArguments) + @('config', '--services')) -Description 'docker compose config --services'
+    } catch {
+        $profileError = $_.Exception.Message
+        # Older Compose releases may not support profiles or the wildcard
+        # profile. Default (unprofiled) services still give us finance-api and
+        # wallos; nginx/python/Wallos bases come from the explicit defaults.
+        $baseArguments = @(New-ComposeArguments -NoProfiles)
+        try {
+            $serviceOutput = Invoke-ComposeCommand -Arguments (@($baseArguments) + @('config', '--services')) -Description 'docker compose config --services (without profiles)'
+        } catch {
+            throw ('docker compose config --services failed. With profile: ' + $profileError + ' | Without profile: ' + $_.Exception.Message)
+        }
+    }
+    $names = @($serviceOutput -split "`r?`n" |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -and $_ -match '^[A-Za-z0-9][A-Za-z0-9_.-]*$' })
+
+    $result = New-Object System.Collections.Generic.List[object]
+    foreach ($name in $names) {
+        $text = Invoke-ComposeCommand -Arguments (@($baseArguments) + @('config', $name)) -Description ('docker compose config ' + $name)
+        $hasBuild = ($text -match '(?m)^    build:')
+        $image = ''
+        $imageMatch = [regex]::Match($text, '(?m)^    image:\s*["'']?([^"''\r\n]+)["'']?\s*$')
+        if ($imageMatch.Success) { $image = $imageMatch.Groups[1].Value.Trim() }
+
+        $context = ''
+        $dockerfile = 'Dockerfile'
+        if ($hasBuild) {
+            $buildBlock = [regex]::Match($text, '(?ms)^    build:\s*\r?\n((?:      .*\r?\n?)*)')
+            if ($buildBlock.Success) {
+                $block = $buildBlock.Groups[1].Value
+                $contextMatch = [regex]::Match($block, '(?m)^\s+context:\s*["'']?([^"''\r\n]+)["'']?\s*$')
+                if ($contextMatch.Success) { $context = $contextMatch.Groups[1].Value.Trim() }
+                $dockerfileMatch = [regex]::Match($block, '(?m)^\s+dockerfile:\s*["'']?([^"''\r\n]+)["'']?\s*$')
+                if ($dockerfileMatch.Success) { $dockerfile = $dockerfileMatch.Groups[1].Value.Trim() }
+            }
+        }
+
+        $result.Add([pscustomobject]@{
+            Name = $name
+            HasBuild = $hasBuild
+            Image = $image
+            Context = $context
+            Dockerfile = $dockerfile
+        })
+    }
+    return $result.ToArray()
+}
+
+function Get-ComposeServiceInfo {
+    param([switch]$AllProfiles)
+    if (-not $ForceLegacyComposeConfig) {
+        try {
+            return @(Get-ComposeServiceInfoFromJson -AllProfiles:$AllProfiles)
+        } catch {
+            $jsonError = $_.Exception.Message
+            Write-Warning ('JSON compose inspection failed; falling back to YAML: ' + $jsonError)
+            try {
+                return @(Get-ComposeServiceInfoFromYaml -AllProfiles:$AllProfiles)
+            } catch {
+                throw ('docker compose config failed. JSON attempt: ' + $jsonError + ' | YAML fallback: ' + $_.Exception.Message)
+            }
+        }
+    }
+    return @(Get-ComposeServiceInfoFromYaml -AllProfiles:$AllProfiles)
 }
 
 function Get-ImagePlan {
     # Built images come only from services enabled by the build profile.
     $built = New-Object System.Collections.Generic.List[string]
     $dockerfiles = New-Object System.Collections.Generic.List[string]
-    $enabled = Get-ComposeConfig
-    foreach ($property in @($enabled.services.PSObject.Properties)) {
-        $service = $property.Value
-        $buildProperty = $service.PSObject.Properties['build']
-        if ($null -eq $buildProperty) { continue }
-        $imageProperty = $service.PSObject.Properties['image']
-        $image = if ($imageProperty) { [string]$imageProperty.Value } else { '' }
-        $builtImage = if ($image) { $image } else { $ProjectName + '-' + $property.Name }
+    foreach ($service in @(Get-ComposeServiceInfo)) {
+        if (-not $service.HasBuild) { continue }
+        $builtImage = if ($service.Image) { $service.Image } else { $ProjectName + '-' + $service.Name }
         if ($builtImage -and -not $built.Contains($builtImage)) { $built.Add($builtImage) }
 
-        # Compose resolves build.context to an absolute path; dockerfile is
-        # relative to that context unless absolute.
-        $build = $buildProperty.Value
-        $context = '.'
-        $dockerfile = 'Dockerfile'
-        if ($build -is [string]) {
-            $context = $build
-        } else {
-            if ($build.PSObject.Properties['context']) { $context = [string]$build.context }
-            if ($build.PSObject.Properties['dockerfile']) { $dockerfile = [string]$build.dockerfile }
-        }
-        if ($context -and $dockerfile) {
-            $dockerfilePath = if ([IO.Path]::IsPathRooted($dockerfile)) { $dockerfile } else { Join-Path $context $dockerfile }
-            if (Test-Path $dockerfilePath) { $dockerfiles.Add($dockerfilePath) }
-        }
+        $context = $service.Context
+        if (-not $context) { $context = '.' }
+        $dockerfile = $service.Dockerfile
+        if (-not $dockerfile) { $dockerfile = 'Dockerfile' }
+        $dockerfilePath = if ([IO.Path]::IsPathRooted($dockerfile)) { $dockerfile } else { Join-Path $context $dockerfile }
+        if (Test-Path $dockerfilePath) { $dockerfiles.Add($dockerfilePath) }
     }
 
     # Base images come from every image-only service in every profile, every
     # build Dockerfile FROM line, and the explicit defaults
     # (nginx/python/Wallos).
     $base = New-Object System.Collections.Generic.List[string]
-    $all = Get-ComposeConfig -AllProfiles
-    foreach ($property in @($all.services.PSObject.Properties)) {
-        $service = $property.Value
-        if ($null -ne $service.PSObject.Properties['build']) { continue }
-        $imageProperty = $service.PSObject.Properties['image']
-        if (-not $imageProperty) { continue }
-        $image = [string]$imageProperty.Value
-        if ($image -and -not $base.Contains($image)) { $base.Add($image) }
+    foreach ($service in @(Get-ComposeServiceInfo -AllProfiles)) {
+        if ($service.HasBuild) { continue }
+        if ($service.Image -and -not $base.Contains($service.Image)) { $base.Add($service.Image) }
     }
     foreach ($image in @(Get-DockerfileBaseImages -Paths @($dockerfiles))) {
         if ($image -and -not $base.Contains($image)) { $base.Add($image) }
@@ -242,6 +350,13 @@ try {
         $createdSecretsDir = $true
     }
     $placeholders = @{
+        (Join-Path $repoRoot '.env') = @(
+            '# offline-bundle-placeholder',
+            'FINANCE_API_PORT=8767',
+            'WALLOS_PORT=18082',
+            'GATEWAY_PORT=18768',
+            'FINANCE_TIMEZONE=Asia/Shanghai'
+        ) -join "`n"
         (Join-Path $secretsDir 'backend.env') = @(
             'FINANCE_DEVICE_TOKEN=offline-bundle-placeholder',
             'FINANCE_ADMIN_TOKEN=offline-bundle-placeholder',
