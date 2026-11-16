@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -153,6 +154,7 @@ fun TransactionListScreen(
     var showBillImport by remember { mutableStateOf(false) }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var activeDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     var exactDateFilter by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var duplicateListExpanded by remember { mutableStateOf(false) }
@@ -570,6 +572,29 @@ fun TransactionListScreen(
                 }
             }
         }
+    }
+
+    pendingDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(tr("删除这笔交易？")) },
+            text = {
+                Text(
+                    tr("删除将在电脑或 VPS 在线后双向同步；其他设备也会删除该笔交易。若只是误识别或退款，建议在网站标记为不计入或退款。")
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.delete(entry)
+                    pendingDelete = null
+                }) {
+                    Text(tr("确认删除"), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text(tr("取消")) }
+            },
+        )
     }
 
     if (showBillImport) {
