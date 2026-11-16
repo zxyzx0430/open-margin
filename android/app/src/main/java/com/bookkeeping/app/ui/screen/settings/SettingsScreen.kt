@@ -591,6 +591,29 @@ fun SettingsScreen(
             }
         }
     }
+
+    if (showExportGuide) {
+        AlertDialog(
+            onDismissRequest = { showExportGuide = false },
+            title = { Text(tr("导出微信 / 支付宝账单")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(tr("微信"), style = MaterialTheme.typography.titleSmall)
+                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「常见问题」→「下载账单」→「用于个人对账」，选时间范围并填邮箱，收到邮件后解压得到 CSV。"))
+                    Text(tr("支付宝"), style = MaterialTheme.typography.titleSmall)
+                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」，选时间范围并填邮箱，解压密码在邮件里。"))
+                    Text(
+                        tr("导入时选解压出的 CSV 文件即可。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showExportGuide = false }) { Text(tr("知道了")) }
+            },
+        )
+    }
 }
 
 private const val PAGE_RECOGNITION_COMPONENT =
@@ -1804,29 +1827,6 @@ private fun AboutUpdateCard() {
                 }
             }
         }
-    }
-
-    if (showExportGuide) {
-        AlertDialog(
-            onDismissRequest = { showExportGuide = false },
-            title = { Text(tr("导出微信 / 支付宝账单")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("微信"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「常见问题」→「下载账单」→「用于个人对账」，选时间范围并填邮箱，收到邮件后解压得到 CSV。"))
-                    Text(tr("支付宝"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」，选时间范围并填邮箱，解压密码在邮件里。"))
-                    Text(
-                        tr("导入时选解压出的 CSV 文件即可。"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showExportGuide = false }) { Text(tr("知道了")) }
-            },
-        )
     }
 
     installDialog?.let { state ->
