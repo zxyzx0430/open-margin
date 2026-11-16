@@ -775,6 +775,15 @@ internal object EnglishUiText {
         "通知权限用于显示自动记账服务状态；清衡通过通知使用权读取付款通知并自动记账。" to "Notification permission lets Open Margin show the auto-bookkeeping service status. Notification access lets it read payment notifications and record them automatically.",
         "金额不能为负数，请用支出/收入切换方向" to "Amount cannot be negative. Switch between expense and income instead.",
         "金额最多保留两位小数" to "Amount can have at most two decimal places",
+
+        // === 账单详情 · 全字段编辑页 ===
+        "记录信息" to "Record info",
+        "账户（可选）" to "Account (optional)",
+        "银行" to "Bank",
+        "时间不能晚于当前时间 5 分钟以上" to "Time cannot be more than 5 minutes in the future",
+        "请选择有效分类" to "Choose a valid category",
+        "请选择有效来源" to "Choose a valid source",
+        "请选择有效审核状态" to "Choose a valid review status",
         "隐藏" to "Hide",
         "预算不能为负数" to "Budget cannot be negative",
         "预算必须大于 0" to "Budget must be greater than 0",

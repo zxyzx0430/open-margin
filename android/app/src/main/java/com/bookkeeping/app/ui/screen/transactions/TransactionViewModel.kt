@@ -343,6 +343,27 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 详情页「编辑账单」的全字段保存：金额、收支类型、分类、商户、备注、账户、
+     * 来源、发生时间、审核状态一次写完。
+     *
+     * 这里只做二次校验和字段复制；syncDirty / syncModifiedMs / syncMutationId
+     * 仍由 TransactionRepository.update 统一写入，同步协议不变。
+     */
+    fun saveTransaction(original: TransactionEntity, fields: TransactionEditFields) {
+        val now = System.currentTimeMillis()
+        // 与编辑页同一套校验；非法或没有改动就不写库，也不触发同步。
+        if (!TransactionEditRules.errorsOf(fields, now).isValid) return
+        if (!TransactionEditRules.hasChanges(original, fields)) return
+        viewModelScope.launch {
+            repository.update(TransactionEditRules.applyTo(original, fields))
+            val category = runCatching { TransactionCategory.valueOf(fields.category) }.getOrNull()
+            if (category != null && original.category != fields.category && fields.merchant.isNotBlank()) {
+                settings.recordCategoryLearning(fields.merchant, category)
+            }
+        }
+    }
+
     fun saveMerchantRule(merchant: String, category: TransactionCategory) {
         if (merchant.isBlank()) return
         viewModelScope.launch { settings.rememberMerchantCategory(merchant, category) }
