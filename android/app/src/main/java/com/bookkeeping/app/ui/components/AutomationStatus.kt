@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.NotificationListenerHelper
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureHealth
+import com.bookkeeping.app.notification.accessibility.AccessibilityConnectionState
 
 /** Single source of truth for the four capabilities required by auto-tracking. */
 object AutomationStatus {
@@ -39,7 +40,9 @@ object AutomationStatus {
         if (!areNotificationsGranted(context)) add(tr("通知权限"))
         if (!NotificationListenerHelper.isEnabled(context)) add(tr("通知使用权"))
         if (!isPageRecognitionEnabled(context)) add(tr("页面识别服务"))
-        if (!AccessibilityCaptureHealth.snapshot(context).authorized) add(tr("无障碍兜底"))
+        if (AccessibilityCaptureHealth.snapshot(context).state != AccessibilityConnectionState.CONNECTED) {
+            add(tr("无障碍兜底"))
+        }
     }
 
     fun requiredReady(context: Context): Boolean = missingNames(context).isEmpty()
