@@ -142,11 +142,12 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     )
                 }
                 val confirmation = JSONObject(response.second)
-                // Accepted != persisted: old API counts ignored pre-ledger-start
-                // events as accepted. Never acknowledge a rejected local record.
+                // 条数对不上说明回执不可信，必须重试；条数一致但
+                // ignored_before_start>0 只说明对面是旧服务端、丢了几条历史
+                // 记录，本地记录仍在手机里：提示即可，绝不能因此阻断同步。
+                val ignoredBeforeStart = confirmation.optInt("ignored_before_start", 0)
                 when (LegacyUploadAckPolicy.decide(
-                    events.length(), confirmation.optInt("accepted", -1),
-                    confirmation.optInt("ignored_before_start", 0)
+                    events.length(), confirmation.optInt("accepted", -1), ignoredBeforeStart
                 )) {
                     LegacyUploadAckPolicy.Decision.RETRY -> {
                         return finish(
@@ -154,19 +155,14 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                             "服务器确认条数不一致，将重试", Result.retry()
                         )
                     }
-                    LegacyUploadAckPolicy.Decision.REJECTED_BY_LEDGER_START -> {
-                        return finish(
-                            prefs, SyncResultCode.BLOCKED,
-                            "有交易早于服务器账本起始日，被拒绝上传；请检查日期和账本设置，记录仍保留在手机",
-                            Result.failure(),
-                        )
-                    }
                     LegacyUploadAckPolicy.Decision.ADVANCE_CURSOR -> Unit
                 }
                 cursor = batch.last().id
                 if (!prefs.edit().putLong("last_synced_id", cursor)
                     .putLong("last_success_ms", System.currentTimeMillis())
-                    .putString("last_result", "已上传，正在拉取最新变更")
+                    .putString("last_result", if (ignoredBeforeStart > 0)
+                        "已上传；其中 $ignoredBeforeStart 条未被旧版服务端接收，记录仍保留在手机"
+                    else "已上传，正在拉取最新变更")
                     .putString(LAST_RESULT_CODE, SyncResultCode.RETRY.preferenceValue)
                     .commit()) {
                     return finish(

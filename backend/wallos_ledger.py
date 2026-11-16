@@ -240,8 +240,6 @@ def add_manual(t: NewEntry):
     check_new(t)
     event_id="wallos:manual:"+t.idempotency_key.lower()
     with core.db_connection() as db:
-        if t.timestamp_ms < core.ledger_start_ms(db):
-            raise HTTPException(status_code=422, detail="Transaction predates the new ledger start (2026-10-10 CST)")
         cur=db.execute("""INSERT OR IGNORE INTO transactions
             (event_id,timestamp_ms,amount_cents,currency,direction,source,category,merchant,review_status)
             VALUES (?,?,?,?,?,'MANUAL',?,?, 'unverified')""",

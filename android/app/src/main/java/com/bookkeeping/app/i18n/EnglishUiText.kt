@@ -268,7 +268,6 @@ internal object EnglishUiText {
         "网络或服务器异常，将自动重试" to "Network/server error; retrying",
         "同步授权失败，请核对设备密钥" to "Sync authorization failed; check device key",
         "服务器确认条数不一致，将重试" to "Server acknowledgment count mismatch; retrying",
-        "有交易早于服务器账本起始日，被拒绝上传；请检查日期和账本设置，记录仍保留在手机" to "Some transactions predate the ledger start and were rejected. They remain on your phone.",
         "已上传，正在拉取最新变更" to "Uploaded; downloading changes",
         "同步异常，将自动重试" to "Sync error; retrying",
         "需要有效 HTTPS 地址及至少16位的设备密钥" to "A valid HTTPS address and a device key of at least 16 characters are required",
@@ -799,6 +798,12 @@ internal object EnglishUiText {
         if (chinese.startsWith("旧交易 ") && chinese.endsWith(" 金额待核对；未擅自修改")) {
             val id = chinese.removePrefix("旧交易 ").removeSuffix(" 金额待核对；未擅自修改")
             return "Old transaction $id needs an amount review; no automatic correction was made"
+        }
+        if (chinese.startsWith("已上传；其中 ") &&
+            chinese.endsWith(" 条未被旧版服务端接收，记录仍保留在手机")) {
+            val count = chinese.removePrefix("已上传；其中 ")
+                .removeSuffix(" 条未被旧版服务端接收，记录仍保留在手机")
+            return "Uploaded; $count records were not accepted by the older server and remain on your phone"
         }
         if (chinese.startsWith("已同步无冲突交易；仍有 ") &&
             chinese.endsWith(" 笔修改待核对，请不要卸载应用")) {
