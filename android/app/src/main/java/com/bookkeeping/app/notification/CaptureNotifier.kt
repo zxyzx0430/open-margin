@@ -26,6 +26,7 @@ object CaptureNotifier {
         context: Context,
         transaction: TransactionEntity,
         possibleDuplicate: Boolean,
+        merged: Boolean = false,
     ) {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         ensureChannel(context)
@@ -38,6 +39,8 @@ object CaptureNotifier {
         var text = "${transaction.currency} $amount · $merchant · $time"
         if (possibleDuplicate) {
             text += " · " + AppLanguage.tr(context, "可能与已有记录重复")
+        } else if (merged) {
+            text += " · " + AppLanguage.tr(context, "已合并到已有记录")
         }
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -55,7 +58,11 @@ object CaptureNotifier {
             .setContentTitle(
                 AppLanguage.tr(
                     context,
-                    if (possibleDuplicate) "已保存，待确认重复" else "自动记账成功",
+                    when {
+                        possibleDuplicate -> "已保存，待确认重复"
+                        merged -> "已合并重复采集"
+                        else -> "自动记账成功"
+                    },
                 )
             )
             .setContentText(text)
