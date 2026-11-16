@@ -65,7 +65,7 @@ function New-OmDefaultState {
     param([string]$RepoRoot = $script:OmRepoRoot)
     return [pscustomobject]@{
         schema             = 1
-        engineVersion      = '1.2.5'
+        engineVersion      = '1.3.0'
         appRoot            = $RepoRoot
         mode               = 'remote_sync'
         step               = 'UNINITIALIZED'
@@ -118,17 +118,29 @@ function Read-OmState {
     if (-not (Test-Path $script:OmStatePath)) {
         return New-OmDefaultState
     }
+    $mutex = Enter-OmStateLock
     try {
-        $raw = Get-Content -Path $script:OmStatePath -Raw -Encoding UTF8
-        if ([string]::IsNullOrWhiteSpace($raw)) { return New-OmDefaultState }
-        $state = $raw | ConvertFrom-Json
-        if (-not $state.PSObject.Properties['schema']) { throw 'missing schema' }
-        return (Merge-OmStateDefaults $state)
-    } catch {
-        $bad = $script:OmStatePath + '.corrupt-' + (Get-Date -Format 'yyyyMMddHHmmss')
+        $lastError = $null
+        for ($attempt = 0; $attempt -lt 4; $attempt++) {
+            try {
+                $raw = Get-Content -Path $script:OmStatePath -Raw -Encoding UTF8
+                if ([string]::IsNullOrWhiteSpace($raw)) { return New-OmDefaultState }
+                $state = $raw | ConvertFrom-Json
+                if (-not $state.PSObject.Properties['schema']) { throw 'missing schema' }
+                return (Merge-OmStateDefaults $state)
+            } catch {
+                $lastError = $_
+                Start-Sleep -Milliseconds 100
+            }
+        }
+        # Back up only after repeated failures; the PID keeps concurrent
+        # recovery attempts from colliding on the same backup name.
+        $bad = $script:OmStatePath + '.corrupt-' + (Get-Date -Format 'yyyyMMddHHmmssfff') + '-' + $PID
         try { Move-Item -Force $script:OmStatePath $bad } catch { }
-        Write-OmLog -Level WARN -Message ("state file corrupt, moved to " + $bad)
+        Write-OmLog -Level WARN -Message ("state file corrupt, moved to " + $bad + " (" + $lastError.Exception.Message + ")")
         return New-OmDefaultState
+    } finally {
+        Exit-OmStateLock $mutex
     }
 }
 
@@ -143,22 +155,36 @@ function Save-OmState {
     $json = $State | ConvertTo-Json -Depth 12
     $mutex = $null
     if (-not $SkipLock) { $mutex = Enter-OmStateLock }
+    # Per-process temporary name: two writers must never share a temp file.
+    $tmp = $script:OmStatePath + '.tmp-' + $PID + '-' + [guid]::NewGuid().ToString('N')
     try {
-        $tmp = $script:OmStatePath + '.tmp'
         $utf8 = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($tmp, $json, $utf8)
-        if (Test-Path $script:OmStatePath) {
+        $lastError = $null
+        for ($attempt = 0; $attempt -lt 10; $attempt++) {
             try {
-                [System.IO.File]::Replace($tmp, $script:OmStatePath, $null)
+                if (Test-Path $script:OmStatePath) {
+                    try {
+                        [System.IO.File]::Replace($tmp, $script:OmStatePath, $null)
+                    } catch {
+                        # File.Replace needs an NTFS target; fall back to a
+                        # copy+delete when the target vanished or is exotic.
+                        [System.IO.File]::Copy($tmp, $script:OmStatePath, $true)
+                        Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+                    }
+                } else {
+                    Move-Item -Force $tmp $script:OmStatePath -ErrorAction Stop
+                }
+                $lastError = $null
+                break
             } catch {
-                # File.Replace needs both files on the same volume and an
-                # NTFS target; fall back to a best-effort move.
-                Move-Item -Force $tmp $script:OmStatePath
+                $lastError = $_
+                Start-Sleep -Milliseconds 100
             }
-        } else {
-            Move-Item -Force $tmp $script:OmStatePath
         }
+        if ($null -ne $lastError) { throw $lastError }
     } finally {
+        if (Test-Path $tmp) { Remove-Item -Force $tmp -ErrorAction SilentlyContinue }
         if ($mutex) { Exit-OmStateLock $mutex }
     }
 }
@@ -246,17 +272,21 @@ function Test-OmStateDrift {
 }
 
 function Enter-OmStateLock {
+    $mutex = New-Object System.Threading.Mutex($false, 'Local\OpenMarginSetupState')
     try {
-        $mutex = New-Object System.Threading.Mutex($false, 'Local\OpenMarginSetupState')
-        try {
-            $null = $mutex.WaitOne(5000)
-        } catch [System.Threading.AbandonedMutexException] {
-            # Previous process died while holding the lock; continue.
-        }
-        return $mutex
+        $acquired = $mutex.WaitOne(15000)
+    } catch [System.Threading.AbandonedMutexException] {
+        # Previous process died while holding the lock; we now own it.
+        $acquired = $true
     } catch {
-        return $null
+        try { $mutex.Dispose() } catch { }
+        throw
     }
+    if (-not $acquired) {
+        try { $mutex.Dispose() } catch { }
+        throw 'state lock timeout'
+    }
+    return $mutex
 }
 
 function Exit-OmStateLock {
