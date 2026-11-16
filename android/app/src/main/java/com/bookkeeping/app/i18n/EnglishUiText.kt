@@ -458,6 +458,8 @@ internal object EnglishUiText {
         "确认导入" to "Import",
         "导入中…" to "Importing…",
         "已导入" to "Imported",
+        "可在「账单」页查看，列表会自动刷新。" to
+            "View them on the Records tab; the list refreshes automatically.",
         "第" to "Row ",
         "行" to "",
         "与第" to "Duplicate of row ",

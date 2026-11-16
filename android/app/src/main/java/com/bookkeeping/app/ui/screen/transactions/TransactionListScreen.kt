@@ -92,7 +92,6 @@ import com.bookkeeping.app.ui.components.MonthlySummaryCard
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
-import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
@@ -119,9 +118,7 @@ private data class LedgerStatus(
 fun TransactionListScreen(
     viewModel: TransactionViewModel = hiltViewModel(),
     captureReviewViewModel: CaptureReviewViewModel = hiltViewModel(),
-    openBillImport: Boolean = false,
-    onBillImportOpened: () -> Unit = {},
-    onSetupAutomation: () -> Unit = {},
+    onOpenBillImport: () -> Unit = {},
     drilldown: StatsLedgerDrilldown? = null,
     onDrilldownConsumed: () -> Unit = {},
     onOpenDetail: (Long) -> Unit = {},
@@ -151,7 +148,6 @@ fun TransactionListScreen(
     }
 
     var showAddDialog by remember { mutableStateOf(false) }
-    var showBillImport by remember { mutableStateOf(false) }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
@@ -161,13 +157,6 @@ fun TransactionListScreen(
     var statusRefresh by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-
-    LaunchedEffect(openBillImport) {
-        if (openBillImport) {
-            showBillImport = true
-            onBillImportOpened()
-        }
-    }
 
     LaunchedEffect(drilldown) {
         val request = drilldown ?: return@LaunchedEffect
@@ -327,7 +316,7 @@ fun TransactionListScreen(
                             tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
-                    IconButton(onClick = { showBillImport = true }) {
+                    IconButton(onClick = onOpenBillImport) {
                         Icon(
                             imageVector = Icons.Outlined.FileDownload,
                             contentDescription = tr("导入账单"),
@@ -586,10 +575,6 @@ fun TransactionListScreen(
                 TextButton(onClick = { pendingDelete = null }) { Text(tr("取消")) }
             },
         )
-    }
-
-    if (showBillImport) {
-        BillImportDialog(onDismiss = { showBillImport = false })
     }
 
     if (showCaptureReview) {
