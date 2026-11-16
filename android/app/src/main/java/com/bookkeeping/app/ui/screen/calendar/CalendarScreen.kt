@@ -83,6 +83,7 @@ import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.i18n.CalendarDateText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
@@ -852,16 +853,26 @@ private fun SelectionSummary(
     val income = includedIncomes.sumOf { it.amountCents }
     val includedCount = includedExpenses.size + includedIncomes.size
     val net = income - expense
+    val startDate = start
+    val endDate = end
     val title = when {
-        !hasSelection -> tr("本月汇总")
-        start == end -> formatDate(start)
-        start!!.year == end!!.year && start.month == end.month ->
-            if (AppLanguage.current() == AppLanguage.ENGLISH) {
-                "${start.month}/${start.day}–${end.day}"
-            } else {
-                "${start.month}月${start.day}日–${end.day}日"
-            }
-        else -> formatDate(start) + "–" + formatDate(end!!)
+        startDate == null || endDate == null -> tr("本月汇总")
+        startDate == endDate -> CalendarDateText.day(startDate.year, startDate.month, startDate.day)
+        startDate.year == endDate.year && startDate.month == endDate.month ->
+            CalendarDateText.sameMonthRange(
+                startDate.year,
+                startDate.month,
+                startDate.day,
+                endDate.day,
+            )
+        else -> CalendarDateText.crossMonthRange(
+            startDate.year,
+            startDate.month,
+            startDate.day,
+            endDate.year,
+            endDate.month,
+            endDate.day,
+        )
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1119,13 +1130,6 @@ private fun dateOf(timestamp: Long): CalendarDate =
         )
     }
 
-private fun formatDate(date: CalendarDate): String =
-    if (AppLanguage.current() == AppLanguage.ENGLISH) {
-        "${date.year}/${date.month}/${date.day}"
-    } else {
-        "${date.year}年${date.month}月${date.day}日"
-    }
-
 private fun dayOf(timestamp: Long): Int =
     Calendar.getInstance().apply { timeInMillis = timestamp }.get(Calendar.DAY_OF_MONTH)
 
@@ -1141,13 +1145,7 @@ private fun shiftMonth(monthKey: String, delta: Int): String {
 
 private fun monthLabel(key: String): String {
     val parts = BudgetMonth.parse(key) ?: return key
-    val cal = Calendar.getInstance().apply {
-        clear()
-        set(parts.year, parts.month - 1, 1)
-    }
-    val pattern = if (AppLanguage.current() == AppLanguage.ENGLISH) "MMM yyyy" else "yyyy年M月"
-    val locale = if (AppLanguage.current() == AppLanguage.ENGLISH) Locale.ENGLISH else Locale.CHINA
-    return SimpleDateFormat(pattern, locale).format(cal.time)
+    return CalendarDateText.monthHeading(parts.year, parts.month)
 }
 
 private fun lunarLabel(year: Int, month: Int, day: Int): String {
