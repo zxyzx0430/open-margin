@@ -102,8 +102,14 @@ dependencies {
     // Background upload; default disabled until opt-in
     implementation("androidx.work:work-runtime-ktx:2.10.1")
 
+    // Offline QR pairing: embedded camera scanner + core decoder for gallery images.
+    implementation(libs.zxing.android.embedded)
+    implementation(libs.zxing.core)
+
     // 测试
     testImplementation(libs.junit)
+    // Android's org.json is a stub in local unit tests; use the real parser.
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

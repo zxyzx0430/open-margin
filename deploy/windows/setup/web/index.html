@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>清衡 · Windows 一键部署</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="om-header">
+    <div class="om-brand">
+      <span class="om-mark">清</span>
+      <div>
+        <strong>清衡 · Windows 一键部署</strong>
+        <span class="om-sub">Open Margin</span>
+      </div>
+    </div>
+    <div class="om-header-right">
+      <span id="header-state" class="om-pill om-pill-neutral">正在检查</span>
+      <span id="version" class="om-version">v1.2.5</span>
+    </div>
+  </header>
+
+  <nav class="om-steps" aria-label="部署步骤">
+    <div class="om-step" data-step="env"><span>1</span>环境</div>
+    <div class="om-step" data-step="tailscale"><span>2</span>Tailscale</div>
+    <div class="om-step" data-step="admin"><span>3</span>管理员</div>
+    <div class="om-step" data-step="deploy"><span>4</span>部署</div>
+    <div class="om-step" data-step="complete"><span>5</span>完成</div>
+  </nav>
+
+  <main class="om-main">
+    <section id="screen-welcome" class="om-screen is-active">
+      <div class="om-hero">
+        <p class="om-kicker">Windows 一键部署</p>
+        <h1>让手机记账，自动同步到这台电脑</h1>
+        <p class="om-lead">向导会检查并安装运行环境，启动清衡服务，开启一个只用于同步的公网入口。大约 10–30 分钟，取决于网络。</p>
+        <div class="om-actions">
+          <button id="btn-start" class="om-btn om-btn-primary">开始</button>
+          <button id="btn-status" class="om-btn om-btn-ghost">查看运行状态</button>
+        </div>
+        <p class="om-fineprint">不需要提前安装 Docker、Tailscale、Git 或 Python。</p>
+      </div>
+    </section>
+
+    <section id="screen-env" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">第 1 步</p>
+          <h2>环境检查</h2>
+        </div>
+        <button id="btn-recheck" class="om-btn om-btn-ghost">重新检测</button>
+      </div>
+      <div id="env-checks" class="om-check-list"></div>
+      <div class="om-actions">
+        <button id="btn-install-deps" class="om-btn om-btn-primary">一键安装依赖</button>
+        <button id="btn-env-next" class="om-btn om-btn-ghost" disabled>下一步</button>
+      </div>
+      <p class="om-hint">安装依赖会弹一次 Windows 管理员确认（UAC）。如果 Docker 镜像下载失败，可以使用离线镜像包。</p>
+    </section>
+
+    <section id="screen-tailscale" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">第 2 步</p>
+          <h2>连接 Tailscale</h2>
+        </div>
+        <button id="btn-ts-recheck" class="om-btn om-btn-ghost">重新检测</button>
+      </div>
+      <div id="ts-checks" class="om-check-list"></div>
+      <div class="om-card om-note">
+        <strong>手机不需要安装 Tailscale。</strong>
+        <p>Tailscale 只给这台电脑一个公网 HTTPS 入口。手机用自己的商业 VPN 访问这个入口，不会和 VPN 抢通道。</p>
+      </div>
+      <div class="om-actions">
+        <button id="btn-ts-login" class="om-btn om-btn-primary">打开 Tailscale 登录</button>
+        <button id="btn-ts-admin" class="om-btn om-btn-ghost">打开 Tailscale 管理台</button>
+        <button id="btn-ts-next" class="om-btn om-btn-ghost" disabled>下一步</button>
+      </div>
+    </section>
+
+    <section id="screen-security" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">确认</p>
+          <h2>公网访问说明</h2>
+        </div>
+      </div>
+      <div class="om-card">
+        <p>部署完成后，这台电脑会有一个公网地址，只开放：</p>
+        <ul class="om-list">
+          <li>同步接口（需要设备密钥）</li>
+          <li>一次性配对页面（只在本机显示二维码）</li>
+        </ul>
+        <p>Wallos 账本、MCP、OAuth 和管理接口不会对公网开放。</p>
+        <p class="om-warn">二维码相当于账本钥匙。不要截图、不要转发，10 分钟后向导会自动隐藏它。</p>
+      </div>
+      <label class="om-check">
+        <input type="checkbox" id="ack-public">
+        <span>我理解并同意开启公网同步入口</span>
+      </label>
+      <div class="om-actions">
+        <button id="btn-security-next" class="om-btn om-btn-primary" disabled>下一步</button>
+      </div>
+    </section>
+
+    <section id="screen-admin" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">第 3 步</p>
+          <h2>设置管理员账号</h2>
+        </div>
+      </div>
+      <div class="om-form">
+        <label>用户名<input id="admin-user" autocomplete="username" maxlength="60" placeholder="例如 alex"></label>
+        <label>密码<input id="admin-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 位"></label>
+        <label>确认密码<input id="admin-password2" type="password" autocomplete="new-password" minlength="8"></label>
+        <label>邮箱（可选）<input id="admin-email" type="email" autocomplete="email" placeholder="用于密码找回"></label>
+      </div>
+      <p class="om-hint">这是以后登录网页版清衡的账号。密码只用于本地创建管理员，不会写进日志。</p>
+      <div class="om-actions">
+        <button id="btn-admin-next" class="om-btn om-btn-primary">下一步</button>
+      </div>
+    </section>
+
+    <section id="screen-deploy" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">第 4 步</p>
+          <h2>一键部署</h2>
+        </div>
+        <span id="deploy-state" class="om-pill om-pill-neutral">等待开始</span>
+      </div>
+      <div id="deploy-progress" class="om-progress-list"></div>
+      <div id="deploy-action-box" class="om-card om-hidden">
+        <p id="deploy-action-text"></p>
+        <div class="om-actions">
+          <a id="deploy-action-link" class="om-btn om-btn-primary" target="_blank" rel="noopener">打开授权页</a>
+          <button id="btn-deploy-retry" class="om-btn om-btn-ghost">重试</button>
+        </div>
+      </div>
+      <div class="om-actions">
+        <button id="btn-deploy" class="om-btn om-btn-primary">开始部署</button>
+        <button id="btn-deploy-logs" class="om-btn om-btn-ghost">查看日志</button>
+      </div>
+      <p class="om-hint">部署过程中可能会弹出 Tailscale 授权页，点“允许”即可。不要关闭这个页面。</p>
+    </section>
+
+    <section id="screen-complete" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">完成</p>
+          <h2>部署完成</h2>
+        </div>
+        <span class="om-pill om-pill-ok">已连接</span>
+      </div>
+      <div class="om-grid-2">
+        <div class="om-card om-qr-card">
+          <h3>1. 下载 Android App</h3>
+          <div id="app-qr" class="om-qr"></div>
+          <p class="om-hint">扫码打开最新签名 APK。允许“安装未知应用”后再安装。</p>
+          <a class="om-btn om-btn-ghost" href="https://github.com/zxyzx0430/open-margin/releases/latest" target="_blank" rel="noopener">打不开二维码？点这里</a>
+        </div>
+        <div class="om-card om-qr-card">
+          <h3>2. 扫码配对</h3>
+          <div id="pair-qr" class="om-qr"></div>
+          <p id="pair-qr-hint" class="om-hint">二维码 10 分钟后自动隐藏，只在本机显示。</p>
+          <button id="btn-pair-qr-refresh" class="om-btn om-btn-ghost">重新显示二维码</button>
+        </div>
+      </div>
+      <div class="om-card">
+        <h3>手机上还要做</h3>
+        <ol class="om-list">
+          <li>打开 App → 自动记账设置 → 授权通知使用权（必需）、短信（可选）、无障碍页面识别（可选）、电池优化白名单。</li>
+          <li>设置 → 扫码连接 → 扫描上面的配对二维码。</li>
+          <li>点“测试连接”，看到账本身份和同步进度就成功了。</li>
+        </ol>
+      </div>
+      <div class="om-card om-note">
+        <strong>注意</strong>
+        <ul class="om-list">
+          <li>电脑要保持开机；休眠/关机时同步暂停，手机继续本地记账，恢复后补传。</li>
+          <li>二维码和密钥不要截图、不要转发。</li>
+          <li>建议点“一键备份”；本机备份不等于异地备份。</li>
+          <li>关闭远程访问：下面点“关闭远程同步”。</li>
+        </ul>
+      </div>
+      <div class="om-actions">
+        <button id="btn-backup" class="om-btn om-btn-ghost">一键备份</button>
+        <button id="btn-open-ledger" class="om-btn om-btn-ghost">打开本机账本</button>
+        <button id="btn-disable" class="om-btn om-btn-danger">关闭远程同步</button>
+      </div>
+    </section>
+
+    <section id="screen-status" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">运行状态</p>
+          <h2>清衡设置</h2>
+        </div>
+        <button id="btn-status-refresh" class="om-btn om-btn-ghost">刷新</button>
+      </div>
+      <div id="status-summary" class="om-card"></div>
+      <div class="om-actions">
+        <button id="btn-status-repair" class="om-btn om-btn-primary">一键修复</button>
+        <button id="btn-watchdog-pause" class="om-btn om-btn-ghost">暂停看门狗 1 小时</button>
+        <button id="btn-watchdog-resume" class="om-btn om-btn-ghost">恢复看门狗</button>
+        <button id="btn-rotate-token" class="om-btn om-btn-danger">重新生成设备密钥</button>
+        <button id="btn-status-enable" class="om-btn om-btn-ghost">重新开启远程同步</button>
+      </div>
+      <div class="om-card">
+        <h3>最近日志</h3>
+        <pre id="status-logs" class="om-logs"></pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="om-toast om-hidden" role="status" aria-live="polite"></div>
+  <div id="log-drawer" class="om-drawer om-hidden">
+    <div class="om-drawer-head">
+      <strong>部署日志</strong>
+      <button id="btn-close-logs" class="om-btn om-btn-ghost">关闭</button>
+    </div>
+    <pre id="log-lines" class="om-logs"></pre>
+  </div>
+
+  <script src="/qrcode.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

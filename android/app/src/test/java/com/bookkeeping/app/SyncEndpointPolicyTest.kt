@@ -27,4 +27,13 @@ class SyncEndpointPolicyTest {
     @Test fun changingBeforeAnySyncIsSafe() {
         assertTrue(SyncEndpointPolicy.canChangeServer(windows, vps, 0, 0, 0))
     }
+
+    @Test fun clearedStoredUrlCannotBypassHistory() {
+        // An empty previous URL used to be treated as a wildcard, which let a
+        // user erase the address field and re-point an existing cursor.
+        assertFalse(SyncEndpointPolicy.canChangeServer("", windows, 1, 0, 0))
+        assertFalse(SyncEndpointPolicy.canChangeServer("", windows, 0, 1, 0))
+        assertFalse(SyncEndpointPolicy.canChangeServer("", windows, 0, 0, 1))
+        assertTrue(SyncEndpointPolicy.canChangeServer("", windows, 0, 0, 0))
+    }
 }
