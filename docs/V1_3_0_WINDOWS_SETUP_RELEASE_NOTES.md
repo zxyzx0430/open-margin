@@ -46,7 +46,7 @@
 - `OpenMargin-Offline-<version>.tar.gz` 是**单独的 Release 资产**，不塞进安装器，允许用户手动转发。
 - 包含 `finance-api`、`wallos` 构建镜像和 `python:3.11-slim`、`nginx:1.28-alpine`、Wallos 基础镜像；附 `manifest.json`、`RESTORE.md` 和 SHA256。
 - 恢复：`tar -xzf ...`，然后 `docker load -i images.tar`。
-- **限制**：当前向导以 `docker compose up --build` 启动；完全离线重建仍依赖后续支持预构建镜像 / `--no-build`，端到端离线安装尚未验证。
+- **限制**：网页向导默认以 `docker compose up --build` 启动；CLI 已支持 `open-margin-setup.ps1 deploy --no-build` 直接使用已 `docker load` 的镜像。完全离线（预构建镜像 + `--no-build`）的端到端安装尚未在干净机验证；本环境因磁盘空间未实际生成离线包。
 
 ### CI
 
@@ -57,17 +57,16 @@
 
 ## 已知限制 / 发布前必须完成
 
-- 真实 Windows 10 Home 22H2 / Windows 11 干净机从零安装未验证。
-- Tailscale 注册、MagicDNS/HTTPS、Funnel 授权、公共 DNS 传播未验证。
+- 真实 Windows 10 Home 22H2 / Windows 11 干净机从零安装未验证；当前只在开发机跑过环境检查与演练模式。
+- Tailscale 注册、MagicDNS/HTTPS、Funnel 授权、公共 DNS 传播未验证；本机未安装 Tailscale。
 - 中国 SIM + 商业 VPN 访问 `*.ts.net` 未验证；Funnel 仍是 beta，带宽有限，只适合小数据同步。
-- Android 真机扫码、`server_id` 校验、断线补传未验证；Android 二维码扫描代码必须与本版本一起发布，否则二维码不可用。
-- 依赖安装的提权 helper 仍调用 `pwsh.exe`（PowerShell 7）；只有 Windows PowerShell 5.1 的机器会在该步骤失败。
-- 引擎脚本当前是无 BOM UTF-8，含中文；Windows PowerShell 5.1 可能按 ANSI 误读。需要补 BOM 或改为 ASCII。
-- `WAITING_REBOOT` 状态已写入，但没有注册 `RunOnce` 自动续装；重启后需手动重新打开“清衡设置”。
-- `compose.yaml` 在当前分支还没有 `windows-public-sync` service；运行时/compose 线程必须补齐，否则远程同步 profile 不完整。
-- 安装器未做代码签名；SmartScreen 行为只在文档层面说明，未在真实下载链路验收。
-- 完全离线安装未验证（见上）。
-- Inno Setup 本地未安装；本线程只做了脚本静态检查，安装器由 CI 编译。
+- Android 真机扫码与商业 VPN 下的同步未验证；JVM 单测 660 条通过，模拟器相册二维码解码由 Android 分支单独验证。
+- 管理员提权安装（WSL2 / Docker Desktop / Tailscale、UAC、URL ACL、重启续装）未在干净机验证；开发机当前不是管理员。
+- Wallos 真实容器内的 `/registration.php` 表单未验证（仅 mock）。
+- 安装器未做代码签名；本机未安装 Inno Setup，只验证了 `Build-Installer.ps1` 在缺少 ISCC 时以退出码 2 停止且不自动安装。
+- 离线镜像包本环境未实际构建（磁盘空间不足）；`-SkipBuild` 在缺少镜像时安全失败并清理占位 secrets。
+- 看门狗用伪 Docker/Tailscale 做了故障注入，真实 Docker Desktop 重启、登录计划任务和“无窗口”行为未在干净机验证。
+- 开发机系统盘可用空间仅 3.1GB，低于向导要求的 15GB，因此环境检查会按设计阻止继续；演练流程通过测试钩子绕过该环境门槛。
 
 ## 升级与兼容
 
@@ -78,11 +77,17 @@
 
 ## 验证状态
 
-已完成（静态）：
+已在集成分支实际运行（2026-11-17）：
 
-- `[System.Management.Automation.Language.Parser]::ParseFile` 解析全部 Windows PowerShell 文件。
-- `docker compose --profile windows-private-sync config -q` 与 `--profile windows-public-sync config -q`（临时占位 secrets）。
-- 新增 GitHub Actions YAML 语法解析。
-- `python scripts/check-public-ready.py`（本机依赖可用时）。
+- Pester 5：61 条通过，0 失败（`deploy/windows/setup/tests/Run-Tests.ps1 -CI`）。
+- 后端 unittest：102 条通过（`FINANCE_PUBLIC_URL=... python -m unittest discover -p "test_*.py"`）。
+- Android JVM 单测：660 条，0 失败，1 跳过；`:app:assembleDebug` 成功（versionCode 25 / versionName 1.3.0）。
+- 网关：Docker nginx 私有/公网各 5 条允许、15 条拒绝，公网限流生效，访问日志无 token。
+- Compose：默认、`windows-public-sync`、`windows-private-sync` 三套配置均 `config -q` 通过。
+- 向导 API：未带 cookie 401、错误 Origin 403、坏 JSON 400、未知 action 404、路径穿越 403、错误 Host 403。
+- 向导并发：200 次 `/api/health` + 100 次 `/api/status` 全部 200；10 个并发 Job 全部完成；20 个并发状态写入无损坏、无残留临时文件。
+- 看门狗 `-Once -DryRun`：Docker 掉线、容器缺失、Tailscale 需登录/掉线、Funnel 未授权/路由缺失、暂停过期、退避耗尽均按设计记录且不弹出窗口。
+- 向导演练：欢迎 → 环境检查 → Tailscale → 公网确认 → 管理员校验 → 部署 dry-run → 自测 → 完成 → 状态，无 console error，DOM 无长 token。
+- 静态：38 个 PowerShell 文件解析通过；8 个 GitHub Actions YAML 解析通过；`python scripts/check-public-ready.py` 通过。
 
-未完成（动态）：安装器编译、干净机安装、Funnel 真机、手机商业 VPN、Android 扫码、看门狗故障注入、离线安装。发布前按 `docs/DEPLOY_WINDOWS.md` 第 0.9 节验收。
+未完成（动态）：干净机安装、真实 Tailscale/Funnel、管理员提权、真实 Wallos 注册、Android 真机扫码、看门狗真实系统故障、Inno Setup 编译、离线包构建与离线安装。发布前按 `docs/DEPLOY_WINDOWS.md` 第 0.9 节验收。
