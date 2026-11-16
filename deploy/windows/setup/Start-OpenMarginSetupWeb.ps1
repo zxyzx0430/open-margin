@@ -158,6 +158,14 @@ function Set-OmJobStatus {
     Write-OmAtomicJson -Path $Path -Value ([pscustomobject]@{ status = $Status; updatedAt = (Get-Date).ToString('o') })
 }
 
+# Fixed action whitelist: unknown actions are rejected before a job is created.
+$allowedWebActions = @(
+    'check', 'install-deps', 'deploy', 'create-owner', 'login-tailscale',
+    'approve-funnel', 'verify', 'disable', 'enable', 'repair', 'backup',
+    'pair-qr', 'rotate-token', 'pause-watchdog', 'resume-watchdog',
+    'install-watchdog', 'uninstall-watchdog', 'watchdog-status'
+)
+
 function Start-OmWebJob {
     param([string]$Action, $Params)
     $id = [guid]::NewGuid().ToString('N')
@@ -348,7 +356,7 @@ try {
                         Write-OmJson -Context $context -Value @{ ok = $false; code = 'METHOD_NOT_ALLOWED' } -Status 405
                         break
                     }
-                    Write-OmJson -Context $context -Value @{ ok = $true; service = 'open-margin-setup'; version = '1.2.5'; dryRun = [bool]$DryRun }
+                    Write-OmJson -Context $context -Value @{ ok = $true; service = 'open-margin-setup'; version = '1.3.0'; dryRun = [bool]$DryRun }
                 }
                 '^/api/config$' {
                     if ($method -ne 'GET') {
@@ -357,7 +365,7 @@ try {
                     }
                     $state = Read-OmState
                     Write-OmJson -Context $context -Value @{
-                        ok = $true; version = '1.2.5'; repoRoot = $RepoRoot;
+                        ok = $true; version = '1.3.0'; repoRoot = $RepoRoot;
                         ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun
                     }
                 }
@@ -427,6 +435,10 @@ try {
                         continue
                     }
                     $action = $matches[1]
+                    if ($allowedWebActions -notcontains $action) {
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'NOT_FOUND' } -Status 404
+                        continue
+                    }
                     try { $body = Read-OmRequestBody -Context $context } catch {
                         Write-OmJson -Context $context -Value @{ ok = $false; code = 'BAD_JSON'; message = $_.Exception.Message } -Status 400
                         continue
