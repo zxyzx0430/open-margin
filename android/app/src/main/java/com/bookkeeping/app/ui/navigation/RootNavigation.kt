@@ -53,8 +53,12 @@ fun RootNavigation() {
     var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+    // Resolve the static tab list once at the top of composition. Reading it
+    // lazily from inside hierarchy.any could observe a nested data object
+    // before its class initializer had assigned INSTANCE (null route crash).
+    val navItems = BottomNavItem.ALL
     val showBottomBar = currentDestination?.hierarchy?.any { destination ->
-        BottomNavItem.ALL.any { it.route == destination.route }
+        navItems.any { it.route == destination.route }
     } == true
 
     Scaffold(
@@ -68,7 +72,7 @@ fun RootNavigation() {
                 ) {
                     val showLabels = LocalDensity.current.fontScale <= 1.3f
 
-                    BottomNavItem.ALL.forEach { item ->
+                    navItems.forEach { item ->
                         val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
                         val label: (@Composable () -> Unit)? = if (showLabels) {
                             {
