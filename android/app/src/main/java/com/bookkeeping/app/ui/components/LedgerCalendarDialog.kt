@@ -48,6 +48,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.i18n.CalendarDateText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import java.text.SimpleDateFormat
@@ -96,7 +97,7 @@ fun LedgerCalendarDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = monthLabel(currentMonth),
+                            text = CalendarDateText.monthHeading(parts.year, parts.month),
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -353,7 +354,7 @@ private fun CalendarGrid(
                 Icon(Icons.Default.KeyboardArrowLeft, contentDescription = tr("上个月"))
             }
             Text(
-                text = if (localeEnglish) monthEnglishLabel(year, month) else "${month}月",
+                text = CalendarDateText.monthShort(year, month),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -526,21 +527,7 @@ private fun shiftMonth(monthKey: String, delta: Int): String {
 }
 
 private fun rangeLabel(year: Int, month: Int, start: Int, end: Int): String =
-    if (start == end) {
-        if (AppLanguage.current() == AppLanguage.ENGLISH) "$month/$start"
-        else "${month}月${start}日"
-    } else {
-        if (AppLanguage.current() == AppLanguage.ENGLISH) "$month/$start–$month/$end"
-        else "${month}月${start}日–${end}日"
-    }
-
-private fun monthEnglishLabel(year: Int, month: Int): String {
-    val cal = Calendar.getInstance().apply {
-        clear()
-        set(year, month - 1, 1)
-    }
-    return SimpleDateFormat("MMM yyyy", Locale.ENGLISH).format(cal.time)
-}
+    CalendarDateText.sameMonthRange(year, month, start, end)
 
 private fun timeLabel(timestamp: Long): String =
     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
