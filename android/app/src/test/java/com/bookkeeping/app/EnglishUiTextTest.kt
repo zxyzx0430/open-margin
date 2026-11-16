@@ -59,6 +59,29 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun updateInstallFlowLabelsTranslate() {
+        val expected = mapOf(
+            "发现新版本" to "New version available",
+            "APK 大小" to "APK size",
+            "发布日期" to "Release date",
+            "下载" to "Download",
+            "下载中" to "Downloading",
+            "安装" to "Install",
+            "下载失败，请重试" to "Download failed. Try again.",
+            "没有可下载的正式版 APK" to "No stable APK is available for download.",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+        // The removed supplementary notice must not linger as an orphan key.
+        assertEquals(
+            "检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。",
+            EnglishUiText.translate("检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。"),
+        )
+    }
+
+    @Test
     fun transactionDialogAndImportMessagesTranslate() {
         assertEquals("Edit transaction", EnglishUiText.translate("编辑账单"))
         assertEquals("Date", EnglishUiText.translate("日期"))
