@@ -38,7 +38,6 @@ import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -232,10 +231,6 @@ fun StatsScreen(
                     )
                 }
             }
-            item(key = "summary_note") {
-                SummaryNote(type = viewingType)
-            }
-
             if (stats.isEmpty()) {
                 item(key = "empty") {
                     EmptyStatsCard(
@@ -717,31 +712,6 @@ private fun ComparisonValue(comparison: MonthComparison, type: TransactionType) 
 }
 
 @Composable
-private fun SummaryNote(type: TransactionType) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(
-            imageVector = Icons.Outlined.Info,
-            contentDescription = null,
-            tint = QingTextSecondary,
-            modifier = Modifier.size(14.dp),
-        )
-        Text(
-            text = if (type == TransactionType.INCOME) {
-                tr("收入包含转入、红包等实际入账，仅排除退款和未计入记录。")
-            } else {
-                tr("不包含转账和退款，统计仅计入实际消费支出。")
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = QingTextSecondary,
-        )
-    }
-}
-
-@Composable
 private fun CategoryDonutCard(
     stats: List<CategoryStat>,
     totalCents: Long,
@@ -768,10 +738,10 @@ private fun CategoryDonutCard(
                 stats = stats,
                 totalCents = totalCents,
                 centerLabel = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
-                // 高度留出引线标签的错位空间：标签在环外两侧排开，不再压住扇区。
+                // 环外不再有引线与标签，高度按圆环本体给：短边一半减去留白就是半径。
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(236.dp),
+                    .height(200.dp),
                 selectedCategory = selectedCategory,
                 onSliceClick = { selectedCategory = it },
             )

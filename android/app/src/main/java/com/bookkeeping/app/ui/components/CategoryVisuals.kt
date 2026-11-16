@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.ui.screen.stats.categoryColor
 import com.bookkeeping.app.ui.theme.LocalQingDark
 
 data class CategoryVisual(
@@ -27,31 +28,49 @@ data class CategoryVisual(
     val icon: ImageVector,
 )
 
+/**
+ * 分类图标的配色只从 [categoryColor] 来：饼图扇区、图例色块、账单列表图标、预算页图标共用同一份颜色，
+ * 不再各算一套，否则同一个分类在不同页面会显示成两种颜色。
+ *
+ * 浅色模式直接用分类色做前景、把它压到 14% 做底色；暗色模式先把颜色提亮再压底，
+ * 保证深色背景上图标仍然看得清。
+ */
 @Composable
 fun categoryVisual(category: TransactionCategory): CategoryVisual {
-    val base = when (category) {
-        TransactionCategory.FOOD -> CategoryVisual(Color(0xFFFDE8D7), Color(0xFFD96C2F), Icons.Outlined.Restaurant)
-        TransactionCategory.TRANSPORT -> CategoryVisual(Color(0xFFDCEBFF), Color(0xFF2F6FE0), Icons.Outlined.DirectionsSubway)
-        TransactionCategory.SHOPPING -> CategoryVisual(Color(0xFFF3E4FF), Color(0xFF8552D6), Icons.Outlined.ShoppingBag)
-        TransactionCategory.ENTERTAINMENT -> CategoryVisual(Color(0xFFFFE4EC), Color(0xFFD94F78), Icons.Outlined.SportsEsports)
-        TransactionCategory.HOUSING -> CategoryVisual(Color(0xFFE8EDFF), Color(0xFF4F5FC7), Icons.Outlined.Home)
-        TransactionCategory.UTILITIES -> CategoryVisual(Color(0xFFDFF5F1), Color(0xFF168C7A), Icons.Outlined.Bolt)
-        TransactionCategory.HEALTH -> CategoryVisual(Color(0xFFF1E7E3), Color(0xFF7D5F55), Icons.Outlined.MedicalServices)
-        TransactionCategory.EDUCATION -> CategoryVisual(Color(0xFFFFF1D6), Color(0xFFC68A1E), Icons.Outlined.School)
-        TransactionCategory.SALARY -> CategoryVisual(Color(0xFFE4F5D9), Color(0xFF4F8C32), Icons.Outlined.Payments)
-        TransactionCategory.BONUS -> CategoryVisual(Color(0xFFFFF6D7), Color(0xFFA87900), Icons.Outlined.Payments)
-        TransactionCategory.INVESTMENT -> CategoryVisual(Color(0xFFE3F3F8), Color(0xFF277A91), Icons.Outlined.Payments)
-        TransactionCategory.INSURANCE -> CategoryVisual(Color(0xFFE8F0FA), Color(0xFF416B9E), Icons.Outlined.MedicalServices)
-        TransactionCategory.GIFT -> CategoryVisual(Color(0xFFFFE8E8), Color(0xFFC24B4B), Icons.Outlined.Payments)
-        TransactionCategory.TRANSFER -> CategoryVisual(Color(0xFFEDE7FF), Color(0xFF6A5ACD), Icons.Outlined.SwapHoriz)
-        TransactionCategory.OTHER -> CategoryVisual(Color(0xFFECEFF1), Color(0xFF607D8B), Icons.Outlined.MoreHoriz)
+    val accent = categoryColor(category)
+    val icon = categoryIcon(category)
+    if (!LocalQingDark.current) {
+        return CategoryVisual(
+            background = accent.copy(alpha = 0.14f),
+            foreground = accent,
+            icon = icon,
+        )
     }
-    if (!LocalQingDark.current) return base
-    val foreground = lerp(base.foreground, Color.White, 0.30f)
-    return base.copy(
-        background = foreground.copy(alpha = 0.18f),
-        foreground = foreground,
+    val lifted = lerp(accent, Color.White, 0.30f)
+    return CategoryVisual(
+        background = lifted.copy(alpha = 0.18f),
+        foreground = lifted,
+        icon = icon,
     )
+}
+
+/** 图标与颜色无关，单独一张表；测试可以逐类检查有没有拿到图标。 */
+internal fun categoryIcon(category: TransactionCategory): ImageVector = when (category) {
+    TransactionCategory.FOOD -> Icons.Outlined.Restaurant
+    TransactionCategory.TRANSPORT -> Icons.Outlined.DirectionsSubway
+    TransactionCategory.SHOPPING -> Icons.Outlined.ShoppingBag
+    TransactionCategory.ENTERTAINMENT -> Icons.Outlined.SportsEsports
+    TransactionCategory.HOUSING -> Icons.Outlined.Home
+    TransactionCategory.UTILITIES -> Icons.Outlined.Bolt
+    TransactionCategory.HEALTH -> Icons.Outlined.MedicalServices
+    TransactionCategory.EDUCATION -> Icons.Outlined.School
+    TransactionCategory.SALARY -> Icons.Outlined.Payments
+    TransactionCategory.BONUS -> Icons.Outlined.Payments
+    TransactionCategory.INVESTMENT -> Icons.Outlined.Payments
+    TransactionCategory.INSURANCE -> Icons.Outlined.MedicalServices
+    TransactionCategory.GIFT -> Icons.Outlined.Payments
+    TransactionCategory.TRANSFER -> Icons.Outlined.SwapHoriz
+    TransactionCategory.OTHER -> Icons.Outlined.MoreHoriz
 }
 
 fun merchantSystemIcon(name: String?): ImageVector? = when (name) {
