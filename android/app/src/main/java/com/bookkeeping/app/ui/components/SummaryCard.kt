@@ -58,7 +58,7 @@ fun MonthlySummaryCard(
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
-                label = tr("收支差"),
+                label = tr("结余"),
                 value = (if (diff >= 0) "+" else "−") + formatCny(kotlin.math.abs(diff)),
                 color = diffColor,
                 modifier = Modifier.weight(1f),

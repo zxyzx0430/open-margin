@@ -217,6 +217,18 @@ class StatsViewModel @Inject constructor(
         .map { list -> list.sumOf { it.totalCents } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
+    /** Income minus expenses for the selected month or year. */
+    val balanceCents: StateFlow<Long> = combine(_selectedMonth, _period) { month, period ->
+        rangeFor(month, period)
+    }
+        .flatMapLatest { (start, end) ->
+            repository.observeBetween(start, end).map { transactions ->
+                StatsAggregation.totalCents(transactions, TransactionType.INCOME) -
+                    StatsAggregation.totalCents(transactions, TransactionType.EXPENSE)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
     // 选中月份每日合计（柱状图用）。无交易的日子填 0
     val dailyTotals: StateFlow<List<DailyTotal>> = _selectedMonth
         .flatMapLatest { month ->

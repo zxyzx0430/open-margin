@@ -108,6 +108,7 @@ fun StatsScreen(
 ) {
     val stats by viewModel.categoryStats.collectAsState()
     val totalCents by viewModel.totalCents.collectAsState()
+    val balanceCents by viewModel.balanceCents.collectAsState()
     val viewingType by viewModel.viewingType.collectAsState()
     val dailyTotals by viewModel.dailyTotals.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
@@ -177,6 +178,7 @@ fun StatsScreen(
                 StatsSummaryCard(
                     totalCents = totalCents,
                     dailyAverageCents = dailyAverage,
+                    balanceCents = balanceCents,
                     comparison = comparison,
                     type = viewingType,
                     period = period,
@@ -375,6 +377,7 @@ private fun PeriodPill(
 private fun StatsSummaryCard(
     totalCents: Long,
     dailyAverageCents: Long,
+    balanceCents: Long,
     comparison: MonthComparison,
     type: TransactionType,
     period: StatsPeriod,
@@ -429,6 +432,22 @@ private fun StatsSummaryCard(
                     color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = tr("结余"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = mutedOnContainer,
+                )
+                Text(
+                    text = (if (balanceCents >= 0) "+" else "−") +
+                        formatCny(abs(balanceCents)),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (balanceCents >= 0) QingIncome else QingExpense,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
