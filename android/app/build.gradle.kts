@@ -17,7 +17,7 @@ android {
         // RC12: merged calendar workspace, ledger UI refresh, category drill-down
         // and settings alignment on top of rc.11 capture/import fixes.
         // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.12).
-        versionCode = 17
+        versionCode = 18
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
