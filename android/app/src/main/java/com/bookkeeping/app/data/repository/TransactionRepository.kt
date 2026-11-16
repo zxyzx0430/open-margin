@@ -73,9 +73,13 @@ class TransactionRepository @Inject constructor(
         return id
     }
 
-    // 自动抓取路径专用：8s 窗口内同来源同商户同金额视为高置信度重复，直接跳过。
-    // 其他同金额/方向/币种、3 分钟内相近的记录只标注为“待确认重复”，
-    // 仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
+    // 自动抓取路径专用。
+    // 1) 同一订单号已经在库里 → 直接跳过（同一笔被重复上报）。
+    // 2) 8s 内同来源同商户同金额 → 跳过（同一通道重发）。
+    // 3) 120s 内同来源同金额，且商户/订单号互证 → 自动合并进先入库的那条：
+    //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
+    // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
+    //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
     suspend fun insertIfNotDuplicate(
         transaction: TransactionEntity,
         windowMs: Long = 8_000L,
@@ -96,6 +100,33 @@ class TransactionRepository @Inject constructor(
             windowEndMs = transaction.timestamp + windowMs,
         )
         if (existing != null) return@withLock null
+
+        // 同一笔支付被两条采集路径各扫一次（通知文本缺商户、支付成功页有商户）：
+        // 合成一条，写回先入库的行，不再让用户确认。
+        val mergeTarget = findAutoMergeTarget(transaction)
+        if (mergeTarget != null) {
+            val merged = CaptureMergePolicy.mergeInto(mergeTarget, transaction)
+            update(merged)
+            CaptureHealth.onTransactionSaved(context)
+            KeepAliveService.refreshStatus(context)
+            if (notifySuccess) {
+                try {
+                    if (settings.successNotificationsEnabledNow()) {
+                        CaptureNotifier.notifySaved(
+                            context = context,
+                            transaction = merged,
+                            possibleDuplicate = false,
+                            merged = true,
+                        )
+                    }
+                } catch (failure: CancellationException) {
+                    throw failure
+                } catch (_: Exception) {
+                    // A notification failure must never affect the merged ledger.
+                }
+            }
+            return@withLock merged.id
+        }
 
         val similar = dao.findRecentSimilar(
             amountCents = transaction.amountCents,
@@ -118,6 +149,49 @@ class TransactionRepository @Inject constructor(
             KeepAliveService.refreshStatus(context)
         }
         id
+    }
+
+    /** 自动合并的目标：窗口内证据最充分的同来源记录，优先 id 最小（先入库）的那条。 */
+    private suspend fun findAutoMergeTarget(transaction: TransactionEntity): TransactionEntity? =
+        CaptureMergePolicy.findMergeTarget(
+            candidates = dao.findRecentByAmount(
+                amountCents = transaction.amountCents,
+                type = transaction.type,
+                currency = transaction.currency,
+                windowStartMs = transaction.timestamp - CaptureMergePolicy.AUTO_MERGE_WINDOW_MS,
+                windowEndMs = transaction.timestamp + CaptureMergePolicy.AUTO_MERGE_WINDOW_MS,
+            ),
+            incoming = transaction,
+        )
+
+    /**
+     * 一次性本地纠正：修掉升级前已经各插一条的重复对（通知缺商户 + 支付成功页有商户）。
+     *
+     * 扫描仍带「待确认重复」标记的记录，满足 [CaptureMergePolicy.isSamePayment] 的
+     * 按同一规则合并：保留信息更全的那条并补全字段，穷的那条改成 excluded +
+     * duplicateOfId 指向保留行（列表默认不显示），不做物理删除。
+     *
+     * 纯本地写：不调用 [update]，因此不会把这次纠正推给服务器；只在 prefs 里
+     * 记一个版本标记，保证只跑一次。不满足条件的重复对仍然留在人工确认卡片里。
+     *
+     * @return 实际合并的重复对数量。
+     */
+    suspend fun repairCapturedDuplicatesOnce(): Int = duplicateMutex.withLock {
+        if (settings.captureDuplicateRepairDone()) return@withLock 0
+        var mergedPairs = 0
+        for (flagged in dao.findPossibleDuplicates()) {
+            // Re-read inside the loop: an earlier pair may have consumed this row.
+            val current = dao.getById(flagged.id) ?: continue
+            if (!CaptureMergePolicy.canReceiveMerge(current)) continue
+            val originalId = current.duplicateOfId ?: continue
+            val original = dao.getById(originalId) ?: continue
+            val plan = CaptureMergePolicy.planRepair(current, original) ?: continue
+            dao.update(plan.keep)
+            dao.update(plan.absorbed)
+            mergedPairs++
+        }
+        settings.markCaptureDuplicateRepairDone()
+        mergedPairs
     }
 
     // 用户在交易页确认“两笔都是真的”：清除本地标记，并把状态同步为已确认。

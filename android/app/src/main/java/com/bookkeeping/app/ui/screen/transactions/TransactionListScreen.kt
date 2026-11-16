@@ -70,6 +70,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
+import com.bookkeeping.app.data.repository.CaptureMergePolicy
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.CaptureConnectionState
@@ -142,9 +143,7 @@ fun TransactionListScreen(
     val duplicateCandidates = remember(allTransactions) {
         val byId = allTransactions.associateBy { it.id }
         allTransactions
-            .filter {
-                it.duplicateOfId != null || it.remoteReviewStatus == "possible_duplicate"
-            }
+            .filter { CaptureMergePolicy.needsManualReview(it) }
             .map { candidate ->
                 TransactionViewModel.DuplicateCandidate(
                     candidate = candidate,
