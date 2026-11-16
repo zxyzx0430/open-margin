@@ -27,6 +27,8 @@ class EnglishUiTextTest {
             "仅 Windows / VPS 更新" to "Windows / VPS only",
             "Android APP 与 Windows / VPS 都有更新" to "Both Android app and Windows / VPS",
             "更新范围未注明" to "Update scope not specified",
+            "点选单日 · 长按日期拖动选区间，拖到空白处稍作停留可跨月" to
+                "Tap a day · long-press and drag to select a range; pause on the empty space to cross months",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
