@@ -41,6 +41,7 @@ import androidx.navigation.compose.rememberNavController
 import com.bookkeeping.app.ui.screen.billimport.BillImportScreen
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
+import com.bookkeeping.app.ui.screen.settings.MerchantRulesScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
@@ -194,6 +195,9 @@ fun RootNavigation() {
                 route = BottomNavItem.Budget.route,
                 popEnterTransition = { EnterTransition.None },
             ) { BudgetScreen() }
+            composable(AppRoutes.MERCHANT_RULES) {
+                MerchantRulesScreen(onBack = { navController.popBackStack() })
+            }
             composable(
                 route = BottomNavItem.Settings.route,
                 popEnterTransition = { EnterTransition.None },
@@ -201,6 +205,9 @@ fun RootNavigation() {
                 SettingsScreen(
                     // 导入账单走独立路由：关掉后 popBackStack 回设置页，不再切到账单 tab。
                     onImportBills = { navController.navigate(AppRoutes.BILL_IMPORT) },
+                    onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
+                    openAutomationSetup = requestAutomationSetup,
+                    onAutomationOpened = { requestAutomationSetup = false },
                 )
             }
         }

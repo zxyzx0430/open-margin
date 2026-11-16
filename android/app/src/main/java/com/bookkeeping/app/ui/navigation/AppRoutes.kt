@@ -11,6 +11,9 @@ object AppRoutes {
     /** 账单导入是独立页面：从哪个 tab 进来，关掉后就回到那个 tab。 */
     const val BILL_IMPORT = "bill-import"
 
+    /** 商户分类记忆是全屏子页：从设置进入，返回回设置。 */
+    const val MERCHANT_RULES = "merchant-rules"
+
     const val TRANSACTION_DETAIL = "transaction/{id}"
     const val TRANSACTION_ID = "id"
 
