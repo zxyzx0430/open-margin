@@ -25,6 +25,8 @@ object NotificationParser {
 
     private const val PKG_ALIPAY = "com.eg.android.AlipayGphone"
     private const val PKG_WECHAT = "com.tencent.mm"
+    private val AGGREGATE_SUMMARY =
+        Regex("""(?:微信支付|微信收款|支付宝)\s*\[\s*\d+\s*条\s*\]""")
 
     // 金额提取：只匹配带 ￥/¥ 前缀或后缀"元"的数字，避免误匹配日期等。
     // 尾部边界防止把 12.345 / 1.2.3 截成合法金额。
@@ -173,6 +175,11 @@ object NotificationParser {
             PKG_WECHAT -> TransactionSource.WECHAT
             else -> return null
         }
+        // Some ROMs deliver a group summary without FLAG_GROUP_SUMMARY. Its
+        // "[3条]" count describes several child notifications, not one payment;
+        // booking it duplicates the child notification and the visible page.
+        val combined = "${title.orEmpty()} ${text.orEmpty()}"
+        if (AGGREGATE_SUMMARY.containsMatchIn(combined)) return null
         // A chat message such as "张三: 支付成功 ¥12.30" is not a payment
         // notification. WeChat/Alipay payment notices have a service title.
         if (!title.isNullOrBlank() && !isPaymentTitle(source, title)) return null
