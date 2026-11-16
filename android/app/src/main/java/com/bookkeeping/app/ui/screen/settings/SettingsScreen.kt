@@ -101,7 +101,13 @@ import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
 import com.bookkeeping.app.update.UpdateComponentScope
 import com.bookkeeping.app.update.UpdateVersionPolicy
-import com.bookkeeping.app.sync.SyncSettingsCard
+import com.bookkeeping.app.sync.SyncSettingsPanel
+import com.bookkeeping.app.sync.SyncState
+import com.bookkeeping.app.sync.SyncStateKind
+import com.bookkeeping.app.sync.SyncStatusPanel
+import com.bookkeeping.app.sync.endpointHost
+import com.bookkeeping.app.sync.readPendingCounts
+import com.bookkeeping.app.sync.relativeSyncTime
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.Close
@@ -164,15 +170,29 @@ fun SettingsScreen(
         mutableStateOf(isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT))
     }
     var lastSyncMs by remember { mutableStateOf(syncPrefs.getLong("last_success_ms", 0L)) }
-    var lastSyncMessage by remember {
-        mutableStateOf(syncPrefs.getString("last_result", "") ?: "")
-    }
     var lastSyncCode by remember {
         mutableStateOf(syncPrefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null))
     }
-    var conflicts by remember { mutableStateOf(syncPrefs.getInt("pending_sync_conflicts", 0)) }
+    // 两个数字分开读：待上传是正常现象，冲突才需要警告色。
+    var pendingUploads by remember {
+        mutableStateOf(readPendingCounts(syncPrefs).uploads)
+    }
+    var pendingConflicts by remember {
+        mutableStateOf(readPendingCounts(syncPrefs).conflicts)
+    }
     var syncEnabled by remember { mutableStateOf(syncPrefs.getBoolean("enabled", false)) }
-    var endpoint by remember { mutableStateOf(syncPrefs.getString("url", "") ?: "") }
+    var syncConfigured by remember {
+        mutableStateOf(
+            SyncState.isConfigured(
+                syncPrefs.getString("url", ""),
+                syncPrefs.getString("token", ""),
+            ),
+        )
+    }
+    // 列表里只放主机名；完整地址留在同步设置页，避免 URL 从中间断行。
+    var syncHost by remember {
+        mutableStateOf(endpointHost(syncPrefs.getString("url", "")))
+    }
     var detailDialog by remember { mutableStateOf<String?>(null) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
 
@@ -202,11 +222,15 @@ fun SettingsScreen(
                     pageRecognitionEnabled =
                         isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT)
                     lastSyncMs = syncPrefs.getLong("last_success_ms", 0L)
-                    lastSyncMessage = syncPrefs.getString("last_result", "") ?: ""
                     lastSyncCode = syncPrefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null)
-                    conflicts = syncPrefs.getInt("pending_sync_conflicts", 0)
+                    pendingUploads = readPendingCounts(syncPrefs).uploads
+                    pendingConflicts = readPendingCounts(syncPrefs).conflicts
                     syncEnabled = syncPrefs.getBoolean("enabled", false)
-                    endpoint = syncPrefs.getString("url", "") ?: ""
+                    syncConfigured = SyncState.isConfigured(
+                        syncPrefs.getString("url", ""),
+                        syncPrefs.getString("token", ""),
+                    )
+                    syncHost = endpointHost(syncPrefs.getString("url", ""))
                 }
                 delay(5_000L)
             }
@@ -285,12 +309,12 @@ fun SettingsScreen(
             item {
                 SyncOverviewGroup(
                     enabled = syncEnabled,
-                    endpoint = endpoint,
-                    conflicts = conflicts,
-                    lastSyncMs = lastSyncMs,
-                    lastSyncMessage = lastSyncMessage,
-                    lastSyncCode = lastSyncCode,
-                    onOpenSyncDetails = { detailDialog = "sync" },
+                    configured = syncConfigured,
+                    uploads = pendingUploads,
+                    conflicts = pendingConflicts,
+                    lastSuccessMs = lastSyncMs,
+                    lastResultCode = lastSyncCode,
+                    onOpenSyncStatus = { detailDialog = "syncStatus" },
                 )
             }
             item {
@@ -298,15 +322,8 @@ fun SettingsScreen(
                     SettingsActionRow(
                         icon = Icons.Filled.Cloud,
                         title = tr("同步设置"),
-                        subtitle = tr("服务器地址、密钥、立即同步"),
-                        onClick = { detailDialog = "sync" },
-                    )
-                    SettingsRowDivider()
-                    SettingsActionRow(
-                        icon = Icons.Filled.Sync,
-                        title = tr("首次连接向导"),
-                        subtitle = tr("3 步连接 Windows / VPS"),
-                        onClick = { detailDialog = "wizard" },
+                        subtitle = syncHost.ifBlank { tr("未配置服务器") },
+                        onClick = { detailDialog = "syncSettings" },
                     )
                 }
             }
@@ -317,7 +334,7 @@ fun SettingsScreen(
                     SettingsActionRow(
                         icon = Icons.Filled.FileUpload,
                         title = tr("导入账单"),
-                        subtitle = tr("支持微信/支付宝官方 CSV / XLSX / 文本"),
+                        subtitle = tr("微信 / 支付宝 CSV"),
                         onClick = onImportBills,
                     )
                 }
@@ -333,7 +350,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Sync,
                         title = tr("商户分类记忆"),
                         subtitle = if (merchantRules.isEmpty()) {
-                            tr("手动修改分类后会自动记住商户")
+                            tr("修改分类即记住")
                         } else {
                             merchantRules.size.toString() + " " + tr("个商户")
                         },
@@ -348,7 +365,7 @@ fun SettingsScreen(
                     SettingsSwitchRow(
                         icon = Icons.Filled.Notifications,
                         title = tr("常驻运行状态"),
-                        subtitle = tr("通知栏显示连接状态与运行时长"),
+                        subtitle = tr("通知栏显示连接状态"),
                         checked = keepAlive,
                         onCheckedChange = viewModel::setKeepAlive,
                     )
@@ -356,7 +373,7 @@ fun SettingsScreen(
                     SettingsSwitchRow(
                         icon = Icons.Filled.Notifications,
                         title = tr("自动记账成功提醒"),
-                        subtitle = tr("保存后显示金额、商户和时间"),
+                        subtitle = tr("入账后弹出提醒"),
                         checked = successNotifications,
                         onCheckedChange = viewModel::setSuccessNotifications,
                     )
@@ -364,7 +381,7 @@ fun SettingsScreen(
                     SettingsActionRow(
                         icon = Icons.Filled.Sync,
                         title = tr("常驻状态详情"),
-                        subtitle = tr("查看运行时长、断开时间和最近入账"),
+                        subtitle = tr("运行时长与最近入账"),
                         onClick = { detailDialog = "keepAlive" },
                     )
                 }
@@ -380,7 +397,7 @@ fun SettingsScreen(
                     SettingsActionRow(
                         icon = Icons.Filled.Warning,
                         title = tr("后台运行设置"),
-                        subtitle = tr("自启动 / 省电策略 / 后台运行"),
+                        subtitle = tr("自启动与省电策略"),
                         onClick = { detailDialog = "rom" },
                     )
                 }
@@ -419,8 +436,15 @@ fun SettingsScreen(
                         onFinish = { detailDialog = null },
                     )
                 }
-                "sync" -> SettingsDetailDialog(tr("同步设置"), { detailDialog = null }) {
-                    SyncSettingsCard()
+                "syncStatus" -> SettingsDetailDialog(tr("同步状态"), { detailDialog = null }) {
+                    SyncStatusPanel(
+                        onOpenSyncSettings = { detailDialog = "syncSettings" },
+                    )
+                }
+                "syncSettings" -> SettingsDetailDialog(tr("同步设置"), { detailDialog = null }) {
+                    SyncSettingsPanel(
+                        onOpenWizard = { detailDialog = "wizard" },
+                    )
                 }
                 "wizard" -> SettingsDetailDialog(tr("首次连接向导"), { detailDialog = null }) {
                     WindowsFirstConnectionWizard()
@@ -590,86 +614,64 @@ private fun openAppDetailsSettings(context: Context) {
     }
 }
 
-private fun relativeSyncTime(timestampMs: Long): String {
-    if (timestampMs <= 0L) return tr("尚未同步")
-    val diff = (System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)
-    return when {
-        diff < 60_000L -> tr("刚刚")
-        diff < 3_600_000L -> String.format(
-            Locale.getDefault(),
-            tr("%d 分钟前"),
-            diff / 60_000L,
-        )
-        diff < 86_400_000L -> String.format(
-            Locale.getDefault(),
-            tr("%d 小时前"),
-            diff / 3_600_000L,
-        )
-        else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-            .format(Date(timestampMs))
-    }
-}
-
 @Composable
 private fun SyncOverviewGroup(
     enabled: Boolean,
-    endpoint: String,
+    configured: Boolean,
+    uploads: Int,
     conflicts: Int,
-    lastSyncMs: Long,
-    lastSyncMessage: String,
-    lastSyncCode: String?,
-    onOpenSyncDetails: () -> Unit,
+    lastSuccessMs: Long,
+    lastResultCode: String?,
+    onOpenSyncStatus: () -> Unit,
 ) {
-    val syncCode = SyncResultCode.from(lastSyncCode)
-    val legacySyncFailed = lastSyncMessage.contains("失败") ||
-        lastSyncMessage.contains("异常") || lastSyncMessage.contains("不可用") ||
-        lastSyncMessage.contains("401") || lastSyncMessage.contains("403")
-    val statusLabel = syncCode?.label ?: when {
-        legacySyncFailed -> "同步异常"
-        lastSyncMs > 0L -> "同步正常"
-        else -> null
+    val kind = SyncState.of(
+        enabled = enabled,
+        configured = configured,
+        code = SyncResultCode.from(lastResultCode),
+        lastSuccessMs = lastSuccessMs,
+    )
+    val syncTone = when (kind) {
+        SyncStateKind.OK -> StatusTone.POSITIVE
+        SyncStateKind.RETRY, SyncStateKind.BLOCKED, SyncStateKind.AUTH -> StatusTone.ERROR
+        SyncStateKind.NOT_ENABLED, SyncStateKind.NOT_CONFIGURED, SyncStateKind.NEVER_RUN ->
+            StatusTone.NEUTRAL
     }
-    val syncTone = when (syncCode) {
-        SyncResultCode.OK -> StatusTone.POSITIVE
-        SyncResultCode.RETRY, SyncResultCode.BLOCKED, SyncResultCode.AUTH -> StatusTone.ERROR
-        SyncResultCode.CONFIG -> StatusTone.NEUTRAL
-        null -> when {
-            legacySyncFailed -> StatusTone.WARNING
-            lastSyncMs <= 0L -> StatusTone.NEUTRAL
-            else -> StatusTone.POSITIVE
-        }
+    // 标题就是「最近同步」，副标题只给相对时间，不再复述状态词。
+    val lastSyncSubtitle = if (lastSuccessMs > 0L) {
+        relativeSyncTime(lastSuccessMs)
+    } else {
+        tr("尚未同步")
+    }
+    // 待上传是正常现象（中性），只有真冲突才是警告。
+    val pendingBadge = when {
+        conflicts > 0 -> String.format(Locale.getDefault(), tr("%d 笔冲突"), conflicts)
+        uploads > 0 -> String.format(Locale.getDefault(), tr("%d 笔待上传"), uploads)
+        else -> tr("无待上传")
+    }
+    val pendingSubtitle = when {
+        conflicts > 0 && uploads > 0 ->
+            String.format(Locale.getDefault(), tr("%d 笔修改待上传"), uploads)
+        conflicts > 0 -> tr("逐笔核对后才能继续同步")
+        uploads > 0 -> String.format(Locale.getDefault(), tr("%d 笔修改待上传"), uploads)
+        else -> tr("没有待上传的修改")
     }
     SettingsGroupCard {
         SettingsStatusRow(
             icon = Icons.Filled.Cloud,
-            title = tr("Windows / VPS 双向同步"),
-            subtitle = endpoint.ifBlank { tr("未配置") },
-            statusText = if (enabled) tr("已开启") else tr("未开启"),
-            tone = if (enabled) StatusTone.POSITIVE else StatusTone.NEUTRAL,
-            onClick = onOpenSyncDetails,
+            title = tr("最近同步"),
+            subtitle = lastSyncSubtitle,
+            statusText = tr(kind.label),
+            tone = syncTone,
+            onClick = onOpenSyncStatus,
         )
         SettingsRowDivider()
         SettingsStatusRow(
             icon = Icons.Filled.Warning,
-            title = tr("冲突处理"),
-            subtitle = if (conflicts > 0) tr("有本地修改或冲突需要核对") else tr("无待处理冲突"),
-            statusText = if (conflicts > 0) String.format(
-                Locale.getDefault(),
-                tr("%d 笔待处理"),
-                conflicts,
-            ) else tr("正常"),
-            tone = if (conflicts > 0) StatusTone.WARNING else StatusTone.POSITIVE,
-            onClick = onOpenSyncDetails,
-        )
-        SettingsRowDivider()
-        SettingsStatusRow(
-            icon = Icons.Filled.Sync,
-            title = tr("最近同步"),
-            subtitle = statusLabel?.let { tr(it) }
-                ?: lastSyncMessage.ifBlank { tr("尚未执行同步") }.let { tr(it) },
-            statusText = relativeSyncTime(lastSyncMs),
-            tone = syncTone,
-            onClick = onOpenSyncDetails,
+            title = tr("待处理"),
+            subtitle = pendingSubtitle,
+            statusText = pendingBadge,
+            tone = if (conflicts > 0) StatusTone.WARNING else StatusTone.NEUTRAL,
+            onClick = onOpenSyncStatus,
         )
     }
 }
@@ -697,23 +699,13 @@ private fun PermissionStatusGroup(
         AccessibilityConnectionState.PERMISSION_OFF -> StatusTone.ERROR
         AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> StatusTone.WARNING
     }
-    val accessibilitySubtitle = buildString {
-        append(tr("微信/支付宝转账入账"))
-        if (accessibilityHealth.disconnectedAtMs > 0L) {
-            append(" · ")
-            append(tr("上次断开"))
-            append("：")
-            append(formatHealthTime(accessibilityHealth.disconnectedAtMs))
-            accessibilityHealth.disconnectedReason.takeIf { it.isNotBlank() }?.let {
-                append("（$it）")
-            }
-        }
-    }
+    // 副标题只写功能，不再追加「上次断开（原因）」：那是诊断信息，详情在无障碍诊断页。
+    val accessibilitySubtitle = tr("转账与红包入账")
     SettingsGroupCard {
         SettingsStatusRow(
             icon = Icons.Filled.Notifications,
             title = tr("系统通知"),
-            subtitle = tr("常驻状态与成功提醒"),
+            subtitle = tr("常驻状态与提醒"),
             statusText = if (postNotificationsGranted) tr("已允许") else tr("未允许"),
             tone = if (postNotificationsGranted) StatusTone.POSITIVE else StatusTone.ERROR,
             onClick = onOpenSystemNotifications,
@@ -722,7 +714,7 @@ private fun PermissionStatusGroup(
         SettingsStatusRow(
             icon = Icons.Filled.Notifications,
             title = tr("通知使用权"),
-            subtitle = tr("抓取支付宝/微信支付通知"),
+            subtitle = tr("抓取支付通知"),
             statusText = if (notificationEnabled) tr("已授权") else tr("未授权"),
             tone = if (notificationEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
             onClick = onOpenNotificationSettings,
@@ -731,7 +723,7 @@ private fun PermissionStatusGroup(
         SettingsStatusRow(
             icon = Icons.Filled.Visibility,
             title = tr("页面识别"),
-            subtitle = tr("识别微信/支付宝支付页面"),
+            subtitle = tr("识别支付页面"),
             statusText = if (pageRecognitionEnabled) tr("已开启") else tr("未开启"),
             tone = if (pageRecognitionEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
             onClick = onOpenPageRecognitionSettings,
@@ -749,8 +741,8 @@ private fun PermissionStatusGroup(
         SettingsStatusRow(
             icon = Icons.Filled.Sms,
             title = tr("短信权限"),
-            subtitle = tr("可选，读取银行交易短信"),
-            statusText = if (smsGranted) tr("已授权") else tr("可选，未开启"),
+            subtitle = tr("可选，银行短信"),
+            statusText = if (smsGranted) tr("已授权") else tr("未开启"),
             tone = if (smsGranted) StatusTone.POSITIVE else StatusTone.NEUTRAL,
             onClick = onOpenSmsSettings,
         )
@@ -853,7 +845,7 @@ private fun AutomationSetupCard(
             }
             Text(
                 text = if (ready) {
-                    tr("4 项必需能力已完成；短信与 ROM 设置可选")
+                    tr("短信与 ROM 设置可选")
                 } else {
                     tr("按提示逐项开启，系统开关只能由你手动确认")
                 },
