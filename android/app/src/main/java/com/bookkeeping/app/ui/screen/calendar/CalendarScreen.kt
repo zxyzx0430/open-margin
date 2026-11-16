@@ -5,6 +5,7 @@ import android.icu.util.ChineseCalendar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -103,6 +104,7 @@ private enum class HeatmapMode(val label: String) {
 @Composable
 fun CalendarScreen(
     viewModel: CalendarViewModel = hiltViewModel(),
+    onOpenDetail: (Long) -> Unit = {},
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val context = LocalContext.current
@@ -305,7 +307,7 @@ fun CalendarScreen(
                     .padding(top = 8.dp),
             ) {
                 items(selectedTransactions, key = { it.id }) { transaction ->
-                    CalendarTransactionRow(transaction)
+                    CalendarTransactionRow(transaction) { onOpenDetail(transaction.id) }
                 }
             }
         } else {
@@ -742,7 +744,7 @@ private fun SelectionSummary(
 }
 
 @Composable
-private fun CalendarTransactionRow(transaction: TransactionEntity) {
+private fun CalendarTransactionRow(transaction: TransactionEntity, onClick: () -> Unit) {
     val expense = transaction.type == TransactionType.EXPENSE.name
     val type = when (transaction.type) {
         TransactionType.EXPENSE.name -> TransactionType.EXPENSE
@@ -765,6 +767,7 @@ private fun CalendarTransactionRow(transaction: TransactionEntity) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(onClick = onClick)
             .padding(vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

@@ -25,6 +25,16 @@ import kotlin.math.roundToLong
 /** Month vs. full-year view for the stats screen. */
 enum class StatsPeriod { MONTH, YEAR }
 
+/** Range and category carried from a stats drilldown into the ledger. */
+data class StatsLedgerDrilldown(
+    val period: StatsPeriod,
+    val year: Int,
+    val month: Int,
+    val day: Int? = null,
+    val category: TransactionCategory? = null,
+    val type: TransactionType,
+)
+
 /** One month of a full-year view (month is 1..12). */
 data class MonthlyTotal(
     val month: Int,
@@ -289,13 +299,13 @@ class StatsViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
-    // 分类下钻使用：当前选中月份的全部交易
-    val monthTransactions: StateFlow<List<TransactionEntity>> = _selectedMonth
-        .flatMapLatest { month ->
-            val (start, end) = BudgetMonth.range(month)
-            repository.observeBetween(start, end)
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // 分类下钻使用：当前选中统计范围内的全部交易。
+    val periodTransactions: StateFlow<List<TransactionEntity>> =
+        combine(_selectedMonth, _period) { month, period -> rangeFor(month, period) }
+            .flatMapLatest { (start, end) ->
+                repository.observeBetween(start, end)
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val previousComparison: StateFlow<MonthComparison> = combine(
         totalCents,
