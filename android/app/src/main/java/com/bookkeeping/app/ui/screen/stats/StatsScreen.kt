@@ -42,6 +42,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -103,6 +106,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -127,6 +131,7 @@ fun StatsScreen(
     val periodTransactions by viewModel.periodTransactions.collectAsState()
 
     var showMonthPicker by remember { mutableStateOf(false) }
+    var showDayPicker by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<TransactionCategory?>(null) }
 
     fun ledgerDrilldown(
@@ -181,6 +186,7 @@ fun StatsScreen(
                             date = selectedDate,
                             onPrevious = { viewModel.shiftDay(-1) },
                             onNext = { viewModel.shiftDay(1) },
+                            onClick = { showDayPicker = true },
                         )
                     }
                 },
@@ -283,6 +289,43 @@ fun StatsScreen(
                 showMonthPicker = false
             },
         )
+    }
+
+    if (showDayPicker) {
+        val initialUtc = remember(selectedDate) {
+            Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                clear()
+                set(selectedDate.year, selectedDate.month - 1, selectedDate.day)
+            }.timeInMillis
+        }
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialUtc)
+        DatePickerDialog(
+            onDismissRequest = { showDayPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                                timeInMillis = millis
+                            }
+                            viewModel.setDate(
+                                StatsDate(
+                                    year = calendar.get(Calendar.YEAR),
+                                    month = calendar.get(Calendar.MONTH) + 1,
+                                    day = calendar.get(Calendar.DAY_OF_MONTH),
+                                ),
+                            )
+                        }
+                        showDayPicker = false
+                    },
+                ) { Text(tr("确定")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDayPicker = false }) { Text(tr("取消")) }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
     }
 
     selectedCategory?.let { category ->
@@ -1095,9 +1138,8 @@ private fun CategoryDetailDialog(
                     it.currency == "CNY" &&
                     it.duplicateOfId == null &&
                     it.remoteReviewStatus !in setOf(
-                        "excluded", "transfer", "refund", "possible_duplicate",
-                    ) &&
-                    (it.type == "INCOME" || it.category != "TRANSFER")
+                        "excluded", "possible_duplicate", "duplicate",
+                    )
             }
             .sortedByDescending { it.timestamp }
     }
@@ -1293,6 +1335,7 @@ private fun DateStepper(
     date: StatsDate,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(50)
     val canGoPrevious = date.year > StatsViewModel.MIN_YEAR
@@ -1323,6 +1366,9 @@ private fun DateStepper(
             color = QingPrimaryDeep,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 4.dp, vertical = 8.dp),
         )
         IconButton(
             onClick = onNext,

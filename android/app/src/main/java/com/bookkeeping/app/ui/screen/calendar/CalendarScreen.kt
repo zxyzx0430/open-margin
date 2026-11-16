@@ -205,6 +205,17 @@ fun CalendarScreen(
             .statusBarsPadding()
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = tr("日历"),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+        }
         MonthHeader(
             monthKey = monthKey,
             onPrevious = { navigateMonth(shiftMonth(monthKey, -1)) },

@@ -14,9 +14,9 @@ android {
         applicationId = "com.bookkeeping.app"
         minSdk = 24
         targetSdk = 35
-        // RC12: merged calendar workspace, ledger UI refresh, category drill-down
-        // and settings alignment on top of rc.11 capture/import fixes.
-        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.12).
+        // Stable v1.2.0: all capture/import/classification/UI work plus the
+        // rc.13 startup and duplicate-notification fixes.
+        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0).
         versionCode = 19
         versionName = "1.2.0"
 

@@ -588,4 +588,28 @@ class BillImportMappingTest {
         assertEquals(1, marked.importableRows.size)
         assertEquals(0, marked.validRows.size)
     }
+
+    @Test
+    fun importMatchesOrderlessScanWithinTwoMinutesButNotDifferentMerchant() {
+        val scan = TransactionEntity(
+            amountCents = 200L,
+            type = TransactionType.EXPENSE.name,
+            category = TransactionCategory.SHOPPING.name,
+            merchant = "印象小店",
+            source = TransactionSource.WECHAT.name,
+            timestamp = 1_700_000_060_000L,
+        )
+        assertTrue(
+            BillImportMapping.isAlreadyPresent(
+                row(merchant = "印象小店", amountCents = 200L, orderId = "ORDER-IMPRESSION"),
+                listOf(scan),
+            ),
+        )
+        assertFalse(
+            BillImportMapping.isAlreadyPresent(
+                row(merchant = "另一家店", amountCents = 200L, orderId = "ORDER-OTHER"),
+                listOf(scan),
+            ),
+        )
+    }
 }
