@@ -24,6 +24,10 @@ coroutines = "1.9.0"
 datastore = "1.1.1"
 vico = "2.0.0"
 mlkitTextChinese = "16.0.1"
+# Offline QR scanning for Windows pairing; no Google Play Services.
+zxingEmbedded = "4.3.0"
+zxingCore = "3.4.1"
+orgJson = "20240303"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -70,6 +74,12 @@ vico-compose-m3 = { group = "com.patrykandpatrick.vico", name = "compose-m3", ve
 
 # ML Kit 本地中文 OCR（bundled，无需联网）
 mlkit-text-recognition-chinese = { group = "com.google.mlkit", name = "text-recognition-chinese", version.ref = "mlkitTextChinese" }
+
+# Offline QR pairing (camera + gallery decode, no Play Services)
+zxing-android-embedded = { group = "com.journeyapps", name = "zxing-android-embedded", version.ref = "zxingEmbedded" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
+# Real org.json for JVM unit tests; Android provides it at runtime.
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

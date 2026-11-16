@@ -14,7 +14,11 @@ internal object SyncEndpointPolicy {
     ): Boolean {
         val old = previousUrl.trim().trimEnd('/')
         val next = proposedUrl.trim().trimEnd('/')
-        if (old.isEmpty() || old == next) return true
-        return lastUploadedId <= 0 && lastPulledRevision <= 0 && lastSuccessMs <= 0
+        val historyExists = lastUploadedId > 0 || lastPulledRevision > 0 || lastSuccessMs > 0
+        // Without history the field may be empty (first-time setup). With
+        // history an empty previous URL must not act as a wildcard: clearing
+        // the address field would otherwise bypass the migration guard.
+        if (!historyExists) return true
+        return old.isNotEmpty() && old == next
     }
 }
