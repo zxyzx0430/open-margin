@@ -25,7 +25,14 @@ internal object EnglishUiText {
         "正在检查更新…" to "Checking for updates…",
         "已是最新版本" to "You're up to date",
         "查看 GitHub 发布页" to "View GitHub release",
-        "检查更新失败，请检查网络或稍后重试" to "Unable to check for updates. Check your connection and try again.",
+        "连不上 GitHub，请先开启代理" to "Can't reach GitHub. Turn on your proxy first.",
+        "连接 GitHub 超时，请检查代理" to "GitHub connection timed out. Check your proxy.",
+        "GitHub 拒绝了请求（403），请稍后再试" to "GitHub refused the request (403). Try again later.",
+        "GitHub 返回错误" to "GitHub returned an error",
+        "GitHub 返回内容无法解析" to "GitHub's response could not be parsed.",
+        "检查更新失败，请稍后重试" to "Unable to check for updates. Try again later.",
+        "更新检查直接访问 GitHub，中国大陆网络需要开启代理" to
+            "Update checks go directly to GitHub, so a proxy is required on mainland China networks.",
         // === 应用内更新：检查 → 下载 → 拉起系统安装器 ===
         "发现新版本" to "New version available",
         "版本" to "Version",

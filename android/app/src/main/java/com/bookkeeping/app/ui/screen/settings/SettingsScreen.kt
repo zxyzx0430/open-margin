@@ -1715,12 +1715,40 @@ private fun AboutUpdateCard() {
                         tr("已是最新版本"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                GitHubReleaseUpdateChecker.CheckResult.Unavailable ->
-                    Text(
-                        tr("检查更新失败，请检查网络或稍后重试"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                is GitHubReleaseUpdateChecker.CheckResult.Unavailable -> {
+                    val kind = state.kind
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            when (kind) {
+                                GitHubReleaseUpdateChecker.FailureKind.NO_NETWORK ->
+                                    tr("连不上 GitHub，请先开启代理")
+                                GitHubReleaseUpdateChecker.FailureKind.TIMEOUT ->
+                                    tr("连接 GitHub 超时，请检查代理")
+                                GitHubReleaseUpdateChecker.FailureKind.HTTP ->
+                                    if (state.httpCode == 403) {
+                                        tr("GitHub 拒绝了请求（403），请稍后再试")
+                                    } else {
+                                        tr("GitHub 返回错误") + " " + state.httpCode
+                                    }
+                                GitHubReleaseUpdateChecker.FailureKind.PARSE ->
+                                    tr("GitHub 返回内容无法解析")
+                                GitHubReleaseUpdateChecker.FailureKind.UNKNOWN ->
+                                    tr("检查更新失败，请稍后重试")
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        if (kind == GitHubReleaseUpdateChecker.FailureKind.NO_NETWORK ||
+                            kind == GitHubReleaseUpdateChecker.FailureKind.TIMEOUT
+                        ) {
+                            Text(
+                                tr("更新检查直接访问 GitHub，中国大陆网络需要开启代理"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 is GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable -> {
                     val apkTag = state.apkTag
                     if (state.apkUrl == null || apkTag == null) {
