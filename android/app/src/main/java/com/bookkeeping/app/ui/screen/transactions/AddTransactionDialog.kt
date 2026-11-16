@@ -24,6 +24,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -72,6 +73,7 @@ fun AddTransactionDialog(
                 (it.amountCents % 100).toString().padStart(2,'0')
         } ?: "")
     }
+    var amountInputError by remember(initial?.id) { mutableStateOf<String?>(null) }
     var selectedType by remember(initial?.id) {
         mutableStateOf(runCatching { TransactionType.valueOf(initial?.type ?: "EXPENSE") }
             .getOrDefault(TransactionType.EXPENSE))
@@ -88,7 +90,15 @@ fun AddTransactionDialog(
     }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    val amountValid = MoneyAmount.cents(amountText) != null
+    val amountIsNegative = amountText.contains('-') || amountText.contains('−') ||
+        (amountText.toDoubleOrNull()?.let { it < 0.0 } == true)
+    val amountError = when {
+        amountIsNegative -> tr("金额不能为负数，请用支出/收入切换方向")
+        amountInputError != null -> amountInputError
+        amountText.isNotEmpty() && MoneyAmount.cents(amountText) == null -> tr("请输入有效金额")
+        else -> null
+    }
+    val amountValid = amountError == null && MoneyAmount.cents(amountText) != null
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -136,14 +146,28 @@ fun AddTransactionDialog(
 
                 OutlinedTextField(
                     value = amountText,
-                    onValueChange = { amountText = it.filter { c -> c.isDigit() || c == '.' } },
+                    onValueChange = { raw ->
+                        if (raw.contains('-') || raw.contains('−')) {
+                            // Keep the previous amount, but surface the rejected negative input.
+                            amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
+                        } else {
+                            val candidate = raw.filter { c -> c.isDigit() || c == '.' }
+                            if (candidate.hasMoreThanTwoFractionDigits()) {
+                                // Reject the edit rather than silently dropping extra decimal digits.
+                                amountInputError = tr("金额最多保留两位小数")
+                            } else {
+                                amountText = candidate
+                                amountInputError = null
+                            }
+                        }
+                    },
                     label = { Text(tr("金额（元）")) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
-                    isError = amountText.isNotEmpty() && !amountValid,
+                    isError = amountError != null,
                     supportingText = {
-                        if (amountText.isNotEmpty() && !amountValid) {
-                            Text(tr("请输入有效金额"))
+                        if (amountError != null) {
+                            Text(amountError, color = MaterialTheme.colorScheme.error)
                         }
                     },
                     modifier = Modifier.fillMaxWidth()
@@ -235,6 +259,9 @@ fun AddTransactionDialog(
 
 private fun formatDate(timestampMs: Long): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestampMs))
+
+private fun String.hasMoreThanTwoFractionDigits(): Boolean =
+    contains('.') && substringAfter('.').count { it.isDigit() } > 2
 
 private fun localDateToUtc(timestampMs: Long): Long {
     val local = Calendar.getInstance().apply { timeInMillis = timestampMs }
