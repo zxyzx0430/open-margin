@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.round
 import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -93,17 +94,19 @@ class BudgetViewModel @Inject constructor(
     }
 
     fun setMonthlyTotal(yuan: Double) {
+        val cents = validatedBudgetCents(yuan) ?: return
         viewModelScope.launch {
-            budgetPrefs.setMonthlyTotal(_selectedMonth.value, (yuan * 100).toLong())
+            budgetPrefs.setMonthlyTotal(_selectedMonth.value, cents)
         }
     }
 
     fun setCategoryBudget(category: TransactionCategory, yuan: Double) {
+        val cents = validatedBudgetCents(yuan, MAX_CATEGORY_BUDGET_YUAN) ?: return
         viewModelScope.launch {
             budgetPrefs.setCategoryBudget(
                 _selectedMonth.value,
                 category,
-                (yuan * 100).toLong(),
+                cents,
             )
         }
     }
@@ -116,4 +119,17 @@ class BudgetViewModel @Inject constructor(
 
     // 选中月份还剩几天（当前月含今天；过去月为 0；未来月为整月）
     fun daysRemaining(): Int = BudgetMonth.daysRemaining(_selectedMonth.value)
+
+    private fun validatedBudgetCents(yuan: Double, maxYuan: Double? = null): Long? {
+        if (!yuan.isFinite() || yuan <= 0.0 || (maxYuan != null && yuan > maxYuan)) return null
+        val cents = yuan * 100.0
+        if (!cents.isFinite() || cents >= Long.MAX_VALUE.toDouble()) return null
+
+        // The UI limits precision to two decimals, but round defensively if another layer sends more.
+        return round(cents).toLong().takeIf { it > 0L }
+    }
+
+    private companion object {
+        const val MAX_CATEGORY_BUDGET_YUAN = 1_000_000.0
+    }
 }
