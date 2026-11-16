@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
@@ -27,6 +29,8 @@ import java.util.Calendar
 import javax.inject.Inject
 
 enum class LedgerTimeFilter { MONTH, YEAR, ALL }
+
+enum class LedgerLoadState { INITIAL, LOADING, READY }
 
 internal fun TransactionEntity.isLedgerTotalsCandidate(): Boolean =
     currency == "CNY" &&
@@ -126,11 +130,13 @@ class TransactionViewModel @Inject constructor(
             PeriodState(LedgerTimeFilter.ALL, BudgetMonth.currentKey(), Calendar.getInstance().get(Calendar.YEAR)),
         )
 
-    private val _ledgerLoaded = MutableStateFlow(false)
-    val ledgerLoaded: StateFlow<Boolean> = _ledgerLoaded
+    private val _ledgerLoadState = MutableStateFlow(LedgerLoadState.INITIAL)
+    val ledgerLoadState: StateFlow<LedgerLoadState> = _ledgerLoadState
 
     // Kept for callers that only need the raw list (duplicate originals, calendar).
     val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
+        .onStart { _ledgerLoadState.value = LedgerLoadState.LOADING }
+        .onEach { _ledgerLoadState.value = LedgerLoadState.READY }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val hasAnyTransactions: StateFlow<Boolean> = allTransactions
@@ -168,7 +174,6 @@ class TransactionViewModel @Inject constructor(
                     startMs = start,
                     endMs = end,
                 ).map { list ->
-                    _ledgerLoaded.value = true
                     if (amountQuery != null) {
                         list.filter {
                             LedgerFilter.matches(

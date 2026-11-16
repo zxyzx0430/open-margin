@@ -17,13 +17,29 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import java.util.Calendar
 import javax.inject.Inject
 import kotlin.math.roundToLong
 
-/** Month vs. full-year view for the stats screen. */
-enum class StatsPeriod { MONTH, YEAR }
+/** Day, month, or full-year view for the stats screen. */
+enum class StatsPeriod { DAY, MONTH, YEAR }
+
+/** Calendar date selected by the independent day view. Month is 1..12. */
+data class StatsDate(
+    val year: Int,
+    val month: Int,
+    val day: Int,
+)
+
+data class DayStatsSummary(
+    val expenseCents: Long,
+    val incomeCents: Long,
+    val balanceCents: Long,
+    val transactionCount: Int,
+    val isLoaded: Boolean = false,
+)
 
 /** Range and category carried from a stats drilldown into the ledger. */
 data class StatsLedgerDrilldown(
@@ -167,6 +183,26 @@ internal object StatsAggregation {
         set(Calendar.DAY_OF_YEAR, 1)
     }.getActualMaximum(Calendar.DAY_OF_YEAR)
 
+    fun currentDate(): StatsDate = Calendar.getInstance().toStatsDate()
+
+    fun dateRange(date: StatsDate): Pair<Long, Long> {
+        val start = Calendar.getInstance().apply {
+            clear()
+            set(date.year, date.month - 1, date.day, 0, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val end = (start.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_MONTH, 1)
+        }
+        return start.timeInMillis to end.timeInMillis
+    }
+
+    fun shiftDate(date: StatsDate, days: Int): StatsDate = Calendar.getInstance().apply {
+        clear()
+        set(date.year, date.month - 1, date.day, 12, 0, 0)
+        add(Calendar.DAY_OF_MONTH, days)
+    }.toStatsDate()
+
     /** Matches the monthly rule: total divided by calendar days in the period. */
     fun averagePerDay(totalCents: Long, year: Int): Long {
         val days = daysInYear(year)
@@ -175,9 +211,15 @@ internal object StatsAggregation {
 
     private fun calendarAt(timestampMs: Long): Calendar =
         Calendar.getInstance().apply { timeInMillis = timestampMs }
+
+    private fun Calendar.toStatsDate() = StatsDate(
+        year = get(Calendar.YEAR),
+        month = get(Calendar.MONTH) + 1,
+        day = get(Calendar.DAY_OF_MONTH),
+    )
 }
 
-// 统计页 ViewModel：选中月份/全年、支出/收入聚合与环比
+// 统计页 ViewModel：选中日期/月/年、支出/收入聚合与环比
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class StatsViewModel @Inject constructor(
@@ -194,6 +236,9 @@ class StatsViewModel @Inject constructor(
     private val _period = MutableStateFlow(StatsPeriod.MONTH)
     val period: StateFlow<StatsPeriod> = _period
 
+    private val _selectedDate = MutableStateFlow(StatsAggregation.currentDate())
+    val selectedDate: StateFlow<StatsDate> = _selectedDate
+
     /** Year of [selectedMonth]; the year stepper preserves the chosen month. */
     val selectedYear: StateFlow<Int> = _selectedMonth
         .map { yearOf(it) }
@@ -206,12 +251,14 @@ class StatsViewModel @Inject constructor(
     private val _statsLoaded = MutableStateFlow(false)
     val statsLoaded: StateFlow<Boolean> = _statsLoaded
 
-    // 选中月份/年份按分类聚合后的列表（金额降序）
+    // 选中日期/月/年的分类聚合列表（金额降序）
     val categoryStats: StateFlow<List<CategoryStat>> =
-        combine(_selectedMonth, _period) { month, period -> month to period }
-            .flatMapLatest { (month, period) ->
+        combine(_selectedMonth, _selectedDate, _period) { month, date, period ->
+            Triple(month, date, period)
+        }
+            .flatMapLatest { (month, date, period) ->
                 _statsLoaded.value = false
-                val (start, end) = rangeFor(month, period)
+                val (start, end) = rangeFor(month, date, period)
                 combine(
                     repository.observeBetween(start, end),
                     _viewingType,
@@ -227,9 +274,13 @@ class StatsViewModel @Inject constructor(
         .map { list -> list.sumOf { it.totalCents } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
-    /** Income minus expenses for the selected month or year. */
-    val balanceCents: StateFlow<Long> = combine(_selectedMonth, _period) { month, period ->
-        rangeFor(month, period)
+    /** Income minus expenses for the selected date, month, or year. */
+    val balanceCents: StateFlow<Long> = combine(
+        _selectedMonth,
+        _selectedDate,
+        _period,
+    ) { month, date, period ->
+        rangeFor(month, date, period)
     }
         .flatMapLatest { (start, end) ->
             repository.observeBetween(start, end).map { transactions ->
@@ -238,6 +289,27 @@ class StatsViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
+    val selectedDaySummary: StateFlow<DayStatsSummary> = _selectedDate
+        .flatMapLatest { date ->
+            val (start, end) = StatsAggregation.dateRange(date)
+            repository.observeBetween(start, end).map { transactions ->
+                val expenses = StatsAggregation.totalCents(transactions, TransactionType.EXPENSE)
+                val income = StatsAggregation.totalCents(transactions, TransactionType.INCOME)
+                DayStatsSummary(
+                    expenseCents = expenses,
+                    incomeCents = income,
+                    balanceCents = income - expenses,
+                    transactionCount = transactions.size,
+                    isLoaded = true,
+                )
+            }.onStart { emit(DayStatsSummary(0L, 0L, 0L, 0)) }
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            DayStatsSummary(0L, 0L, 0L, 0),
+        )
 
     // 选中月份每日合计（柱状图用）。无交易的日子填 0
     val dailyTotals: StateFlow<List<DailyTotal>> = _selectedMonth
@@ -268,9 +340,14 @@ class StatsViewModel @Inject constructor(
 
     // 上一月/上一年同方向总额，用于环比
     val previousPeriodTotalCents: StateFlow<Long> =
-        combine(_selectedMonth, _period) { month, period -> month to period }
-            .flatMapLatest { (month, period) ->
+        combine(_selectedMonth, _selectedDate, _period) { month, date, period ->
+            Triple(month, date, period)
+        }
+            .flatMapLatest { (month, date, period) ->
                 val range = when (period) {
+                    StatsPeriod.DAY -> StatsAggregation.dateRange(
+                        StatsAggregation.shiftDate(date, -1),
+                    )
                     StatsPeriod.MONTH -> BudgetMonth.range(BudgetMonth.previousKey(month))
                     StatsPeriod.YEAR -> {
                         val year = yearOf(month)
@@ -294,6 +371,7 @@ class StatsViewModel @Inject constructor(
     val dailyAverageCents: StateFlow<Long> =
         combine(totalCents, _selectedMonth, _period) { total, month, period ->
             when (period) {
+                StatsPeriod.DAY -> total
                 StatsPeriod.MONTH -> BudgetCalculations.averagePerDay(total, month)
                 StatsPeriod.YEAR -> StatsAggregation.averagePerDay(total, yearOf(month))
             }
@@ -301,7 +379,9 @@ class StatsViewModel @Inject constructor(
 
     // 分类下钻使用：当前选中统计范围内的全部交易。
     val periodTransactions: StateFlow<List<TransactionEntity>> =
-        combine(_selectedMonth, _period) { month, period -> rangeFor(month, period) }
+        combine(_selectedMonth, _selectedDate, _period) { month, date, period ->
+            rangeFor(month, date, period)
+        }
             .flatMapLatest { (start, end) ->
                 repository.observeBetween(start, end)
             }
@@ -341,8 +421,18 @@ class StatsViewModel @Inject constructor(
         setYear(yearOf(_selectedMonth.value) + delta)
     }
 
-    private fun rangeFor(month: String, period: StatsPeriod): Pair<Long, Long> =
+    fun shiftDay(delta: Int) {
+        val shifted = StatsAggregation.shiftDate(_selectedDate.value, delta)
+        if (shifted.year in MIN_YEAR..MAX_YEAR) _selectedDate.value = shifted
+    }
+
+    private fun rangeFor(
+        month: String,
+        date: StatsDate,
+        period: StatsPeriod,
+    ): Pair<Long, Long> =
         when (period) {
+            StatsPeriod.DAY -> StatsAggregation.dateRange(date)
             StatsPeriod.MONTH -> BudgetMonth.range(month)
             StatsPeriod.YEAR -> StatsAggregation.yearRange(yearOf(month))
         }
