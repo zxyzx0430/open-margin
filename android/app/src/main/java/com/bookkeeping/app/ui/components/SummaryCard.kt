@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.theme.QingExpense
@@ -81,13 +80,11 @@ private fun SummaryMetric(
             color = QingPrimaryDeep.copy(alpha = 0.72f),
             maxLines = 1,
         )
-        Text(
+        AutoSizeAmountText(
             text = value,
             style = com.bookkeeping.app.ui.theme.Typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Start,
         )
     }

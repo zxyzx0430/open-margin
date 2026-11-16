@@ -18,6 +18,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingPrimaryDeep
 import com.bookkeeping.app.ui.theme.QingSurfaceVariant
@@ -82,7 +83,7 @@ fun CategoryPieChart(
             modifier = Modifier.padding(horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(
+            AutoSizeAmountText(
                 text = formatCny(totalCents),
                 style = MaterialTheme.typography.titleLarge,
                 color = QingPrimaryDeep,

@@ -28,32 +28,14 @@ internal object CaptureStatusNotifier {
         }
         val contentIntent = PendingIntent.getActivity(context, 0, openIntent, pendingFlags)
 
-        val title = when (health.state) {
-            CaptureConnectionState.CONNECTED ->
-                "🟢 " + AppLanguage.tr(context, "自动记账运行中")
-            CaptureConnectionState.UNKNOWN ->
-                "⚪ " + AppLanguage.tr(context, "正在确认运行状态")
-            else -> "🔴 " + AppLanguage.tr(context, "自动记账已断开")
-        }
-        val connectedLine = if (connected) {
-            AppLanguage.tr(context, "通知监听已连接") + "\n" +
-                AppLanguage.tr(context, "已稳定运行") + " " +
-                CaptureUptime.format(
-                    CaptureUptime.elapsed(
-                        connectedAtMs = health.connectedAtMs,
-                        connectedElapsedMs = health.connectedElapsedMs,
-                        nowMs = System.currentTimeMillis(),
-                        nowElapsedMs = SystemClock.elapsedRealtime(),
-                    ),
-                    AppLanguage.tr(context, CaptureUptime.DEFAULT_PATTERN),
-                )
-        } else {
-            ""
-        }
+        // 常驻通知只保留「品牌名 + 一行状态」：展开式 BigTextStyle 会撑成三行，
+        // 挤占通知栏又说不到重点；运行时长交给 App 内状态页显示。
+        val title = AppLanguage.tr(context, "清衡 OpenMargin")
         val contentText = when (health.state) {
-            CaptureConnectionState.CONNECTED -> connectedLine
+            CaptureConnectionState.CONNECTED ->
+                AppLanguage.tr(context, "自动记账服务正常运行中")
             CaptureConnectionState.UNKNOWN ->
-                AppLanguage.tr(context, "已授权，正在等待通知监听连接")
+                AppLanguage.tr(context, "正在确认运行状态")
             CaptureConnectionState.PERMISSION_OFF ->
                 AppLanguage.tr(context, "通知使用权已关闭 · 点击开启")
             CaptureConnectionState.DISCONNECTED -> disconnectedText(context, health)
@@ -63,10 +45,6 @@ internal object CaptureStatusNotifier {
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
             .setContentText(contentText)
-            .setStyle(
-                NotificationCompat.BigTextStyle()
-                    .bigText(buildBigText(context, health, contentText))
-            )
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -126,46 +104,6 @@ internal object CaptureStatusNotifier {
             AppLanguage.tr(context, "上次连接 %s，当前未连接 · 点击检查权限"),
             formatTime(context, health.connectedAtMs),
         )
-    }
-
-    private fun buildBigText(
-        context: Context,
-        health: CaptureHealthSnapshot,
-        statusLine: String,
-    ): String {
-        val lines = mutableListOf(statusLine)
-        lines += if (health.lastSuccessAtMs > 0L) {
-            AppLanguage.tr(context, "最近成功入账：") +
-                formatTime(context, health.lastSuccessAtMs)
-        } else {
-            AppLanguage.tr(context, "尚无成功入账")
-        }
-        if (health.state == CaptureConnectionState.PERMISSION_OFF) {
-            lines += AppLanguage.tr(context, "原因：通知使用权已关闭")
-        } else if (health.state == CaptureConnectionState.DISCONNECTED &&
-            health.disconnectedReason == "listener_disconnected"
-        ) {
-            lines += AppLanguage.tr(context, "原因：系统已断开通知监听服务")
-        }
-        if (health.lastFailureAtMs > 0L &&
-            health.lastFailureAtMs > health.lastSuccessAtMs &&
-            health.failureStage.isNotBlank()
-        ) {
-            lines += String.format(
-                Locale.getDefault(),
-                AppLanguage.tr(context, "最近异常：%s（%d 次）"),
-                stageLabel(context, health.failureStage),
-                health.failureCount,
-            )
-        }
-        lines += AppLanguage.tr(context, "仅在本机显示状态，不含金额和商户")
-        return lines.joinToString("\n")
-    }
-
-    private fun stageLabel(context: Context, stage: String): String = when (stage) {
-        "processing" -> AppLanguage.tr(context, "通知处理")
-        "persist" -> AppLanguage.tr(context, "保存交易")
-        else -> stage
     }
 
     private fun formatTime(context: Context, timestampMs: Long): String {
