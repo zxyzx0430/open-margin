@@ -710,7 +710,7 @@ internal object EnglishUiText {
         "尚未同步到服务器" to "Not synced to server",
         "展开全部" to "Expand all",
         "左右滑动切月 · 拖到边缘可跨月 · 长按或拖动可选一段时间" to "Swipe to change months · drag to an edge to cross months · long-press or drag to select a date range",
-        "点选单日 · 长按日期拖动选区间，拖到空白处可继续跨月" to "Tap a day · press and drag to select a range; drag into the empty space to keep crossing months",
+        "点选单日 · 长按日期拖动选区间，拖到空白处稍作停留可跨月" to "Tap a day · long-press and drag to select a range; pause on the empty space to cross months",
         "长按日期拖动选择区间，或点选单日" to "Press and drag on a day to select a range, or tap a single day",
         "已同步到服务器" to "Synced to server",
         "已授权 · 未连接" to "Permission granted · not connected",

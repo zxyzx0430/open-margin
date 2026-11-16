@@ -2,6 +2,9 @@ package com.bookkeeping.app.ui.screen.calendar
 
 import android.content.Context
 import android.icu.util.ChineseCalendar
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -45,6 +48,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,10 +63,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,8 +92,13 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.floor
+
+// 跨月节奏：手指进入空白格后要停够这么久才翻一页。
+// 350ms 是「明显能感觉到停了一下、又不觉得卡」的位置；调小会一拖就跳两三个月。
+private const val CROSS_MONTH_DWELL_MS = 350L
 
 private const val CALENDAR_PREFS = "calendar_view_prefs"
 private const val KEY_HEATMAP = "heatmap"
@@ -273,7 +285,7 @@ fun CalendarScreen(
             },
         )
         Text(
-            text = tr("点选单日 · 长按日期拖动选区间，拖到空白处可继续跨月"),
+            text = tr("点选单日 · 长按日期拖动选区间，拖到空白处稍作停留可跨月"),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 4.dp),
@@ -362,6 +374,19 @@ private fun MonthHeader(
     onNext: () -> Unit,
     menu: @Composable () -> Unit,
 ) {
+    // 翻月反馈：月份标题 150ms 淡入 + 轻微放大，让用户看出「刚翻了一页」。
+    // 第一次组合不播（否则每次进页面都闪一下），之后每次换月才从 0 起跳。
+    var hasShownMonth by remember { mutableStateOf(false) }
+    val flipProgress = remember(monthKey) {
+        Animatable(if (hasShownMonth) 0f else 1f)
+    }
+    LaunchedEffect(monthKey) {
+        if (hasShownMonth) {
+            flipProgress.animateTo(1f, tween(durationMillis = 150))
+        } else {
+            hasShownMonth = true
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -383,7 +408,15 @@ private fun MonthHeader(
         }
         Text(
             text = monthLabel(monthKey),
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .graphicsLayer {
+                    val progress = flipProgress.value
+                    alpha = 0.25f + 0.75f * progress
+                    val scale = 0.92f + 0.08f * progress
+                    scaleX = scale
+                    scaleY = scale
+                },
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
@@ -461,7 +494,6 @@ private fun CalendarMonthGrid(
     val firstOffset = firstDayOffset(year, month, weekStartsMonday)
     val density = LocalDensity.current
     val rowHeightPx = with(density) { 44.dp.toPx() }
-    val crossMonthDragPx = with(density) { 56.dp.toPx() }
     val reverseCrossDragPx = with(density) { 24.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
     // 手势协程的 key 只有尺寸：跨月会重组，但手指还没松，协程不能重启。
@@ -473,6 +505,7 @@ private fun CalendarMonthGrid(
     val latestWeekStartsMonday = rememberUpdatedState(weekStartsMonday)
     val latestOnSelect = rememberUpdatedState(onSelect)
     val latestOnCrossMonth = rememberUpdatedState(onCrossMonth)
+    val latestHaptics = rememberUpdatedState(LocalHapticFeedback.current)
     val byDay = remember(transactions) { transactions.groupBy { dayOf(it.timestamp) } }
     val heatValues = remember(byDay, heatmap) {
         byDay.mapValues { (_, list) ->
@@ -521,7 +554,7 @@ private fun CalendarMonthGrid(
                 .fillMaxWidth()
                 .height(44.dp * 6)
                 .onSizeChanged { gridWidthPx = it.width.toFloat() }
-                .pointerInput(gridWidthPx, rowHeightPx, crossMonthDragPx, reverseCrossDragPx) {
+                .pointerInput(gridWidthPx, rowHeightPx, reverseCrossDragPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val anchorYear = latestYear.value
@@ -534,7 +567,7 @@ private fun CalendarMonthGrid(
                             latestDays.value,
                         ) ?: return@awaitEachGesture
                         val anchor = CalendarDate(anchorYear, anchorMonth, anchorDay)
-                        // 跨月只属于「长按进入区间选择后拖到左右边缘」：
+                        // 跨月只属于「长按进入区间选择后拖到空白处」：
                         // 普通点按选单日，普通横滑不切月也不改选中。
                         val longPress = awaitLongPressOrCancellation(down.id)
                         if (longPress == null) {
@@ -552,103 +585,156 @@ private fun CalendarMonthGrid(
                         var viewDays = latestDays.value
                         // 已经跨进过的月份，按顺序记着：往回拖时逐层退回。
                         val crossedMonths = mutableListOf<Pair<String, Boolean>>()
-                        var forwardTravelPx = 0f
+                        // 手指当前所在的空白格方向：+1 月末空白（翻下月），-1 月初空白（翻上月），0 在日期格上。
+                        var blankDir = 0
+                        // 进入当前空白格 / 反向解锁的时刻，0 表示没在计时。
+                        // 两者都只记「从何时开始停」：到点翻一页，翻完重新计时，所以手指一直停着也是一页一页翻。
+                        var blankDwellStartMs = 0L
+                        var reverseDwellStartMs = 0L
+                        // 反向位移只用来解除抑制：够 24dp 才开始反向停留计时，不再立即回翻。
                         var reverseTravelPx = 0f
-                        // 刚翻过一个月就先把「空白格触发」关掉，避免手指还停在空白里连翻。
-                        var blankFlipArmed = true
                         var lastX = longPress.position.x
+                        var pointer = longPress.position
                         var lastDay = anchorDay
+
+                        fun showMonth(targetKey: String) {
+                            val target = BudgetMonth.parse(targetKey) ?: return
+                            viewYear = target.year
+                            viewMonth = target.month
+                            viewOffset = firstDayOffset(
+                                viewYear, viewMonth, latestWeekStartsMonday.value,
+                            )
+                            viewDays = monthDayCount(viewYear, viewMonth)
+                            lastDay = rangeEndDayIn(anchor, viewYear, viewMonth)
+                            latestOnCrossMonth.value(targetKey, anchor)
+                        }
+
+                        fun flipMonth(forward: Boolean) {
+                            val nextKey = shiftMonth(
+                                BudgetMonth.keyOf(viewYear, viewMonth),
+                                if (forward) 1 else -1,
+                            )
+                            showMonth(nextKey)
+                            crossedMonths.add(nextKey to forward)
+                        }
+
+                        // 往回退一页：退掉最近跨进的月份；一个都没跨过就退回长按所在月。
+                        fun retreatMonth() {
+                            if (crossedMonths.isEmpty()) return
+                            crossedMonths.removeAt(crossedMonths.lastIndex)
+                            showMonth(
+                                crossedMonths.lastOrNull()?.first
+                                    ?: BudgetMonth.keyOf(anchorYear, anchorMonth),
+                            )
+                        }
+
                         while (true) {
-                            val event = awaitPointerEvent()
+                            // 手指停在空白里不会再有指针事件，所以按「还差多少毫秒」等事件：
+                            // 等到超时说明已经停够 CROSS_MONTH_DWELL_MS，翻一页。
+                            // 停留途中手指出空白格或反向，计时会被清掉，不会翻。
+                            val nowMs = SystemClock.uptimeMillis()
+                            val blankDueMs = if (blankDwellStartMs > 0L) {
+                                blankDwellStartMs + CROSS_MONTH_DWELL_MS
+                            } else {
+                                Long.MAX_VALUE
+                            }
+                            val reverseDueMs = if (reverseDwellStartMs > 0L) {
+                                reverseDwellStartMs + CROSS_MONTH_DWELL_MS
+                            } else {
+                                Long.MAX_VALUE
+                            }
+                            val dueMs = minOf(blankDueMs, reverseDueMs)
+                            val event = when {
+                                dueMs == Long.MAX_VALUE -> awaitPointerEvent()
+                                dueMs <= nowMs -> null
+                                else -> withTimeoutOrNull(dueMs - nowMs) { awaitPointerEvent() }
+                            }
+                            if (event == null) {
+                                // 停留到点：只翻一页，然后按新月份重新判断手指位置、重新起算停留。
+                                val retreat = reverseDwellStartMs > 0L && reverseDueMs <= blankDueMs
+                                latestHaptics.value.performHapticFeedback(
+                                    HapticFeedbackType.LongPress,
+                                )
+                                blankDwellStartMs = 0L
+                                reverseDwellStartMs = 0L
+                                reverseTravelPx = 0f
+                                if (retreat) retreatMonth() else flipMonth(blankDir > 0)
+                                blankDir = blankDirectionAt(
+                                    pointer, gridWidthPx, rowHeightPx, viewOffset, viewDays,
+                                )
+                                blankDwellStartMs = if (blankDir != 0) {
+                                    SystemClock.uptimeMillis()
+                                } else {
+                                    0L
+                                }
+                                continue
+                            }
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
                                 change.consume()
                                 break
                             }
-                            val dx = change.position.x - lastX
-                            lastX = change.position.x
+                            pointer = change.position
+                            val dx = pointer.x - lastX
+                            lastX = pointer.x
                             // 上一次跨月是往右翻的，就往左退回；反之亦然。
-                            // 反向移动够 24dp 才退一个月，手指在边缘抖动不会反复翻。
+                            // 反向位移够 24dp 只解除抑制，还要再停留 350ms 才真的回翻一页。
                             val lastCross = crossedMonths.lastOrNull()
-                            val reversing = lastCross != null &&
+                            val reversing = lastCross != null && dx != 0f &&
                                 (if (lastCross.second) dx < 0f else dx > 0f)
                             if (reversing) {
+                                // 反向优先：先清掉「停在空白里」的正向计时，
+                                // 否则边往回拖边把上一个月又翻过去。
+                                blankDir = 0
+                                blankDwellStartMs = 0L
                                 reverseTravelPx += abs(dx)
-                                if (reverseTravelPx >= reverseCrossDragPx) {
-                                    crossedMonths.removeAt(crossedMonths.lastIndex)
-                                    reverseTravelPx = 0f
-                                    forwardTravelPx = 0f
-                                    // 退回来时手指仍停在空白格里，先关掉触发，避免立刻又翻过去。
-                                    blankFlipArmed = false
-                                    val targetKey = crossedMonths.lastOrNull()?.first
-                                        ?: BudgetMonth.keyOf(anchorYear, anchorMonth)
-                                    val target = BudgetMonth.parse(targetKey)
-                                    if (target != null) {
-                                        viewYear = target.year
-                                        viewMonth = target.month
-                                        viewOffset = firstDayOffset(
-                                            viewYear, viewMonth, latestWeekStartsMonday.value,
-                                        )
-                                        viewDays = monthDayCount(viewYear, viewMonth)
-                                        lastDay = rangeEndDayIn(anchor, viewYear, viewMonth)
-                                        latestOnCrossMonth.value(targetKey, anchor)
-                                    }
+                                if (reverseTravelPx >= reverseCrossDragPx &&
+                                    reverseDwellStartMs == 0L
+                                ) {
+                                    reverseDwellStartMs = SystemClock.uptimeMillis()
                                 }
                                 change.consume()
                                 continue
                             }
-                            if (dx != 0f) reverseTravelPx = 0f
-                            // 手指拖进本月「末尾空白格 / 开头空白格」就跨月：
+                            if (dx != 0f) {
+                                reverseTravelPx = 0f
+                                reverseDwellStartMs = 0L
+                            }
+                            // 手指拖进本月「末尾空白格 / 开头空白格」才跨月：
                             // 往右进尾部空白翻下月（终点 1 号），往左进头部空白翻上月（终点月末）。
                             // 不能只看第 0/6 列——像 11 月 30 日在第 6 行第 0 列，
-                            // 往右拖是穿过一行空白，永远到不了第 6 列。
-                            val blankDir = blankDirectionAt(
-                                change.position, gridWidthPx, rowHeightPx, viewOffset, viewDays,
+                            // 往右拖是穿过一整行空白，永远到不了第 6 列。
+                            val blankDirNow = blankDirectionAt(
+                                pointer, gridWidthPx, rowHeightPx, viewOffset, viewDays,
                             )
-                            if (blankDir != 0) {
-                                forwardTravelPx += abs(dx)
-                                // 回到日期格后重新允许；若一直停在空白里，拖满 56dp 也允许再翻。
-                                val enough = blankFlipArmed || forwardTravelPx >= crossMonthDragPx
-                                if (enough) {
-                                    forwardTravelPx = 0f
-                                    reverseTravelPx = 0f
-                                    blankFlipArmed = false
-                                    val forward = blankDir > 0
-                                    val nextKey = shiftMonth(
-                                        BudgetMonth.keyOf(viewYear, viewMonth),
-                                        if (forward) 1 else -1,
-                                    )
-                                    val next = BudgetMonth.parse(nextKey)
-                                    if (next != null) {
-                                        viewYear = next.year
-                                        viewMonth = next.month
-                                        viewOffset = firstDayOffset(
-                                            viewYear, viewMonth, latestWeekStartsMonday.value,
-                                        )
-                                        viewDays = monthDayCount(viewYear, viewMonth)
-                                        lastDay = rangeEndDayIn(anchor, viewYear, viewMonth)
-                                        crossedMonths.add(nextKey to forward)
-                                        latestOnCrossMonth.value(nextKey, anchor)
-                                    }
+                            if (blankDirNow != blankDir) {
+                                // 刚进空白格：开始计时；出空白格回日期格：取消计时。
+                                blankDir = blankDirNow
+                                blankDwellStartMs = if (blankDirNow != 0) {
+                                    SystemClock.uptimeMillis()
+                                } else {
+                                    0L
                                 }
-                            } else {
-                                blankFlipArmed = true
-                                forwardTravelPx = 0f
-                                val day = dayAt(
-                                    change.position,
-                                    gridWidthPx,
-                                    rowHeightPx,
-                                    viewOffset,
-                                    viewDays,
+                            }
+                            if (blankDirNow != 0) {
+                                // 停在空白里先不翻，交给上面的超时分支到点再翻。
+                                change.consume()
+                                continue
+                            }
+                            val day = dayAt(
+                                pointer,
+                                gridWidthPx,
+                                rowHeightPx,
+                                viewOffset,
+                                viewDays,
+                            )
+                            if (day != null && day != lastDay) {
+                                lastDay = day
+                                val current = CalendarDate(viewYear, viewMonth, day)
+                                latestOnSelect.value(
+                                    minOf(anchor, current),
+                                    maxOf(anchor, current),
                                 )
-                                if (day != null && day != lastDay) {
-                                    lastDay = day
-                                    val current = CalendarDate(viewYear, viewMonth, day)
-                                    latestOnSelect.value(
-                                        minOf(anchor, current),
-                                        maxOf(anchor, current),
-                                    )
-                                }
                             }
                             change.consume()
                         }
