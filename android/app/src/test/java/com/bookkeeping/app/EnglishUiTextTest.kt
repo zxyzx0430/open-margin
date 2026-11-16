@@ -165,4 +165,36 @@ class EnglishUiTextTest {
         assertEquals("Next year", EnglishUiText.translate("下一年"))
         assertEquals("Cancel", EnglishUiText.translate("取消"))
     }
+
+    @Test
+    fun merchantRulesPageLabelsTranslate() {
+        // 商户分类记忆页：标题栏、搜索、列表状态、空状态、编辑面板、清除确认。
+        val expected = mapOf(
+            "商户分类记忆" to "Merchant category memory",
+            "添加" to "Add",
+            "搜索商户" to "Search merchants",
+            "没有匹配的商户" to "No matching merchants",
+            "已生效" to "Active",
+            "已暂停学习" to "Learning paused",
+            "还没有自定义规则" to "No custom rules yet",
+            "清除全部分类记忆" to "Clear all category memory",
+            "清除全部分类记忆？" to "Clear all category memory?",
+            "已清除" to "Cleared",
+            "已保存" to "Saved",
+            "已删除" to "Deleted",
+            "添加规则" to "Add rule",
+            "编辑规则" to "Edit rule",
+            "最近商户" to "Recent merchants",
+            "已有规则" to "Has rule",
+            "暂停学习此商户" to "Pause learning for this merchant",
+            "删除这条规则？" to "Delete this rule?",
+            "请先输入商户名" to "Enter a merchant name first",
+            "请选择分类" to "Select a category",
+            "改为编辑" to "Edit it instead",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
 }
