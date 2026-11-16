@@ -1,4 +1,5 @@
-# Open Margin setup engine: secrets, Docker Compose, health waits.
+﻿# Open Margin setup engine: secrets, Docker Compose, health waits.
+# Windows PowerShell 5.1 compatible.
 
 function Get-OmRepoRoot {
     if ($script:OmRepoRoot) { return $script:OmRepoRoot }
@@ -15,12 +16,40 @@ function Get-OmBackendEnvPath {
     return (Join-Path (Get-OmSecretsPath) 'backend.env')
 }
 
+function Get-OmEnvValueFromFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+    if (-not (Test-Path $Path)) { return $null }
+    $line = Select-String -Path $Path -Pattern ('^' + [regex]::Escape($Name) + '=') | Select-Object -First 1
+    if (-not $line) { return $null }
+    return $line.Line.Substring($Name.Length + 1).Trim()
+}
+
+function Set-OmEnvValueInFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+    if (-not (Test-Path $Path)) { throw ('env file not found: ' + $Path) }
+    $lines = [System.IO.File]::ReadAllLines($Path)
+    $found = $false
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        if ($lines[$i] -like ($Name + '=*')) {
+            $lines[$i] = $Name + '=' + $Value
+            $found = $true
+        }
+    }
+    if (-not $found) { $lines += ($Name + '=' + $Value) }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, (($lines -join [Environment]::NewLine) + [Environment]::NewLine), $utf8)
+}
+
 function Get-OmDeviceTokenFromFile {
     param([string]$Path = (Get-OmBackendEnvPath))
-    if (-not (Test-Path $Path)) { return $null }
-    $line = Select-String -Path $Path -Pattern '^FINANCE_DEVICE_TOKEN=' | Select-Object -First 1
-    if (-not $line) { return $null }
-    return $line.Line.Substring('FINANCE_DEVICE_TOKEN='.Length).Trim()
+    return (Get-OmEnvValueFromFile -Name 'FINANCE_DEVICE_TOKEN' -Path $Path)
 }
 
 function Set-OmDeviceTokenInFile {
@@ -28,18 +57,7 @@ function Set-OmDeviceTokenInFile {
         [Parameter(Mandatory = $true)][string]$Token,
         [string]$Path = (Get-OmBackendEnvPath)
     )
-    if (-not (Test-Path $Path)) { throw 'backend.env not found' }
-    $lines = [System.IO.File]::ReadAllLines($Path)
-    $found = $false
-    for ($i = 0; $i -lt $lines.Length; $i++) {
-        if ($lines[$i] -like 'FINANCE_DEVICE_TOKEN=*') {
-            $lines[$i] = 'FINANCE_DEVICE_TOKEN=' + $Token
-            $found = $true
-        }
-    }
-    if (-not $found) { $lines += ('FINANCE_DEVICE_TOKEN=' + $Token) }
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($Path, (($lines -join [Environment]::NewLine) + [Environment]::NewLine), $utf8)
+    Set-OmEnvValueInFile -Name 'FINANCE_DEVICE_TOKEN' -Value $Token -Path $Path
 }
 
 function New-OmSecretValue {
@@ -47,6 +65,13 @@ function New-OmSecretValue {
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Set-OmFileAcl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    try {
+        & icacls.exe $Path /inheritance:r /grant:r ("$env:USERNAME:(OI)(CI)F") /grant:r 'SYSTEM:(OI)(CI)F' /grant:r 'Administrators:(OI)(CI)F' *> $null
+    } catch { }
 }
 
 function New-OmSecrets {
@@ -90,6 +115,7 @@ function New-OmSecrets {
         $utf8 = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($backend, $be + $nl, $utf8)
         [System.IO.File]::WriteAllText($ledger, $wl + $nl, $utf8)
+        Set-OmFileAcl -Path $secrets
         $created = $true
     }
     $envFile = Join-Path $RepoRoot '.env'
@@ -101,23 +127,25 @@ function New-OmSecrets {
     ) -join [Environment]::NewLine
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($envFile, $envLines + [Environment]::NewLine, $utf8)
-    try {
-        & icacls.exe $secrets /inheritance:r /grant:r ("$env:USERNAME:(OI)(CI)F") /grant:r 'SYSTEM:(OI)(CI)F' /grant:r 'Administrators:(OI)(CI)F' *> $null
-    } catch { }
-    return [pscustomobject]@{ created = $created; secretsPath = $secrets; backendEnv = $backend; ledgerEnv = $ledger }
+    return [pscustomobject]@{ created = $created; secretsPath = $secrets; backendEnv = $backend; ledgerEnv = $ledger; envFile = $envFile }
 }
 
 function Invoke-OmDockerCompose {
     param(
         [Parameter(Mandatory = $true)][string[]]$Arguments,
         [string]$ProjectName = 'personal-finance-system',
+        [string]$RepoRoot = (Get-OmRepoRoot),
         [int]$TimeoutSec = 0
     )
     $docker = Get-OmCommandPath 'docker'
     if (-not $docker) {
         return [pscustomobject]@{ exitCode = -1; output = 'docker not found' }
     }
-    $allArgs = @('compose', '--project-name', $ProjectName) + $Arguments
+    $composeFile = Join-Path $RepoRoot 'compose.yaml'
+    if (-not (Test-Path $composeFile)) {
+        return [pscustomobject]@{ exitCode = -1; output = ('compose file not found: ' + $composeFile) }
+    }
+    $allArgs = @('compose', '--project-name', $ProjectName, '--project-directory', $RepoRoot, '-f', $composeFile) + $Arguments
     Write-OmLog -Level INFO -Message ('docker ' + ($allArgs -join ' '))
     try {
         $output = & $docker @allArgs 2>&1 | Out-String
@@ -139,11 +167,12 @@ function Wait-OmDockerReady {
 }
 
 function Start-OmDockerDesktop {
-    $candidates = @(
-        (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Docker\Docker\Docker Desktop.exe')
-    )
-    foreach ($candidate in $candidates) {
+    $candidates = @((Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe'))
+    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+    if ($programFilesX86) {
+        $candidates += (Join-Path $programFilesX86 'Docker\Docker\Docker Desktop.exe')
+    }
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
         if (Test-Path $candidate) {
             Write-OmLog -Level INFO -Message ('starting Docker Desktop: ' + $candidate)
             Start-Process -FilePath $candidate -WindowStyle Hidden | Out-Null
@@ -181,31 +210,77 @@ function Invoke-OmComposeUp {
         [string]$RepoRoot = (Get-OmRepoRoot),
         $Ports = (Get-OmDefaultPorts),
         [string]$ProjectName = 'personal-finance-system',
-        [switch]$SkipBuild
+        [switch]$SkipBuild,
+        [switch]$NoBuild,
+        [switch]$SkipHealth
     )
     $null = New-OmSecrets -RepoRoot $RepoRoot -Ports $Ports
-    $args = @('--profile', 'windows-public-sync', 'up', '-d')
-    if (-not $SkipBuild) { $args += '--build' }
-    $result = Invoke-OmDockerCompose -Arguments $args -ProjectName $ProjectName
+    $composeArgs = @('--profile', 'windows-public-sync', 'up', '-d')
+    if ($NoBuild) {
+        # Offline bundle path: images were loaded with `docker load` and must
+        # not be rebuilt from a possibly incomplete source tree.
+        $composeArgs += '--no-build'
+    } elseif (-not $SkipBuild) {
+        $composeArgs += '--build'
+    }
+    $result = Invoke-OmDockerCompose -Arguments $composeArgs -ProjectName $ProjectName -RepoRoot $RepoRoot
     if ($result.exitCode -ne 0) {
         return [pscustomobject]@{ ok = $false; output = $result.output; step = 'compose' }
     }
     $healthUrl = 'http://127.0.0.1:' + $Ports.api + '/health'
+    if ($SkipHealth) {
+        return [pscustomobject]@{ ok = $true; output = $result.output; step = 'compose'; healthUrl = $healthUrl }
+    }
     $healthy = Wait-OmHttpOk -Url $healthUrl -TimeoutSec 240
-    return [pscustomobject]@{ ok = $healthy; output = $result.output; step = 'health'; healthUrl = $healthUrl }
+    if (-not $healthy) {
+        return [pscustomobject]@{ ok = $false; output = $result.output; step = 'health'; healthUrl = $healthUrl }
+    }
+    $gatewayUrl = 'http://127.0.0.1:' + $Ports.gateway + '/finance/health'
+    $gatewayHealthy = Wait-OmHttpOk -Url $gatewayUrl -TimeoutSec 120
+    if (-not $gatewayHealthy) {
+        return [pscustomobject]@{ ok = $false; output = $result.output; step = 'gateway'; healthUrl = $gatewayUrl }
+    }
+    return [pscustomobject]@{ ok = $true; output = $result.output; step = 'compose'; healthUrl = $healthUrl; gatewayUrl = $gatewayUrl }
 }
 
 function Invoke-OmComposeDown {
     param(
         [string]$ProjectName = 'personal-finance-system',
+        [string]$RepoRoot = (Get-OmRepoRoot),
         [switch]$RemoveVolumes
     )
-    $args = @('down')
-    if ($RemoveVolumes) { $args += '-v' }
-    return Invoke-OmDockerCompose -Arguments $args -ProjectName $ProjectName
+    $composeArgs = @('--profile', 'windows-public-sync', 'down')
+    if ($RemoveVolumes) { $composeArgs += '-v' }
+    return Invoke-OmDockerCompose -Arguments $composeArgs -ProjectName $ProjectName -RepoRoot $RepoRoot
 }
 
 function Get-OmComposePs {
-    param([string]$ProjectName = 'personal-finance-system')
-    return Invoke-OmDockerCompose -Arguments @('ps', '--format', 'json') -ProjectName $ProjectName
+    param(
+        [string]$ProjectName = 'personal-finance-system',
+        [string]$RepoRoot = (Get-OmRepoRoot)
+    )
+    $result = Invoke-OmDockerCompose -Arguments @('--profile', 'windows-public-sync', 'ps', '--format', 'json') -ProjectName $ProjectName -RepoRoot $RepoRoot
+    $items = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in (([string]$result.output) -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed) { continue }
+        try { $items.Add(($trimmed | ConvertFrom-Json)) } catch { }
+    }
+    return [pscustomobject]@{ exitCode = $result.exitCode; items = $items.ToArray(); raw = $result.output }
+}
+
+function Restart-OmFinanceApi {
+    param(
+        [string]$ProjectName = 'personal-finance-system',
+        [string]$RepoRoot = (Get-OmRepoRoot)
+    )
+    return Invoke-OmDockerCompose -Arguments @('--profile', 'windows-public-sync', 'up', '-d', '--force-recreate', 'finance-api') -ProjectName $ProjectName -RepoRoot $RepoRoot
+}
+
+function Invoke-OmComposeBackup {
+    param(
+        [string]$ProjectName = 'personal-finance-system',
+        [string]$RepoRoot = (Get-OmRepoRoot)
+    )
+    return Invoke-OmDockerCompose -Arguments @('--profile', 'maintenance', 'run', '--rm', 'backup') -ProjectName $ProjectName -RepoRoot $RepoRoot
 }
