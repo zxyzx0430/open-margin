@@ -161,8 +161,8 @@ h3 { margin: 0 0 10px; font-size: 16px; }
 }
 .om-form input:focus { outline: 3px solid rgba(66, 109, 229, .18); border-color: var(--om-primary); }
 
-.om-check { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; color: var(--om-ink); }
-.om-check input { width: 18px; height: 18px; accent-color: var(--om-primary); }
+.om-checkbox { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; color: var(--om-ink); }
+.om-checkbox input { width: 18px; height: 18px; accent-color: var(--om-primary); }
 
 .om-progress-list { display: grid; gap: 8px; margin: 12px 0; }
 .om-progress-item {
@@ -214,6 +214,17 @@ h3 { margin: 0 0 10px; font-size: 16px; }
 .om-toast.is-error { background: var(--om-danger); }
 
 .om-hidden { display: none !important; }
+
+.om-banner {
+  max-width: 980px; margin: 0 auto 14px; padding: 10px 14px;
+  border: 1px solid #f0d9a8; background: #fff8e8; color: #8a5b12;
+  border-radius: 12px; font-size: 13px;
+}
+
+.om-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; color: var(--om-ink); word-break: break-all;
+}
 
 @media (max-width: 720px) {
   body { padding: 0 12px 48px; }

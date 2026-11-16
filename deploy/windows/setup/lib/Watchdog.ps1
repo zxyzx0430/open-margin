@@ -1,4 +1,4 @@
-# Open Margin setup engine: watchdog registration.
+﻿# Open Margin setup engine: watchdog registration.
 
 function Get-OmWatchdogDirectory {
     param([string]$StateRoot = (Get-OmStateRoot))
@@ -25,14 +25,17 @@ function Install-OmWatchdog {
     $config = [ordered]@{
         stateRoot = $StateRoot
         repoRoot = $RepoRoot
+        workingDirectory = $RepoRoot
         ports = $Ports
         projectName = $ProjectName
     }
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($stateFile, ($config | ConvertTo-Json -Depth 6), $utf8)
     $vbs = Join-Path $dir 'Watchdog.vbs'
+    $vbsRoot = ([string]$RepoRoot).Replace('"', '""')
     $vbsContent = @"
 Set sh = CreateObject("WScript.Shell")
+sh.CurrentDirectory = "$vbsRoot"
 sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""$target""", 0, False
 "@
     [System.IO.File]::WriteAllText($vbs, $vbsContent, [System.Text.Encoding]::ASCII)
@@ -40,7 +43,7 @@ sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -F
         return [pscustomobject]@{ ok = $true; code = 'DRY_RUN'; task = $TaskName; script = $target }
     }
     try {
-        $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"')
+        $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"') -WorkingDirectory $RepoRoot
         $trigger = New-ScheduledTaskTrigger -AtLogOn
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -Hidden
         $principal = New-ScheduledTaskPrincipal -UserId ($env:USERDOMAIN + '\' + $env:USERNAME) -LogonType Interactive -RunLevel Limited

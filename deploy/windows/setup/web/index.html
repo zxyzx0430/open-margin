@@ -26,10 +26,13 @@
     <div class="om-step" data-step="tailscale"><span>2</span>Tailscale</div>
     <div class="om-step" data-step="admin"><span>3</span>管理员</div>
     <div class="om-step" data-step="deploy"><span>4</span>部署</div>
-    <div class="om-step" data-step="complete"><span>5</span>完成</div>
+    <div class="om-step" data-step="verify"><span>5</span>自测</div>
+    <div class="om-step" data-step="complete"><span>6</span>完成</div>
   </nav>
 
   <main class="om-main">
+    <div id="dry-run-banner" class="om-banner om-hidden">演练模式：所有步骤只模拟，不会安装依赖、启动容器或开启公网入口。</div>
+
     <section id="screen-welcome" class="om-screen is-active">
       <div class="om-hero">
         <p class="om-kicker">Windows 一键部署</p>
@@ -51,7 +54,7 @@
         </div>
         <button id="btn-recheck" class="om-btn om-btn-ghost">重新检测</button>
       </div>
-      <div id="env-checks" class="om-check-list"></div>
+      <div id="env-checks" class="om-check-list" aria-live="polite"></div>
       <div class="om-actions">
         <button id="btn-install-deps" class="om-btn om-btn-primary">一键安装依赖</button>
         <button id="btn-env-next" class="om-btn om-btn-ghost" disabled>下一步</button>
@@ -67,7 +70,7 @@
         </div>
         <button id="btn-ts-recheck" class="om-btn om-btn-ghost">重新检测</button>
       </div>
-      <div id="ts-checks" class="om-check-list"></div>
+      <div id="ts-checks" class="om-check-list" aria-live="polite"></div>
       <div class="om-card om-note">
         <strong>手机不需要安装 Tailscale。</strong>
         <p>Tailscale 只给这台电脑一个公网 HTTPS 入口。手机用自己的商业 VPN 访问这个入口，不会和 VPN 抢通道。</p>
@@ -89,13 +92,15 @@
       <div class="om-card">
         <p>部署完成后，这台电脑会有一个公网地址，只开放：</p>
         <ul class="om-list">
-          <li>同步接口（需要设备密钥）</li>
-          <li>一次性配对页面（只在本机显示二维码）</li>
+          <li>健康检查（GET /finance/health）</li>
+          <li>同步接口（GET /finance/api/v2/sync/changes）</li>
+          <li>同步推送（POST /finance/api/v2/sync/push）</li>
+          <li>两个旧版 Android 同步接口</li>
         </ul>
         <p>Wallos 账本、MCP、OAuth 和管理接口不会对公网开放。</p>
         <p class="om-warn">二维码相当于账本钥匙。不要截图、不要转发，10 分钟后向导会自动隐藏它。</p>
       </div>
-      <label class="om-check">
+      <label class="om-check om-checkbox">
         <input type="checkbox" id="ack-public">
         <span>我理解并同意开启公网同步入口</span>
       </label>
@@ -136,6 +141,7 @@
         <p id="deploy-action-text"></p>
         <div class="om-actions">
           <a id="deploy-action-link" class="om-btn om-btn-primary" target="_blank" rel="noopener">打开授权页</a>
+          <button id="btn-approve-funnel" class="om-btn om-btn-ghost om-hidden">我已完成授权，继续</button>
           <button id="btn-deploy-retry" class="om-btn om-btn-ghost">重试</button>
         </div>
       </div>
@@ -144,6 +150,25 @@
         <button id="btn-deploy-logs" class="om-btn om-btn-ghost">查看日志</button>
       </div>
       <p class="om-hint">部署过程中可能会弹出 Tailscale 授权页，点“允许”即可。不要关闭这个页面。</p>
+    </section>
+
+    <section id="screen-verify" class="om-screen">
+      <div class="om-section-head">
+        <div>
+          <p class="om-kicker">第 5 步</p>
+          <h2>自测</h2>
+        </div>
+        <span id="verify-state" class="om-pill om-pill-neutral">等待结果</span>
+      </div>
+      <div id="verify-checks" class="om-check-list" aria-live="polite"></div>
+      <div class="om-card om-note">
+        <strong>账本身份</strong>
+        <p id="verify-server-id" class="om-mono">尚未读取</p>
+      </div>
+      <div class="om-actions">
+        <button id="btn-verify-continue" class="om-btn om-btn-primary" disabled>完成</button>
+        <button id="btn-verify-again" class="om-btn om-btn-ghost">重新自测</button>
+      </div>
     </section>
 
     <section id="screen-complete" class="om-screen">
@@ -182,7 +207,7 @@
           <li>电脑要保持开机；休眠/关机时同步暂停，手机继续本地记账，恢复后补传。</li>
           <li>二维码和密钥不要截图、不要转发。</li>
           <li>建议点“一键备份”；本机备份不等于异地备份。</li>
-          <li>关闭远程访问：下面点“关闭远程同步”。</li>
+          <li>关闭远程访问：下面点“关闭远程同步”，数据不会删除。</li>
         </ul>
       </div>
       <div class="om-actions">
