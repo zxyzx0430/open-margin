@@ -5,6 +5,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.bookkeeping.app.data.merchant.MerchantRules
+import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.CaptureHealthWorker
 import com.bookkeeping.app.notification.CategoryLearning
@@ -19,6 +20,7 @@ import javax.inject.Inject
 @HiltAndroidApp
 class BookkeepingApplication : Application() {
     @Inject lateinit var settings: SettingsPreferences
+    @Inject lateinit var transactionRepository: TransactionRepository
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -30,6 +32,9 @@ class BookkeepingApplication : Application() {
             MerchantRules.replace(settings.merchantRulesBlocking())
             val (counts, disabled) = settings.categoryLearningBlocking()
             CategoryLearning.replace(counts, disabled)
+            // 一次性纠正升级前已经各插一条的重复采集（prefs 版本标记保证只跑一次）。
+            // 纯本地写，失败不影响启动。
+            runCatching { transactionRepository.repairCapturedDuplicatesOnce() }
         }
         scheduleCaptureHealthRecovery()
     }
