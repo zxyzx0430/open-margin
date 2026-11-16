@@ -143,6 +143,53 @@ class SettingsPreferences @Inject constructor(
         MerchantRules.put(key, category)
     }
 
+    /**
+     * 商户分类记忆页的一次保存：改商户名（先 remove 旧 key 再写新 key）、改分类、
+     * 设置「暂停学习」三件事写在同一次 DataStore edit 里，列表不会看到改了一半的规则。
+     *
+     * [previousMerchant] 为 null 表示新增；改名前后的学习暂停状态跟着 key 一起搬过去。
+     * 存储格式与同步协议不变。
+     */
+    suspend fun saveMerchantRule(
+        previousMerchant: String?,
+        merchant: String,
+        category: TransactionCategory,
+        learningPaused: Boolean,
+    ) {
+        val newKey = MerchantRules.normalize(merchant)
+        if (newKey.isBlank()) return
+        val oldKey = previousMerchant
+            ?.let(MerchantRules::normalize)
+            ?.takeIf { it.isNotBlank() && it != newKey }
+
+        context.settingsDataStore.edit { prefs ->
+            val rules = parseMerchantRules(prefs[KEY_MERCHANT_RULES]).toMutableMap()
+            if (oldKey != null) rules.remove(oldKey)
+            rules[newKey] = category
+            val json = JSONObject()
+            rules.forEach { (name, value) -> json.put(name, value.name) }
+            prefs[KEY_MERCHANT_RULES] = json.toString()
+
+            val (counts, disabled) = parseCategoryLearning(prefs[KEY_CATEGORY_LEARNING])
+            val updatedCounts = counts.toMutableMap()
+            val updatedDisabled = disabled.toMutableSet()
+            if (oldKey != null) {
+                // 旧名字的学习计数和暂停标记都不再属于任何规则。
+                updatedCounts.remove(oldKey)
+                if (updatedDisabled.remove(oldKey)) updatedDisabled.add(newKey)
+            }
+            if (learningPaused) updatedDisabled.add(newKey) else updatedDisabled.remove(newKey)
+            prefs[KEY_CATEGORY_LEARNING] = encodeCategoryLearning(updatedCounts, updatedDisabled)
+        }
+
+        if (oldKey != null) {
+            MerchantRules.remove(oldKey)
+            CategoryLearning.remove(oldKey)
+        }
+        MerchantRules.put(newKey, category)
+        if (learningPaused) CategoryLearning.disable(newKey) else CategoryLearning.enable(newKey)
+    }
+
     suspend fun clearMerchantRules() {
         context.settingsDataStore.edit {
             it.remove(KEY_MERCHANT_RULES)

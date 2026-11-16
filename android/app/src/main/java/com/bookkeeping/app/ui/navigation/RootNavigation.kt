@@ -38,6 +38,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
+import com.bookkeeping.app.ui.screen.settings.MerchantRulesScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
@@ -166,6 +167,9 @@ fun RootNavigation() {
                 )
             }
             composable(BottomNavItem.Budget.route) { BudgetScreen() }
+            composable("merchantRules") {
+                MerchantRulesScreen(onBack = { navController.popBackStack() })
+            }
             composable(BottomNavItem.Settings.route) {
                 SettingsScreen(
                     onImportBills = {
@@ -176,6 +180,7 @@ fun RootNavigation() {
                             restoreState = true
                         }
                     },
+                    onOpenMerchantRules = { navController.navigate("merchantRules") },
                     openAutomationSetup = requestAutomationSetup,
                     onAutomationOpened = { requestAutomationSetup = false },
                 )
