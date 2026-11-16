@@ -1,7 +1,18 @@
-# 清衡 v1.2.0 | Windows 私有同步与首次连接
+# 清衡 v1.3.0 | Windows 首次连接：远程同步与私有同步
 
 > 仅针对 Windows 自托管安装；VPS 部署继续使用原 HTTPS 入口。
 > 此模式是可选私有连接方式，不能与 VPS 自动组成多主账本。
+
+## 先选连接方式
+
+| 场景 | 推荐入口 | 手机是否装 Tailscale | 是否与商业 VPN 冲突 |
+| --- | --- | --- | --- |
+| 手机经常开商业 VPN，只要同步账本 | **v1.3.0 一键安装器 + 网页向导（远程 Funnel）** | 不需要 | 不冲突；但商业 VPN 必须能访问 `*.ts.net` |
+| 有 tailnet，想在手机浏览完整私有网页 | 本文下面的私有 CLI 向导（Tailscale Serve） | 需要 | 会抢 Android 唯一的 VPN 槽 |
+
+**远程同步（推荐）**：从 GitHub Releases 下载 `OpenMargin-Setup.exe`，双击后按向导完成。它只提供远程 Funnel 模式，不提供模式选择；二维码直接包含同步 URL、设备令牌和 `server_id`，只在本机显示 10 分钟。完整流程、SmartScreen、SHA256、UAC、重启、Funnel 限制和离线镜像包见 [Windows 部署说明](DEPLOY_WINDOWS.md) 的“方案 0”。
+
+本文余下内容是**私有 Tailscale Serve CLI**（高级/保留路径），不随 v1 网页向导提供。
 
 ## 用户只需要安装
 
@@ -40,7 +51,7 @@
   - `POST /finance/api/v1/transactions/correct-rounding`（旧记录修复）
 - 其他路径默认 404；上述接口的非许可方法返回 405；编码路径被拒绝。
 - 业务侧 `X-Device-Token` 认证和服务器账本身份校验不变。Tailscale **不能**替代后端认证。
-- 不得启用 Funnel，不得直接开放 8767/18082/18768 公网端口。
+- 私有模式不得启用 Funnel，不得直接开放 8767/18082/18768 公网端口。
 - 安卓 VPN 可能与代理工具互斥；若 Tailscale 未连接，交易留在本地等待重试。
 
 ## 界面状态与恢复
@@ -69,5 +80,6 @@
 6. 升级：旧密钥和 SQLite 卷未重置；现有 Serve 其他应用路由不得被覆盖。
 7. Windows 与 VPS 不得自动双主同步或直接交换客户端游标。
 8. Android/Windows 完整实机端到端测试未通过前不得声称正式发布就绪。
+9. v1.3.0 远程 Funnel 向导同样需要在真实 Windows、Tailscale、商业 VPN 和 Android 真机上验收后才能宣称正式可用。
 
 回归入口：`python3 scripts/test_private_sync_gateway.py`（需要本地 nginx），Android `./gradlew testDebugUnitTest`（需要项目指定的 Java 与 Android SDK）。在 Windows 上需单独用 PowerShell Parser 检查安装脚本。
