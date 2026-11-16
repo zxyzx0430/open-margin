@@ -78,6 +78,7 @@ import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.notification.NotificationListenerHelper
 import com.bookkeeping.app.sync.SyncResultCode
 import com.bookkeeping.app.sync.TransactionSyncWorker
+import com.bookkeeping.app.sync.readPendingCounts
 import com.bookkeeping.app.ui.components.AutomationSetupPrompt
 import com.bookkeeping.app.ui.components.CategoryFilterSheet
 import com.bookkeeping.app.ui.components.CategoryFilterTotal
@@ -1062,7 +1063,10 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
 
     val prefs = context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE)
     val syncEnabled = prefs.getBoolean("enabled", false)
-    val conflicts = prefs.getInt("pending_sync_conflicts", 0)
+    // 待上传是正常现象，冲突才需要警告：两个数字分开读，不能混成一个。
+    val pendingCounts = readPendingCounts(prefs)
+    val conflicts = pendingCounts.conflicts
+    val uploads = pendingCounts.uploads
     val lastSuccess = prefs.getLong("last_success_ms", 0L)
     val lastResult = prefs.getString("last_result", "").orEmpty()
     // Structured code wins; older installs without it fall back to keyword matching.
@@ -1111,6 +1115,12 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
             syncText = tr("同步异常")
             syncTone = StatusTone.WARNING
             syncIcon = Icons.Outlined.ErrorOutline
+        }
+        uploads > 0 -> {
+            // 还没推上去的本地修改：正常现象，不报红。
+            syncText = tr("待上传 ") + uploads
+            syncTone = StatusTone.NEUTRAL
+            syncIcon = Icons.Outlined.Sync
         }
         resultCode == SyncResultCode.OK -> {
             syncText = tr("同步正常")

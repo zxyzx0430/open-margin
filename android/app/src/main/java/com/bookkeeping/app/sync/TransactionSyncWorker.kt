@@ -163,6 +163,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     .putString("last_result", if (ignoredBeforeStart > 0)
                         "已上传；其中 $ignoredBeforeStart 条未被旧版服务端接收，记录仍保留在手机"
                     else "已上传，正在拉取最新变更")
+                    .putLong(LAST_RESULT_MS, System.currentTimeMillis())
                     .putString(LAST_RESULT_CODE, SyncResultCode.RETRY.preferenceValue)
                     .commit()) {
                     return finish(
@@ -203,6 +204,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         prefs.edit()
             .putString("last_result", storedMessage)
             .putString(LAST_RESULT_CODE, code.preferenceValue)
+            .putLong(LAST_RESULT_MS, System.currentTimeMillis())
             .apply()
         return result
     }
@@ -319,6 +321,29 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
     companion object {
         const val PREFS = "finance_sync"
         const val LAST_RESULT_CODE = "last_result_code"
+
+        /**
+         * 最近一次同步结果的写入时间（毫秒）。状态页要显示「结果词 + 时间」，
+         * 只写 last_result 不写时间就没法回答「这是什么时候的结果」。
+         */
+        const val LAST_RESULT_MS = "last_result_ms"
+
+        /**
+         * 两个数字必须分开存，不能混：
+         * - PENDING_UPLOADS：还没推送的本地修改（正常现象，中性色）
+         * - PENDING_CONFLICTS：同一笔在两端都被改过、需要用户逐笔决定（警告色）
+         * 混成一个数字会让用户把自己的本地修改当成冲突。
+         *
+         * 注意语义变更：v1.2.0 及更早写进 PENDING_CONFLICTS 的是 dao.pendingCount()
+         * （全部待推送修改）。升级后到下一次同步之间读不到 PENDING_UPLOADS，
+         * 此时按待上传处理，见 readPendingCounts()。
+         */
+        const val PENDING_UPLOADS = "pending_sync_uploads"
+        const val PENDING_CONFLICTS = "pending_sync_conflicts"
+        const val PENDING_CONFLICT_IDS = "pending_conflict_event_ids"
+        /** 服务器上已经找不到对应记录的 event id；文案要和普通冲突分开讲。 */
+        const val PENDING_CONFLICT_MISSING_IDS = "pending_conflict_missing_ids"
+
         private const val PERIODIC = "finance_periodic_sync"
         private const val IMMEDIATE = "finance_immediate_sync"
         private val mutex = Mutex()
