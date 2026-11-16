@@ -268,13 +268,6 @@ fun StatsScreen(
                     }
                     StatsPeriod.DAY -> Unit
                 }
-                item(key = "category_detail") {
-                    CategoryDetailCard(
-                        stats = stats,
-                        type = viewingType,
-                        onCategoryClick = { selectedCategory = it },
-                    )
-                }
             }
         }
     }
@@ -718,10 +711,10 @@ private fun CategoryDonutCard(
     type: TransactionType,
     onCategoryClick: (TransactionCategory) -> Unit,
 ) {
-    var expanded by remember(stats.size) { mutableStateOf(false) }
     // 环图与图例共用同一个选中分类：点扇区高亮、点图例行去账单，两者互不抢状态。
     var selectedCategory by remember(stats) { mutableStateOf<TransactionCategory?>(null) }
-    val visibleStats = if (expanded) stats else stats.take(LEGEND_PREVIEW_COUNT)
+    // 分类明细已经合并进图例，所以图例一次性展示全部，不再折叠。
+    val visibleStats = stats
     val shape = RoundedCornerShape(20.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -754,33 +747,10 @@ private fun CategoryDonutCard(
                         onClick = { onCategoryClick(stat.category) },
                     )
                 }
-                if (stats.size > LEGEND_PREVIEW_COUNT) {
-                    // 一行文字按钮：展开看全部，再点收起。列表本身在 LazyColumn 里，
-                    // 展开后卡片变高由外层滚动接管，不会撑破布局。
-                    TextButton(
-                        onClick = { expanded = !expanded },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 40.dp),
-                    ) {
-                        Text(
-                            text = if (expanded) {
-                                tr("收起")
-                            } else {
-                                "+${stats.size - LEGEND_PREVIEW_COUNT} ${tr("类")}"
-                            },
-                            style = MaterialTheme.typography.labelLarge,
-                            color = QingPrimary,
-                        )
-                    }
-                }
             }
         }
     }
 }
-
-/** 图例默认只显示前 6 类，剩下的折进「+N 类」。 */
-private const val LEGEND_PREVIEW_COUNT = 6
 
 /**
  * 图例行：色块 + 分类名 + 百分比 + 金额。
@@ -1009,79 +979,6 @@ private fun MonthlyTrendCard(
                         textAlign = TextAlign.End,
                         modifier = Modifier.width(88.dp),
                     )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryDetailCard(
-    stats: List<CategoryStat>,
-    type: TransactionType,
-    onCategoryClick: (TransactionCategory) -> Unit,
-) {
-    val shape = RoundedCornerShape(20.dp)
-    val amountColor = if (type == TransactionType.INCOME) QingIncome else QingExpense
-    val totalCount = stats.sumOf { it.count }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = tr("分类明细"),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "${tr("共")} ${stats.size} ${tr("类")} · $totalCount ${tr("笔")}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            stats.forEachIndexed { index, stat ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onCategoryClick(stat.category) }
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    CategoryIcon(category = stat.category, size = 36.dp)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = tr(stat.category.displayName),
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = "${"%.1f".format(Locale.CHINA, stat.percentage * 100)}% · " +
-                                "${stat.count} ${tr("笔")}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = QingTextSecondary,
-                            maxLines = 1,
-                        )
-                    }
-                    AutoSizeAmountText(
-                        text = formatCny(stat.totalCents),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = amountColor,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                if (index != stats.lastIndex) {
-                    HorizontalDivider(color = QingOutline)
                 }
             }
         }
