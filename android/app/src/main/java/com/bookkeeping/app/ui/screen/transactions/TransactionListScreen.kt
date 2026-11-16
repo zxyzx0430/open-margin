@@ -44,6 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -126,7 +127,7 @@ fun TransactionListScreen(
     onOpenDetail: (Long) -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
-    val ledgerLoaded by viewModel.ledgerLoaded.collectAsState()
+    val ledgerLoadState by viewModel.ledgerLoadState.collectAsState()
     val allTransactions by viewModel.allTransactions.collectAsState()
     val captureReview by captureReviewViewModel.state.collectAsState()
     val periodExpense by viewModel.periodExpenseCents.collectAsState()
@@ -185,6 +186,7 @@ fun TransactionListScreen(
             when (request.period) {
                 StatsPeriod.MONTH -> viewModel.setMonth(request.year, request.month)
                 StatsPeriod.YEAR -> viewModel.setYear(request.year)
+                StatsPeriod.DAY -> viewModel.setMonth(request.year, request.month)
             }
         }
         onDrilldownConsumed()
@@ -248,16 +250,7 @@ fun TransactionListScreen(
                 )
             }
     }
-    val periodLabel = activeDrilldown?.let { request ->
-        val range = if (request.day != null) {
-            "${request.year}${tr("年")}${request.month}${tr("月")}${request.day}${tr("日")}"
-        } else if (request.period == StatsPeriod.YEAR) {
-            "${request.year}${tr("年")}"
-        } else {
-            "${request.year}${tr("年")}${request.month}${tr("月")}"
-        }
-        range + (request.category?.let { " · " + tr(it.displayName) } ?: "") + tr("账单")
-    } ?: tr("全部账单")
+    val periodLabel = activeDrilldown?.let(::drilldownPeriodLabel) ?: tr("全部账单")
     val exactDateTransactions = remember(periodTransactions, exactDateFilter) {
         exactDateFilter?.let { (start, end) ->
             periodTransactions.filter { it.timestamp >= start && it.timestamp < end }
@@ -444,10 +437,14 @@ fun TransactionListScreen(
             }
 
             item(key = "summary") {
-                MonthlySummaryCard(
-                    expenseCents = shownExpense,
-                    incomeCents = shownIncome,
-                )
+                if (ledgerLoadState == LedgerLoadState.READY) {
+                    MonthlySummaryCard(
+                        expenseCents = shownExpense,
+                        incomeCents = shownIncome,
+                    )
+                } else {
+                    LoadingMonthlySummaryCard()
+                }
             }
 
             item(key = "search") {
@@ -514,7 +511,7 @@ fun TransactionListScreen(
                 }
             }
 
-            if (!ledgerLoaded) {
+            if (ledgerLoadState != LedgerLoadState.READY) {
                 item(key = "loading") {
                     Box(
                         modifier = Modifier
@@ -933,6 +930,72 @@ private fun transactionSummary(row: TransactionEntity): String {
     val amount = "%.2f".format(Locale.CHINA, row.amountCents / 100.0)
     return row.currency + " " + amount + " · " + merchant + " · " +
         timeOnlyFormat.format(Date(row.timestamp))
+}
+
+@Composable
+private fun LoadingMonthlySummaryCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            listOf(tr("支出"), tr("收入"), tr("结余")).forEach { label ->
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = "—",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        textAlign = TextAlign.Start,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun drilldownPeriodLabel(request: StatsLedgerDrilldown): String {
+    val english = AppLanguage.current() == AppLanguage.ENGLISH
+    val locale = if (english) Locale.ENGLISH else Locale.CHINA
+    val range = when {
+        request.day != null -> {
+            val date = Calendar.getInstance().apply {
+                clear()
+                set(request.year, request.month - 1, request.day, 12, 0, 0)
+            }
+            val pattern = if (english) "MMM d, yyyy" else "yyyy年M月d日"
+            SimpleDateFormat(pattern, locale).format(date.time)
+        }
+        request.period == StatsPeriod.YEAR -> if (english) {
+            request.year.toString()
+        } else {
+            "${request.year}年"
+        }
+        else -> {
+            val date = Calendar.getInstance().apply {
+                clear()
+                set(request.year, request.month - 1, 1, 12, 0, 0)
+            }
+            val pattern = if (english) "MMM yyyy" else "yyyy年M月"
+            SimpleDateFormat(pattern, locale).format(date.time)
+        }
+    }
+    val category = request.category?.let { " · " + tr(it.displayName) } ?: ""
+    val recordsLabel = (if (english) " " else "") + tr("账单")
+    return range + category + recordsLabel
 }
 
 @Composable
