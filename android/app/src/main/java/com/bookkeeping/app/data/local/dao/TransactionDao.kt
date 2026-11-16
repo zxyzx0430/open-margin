@@ -195,4 +195,15 @@ interface TransactionDao {
         startMs: Long?,
         endMs: Long?,
     ): Flow<List<TransactionEntity>>
+
+    /**
+     * 「商户分类记忆 → 添加规则」的候选来源：最近出现过的商户名，按最后一次出现时间倒序。
+     * 只读查询，不动表结构；GROUP BY 让 DISTINCT 和 ORDER BY MAX(timestamp) 在同一句里成立。
+     */
+    @Query("""SELECT merchant FROM transactions
+              WHERE syncDeleted = 0 AND TRIM(merchant) <> ''
+              GROUP BY merchant
+              ORDER BY MAX(timestamp) DESC
+              LIMIT :limit""")
+    suspend fun recentMerchants(limit: Int): List<String>
 }

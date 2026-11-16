@@ -212,6 +212,36 @@ internal object EnglishUiText {
         "添加分类规则" to "Add category rule",
         "商户名" to "Merchant",
         "保存规则" to "Save rule",
+        // === 商户分类记忆全屏页 ===
+        "添加" to "Add",
+        "搜索商户" to "Search merchants",
+        "没有匹配的商户" to "No matching merchants",
+        "已生效" to "Active",
+        "已暂停学习" to "Learning paused",
+        "还没有自定义规则" to "No custom rules yet",
+        "在账单里改一次分类就会记住，也可以点右上角「添加」新建一条。" to
+            "Change a category once in Records and it is remembered here, or tap Add in the top right to create one.",
+        "清除全部分类记忆？" to "Clear all category memory?",
+        "自定义规则和自动学习结果会一起删除，无法恢复。" to
+            "Custom rules and learned results are deleted together. This cannot be undone.",
+        "已清除" to "Cleared",
+        "已保存" to "Saved",
+        "已删除" to "Deleted",
+        "添加规则" to "Add rule",
+        "编辑规则" to "Edit rule",
+        "最近商户" to "Recent merchants",
+        "已有规则" to "Has rule",
+        "暂停学习此商户" to "Pause learning for this merchant",
+        "暂停后只按这条规则分类，不再自动学习" to
+            "Once paused, this rule is the only source; nothing new is learned",
+        "删除这条规则？" to "Delete this rule?",
+        "删除后这个商户不再自动套用分类。" to
+            "After deleting, this merchant no longer gets a category automatically.",
+        "请先输入商户名" to "Enter a merchant name first",
+        "请选择分类" to "Select a category",
+        "已存在同名规则，将覆盖现有规则" to
+            "A rule with this name already exists; saving would overwrite it",
+        "改为编辑" to "Edit it instead",
         "其中" to "Including",
         "其他" to "Other",
         "分类预算" to "Category budgets",

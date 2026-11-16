@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import com.bookkeeping.app.data.local.entity.TransactionCategory
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -31,14 +30,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -138,13 +133,13 @@ import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onImportBills: () -> Unit = {},
+    onOpenMerchantRules: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
 ) {
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
     val merchantRules by viewModel.merchantRules.collectAsState()
-    val learningDisabled by viewModel.learningDisabled.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val syncPrefs = remember {
@@ -353,7 +348,7 @@ fun SettingsScreen(
                         } else {
                             merchantRules.size.toString() + " " + tr("个商户")
                         },
-                        onClick = { detailDialog = "merchantRules" },
+                        onClick = onOpenMerchantRules,
                     )
                 }
             }
@@ -462,124 +457,6 @@ fun SettingsScreen(
                             }
                         },
                     )
-                }
-                "merchantRules" -> SettingsDetailDialog(
-                    tr("商户分类记忆"),
-                    { detailDialog = null },
-                ) {
-                    var ruleMerchant by remember { mutableStateOf("") }
-                    var ruleCategory by remember { mutableStateOf(TransactionCategory.OTHER) }
-                    var ruleMenu by remember { mutableStateOf(false) }
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            text = tr("添加分类规则"),
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        OutlinedTextField(
-                            value = ruleMerchant,
-                            onValueChange = { ruleMerchant = it },
-                            label = { Text(tr("商户名")) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        ExposedDropdownMenuBox(
-                            expanded = ruleMenu,
-                            onExpandedChange = { ruleMenu = it },
-                        ) {
-                            OutlinedTextField(
-                                value = tr(ruleCategory.displayName),
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text(tr("分类")) },
-                                trailingIcon = {
-                                    ExposedDropdownMenuDefaults.TrailingIcon(
-                                        expanded = ruleMenu,
-                                    )
-                                },
-                                modifier = Modifier
-                                    .menuAnchor()
-                                    .fillMaxWidth(),
-                            )
-                            ExposedDropdownMenu(
-                                expanded = ruleMenu,
-                                onDismissRequest = { ruleMenu = false },
-                            ) {
-                                TransactionCategory.entries.forEach { option ->
-                                    DropdownMenuItem(
-                                        text = { Text(tr(option.displayName)) },
-                                        onClick = {
-                                            ruleCategory = option
-                                            ruleMenu = false
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                        FilledTonalButton(
-                            onClick = {
-                                if (ruleMerchant.isNotBlank()) {
-                                    viewModel.saveMerchantRule(ruleMerchant, ruleCategory)
-                                    ruleMerchant = ""
-                                }
-                            },
-                            enabled = ruleMerchant.isNotBlank(),
-                        ) {
-                            Text(tr("保存规则"))
-                        }
-                        HorizontalDivider()
-                        if (merchantRules.isEmpty()) {
-                            Text(
-                                text = tr("还没有商户分类记忆。手动修改交易分类后会自动保存。"),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        } else {
-                            merchantRules.entries
-                                .sortedBy { it.key }
-                                .forEach { (merchant, category) ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            text = merchant,
-                                            modifier = Modifier.weight(1f),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1,
-                                        )
-                                        Text(
-                                            text = tr(category.displayName),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                        TextButton(
-                                            onClick = {
-                                                viewModel.setLearningDisabled(
-                                                    merchant,
-                                                    merchant !in learningDisabled,
-                                                )
-                                            },
-                                        ) {
-                                            Text(
-                                                if (merchant in learningDisabled) tr("恢复学习")
-                                                else tr("暂停学习"),
-                                            )
-                                        }
-                                        TextButton(
-                                            onClick = { viewModel.removeMerchantRule(merchant) },
-                                        ) {
-                                            Text(tr("删除"))
-                                        }
-                                    }
-                                }
-                            TextButton(onClick = viewModel::clearMerchantRules) {
-                                Text(tr("清除全部分类记忆"))
-                            }
-                        }
-                    }
                 }
                 "keepAlive" -> SettingsDetailDialog(tr("常驻运行状态"), { detailDialog = null }) {
                     KeepAlivePanel(
