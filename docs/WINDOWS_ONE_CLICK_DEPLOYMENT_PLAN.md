@@ -927,3 +927,34 @@ GET  /api/qr
 2. 离线镜像包：单独下载，不塞进安装包。
 3. 安装器无代码签名证书：v1 走 SmartScreen 说明 + SHA256；后续再补签名。
 4. 分发只放 GitHub Releases；离线包同样作为 Release asset，允许用户手动转发。
+
+## 21. 实施状态与验证（2026-11-17，installer/CI/docs 线程追加）
+
+本节只记录状态，不修改前面的计划内容。
+
+### 已落地
+
+- Inno Setup 脚本 `deploy/windows/setup/installer/OpenMargin.iss`，安装到 `%ProgramData%\OpenMargin\app`，开始菜单“清衡设置 / 清衡账本”，不打包 `secrets/` 或 `.env`。
+- 本机构建入口 `installer/Setup.cmd`、`installer/Build-Installer.ps1`（定位 `ISCC.exe`；缺失时可选用 winget 安装 `JRSoftware.InnoSetup`）。
+- 启动器 `installer/Launch-Setup.ps1`（18770–18779 选空闲端口）与 `installer/Install-UrlAcl.ps1`（一次性 loopback URL ACL）。
+- 离线镜像包脚本 `deploy/windows/setup/Build-OfflineBundle.ps1`（`docker compose build` + `docker save` + tar.gz + SHA256 + manifest；不执行 `down -v`）。
+- CI：`.github/workflows/windows-setup-installer.yml`（tag 时编译并附加到 Release；可选构建离线包）、`windows-setup-tests.yml`（Pester 5，测试目录缺失时跳过）、扩展后的 `windows-script-validation.yml`（递归解析所有 Windows PowerShell 文件并扫描合并标记）。
+- 文档：`DEPLOY_WINDOWS.md`、`WINDOWS_PRIVATE_FIRST_CONNECTION.md`、`deploy/windows/setup/README.md`、`V1_3_0_WINDOWS_SETUP_RELEASE_NOTES.md`、`THIRD_PARTY.md`（qrcodejs attribution）、`README.md` 的 Windows 一键安装小节。
+
+### 静态验证
+
+- 全部 `deploy/windows/**` 的 `.ps1/.psm1/.psd1` 通过 `[System.Management.Automation.Language.Parser]::ParseFile`。
+- `docker compose --profile windows-private-sync config -q` 与 `--profile windows-public-sync config -q` 使用临时占位 secrets 通过。
+- 新增 workflow YAML 通过 Python YAML 解析。
+- `python scripts/check-public-ready.py` 通过（本机依赖可用时）。
+
+### 未验证 / 阻塞项
+
+- **Inno Setup 未在本机安装**：安装器未实际编译；CI 会安装并编译。
+- **真实环境未验收**：干净 Windows 10/11、Tailscale Funnel、中国 SIM + 商业 VPN、Android 真机扫码、断线补传、看门狗故障注入、完全离线安装。
+- **引擎 5.1 兼容缺口**：`Invoke-OmElevatedDependencyInstall` / `Invoke-OmElevatedScript` 调用 `pwsh.exe`；仅 Windows PowerShell 5.1 的机器会在提权安装依赖时失败。
+- **脚本编码缺口**：`deploy/windows/setup/**` 现有 `.ps1` 为无 BOM UTF-8 且含中文，Windows PowerShell 5.1 可能按 ANSI 误读；需补 BOM 或改 ASCII。
+- **重启续装缺口**：`WAITING_REBOOT` 已写状态，但没有注册 `RunOnce`；重启后需手动从开始菜单重新打开。
+- **compose 缺口**：当前 `compose.yaml` 尚无 `windows-public-sync` service；运行时/compose 线程需补齐。
+- **离线安装缺口**：向导仍以 `docker compose up --build` 启动，完全离线重建需后续支持预构建镜像 / `--no-build`。
+- 安装器无代码签名符合产品决定；SmartScreen 与 SHA256 只在文档层面交付。

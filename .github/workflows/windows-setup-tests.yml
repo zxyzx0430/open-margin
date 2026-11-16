@@ -1,0 +1,54 @@
+name: Windows Setup Engine Tests
+
+on:
+  push:
+    paths:
+      - 'deploy/windows/setup/**'
+      - '.github/workflows/windows-setup-tests.yml'
+  pull_request:
+    paths:
+      - 'deploy/windows/setup/**'
+      - '.github/workflows/windows-setup-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pester:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure Pester 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pester = Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
+          if (-not $pester -or $pester.Version.Major -lt 5) {
+            Install-Module Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          Import-Module Pester -MinimumVersion 5.0
+          Write-Host ('Pester ' + (Get-Module Pester).Version)
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $testPath = 'deploy/windows/setup/tests'
+          if (-not (Test-Path $testPath)) {
+            Write-Host 'No deploy/windows/setup/tests directory yet; skipping Pester run.'
+            exit 0
+          }
+          $files = @(Get-ChildItem -Path $testPath -Recurse -File -Filter '*.Tests.ps1')
+          if ($files.Count -eq 0) {
+            Write-Host 'The tests directory exists but contains no *.Tests.ps1 files; skipping Pester run.'
+            exit 0
+          }
+          Import-Module Pester -MinimumVersion 5.0
+          $result = Invoke-Pester -Path $testPath -Output Detailed -PassThru
+          Write-Host ('Pester: passed=' + $result.PassedCount + ' failed=' + $result.FailedCount + ' skipped=' + $result.SkippedCount)
+          if ($result.FailedCount -gt 0) {
+            throw ('Pester failures: ' + $result.FailedCount)
+          }
