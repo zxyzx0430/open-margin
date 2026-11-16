@@ -1,23 +1,23 @@
 package com.bookkeeping.app.ui.screen.transactions
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -398,6 +400,14 @@ private fun ReviewCard(label: String, tone: StatusTone) {
     }
 }
 
+/**
+ * 底部动作区：两行按钮共用一套栅格。
+ *
+ * 所有按钮同高 [ACTION_BUTTON_HEIGHT]、同圆角 [ACTION_BUTTON_SHAPE]，行内间距
+ * [ACTION_BUTTON_GAP]，行间 [ACTION_ROW_GAP]，整块左右各 16dp、顶部一条 1dp 分隔线、
+ * 底部再留 [ACTION_BOTTOM_GAP] 给系统手势区。第一行两个等价按钮各占一半，第二行
+ * 「编辑」占 2/3、「删除」占 1/3，位置严格对齐，不再出现一行缩进、一行贴边。
+ */
 @Composable
 private fun DetailActionBar(
     showExclude: Boolean,
@@ -408,69 +418,126 @@ private fun DetailActionBar(
     onDelete: () -> Unit,
 ) {
     Surface(color = MaterialTheme.colorScheme.surface) {
-        Column {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = ACTION_BOTTOM_GAP),
+        ) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(ACTION_ROW_GAP),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(ACTION_BUTTON_GAP)) {
                     if (showExclude) {
-                        FilledTonalButton(
+                        ActionButton(
+                            text = if (excluded) tr("恢复计入统计") else tr("不计入统计"),
                             onClick = onToggleExclude,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp),
-                        ) {
-                            Text(
-                                text = if (excluded) tr("恢复计入统计") else tr("不计入统计"),
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    FilledTonalButton(
-                        onClick = onAddRule,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(40.dp),
-                    ) {
-                        Text(
-                            text = tr("添加分类规则"),
-                            fontSize = 14.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            style = ActionButtonStyle.TONAL,
+                            modifier = Modifier.weight(1f),
                         )
                     }
+                    ActionButton(
+                        text = tr("添加分类规则"),
+                        onClick = onAddRule,
+                        style = ActionButtonStyle.TONAL,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
+                Row(horizontalArrangement = Arrangement.spacedBy(ACTION_BUTTON_GAP)) {
+                    ActionButton(
+                        text = tr("编辑"),
                         onClick = onEdit,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .weight(2f)
-                            .height(48.dp),
-                    ) {
-                        Text(tr("编辑"), fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                    TextButton(
+                        style = ActionButtonStyle.PRIMARY,
+                        modifier = Modifier.weight(2f),
+                    )
+                    ActionButton(
+                        text = tr("删除"),
                         onClick = onDelete,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                    ) {
-                        Text(tr("删除"), color = MaterialTheme.colorScheme.error, fontSize = 15.sp)
-                    }
+                        style = ActionButtonStyle.DANGER_OUTLINED,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
+    }
+}
+
+/** 底部动作区三种按钮样式，尺寸/圆角/字重由 [ActionButton] 统一兜住。 */
+private enum class ActionButtonStyle { TONAL, PRIMARY, DANGER_OUTLINED }
+
+/** 所有底部按钮同高。 */
+private val ACTION_BUTTON_HEIGHT = 46.dp
+
+/** 所有底部按钮同圆角。 */
+private val ACTION_BUTTON_SHAPE = RoundedCornerShape(12.dp)
+
+/** 同一行内两个按钮的间距。 */
+private val ACTION_BUTTON_GAP = 12.dp
+
+/** 两行按钮之间、分隔线与按钮之间的间距。 */
+private val ACTION_ROW_GAP = 10.dp
+
+/** 按钮底部与系统手势区之间的留白。 */
+private val ACTION_BOTTOM_GAP = 12.dp
+
+/** 超过这个字数就把字号降一档，保证一行放得下；再长就占两行，不省略。 */
+private const val ACTION_LABEL_LONG_THRESHOLD = 8
+
+/**
+ * 动作按钮：不用 Material 的 Button 家族，是因为它们会把 46dp 撑到 48dp 的最小交互尺寸，
+ * 两行高度就对不上了。这里用固定尺寸的 Box 自己保证高度与圆角完全一致。
+ */
+@Composable
+private fun ActionButton(
+    text: String,
+    onClick: () -> Unit,
+    style: ActionButtonStyle,
+    modifier: Modifier = Modifier,
+) {
+    // 统一 15sp Medium；文案确实长（英文按钮常见）才降到 14sp，中文 6 个字仍是一行。
+    val fontSize = if (text.length > ACTION_LABEL_LONG_THRESHOLD) 14.sp else 15.sp
+    val container = when (style) {
+        ActionButtonStyle.TONAL -> MaterialTheme.colorScheme.surfaceVariant
+        ActionButtonStyle.PRIMARY -> MaterialTheme.colorScheme.primary
+        ActionButtonStyle.DANGER_OUTLINED -> Color.Transparent
+    }
+    val content = when (style) {
+        ActionButtonStyle.TONAL -> MaterialTheme.colorScheme.onSurface
+        ActionButtonStyle.PRIMARY -> MaterialTheme.colorScheme.onPrimary
+        ActionButtonStyle.DANGER_OUTLINED -> MaterialTheme.colorScheme.error
+    }
+    Box(
+        modifier = modifier
+            .height(ACTION_BUTTON_HEIGHT)
+            .clip(ACTION_BUTTON_SHAPE)
+            .background(container)
+            .then(
+                if (style == ActionButtonStyle.DANGER_OUTLINED) {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.error, ACTION_BUTTON_SHAPE)
+                } else {
+                    Modifier
+                }
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = content,
+            fontSize = fontSize,
+            lineHeight = (fontSize.value + 4).sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            // 不换行、不缩字号、不省略：太长就占两行，多出来的字绝不吞掉。
+            maxLines = 2,
+            softWrap = true,
+            overflow = TextOverflow.Visible,
+        )
     }
 }
 
