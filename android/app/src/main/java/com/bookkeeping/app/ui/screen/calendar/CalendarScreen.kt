@@ -86,6 +86,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.floor
 
 private const val CALENDAR_PREFS = "calendar_view_prefs"
 private const val KEY_HEATMAP = "heatmap"
@@ -272,7 +273,7 @@ fun CalendarScreen(
             },
         )
         Text(
-            text = tr("点选单日 · 长按日期拖动选区间，拖到左右边缘可继续跨月"),
+            text = tr("点选单日 · 长按日期拖动选区间，拖到空白处可继续跨月"),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 4.dp),
@@ -553,6 +554,8 @@ private fun CalendarMonthGrid(
                         val crossedMonths = mutableListOf<Pair<String, Boolean>>()
                         var forwardTravelPx = 0f
                         var reverseTravelPx = 0f
+                        // 刚翻过一个月就先把「空白格触发」关掉，避免手指还停在空白里连翻。
+                        var blankFlipArmed = true
                         var lastX = longPress.position.x
                         var lastDay = anchorDay
                         while (true) {
@@ -564,7 +567,6 @@ private fun CalendarMonthGrid(
                             }
                             val dx = change.position.x - lastX
                             lastX = change.position.x
-                            val column = columnAt(change.position.x, gridWidthPx)
                             // 上一次跨月是往右翻的，就往左退回；反之亦然。
                             // 反向移动够 24dp 才退一个月，手指在边缘抖动不会反复翻。
                             val lastCross = crossedMonths.lastOrNull()
@@ -576,6 +578,8 @@ private fun CalendarMonthGrid(
                                     crossedMonths.removeAt(crossedMonths.lastIndex)
                                     reverseTravelPx = 0f
                                     forwardTravelPx = 0f
+                                    // 退回来时手指仍停在空白格里，先关掉触发，避免立刻又翻过去。
+                                    blankFlipArmed = false
                                     val targetKey = crossedMonths.lastOrNull()?.first
                                         ?: BudgetMonth.keyOf(anchorYear, anchorMonth)
                                     val target = BudgetMonth.parse(targetKey)
@@ -594,15 +598,22 @@ private fun CalendarMonthGrid(
                                 continue
                             }
                             if (dx != 0f) reverseTravelPx = 0f
-                            // 停在最右/最左一列继续往外拖，才累计跨月位移。
-                            val pullingEdge =
-                                (column == 6 && dx > 0f) || (column == 0 && dx < 0f)
-                            if (pullingEdge) {
+                            // 手指拖进本月「末尾空白格 / 开头空白格」就跨月：
+                            // 往右进尾部空白翻下月（终点 1 号），往左进头部空白翻上月（终点月末）。
+                            // 不能只看第 0/6 列——像 11 月 30 日在第 6 行第 0 列，
+                            // 往右拖是穿过一行空白，永远到不了第 6 列。
+                            val blankDir = blankDirectionAt(
+                                change.position, gridWidthPx, rowHeightPx, viewOffset, viewDays,
+                            )
+                            if (blankDir != 0) {
                                 forwardTravelPx += abs(dx)
-                                if (forwardTravelPx >= crossMonthDragPx) {
+                                // 回到日期格后重新允许；若一直停在空白里，拖满 56dp 也允许再翻。
+                                val enough = blankFlipArmed || forwardTravelPx >= crossMonthDragPx
+                                if (enough) {
                                     forwardTravelPx = 0f
                                     reverseTravelPx = 0f
-                                    val forward = column == 6
+                                    blankFlipArmed = false
+                                    val forward = blankDir > 0
                                     val nextKey = shiftMonth(
                                         BudgetMonth.keyOf(viewYear, viewMonth),
                                         if (forward) 1 else -1,
@@ -621,6 +632,7 @@ private fun CalendarMonthGrid(
                                     }
                                 }
                             } else {
+                                blankFlipArmed = true
                                 forwardTravelPx = 0f
                                 val day = dayAt(
                                     change.position,
@@ -909,6 +921,32 @@ private fun dayAt(
 /** 手指落在第几列（0=第一天那列，6=最后一天那列），拖出网格时按边界列算。 */
 private fun columnAt(x: Float, gridWidthPx: Float): Int =
     if (gridWidthPx <= 0f) 0 else (x / (gridWidthPx / 7f)).toInt().coerceIn(0, 6)
+
+/**
+ * 手指落在本月日期格返回 0；落在月初之前的空白格返回 -1；落在月末之后的空白格返回 1。
+ * 跨月判断靠这个，而不是「第 0 / 第 6 列」——月末最后一天可能就在第 0 列。
+ */
+private fun blankDirectionAt(
+    position: Offset,
+    gridWidthPx: Float,
+    rowHeightPx: Float,
+    firstOffset: Int,
+    daysInMonth: Int,
+): Int {
+    if (gridWidthPx <= 0f || rowHeightPx <= 0f) return 0
+    val cellWidth = gridWidthPx / 7f
+    val col = floor(position.x / cellWidth).toInt()
+    val row = floor(position.y / rowHeightPx).toInt()
+    if (row < 0) return 0
+    if (col < 0) return -1
+    if (col > 6) return 1
+    val day = row * 7 + col - firstOffset + 1
+    return when {
+        day < 1 -> -1
+        day > daysInMonth -> 1
+        else -> 0
+    }
+}
 
 /** 跨月时区间终点取目标月里离起点最近的一天：更早的月取月末，更晚的月取月初。 */
 private fun rangeEndDayIn(anchor: CalendarDate, year: Int, month: Int): Int {

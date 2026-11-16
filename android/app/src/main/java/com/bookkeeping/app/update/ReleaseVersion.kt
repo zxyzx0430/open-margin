@@ -76,7 +76,7 @@ object UpdateVersionPolicy {
     // Stable v1.2.0: all capture/import/classification/UI work plus the rc.13
     // startup and duplicate-notification fixes. Keep both release tag and
     // Android versionCode in sync.
-    const val CURRENT_TAG = "v1.2.1"
+    const val CURRENT_TAG = "v1.2.2"
 
     fun latestNewer(
         releases: List<PublishedRelease>,
