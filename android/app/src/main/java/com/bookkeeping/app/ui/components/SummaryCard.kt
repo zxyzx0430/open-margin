@@ -46,19 +46,19 @@ fun MonthlySummaryCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SummaryMetric(
-                label = tr("本月支出"),
+                label = tr("支出"),
                 value = formatCny(expenseCents),
                 color = QingExpense,
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
-                label = tr("本月收入"),
+                label = tr("收入"),
                 value = formatCny(incomeCents),
                 color = QingIncome,
                 modifier = Modifier.weight(1f),
             )
             SummaryMetric(
-                label = tr("本月收支差"),
+                label = tr("收支差"),
                 value = (if (diff >= 0) "+" else "−") + formatCny(kotlin.math.abs(diff)),
                 color = diffColor,
                 modifier = Modifier.weight(1f),

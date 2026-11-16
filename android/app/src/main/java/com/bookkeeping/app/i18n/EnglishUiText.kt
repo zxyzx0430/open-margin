@@ -286,6 +286,8 @@ internal object EnglishUiText {
         "正在确认运行状态" to "Checking capture status",
         "通知监听已连接 · 已稳定运行" to "Notification access connected · running for",
         "通知监听已连接，已稳定运行" to "Notification access connected, running for",
+        "通知监听已连接" to "Notification access connected",
+        "已稳定运行" to "Running for",
         "%02d 小时 %02d 分钟 %02d 秒" to "%02d h %02d min %02d s",
         "%02d 秒" to "%02d sec",
         "%02d 分钟" to "%02d min",
