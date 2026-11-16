@@ -16,6 +16,7 @@ class ReleaseVersionTest {
         val rc9 = ReleaseVersion.parse("v1.2.0-rc.9")!!
         val rc10 = ReleaseVersion.parse("v1.2.0-rc.10")!!
         val rc11 = ReleaseVersion.parse("v1.2.0-rc.11")!!
+        val rc12 = ReleaseVersion.parse("v1.2.0-rc.12")!!
         val stable = ReleaseVersion.parse("v1.2.0")!!
         assertTrue(old < rc5)
         assertTrue(rc5 < rc6)
@@ -24,8 +25,9 @@ class ReleaseVersionTest {
         assertTrue(rc8 < rc9)
         assertTrue(rc9 < rc10)
         assertTrue(rc10 < rc11)
-        assertTrue(rc11 < stable)
-        assertEquals(rc11, ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG))
+        assertTrue(rc11 < rc12)
+        assertTrue(rc12 < stable)
+        assertEquals(rc12, ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG))
         assertNull(ReleaseVersion.parse("v1.2.0-rc.test"))
         assertNull(ReleaseVersion.parse("v1.2.0-beta.8"))
         assertNull(ReleaseVersion.parse("https://other.example"))
@@ -50,11 +52,11 @@ class ReleaseVersionTest {
     @Test fun serverOnlyReleaseWithoutApkMustStillAppear() {
         val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)!!
         val releases = listOf(
-            release("v1.2.0-rc.12", true, false, UpdateComponentScope.SERVER_ONLY),
-            release("v1.2.0-rc.13", true, false, UpdateComponentScope.ANDROID_ONLY),
+            release("v1.2.0-rc.13", true, false, UpdateComponentScope.SERVER_ONLY),
+            release("v1.2.0-rc.14", true, false, UpdateComponentScope.ANDROID_ONLY),
         )
         val latest = UpdateVersionPolicy.latestNewer(releases, current, true)
-        assertEquals("v1.2.0-rc.12", latest?.tag)
+        assertEquals("v1.2.0-rc.13", latest?.tag)
         assertEquals(UpdateComponentScope.SERVER_ONLY, latest?.componentScope)
         assertNull(UpdateVersionPolicy.latestNewer(releases, current, false))
     }
@@ -64,10 +66,10 @@ class ReleaseVersionTest {
         val releases = listOf(
             release("v1.1.3", false),
             release("v1.2.0-rc.5", true),
-            release("v1.2.0-rc.12", true, false, UpdateComponentScope.BOTH),
-            release("v1.2.0-rc.13", true, true, UpdateComponentScope.BOTH),
+            release("v1.2.0-rc.13", true, false, UpdateComponentScope.BOTH),
+            release("v1.2.0-rc.14", true, true, UpdateComponentScope.BOTH),
         )
-        assertEquals("v1.2.0-rc.13",
+        assertEquals("v1.2.0-rc.14",
             UpdateVersionPolicy.latestNewer(releases, current, true)?.tag)
         assertNull(UpdateVersionPolicy.latestNewer(releases, current, false))
         assertEquals("v1.2.0",
@@ -79,7 +81,7 @@ class ReleaseVersionTest {
 
     @Test fun legacyUnmarkedReleaseCanBeFoundButScopeMustStayUnknown() {
         val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)!!
-        val candidate = release("v1.2.0-rc.12", true, true)
+        val candidate = release("v1.2.0-rc.13", true, true)
         assertEquals(UpdateComponentScope.UNSPECIFIED,
             UpdateVersionPolicy.latestNewer(listOf(candidate), current, true)?.componentScope)
         assertNull(UpdateVersionPolicy.latestNewer(
@@ -89,19 +91,19 @@ class ReleaseVersionTest {
     @Test fun androidAndServerReleasesCombineIntoBothAcrossMultipleTags() {
         val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)!!
         val announcements = listOf(
-            release("v1.2.0-rc.12", true, true, UpdateComponentScope.ANDROID_ONLY),
-            release("v1.2.0-rc.13", true, false, UpdateComponentScope.SERVER_ONLY),
+            release("v1.2.0-rc.13", true, true, UpdateComponentScope.ANDROID_ONLY),
+            release("v1.2.0-rc.14", true, false, UpdateComponentScope.SERVER_ONLY),
         )
         val result = UpdateVersionPolicy.latestNewer(announcements, current, true)
-        assertEquals("v1.2.0-rc.13", result?.tag)
+        assertEquals("v1.2.0-rc.14", result?.tag)
         assertEquals(UpdateComponentScope.BOTH, result?.componentScope)
     }
 
     @Test fun unknownLegacyScopePreventsOverconfidentComponentAdvice() {
         val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)!!
         val announcements = listOf(
-            release("v1.2.0-rc.12", true, true, UpdateComponentScope.ANDROID_ONLY),
-            release("v1.2.0-rc.13", true, true, UpdateComponentScope.UNSPECIFIED),
+            release("v1.2.0-rc.13", true, true, UpdateComponentScope.ANDROID_ONLY),
+            release("v1.2.0-rc.14", true, true, UpdateComponentScope.UNSPECIFIED),
         )
         assertEquals(UpdateComponentScope.UNSPECIFIED,
             UpdateVersionPolicy.latestNewer(announcements, current, true)?.componentScope)

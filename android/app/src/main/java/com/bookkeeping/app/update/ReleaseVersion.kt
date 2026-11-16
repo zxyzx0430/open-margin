@@ -73,10 +73,10 @@ data class PublishedRelease(
 )
 
 object UpdateVersionPolicy {
-    // RC11: import completeness, duplicate enrichment, classifier v2, learning
-    // loop and enhanced WebView accessibility. Keep both release tag and
-    // Android versionCode in sync.
-    const val CURRENT_TAG = "v1.2.0-rc.11"
+    // RC12: merged calendar workspace, ledger UI refresh, category drill-down
+    // and settings alignment on top of rc.11 capture/import fixes. Keep both
+    // release tag and Android versionCode in sync.
+    const val CURRENT_TAG = "v1.2.0-rc.12"
 
     fun latestNewer(
         releases: List<PublishedRelease>,
@@ -112,3 +112,4 @@ object UpdateVersionPolicy {
     fun isSignedApkName(name: String): Boolean =
         name.endsWith("-signed.apk") || name.endsWith("-original-signature.apk")
 }
+

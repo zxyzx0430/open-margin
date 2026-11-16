@@ -116,6 +116,16 @@
 
 ## 4. 构建与测试
 
+### rc.12
+
+- Release 签名 APK：`releases/open-margin-v1.2.0-rc.12-signed.apk`
+- 包名：`com.bookkeeping.app`，versionCode `17`，versionName `1.2.0`
+- Release SHA-256：`050edd3ecbff89fe6a9c8fcb3df467fc48b06a77683ac78cdc3119aa70c59115`
+- 签名证书 SHA-256：`0029505dc7dde6eff220b37e9db8cbe467235dfc9d3a948519f3f5b722c354ad`
+- 合并 UI 修订：独立日历 Tab、跨月/农历/热力日历、账单默认全部、分类底部面板、统计分类下钻、设置页对齐。
+- 保留 rc.11 的导入完整性、重复补齐、分类器 v2 和学习闭环。
+- JVM 单测：401 项通过，0 失败（1 项真实账单测试在未设置环境变量时跳过）
+
 ### rc.11
 
 - Release 签名 APK：`releases/open-margin-v1.2.0-rc.11-signed.apk`
