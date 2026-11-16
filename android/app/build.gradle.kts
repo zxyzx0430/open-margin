@@ -55,7 +55,23 @@ android {
     }
 }
 
+// 语音记账的本地 ASR：模型与原生库由 android/app/download-asr-model.sh 准备。
+// 缺文件时在配置阶段直接失败，给出可执行的修复命令——否则会在 Kotlin 编译阶段
+// 抛几十条 “Unresolved reference: k2fsa”，很难看出是模型没下载。
+val asrNativeAar = rootProject.file("app/libs/sherpa-onnx-static-link-onnxruntime-1.13.5.aar")
+if (!asrNativeAar.isFile) {
+    throw GradleException(
+        "缺少 ${asrNativeAar.name}。请先运行：bash android/app/download-asr-model.sh " +
+            "（下载 ~71MB 模型 + ~36MB sherpa-onnx 原生库，带 sha256 校验，可重复执行）",
+    )
+}
+
 dependencies {
+    // 语音记账：本地流式 ASR 原生库（sherpa-onnx 1.13.5，静态链接 onnxruntime）。
+    // 用文件依赖而不是 JitPack 坐标的原因见 download-asr-model.sh 顶部注释：
+    // 带 libonnxruntime.so 的普通 AAR 会和 paddle-ocr 的 ONNX Runtime 撞名。
+    implementation(files(asrNativeAar))
+
     // Compose & 核心
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

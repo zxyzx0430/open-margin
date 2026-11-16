@@ -23,3 +23,8 @@ __pycache__/
 .gradle/
 .idea/
 .DS_Store
+
+# 本地语音识别资产：由 android/app/download-asr-model.sh 下载并校验，禁止提交。
+# 模型 ~71MB + sherpa-onnx 原生库 ~36MB，进 git 会把仓库撑爆。
+/android/app/src/main/assets/asr/
+/android/app/libs/sherpa-onnx-*.aar
