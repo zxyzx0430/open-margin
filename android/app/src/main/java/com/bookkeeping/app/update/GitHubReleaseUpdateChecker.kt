@@ -38,8 +38,14 @@ object GitHubReleaseUpdateChecker {
             val notes: List<String> = emptyList(),
         ) : CheckResult
 
-        data object Unavailable : CheckResult
+        /** [kind] lets the UI say what actually failed instead of a generic error. */
+        data class Unavailable(
+            val kind: FailureKind = FailureKind.UNKNOWN,
+            val httpCode: Int = 0,
+        ) : CheckResult
     }
+
+    enum class FailureKind { NO_NETWORK, TIMEOUT, HTTP, PARSE, UNKNOWN }
 
     private data class ApkAsset(val url: String, val size: Long, val sha256: String?)
 
@@ -48,11 +54,11 @@ object GitHubReleaseUpdateChecker {
 
     fun check(includePrereleases: Boolean): CheckResult {
         val current = ReleaseVersion.parse(UpdateVersionPolicy.CURRENT_TAG)
-            ?: return CheckResult.Unavailable
+            ?: return CheckResult.Unavailable()
         val connection = try {
             URL(RELEASES_API).openConnection() as HttpsURLConnection
-        } catch (_: Exception) {
-            return CheckResult.Unavailable
+        } catch (error: Exception) {
+            return CheckResult.Unavailable(classify(error))
         }
         try {
             connection.instanceFollowRedirects = false
@@ -61,9 +67,16 @@ object GitHubReleaseUpdateChecker {
             connection.readTimeout = 10_000
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             connection.setRequestProperty("User-Agent", "OpenMargin-Android-Version-Check")
-            if (connection.responseCode != 200) return CheckResult.Unavailable
+            val httpCode = connection.responseCode
+            if (httpCode != 200) {
+                return CheckResult.Unavailable(FailureKind.HTTP, httpCode)
+            }
 
-            val releases = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+            val releases = try {
+                JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+            } catch (_: Exception) {
+                return CheckResult.Unavailable(FailureKind.PARSE)
+            }
             val candidates = mutableListOf<PublishedRelease>()
             val apkAssets = mutableMapOf<String, ApkAsset>()
             val publishedAt = mutableMapOf<String, String>()
@@ -134,10 +147,25 @@ object GitHubReleaseUpdateChecker {
                 publishedAt = apkRelease?.let { publishedAt[it.tag] },
                 notes = UpdatePresentation.notes(apkRelease?.let { bodies[it.tag] }),
             )
-        } catch (_: Exception) {
-            return CheckResult.Unavailable
+        } catch (error: Exception) {
+            return CheckResult.Unavailable(classify(error))
         } finally {
             connection.disconnect()
         }
+    }
+
+    /**
+     * 把网络异常归成一类，UI 才能给出可操作的提示。
+     * 国内网络下 api.github.com 基本不可直连，表现多为超时或 UnknownHost。
+     */
+    private fun classify(error: Throwable): FailureKind = when (error) {
+        is java.net.SocketTimeoutException -> FailureKind.TIMEOUT
+        is java.net.UnknownHostException,
+        is java.net.ConnectException,
+        is java.net.NoRouteToHostException -> FailureKind.NO_NETWORK
+        is javax.net.ssl.SSLException -> FailureKind.NO_NETWORK
+        is java.io.IOException -> FailureKind.NO_NETWORK
+        is org.json.JSONException -> FailureKind.PARSE
+        else -> FailureKind.UNKNOWN
     }
 }
