@@ -206,8 +206,6 @@ fun RootNavigation() {
                     // 导入账单走独立路由：关掉后 popBackStack 回设置页，不再切到账单 tab。
                     onImportBills = { navController.navigate(AppRoutes.BILL_IMPORT) },
                     onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
-                    openAutomationSetup = requestAutomationSetup,
-                    onAutomationOpened = { requestAutomationSetup = false },
                 )
             }
         }
