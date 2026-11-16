@@ -153,6 +153,7 @@ fun RootNavigation() {
                             restoreState = true
                         }
                     },
+                    onOpenTransaction = { id -> navController.navigate("transaction/$id") },
                 )
             }
             composable(

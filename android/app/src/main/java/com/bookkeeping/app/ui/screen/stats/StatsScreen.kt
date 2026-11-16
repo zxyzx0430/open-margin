@@ -24,6 +24,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -114,6 +115,7 @@ import kotlin.math.abs
 @Composable
 fun StatsScreen(
     onOpenLedger: (StatsLedgerDrilldown) -> Unit = {},
+    onOpenTransaction: (Long) -> Unit = {},
     viewModel: StatsViewModel = hiltViewModel(),
 ) {
     val stats by viewModel.categoryStats.collectAsState()
@@ -340,6 +342,11 @@ fun StatsScreen(
             transactions = periodTransactions,
             onDismiss = { selectedCategory = null },
             onOpenLedger = { onOpenLedger(ledgerDrilldown(category = category)) },
+            onOpenTransaction = { id ->
+                // 先关面板再跳详情，返回时统计页停在原滚动位置。
+                selectedCategory = null
+                onOpenTransaction(id)
+            },
         )
     }
 }
@@ -515,54 +522,57 @@ private fun StatsSummaryCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (income) tr("日均收入") else tr("日均支出"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = mutedOnContainer,
-                )
+            SummaryMetric(
+                label = if (income) tr("日均收入") else tr("日均支出"),
+                modifier = Modifier.weight(1f),
+            ) {
                 AutoSizeAmountText(
                     text = formatCny(dailyAverageCents),
                     style = MaterialTheme.typography.titleMedium,
                     color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Start,
                 )
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = tr("结余"),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = mutedOnContainer,
-                )
+            SummaryMetric(
+                label = tr("结余"),
+                modifier = Modifier.weight(1f),
+            ) {
                 AutoSizeAmountText(
-                    text = (if (balanceCents >= 0) "+" else "−") +
-                        formatCny(abs(balanceCents)),
+                    text = (if (balanceCents >= 0) "+" else "−") + formatCny(abs(balanceCents)),
                     style = MaterialTheme.typography.titleMedium,
                     color = if (balanceCents >= 0) QingIncome else QingExpense,
                     fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Start,
                 )
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (annual) {
-                        tr("较上一年")
-                    } else {
-                        tr("较上月")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = mutedOnContainer,
-                )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            SummaryMetric(
+                label = if (annual) tr("较上一年") else tr("较上月"),
+                modifier = Modifier.weight(1f),
+            ) {
                 ComparisonValue(comparison = comparison, type = type)
+            }
+            SummaryMetric(
+                label = if (annual) tr("上一年金额") else tr("上月金额"),
+                modifier = Modifier.weight(1f),
+            ) {
                 if (comparison.previousCents > 0L) {
-                    // 列标题已经写了「较上一年 / 较上月」，这里只留金额：
-                    // 11sp 再带前缀就会把数字挤成省略号，金额必须完整可见。
                     AutoSizeAmountText(
                         text = formatCny(comparison.previousCents),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         color = mutedOnContainer,
+                        textAlign = TextAlign.Start,
                     )
                 } else {
                     Text(
@@ -574,6 +584,33 @@ private fun StatsSummaryCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 汇总卡的单个指标：标签在上、金额在下。
+ *
+ * 原来是三列平分，结余列只有 ~87dp，`−¥16,310.76` 这类 11 字符金额按字符数分档
+ * 不会缩字号，直接被父容器裁掉。改成两行两列后每列 ~138dp，金额完整可见。
+ */
+@Composable
+private fun SummaryMetric(
+    label: String,
+    modifier: Modifier = Modifier,
+    value: @Composable () -> Unit,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = QingPrimaryDeep.copy(alpha = 0.72f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        value()
     }
 }
 
@@ -710,6 +747,8 @@ private fun CategoryDonutCard(
     type: TransactionType,
     onCategoryClick: (TransactionCategory) -> Unit,
 ) {
+    var expanded by remember(stats.size) { mutableStateOf(false) }
+    val visibleStats = if (expanded) stats else stats.take(LEGEND_PREVIEW_COUNT)
     val shape = RoundedCornerShape(20.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -726,37 +765,68 @@ private fun CategoryDonutCard(
                 stats = stats,
                 totalCents = totalCents,
                 centerLabel = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
+                // 高度留出扇区外侧的标签环，标签不会压到环上，也不会被卡片裁掉。
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(190.dp),
+                    .height(220.dp),
             )
             HorizontalDivider(color = QingOutline)
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                stats.take(6).forEach { stat ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                visibleStats.forEach { stat ->
                     CategoryLegendRow(stat = stat, onClick = { onCategoryClick(stat.category) })
                 }
-                if (stats.size > 6) {
-                    Text(
-                        text = "+${stats.size - 6} ${tr("类")}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
-                    )
+                if (stats.size > LEGEND_PREVIEW_COUNT) {
+                    // 一行文字按钮：展开看全部，再点收起。列表本身在 LazyColumn 里，
+                    // 展开后卡片变高由外层滚动接管，不会撑破布局。
+                    TextButton(
+                        onClick = { expanded = !expanded },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 40.dp),
+                    ) {
+                        Text(
+                            text = if (expanded) {
+                                tr("收起")
+                            } else {
+                                "+${stats.size - LEGEND_PREVIEW_COUNT} ${tr("类")}"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = QingPrimary,
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** 图例默认只显示前 6 类，剩下的折进「+N 类」。 */
+private const val LEGEND_PREVIEW_COUNT = 6
+
+/**
+ * 图例行：色块 + 分类名 + 百分比 + 金额。
+ *
+ * 色块用的是 [categoryColor]，和扇区同一份颜色映射，不在这里另算一遍，
+ * 否则图例颜色和饼图对不上时用户就只能靠猜。
+ */
 @Composable
 private fun CategoryLegendRow(stat: CategoryStat, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 2.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        CategoryIcon(category = stat.category, size = 24.dp)
+        Box(
+            modifier = Modifier
+                .size(12.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(categoryColor(stat.category)),
+        )
         Text(
             text = tr(stat.category.displayName),
             style = MaterialTheme.typography.bodyMedium,
@@ -765,16 +835,20 @@ private fun CategoryLegendRow(stat: CategoryStat, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = "${"%.1f".format(Locale.CHINA, stat.percentage * 100)}%",
+            text = categoryPercentText(stat.percentage),
             style = MaterialTheme.typography.labelMedium,
             color = QingTextSecondary,
+            modifier = Modifier.widthIn(min = 48.dp),
+            textAlign = TextAlign.End,
             maxLines = 1,
         )
         AutoSizeAmountText(
             text = formatCny(stat.totalCents),
             style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.widthIn(min = 84.dp),
             color = QingText,
             fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.End,
         )
     }
 }
@@ -1120,6 +1194,7 @@ private fun CategoryDetailDialog(
     transactions: List<TransactionEntity>,
     onDismiss: () -> Unit,
     onOpenLedger: () -> Unit,
+    onOpenTransaction: (Long) -> Unit,
 ) {
     val rows = remember(transactions, category, type) {
         transactions
@@ -1229,7 +1304,11 @@ private fun CategoryDetailDialog(
                             .padding(top = 8.dp),
                     ) {
                         items(rows, key = { it.id }) { transaction ->
-                            CategoryDetailTransactionRow(transaction, type)
+                            CategoryDetailTransactionRow(
+                                transaction = transaction,
+                                type = type,
+                                onClick = { onOpenTransaction(transaction.id) },
+                            )
                         }
                     }
                 }
@@ -1242,10 +1321,17 @@ private fun CategoryDetailDialog(
 private fun CategoryDetailTransactionRow(
     transaction: TransactionEntity,
     type: TransactionType,
+    onClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(
+                role = Role.Button,
+                onClickLabel = tr("查看账单详情"),
+                onClick = onClick,
+            )
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
