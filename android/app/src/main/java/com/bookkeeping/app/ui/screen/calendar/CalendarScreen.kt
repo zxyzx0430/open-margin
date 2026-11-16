@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -38,14 +39,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +68,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
@@ -111,18 +120,60 @@ fun CalendarScreen(
         mutableStateOf(prefs.getBoolean(KEY_WEEK_START_MONDAY, false))
     }
     var showLunar by remember { mutableStateOf(prefs.getBoolean(KEY_LUNAR, true)) }
-    var monthKey by remember { mutableStateOf(BudgetMonth.currentKey()) }
-    val today = remember {
-        val cal = Calendar.getInstance()
-        CalendarDate(
-            cal.get(Calendar.YEAR),
-            cal.get(Calendar.MONTH) + 1,
-            cal.get(Calendar.DAY_OF_MONTH),
-        )
+    var monthKey by rememberSaveable { mutableStateOf(BudgetMonth.currentKey()) }
+    var today by rememberSaveable(stateSaver = CalendarDateSaver) {
+        mutableStateOf(currentCalendarDate())
     }
-    var rangeStart by remember { mutableStateOf<CalendarDate?>(today) }
-    var rangeEnd by remember { mutableStateOf<CalendarDate?>(today) }
+    var rangeStart by rememberSaveable(stateSaver = NullableCalendarDateSaver) {
+        mutableStateOf<CalendarDate?>(null)
+    }
+    var rangeEnd by rememberSaveable(stateSaver = NullableCalendarDateSaver) {
+        mutableStateOf<CalendarDate?>(null)
+    }
+    var hasManuallyNavigatedMonth by rememberSaveable { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val latestToday = rememberUpdatedState(today)
+    val latestMonthKey = rememberUpdatedState(monthKey)
+    val latestManualNavigation = rememberUpdatedState(hasManuallyNavigatedMonth)
+    DisposableEffect(lifecycleOwner) {
+        fun refreshToday() {
+            val previousToday = latestToday.value
+            val refreshedToday = currentCalendarDate()
+            if (refreshedToday != previousToday) {
+                today = refreshedToday
+                val previousTodayMonth = BudgetMonth.keyOf(previousToday.year, previousToday.month)
+                val refreshedTodayMonth = BudgetMonth.keyOf(refreshedToday.year, refreshedToday.month)
+                if (!latestManualNavigation.value && latestMonthKey.value == previousTodayMonth &&
+                    previousTodayMonth != refreshedTodayMonth
+                ) {
+                    monthKey = refreshedTodayMonth
+                    rangeStart = null
+                    rangeEnd = null
+                }
+            }
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshToday()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            refreshToday()
+        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun navigateMonth(nextKey: String, manual: Boolean = true) {
+        if (nextKey != monthKey) {
+            monthKey = nextKey
+            rangeStart = null
+            rangeEnd = null
+            if (manual) hasManuallyNavigatedMonth = true
+        }
+    }
 
     val parts = BudgetMonth.parse(monthKey) ?: BudgetMonth.parse(BudgetMonth.currentKey())!!
     val (monthStart, monthEnd) = remember(monthKey) { BudgetMonth.range(monthKey) }
@@ -150,12 +201,12 @@ fun CalendarScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         MonthHeader(
             monthKey = monthKey,
-            onPrevious = { monthKey = shiftMonth(monthKey, -1) },
-            onNext = { monthKey = shiftMonth(monthKey, 1) },
+            onPrevious = { navigateMonth(shiftMonth(monthKey, -1)) },
+            onNext = { navigateMonth(shiftMonth(monthKey, 1)) },
             menu = {
                 Box {
                     IconButton(onClick = { menuExpanded = true }) {
@@ -165,13 +216,18 @@ fun CalendarScreen(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false },
                     ) {
-                        DropdownMenuItem(
-                            text = { Text(tr("热力背景：") + heatmap.label) },
-                            onClick = {
-                                heatmap = HeatmapMode.entries[(heatmap.ordinal + 1) % HeatmapMode.entries.size]
-                                save()
-                            },
-                        )
+                        HeatmapMode.entries.forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text((if (mode == heatmap) "✓ " else "") + tr("热力背景：") + tr(mode.label))
+                                },
+                                onClick = {
+                                    heatmap = mode
+                                    save()
+                                    menuExpanded = false
+                                },
+                            )
+                        }
                         DropdownMenuItem(
                             text = {
                                 Text(
@@ -204,10 +260,10 @@ fun CalendarScreen(
             },
         )
         Text(
-            text = tr("左右滑动切月 · 拖到边缘可跨月 · 点起点后切月点终点也可跨月"),
+            text = tr("左右滑动切月 · 拖到边缘可跨月 · 长按或拖动可选一段时间"),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 6.dp),
+                .padding(bottom = 4.dp),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -223,43 +279,23 @@ fun CalendarScreen(
             rangeStart = rangeStart,
             rangeEnd = rangeEnd,
             onSelect = { start, end ->
-                val existingStart = rangeStart
-                val existingEnd = rangeEnd
-                if (existingStart != null && existingEnd != null &&
-                    existingStart == existingEnd &&
-                    (start.year != existingStart.year || start.month != existingStart.month)
-                ) {
-                    rangeStart = if (existingStart <= end) existingStart else end
-                    rangeEnd = if (existingStart <= end) end else existingStart
-                } else {
-                    rangeStart = start
-                    rangeEnd = end
-                }
+                rangeStart = start
+                rangeEnd = end
             },
             onEdge = { forward ->
-                val nextKey = shiftMonth(monthKey, if (forward) 1 else -1)
-                val nextParts = BudgetMonth.parse(nextKey)
-                if (nextParts != null) {
-                    val edgeDay = if (forward) 1 else daysInMonth(nextParts.year, nextParts.month)
-                    val edgeDate = CalendarDate(nextParts.year, nextParts.month, edgeDay)
-                    val anchor = rangeStart
-                    if (anchor == null) {
-                        rangeStart = edgeDate
-                        rangeEnd = edgeDate
-                    } else {
-                        rangeStart = if (anchor <= edgeDate) anchor else edgeDate
-                        rangeEnd = if (anchor <= edgeDate) edgeDate else anchor
-                    }
-                    monthKey = nextKey
-                }
+                navigateMonth(shiftMonth(monthKey, if (forward) 1 else -1))
             },
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         SelectionSummary(
             start = rangeStart,
             end = rangeEnd,
             transactions = selectedTransactions,
             monthFallback = monthTransactions,
+            onClear = {
+                rangeStart = null
+                rangeEnd = null
+            },
         )
         if (selectedTransactions.isNotEmpty()) {
             LazyColumn(
@@ -280,10 +316,10 @@ fun CalendarScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (rangeStart != null) {
-                        tr("这一天你还没有任何记账")
-                    } else {
-                        tr("滑动日期选择区间，或点选单日")
+                    text = when {
+                        rangeStart == null || rangeEnd == null -> tr("滑动日期选择区间，或点选单日")
+                        rangeStart == rangeEnd -> tr("这一天你还没有任何记账")
+                        else -> tr("这段时间你还没有任何记账")
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -346,7 +382,7 @@ private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 8.dp),
+            .padding(bottom = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         CalendarMetric(tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f))
@@ -399,7 +435,8 @@ private fun CalendarMonthGrid(
     val daysInMonth = daysInMonth(year, month)
     val firstOffset = firstDayOffset(year, month, weekStartsMonday)
     val density = LocalDensity.current
-    val rowHeightPx = with(density) { 36.dp.toPx() }
+    val rowHeightPx = with(density) { 44.dp.toPx() }
+    val edgeDragThresholdPx = with(density) { 60.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
     val byDay = remember(transactions) { transactions.groupBy { dayOf(it.timestamp) } }
     val heatValues = remember(byDay, heatmap) {
@@ -447,9 +484,9 @@ private fun CalendarMonthGrid(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(36.dp * 6)
+                .height(44.dp * 6)
                 .onSizeChanged { gridWidthPx = it.width.toFloat() }
-                .pointerInput(year, month, gridWidthPx) {
+                .pointerInput(year, month, gridWidthPx, edgeDragThresholdPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         val first = dayAt(
@@ -460,6 +497,10 @@ private fun CalendarMonthGrid(
                             daysInMonth,
                         ) ?: return@awaitEachGesture
                         var current = first
+                        var lastX = down.position.x
+                        var edgeDirection = 0
+                        var edgeTravelPx = 0f
+                        var edgeFlippedMonth = false
                         down.consume()
                         while (true) {
                             val event = awaitPointerEvent()
@@ -468,31 +509,58 @@ private fun CalendarMonthGrid(
                                 change.consume()
                                 break
                             }
-                            if (change.position.x > gridWidthPx + 8f) {
-                                onEdge(true)
-                                change.consume()
-                                break
+                            if (!edgeFlippedMonth) {
+                                val direction = when {
+                                    change.position.x >= gridWidthPx -> 1
+                                    change.position.x <= 0f -> -1
+                                    else -> 0
+                                }
+                                if (direction == 0) {
+                                    edgeDirection = 0
+                                    edgeTravelPx = 0f
+                                } else {
+                                    if (edgeDirection != direction) {
+                                        edgeDirection = direction
+                                        edgeTravelPx = 0f
+                                    }
+                                    val previousOutsideDistance = if (direction > 0) {
+                                        max(0f, lastX - gridWidthPx)
+                                    } else {
+                                        max(0f, -lastX)
+                                    }
+                                    val currentOutsideDistance = if (direction > 0) {
+                                        max(0f, change.position.x - gridWidthPx)
+                                    } else {
+                                        max(0f, -change.position.x)
+                                    }
+                                    edgeTravelPx += max(
+                                        0f,
+                                        currentOutsideDistance - previousOutsideDistance,
+                                    )
+                                }
+
+                                if (direction != 0 && edgeTravelPx >= edgeDragThresholdPx) {
+                                    edgeFlippedMonth = true
+                                    onEdge(direction > 0)
+                                } else {
+                                    val day = dayAt(
+                                        change.position,
+                                        gridWidthPx,
+                                        rowHeightPx,
+                                        firstOffset,
+                                        daysInMonth,
+                                    )
+                                    if (day != null) current = day
+                                    onSelect(
+                                        CalendarDate(year, month, min(first, current)),
+                                        CalendarDate(year, month, max(first, current)),
+                                    )
+                                }
                             }
-                            if (change.position.x < -8f) {
-                                onEdge(false)
-                                change.consume()
-                                break
-                            }
-                            val day = dayAt(
-                                change.position,
-                                gridWidthPx,
-                                rowHeightPx,
-                                firstOffset,
-                                daysInMonth,
-                            )
-                            if (day != null) current = day
-                            onSelect(
-                                CalendarDate(year, month, min(first, current)),
-                                CalendarDate(year, month, max(first, current)),
-                            )
+                            lastX = change.position.x
                             change.consume()
                         }
-                        if (first == current) {
+                        if (!edgeFlippedMonth && first == current) {
                             val date = CalendarDate(year, month, first)
                             onSelect(date, date)
                         }
@@ -504,7 +572,7 @@ private fun CalendarMonthGrid(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(36.dp),
+                            .height(44.dp),
                     ) {
                         for (col in 0 until 7) {
                             val day = row * 7 + col - firstOffset + 1
@@ -515,7 +583,7 @@ private fun CalendarMonthGrid(
                             val isEdge = date != null &&
                                 (date == rangeStart || date == rangeEnd)
                             val heat = if (inMonth && heatMax > 0) {
-                                (heatValues[day] ?: 0L).toFloat() / heatMax.toFloat()
+                                heatmapLevel(heatValues[day] ?: 0L, heatMax)
                             } else {
                                 0f
                             }
@@ -544,7 +612,7 @@ private fun CalendarMonthGrid(
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
                                             text = "$day",
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
                                             fontWeight = if (isEdge || inRange) FontWeight.Bold else FontWeight.Normal,
                                             color = when {
                                                 isEdge -> MaterialTheme.colorScheme.onPrimary
@@ -555,7 +623,10 @@ private fun CalendarMonthGrid(
                                         if (showLunar) {
                                             Text(
                                                 text = lunarLabel(year, month, day),
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.sp),
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 8.sp,
+                                                    lineHeight = 10.sp,
+                                                ),
                                                 color = when {
                                                     isEdge -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                                                     inRange -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
@@ -573,9 +644,7 @@ private fun CalendarMonthGrid(
                                                 .width(18.dp)
                                                 .height(3.dp)
                                                 .clip(RoundedCornerShape(50))
-                                                .background(
-                                                    base.copy(alpha = 0.55f + 0.40f * heat),
-                                                ),
+                                                .background(base.copy(alpha = heat)),
                                         )
                                     }
                                 }
@@ -594,6 +663,7 @@ private fun SelectionSummary(
     end: CalendarDate?,
     transactions: List<TransactionEntity>,
     monthFallback: List<TransactionEntity>,
+    onClear: () -> Unit,
 ) {
     val semantic = LocalQingSemanticColors.current
     val hasSelection = start != null && end != null
@@ -640,6 +710,14 @@ private fun SelectionSummary(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (hasSelection) {
+                    TextButton(
+                        onClick = onClear,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(tr("清除"), style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
@@ -773,6 +851,48 @@ private data class CalendarDate(
 ) : Comparable<CalendarDate> {
     override fun compareTo(other: CalendarDate): Int =
         compareValuesBy(this, other, { it.year }, { it.month }, { it.day })
+}
+
+private val CalendarDateSaver = Saver<CalendarDate, String>(
+    save = { date -> "${date.year}-${date.month}-${date.day}" },
+    restore = { value -> parseCalendarDate(value) ?: currentCalendarDate() },
+)
+
+private val NullableCalendarDateSaver = Saver<CalendarDate?, String>(
+    save = { date -> date?.let { "${it.year}-${it.month}-${it.day}" } ?: "" },
+    restore = { value -> parseCalendarDate(value) },
+)
+
+private fun parseCalendarDate(value: String): CalendarDate? {
+    if (value.isEmpty()) return null
+    val parts = value.split('-')
+    if (parts.size != 3) return null
+    val year = parts[0].toIntOrNull() ?: return null
+    val month = parts[1].toIntOrNull() ?: return null
+    val day = parts[2].toIntOrNull() ?: return null
+    if (year < 1) return null
+    if (month !in 1..12 || day !in 1..daysInMonth(year, month)) return null
+    return CalendarDate(year, month, day)
+}
+
+private fun currentCalendarDate(): CalendarDate =
+    Calendar.getInstance().let { cal ->
+        CalendarDate(
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH),
+        )
+    }
+
+private fun heatmapLevel(value: Long, maximum: Long): Float {
+    if (value <= 0L || maximum <= 0L) return 0f
+    val ratio = value.toDouble() / maximum.toDouble()
+    return when {
+        ratio <= 0.25 -> 0.25f
+        ratio <= 0.5 -> 0.5f
+        ratio <= 0.75 -> 0.75f
+        else -> 1f
+    }
 }
 
 private fun dateOf(timestamp: Long): CalendarDate =
