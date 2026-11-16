@@ -86,6 +86,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.MonthPickerDialog
 import com.bookkeeping.app.ui.components.SectionHeader
@@ -504,13 +505,11 @@ private fun StatsSummaryCard(
             style = MaterialTheme.typography.labelMedium,
             color = mutedOnContainer,
         )
-        Text(
+        AutoSizeAmountText(
             text = formatCny(totalCents),
             style = MaterialTheme.typography.headlineMedium,
             color = totalColor,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false,
         )
         Row(
             modifier = Modifier
@@ -525,12 +524,11 @@ private fun StatsSummaryCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = mutedOnContainer,
                 )
-                Text(
+                AutoSizeAmountText(
                     text = formatCny(dailyAverageCents),
                     style = MaterialTheme.typography.titleMedium,
                     color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -539,14 +537,12 @@ private fun StatsSummaryCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = mutedOnContainer,
                 )
-                Text(
+                AutoSizeAmountText(
                     text = (if (balanceCents >= 0) "+" else "−") +
                         formatCny(abs(balanceCents)),
                     style = MaterialTheme.typography.titleMedium,
                     color = if (balanceCents >= 0) QingIncome else QingExpense,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -560,21 +556,22 @@ private fun StatsSummaryCard(
                     color = mutedOnContainer,
                 )
                 ComparisonValue(comparison = comparison, type = type)
-                Text(
-                    text = when {
-                        comparison.previousCents > 0L && annual ->
-                            "${tr("上一年")} " +
-                                formatCny(comparison.previousCents)
-                        comparison.previousCents > 0L ->
-                            "${tr("上月")} ${formatCny(comparison.previousCents)}"
-                        annual -> tr("上一年无数据")
-                        else -> tr("上月无数据")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = mutedOnContainer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (comparison.previousCents > 0L) {
+                    // 列标题已经写了「较上一年 / 较上月」，这里只留金额：
+                    // 11sp 再带前缀就会把数字挤成省略号，金额必须完整可见。
+                    AutoSizeAmountText(
+                        text = formatCny(comparison.previousCents),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = mutedOnContainer,
+                    )
+                } else {
+                    Text(
+                        text = if (annual) tr("上一年无数据") else tr("上月无数据"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = mutedOnContainer,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
@@ -648,13 +645,11 @@ private fun DaySummaryMetric(
             color = QingPrimaryDeep.copy(alpha = 0.72f),
             maxLines = 1,
         )
-        Text(
+        AutoSizeAmountText(
             text = value,
             style = MaterialTheme.typography.titleMedium,
             color = color,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -775,12 +770,11 @@ private fun CategoryLegendRow(stat: CategoryStat, onClick: () -> Unit) {
             color = QingTextSecondary,
             maxLines = 1,
         )
-        Text(
+        AutoSizeAmountText(
             text = formatCny(stat.totalCents),
             style = MaterialTheme.typography.bodyMedium,
             color = QingText,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
         )
     }
 }
@@ -948,7 +942,7 @@ private fun MonthlyTrendCard(
                             )
                         }
                     }
-                    Text(
+                    AutoSizeAmountText(
                         text = formatCny(item.totalCents),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (item.totalCents > 0L) amountColor else QingTextSecondary,
@@ -958,8 +952,6 @@ private fun MonthlyTrendCard(
                             FontWeight.Normal
                         },
                         textAlign = TextAlign.End,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.width(88.dp),
                     )
                 }
@@ -1026,12 +1018,11 @@ private fun CategoryDetailCard(
                             maxLines = 1,
                         )
                     }
-                    Text(
+                    AutoSizeAmountText(
                         text = formatCny(stat.totalCents),
                         style = MaterialTheme.typography.titleSmall,
                         color = amountColor,
                         fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
                     )
                 }
                 if (index != stats.lastIndex) {

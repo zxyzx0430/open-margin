@@ -5,6 +5,7 @@ import android.icu.util.ChineseCalendar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +77,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
@@ -84,8 +86,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
 
 private const val CALENDAR_PREFS = "calendar_view_prefs"
 private const val KEY_HEATMAP = "heatmap"
@@ -272,7 +272,7 @@ fun CalendarScreen(
             },
         )
         Text(
-            text = tr("左右滑动切月 · 拖到边缘可跨月 · 长按或拖动可选一段时间"),
+            text = tr("点选单日 · 长按日期拖动选区间，拖到左右边缘可继续跨月"),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 4.dp),
@@ -294,8 +294,21 @@ fun CalendarScreen(
                 rangeStart = start
                 rangeEnd = end
             },
-            onEdge = { forward ->
-                navigateMonth(shiftMonth(monthKey, if (forward) 1 else -1))
+            onCrossMonth = { targetKey, anchor ->
+                // 跨月拖动不调用 navigateMonth：它会把区间清空，而这里必须保留
+                // 长按的那个起点，只把终点落到目标月最靠近起点的一天。
+                val target = BudgetMonth.parse(targetKey)
+                if (target != null) {
+                    monthKey = targetKey
+                    hasManuallyNavigatedMonth = true
+                    val boundary = CalendarDate(
+                        target.year,
+                        target.month,
+                        rangeEndDayIn(anchor, target.year, target.month),
+                    )
+                    rangeStart = minOf(anchor, boundary)
+                    rangeEnd = maxOf(anchor, boundary)
+                }
             },
         )
         Spacer(Modifier.height(4.dp))
@@ -329,7 +342,7 @@ fun CalendarScreen(
             ) {
                 Text(
                     text = when {
-                        rangeStart == null || rangeEnd == null -> tr("滑动日期选择区间，或点选单日")
+                        rangeStart == null || rangeEnd == null -> tr("长按日期拖动选择区间，或点选单日")
                         rangeStart == rangeEnd -> tr("这一天你还没有任何记账")
                         else -> tr("这段时间你还没有任何记账")
                     },
@@ -421,12 +434,11 @@ private fun CalendarMetric(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
+        AutoSizeAmountText(
             text = value,
             style = MaterialTheme.typography.titleSmall,
             color = color,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
         )
     }
 }
@@ -442,14 +454,24 @@ private fun CalendarMonthGrid(
     rangeStart: CalendarDate?,
     rangeEnd: CalendarDate?,
     onSelect: (CalendarDate, CalendarDate) -> Unit,
-    onEdge: (Boolean) -> Unit,
+    onCrossMonth: (targetMonthKey: String, anchor: CalendarDate) -> Unit,
 ) {
     val daysInMonth = daysInMonth(year, month)
     val firstOffset = firstDayOffset(year, month, weekStartsMonday)
     val density = LocalDensity.current
     val rowHeightPx = with(density) { 44.dp.toPx() }
-    val edgeDragThresholdPx = with(density) { 60.dp.toPx() }
+    val crossMonthDragPx = with(density) { 56.dp.toPx() }
+    val reverseCrossDragPx = with(density) { 24.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
+    // 手势协程的 key 只有尺寸：跨月会重组，但手指还没松，协程不能重启。
+    // 因此月份、日偏移这些易变值统一从最新状态里读。
+    val latestYear = rememberUpdatedState(year)
+    val latestMonth = rememberUpdatedState(month)
+    val latestOffset = rememberUpdatedState(firstOffset)
+    val latestDays = rememberUpdatedState(daysInMonth)
+    val latestWeekStartsMonday = rememberUpdatedState(weekStartsMonday)
+    val latestOnSelect = rememberUpdatedState(onSelect)
+    val latestOnCrossMonth = rememberUpdatedState(onCrossMonth)
     val byDay = remember(transactions) { transactions.groupBy { dayOf(it.timestamp) } }
     val heatValues = remember(byDay, heatmap) {
         byDay.mapValues { (_, list) ->
@@ -498,83 +520,125 @@ private fun CalendarMonthGrid(
                 .fillMaxWidth()
                 .height(44.dp * 6)
                 .onSizeChanged { gridWidthPx = it.width.toFloat() }
-                .pointerInput(year, month, gridWidthPx, edgeDragThresholdPx) {
+                .pointerInput(gridWidthPx, rowHeightPx, crossMonthDragPx, reverseCrossDragPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        val first = dayAt(
+                        val anchorYear = latestYear.value
+                        val anchorMonth = latestMonth.value
+                        val anchorDay = dayAt(
                             down.position,
                             gridWidthPx,
                             rowHeightPx,
-                            firstOffset,
-                            daysInMonth,
+                            latestOffset.value,
+                            latestDays.value,
                         ) ?: return@awaitEachGesture
-                        var current = first
-                        var lastX = down.position.x
-                        var edgeDirection = 0
-                        var edgeTravelPx = 0f
-                        var edgeFlippedMonth = false
-                        down.consume()
+                        val anchor = CalendarDate(anchorYear, anchorMonth, anchorDay)
+                        // 跨月只属于「长按进入区间选择后拖到左右边缘」：
+                        // 普通点按选单日，普通横滑不切月也不改选中。
+                        val longPress = awaitLongPressOrCancellation(down.id)
+                        if (longPress == null) {
+                            if (currentEvent.changes.all { !it.pressed }) {
+                                latestOnSelect.value(anchor, anchor)
+                            }
+                            return@awaitEachGesture
+                        }
+                        latestOnSelect.value(anchor, anchor)
+                        // 跨月后手指还在屏幕上，这里用局部变量跟着切换视角月份，
+                        // 否则要等下一次重组才能按新月份算日期。
+                        var viewYear = anchorYear
+                        var viewMonth = anchorMonth
+                        var viewOffset = latestOffset.value
+                        var viewDays = latestDays.value
+                        // 已经跨进过的月份，按顺序记着：往回拖时逐层退回。
+                        val crossedMonths = mutableListOf<Pair<String, Boolean>>()
+                        var forwardTravelPx = 0f
+                        var reverseTravelPx = 0f
+                        var lastX = longPress.position.x
+                        var lastDay = anchorDay
                         while (true) {
                             val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull() ?: break
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
                                 change.consume()
                                 break
                             }
-                            if (!edgeFlippedMonth) {
-                                val direction = when {
-                                    change.position.x >= gridWidthPx -> 1
-                                    change.position.x <= 0f -> -1
-                                    else -> 0
+                            val dx = change.position.x - lastX
+                            lastX = change.position.x
+                            val column = columnAt(change.position.x, gridWidthPx)
+                            // 上一次跨月是往右翻的，就往左退回；反之亦然。
+                            // 反向移动够 24dp 才退一个月，手指在边缘抖动不会反复翻。
+                            val lastCross = crossedMonths.lastOrNull()
+                            val reversing = lastCross != null &&
+                                (if (lastCross.second) dx < 0f else dx > 0f)
+                            if (reversing) {
+                                reverseTravelPx += abs(dx)
+                                if (reverseTravelPx >= reverseCrossDragPx) {
+                                    crossedMonths.removeAt(crossedMonths.lastIndex)
+                                    reverseTravelPx = 0f
+                                    forwardTravelPx = 0f
+                                    val targetKey = crossedMonths.lastOrNull()?.first
+                                        ?: BudgetMonth.keyOf(anchorYear, anchorMonth)
+                                    val target = BudgetMonth.parse(targetKey)
+                                    if (target != null) {
+                                        viewYear = target.year
+                                        viewMonth = target.month
+                                        viewOffset = firstDayOffset(
+                                            viewYear, viewMonth, latestWeekStartsMonday.value,
+                                        )
+                                        viewDays = monthDayCount(viewYear, viewMonth)
+                                        lastDay = rangeEndDayIn(anchor, viewYear, viewMonth)
+                                        latestOnCrossMonth.value(targetKey, anchor)
+                                    }
                                 }
-                                if (direction == 0) {
-                                    edgeDirection = 0
-                                    edgeTravelPx = 0f
-                                } else {
-                                    if (edgeDirection != direction) {
-                                        edgeDirection = direction
-                                        edgeTravelPx = 0f
-                                    }
-                                    val previousOutsideDistance = if (direction > 0) {
-                                        max(0f, lastX - gridWidthPx)
-                                    } else {
-                                        max(0f, -lastX)
-                                    }
-                                    val currentOutsideDistance = if (direction > 0) {
-                                        max(0f, change.position.x - gridWidthPx)
-                                    } else {
-                                        max(0f, -change.position.x)
-                                    }
-                                    edgeTravelPx += max(
-                                        0f,
-                                        currentOutsideDistance - previousOutsideDistance,
+                                change.consume()
+                                continue
+                            }
+                            if (dx != 0f) reverseTravelPx = 0f
+                            // 停在最右/最左一列继续往外拖，才累计跨月位移。
+                            val pullingEdge =
+                                (column == 6 && dx > 0f) || (column == 0 && dx < 0f)
+                            if (pullingEdge) {
+                                forwardTravelPx += abs(dx)
+                                if (forwardTravelPx >= crossMonthDragPx) {
+                                    forwardTravelPx = 0f
+                                    reverseTravelPx = 0f
+                                    val forward = column == 6
+                                    val nextKey = shiftMonth(
+                                        BudgetMonth.keyOf(viewYear, viewMonth),
+                                        if (forward) 1 else -1,
                                     )
+                                    val next = BudgetMonth.parse(nextKey)
+                                    if (next != null) {
+                                        viewYear = next.year
+                                        viewMonth = next.month
+                                        viewOffset = firstDayOffset(
+                                            viewYear, viewMonth, latestWeekStartsMonday.value,
+                                        )
+                                        viewDays = monthDayCount(viewYear, viewMonth)
+                                        lastDay = rangeEndDayIn(anchor, viewYear, viewMonth)
+                                        crossedMonths.add(nextKey to forward)
+                                        latestOnCrossMonth.value(nextKey, anchor)
+                                    }
                                 }
-
-                                if (direction != 0 && edgeTravelPx >= edgeDragThresholdPx) {
-                                    edgeFlippedMonth = true
-                                    onEdge(direction > 0)
-                                } else {
-                                    val day = dayAt(
-                                        change.position,
-                                        gridWidthPx,
-                                        rowHeightPx,
-                                        firstOffset,
-                                        daysInMonth,
-                                    )
-                                    if (day != null) current = day
-                                    onSelect(
-                                        CalendarDate(year, month, min(first, current)),
-                                        CalendarDate(year, month, max(first, current)),
+                            } else {
+                                forwardTravelPx = 0f
+                                val day = dayAt(
+                                    change.position,
+                                    gridWidthPx,
+                                    rowHeightPx,
+                                    viewOffset,
+                                    viewDays,
+                                )
+                                if (day != null && day != lastDay) {
+                                    lastDay = day
+                                    val current = CalendarDate(viewYear, viewMonth, day)
+                                    latestOnSelect.value(
+                                        minOf(anchor, current),
+                                        maxOf(anchor, current),
                                     )
                                 }
                             }
-                            lastX = change.position.x
                             change.consume()
-                        }
-                        if (!edgeFlippedMonth && first == current) {
-                            val date = CalendarDate(year, month, first)
-                            onSelect(date, date)
                         }
                     }
                 },
@@ -842,11 +906,25 @@ private fun dayAt(
     return day.takeIf { it in 1..daysInMonth }
 }
 
+/** 手指落在第几列（0=第一天那列，6=最后一天那列），拖出网格时按边界列算。 */
+private fun columnAt(x: Float, gridWidthPx: Float): Int =
+    if (gridWidthPx <= 0f) 0 else (x / (gridWidthPx / 7f)).toInt().coerceIn(0, 6)
+
+/** 跨月时区间终点取目标月里离起点最近的一天：更早的月取月末，更晚的月取月初。 */
+private fun rangeEndDayIn(anchor: CalendarDate, year: Int, month: Int): Int {
+    val last = daysInMonth(year, month)
+    if (anchor.year == year && anchor.month == month) return anchor.day.coerceIn(1, last)
+    return if (CalendarDate(year, month, last) < anchor) last else 1
+}
+
 private fun daysInMonth(year: Int, month: Int): Int =
     Calendar.getInstance().apply {
         clear()
         set(year, month - 1, 1)
     }.getActualMaximum(Calendar.DAY_OF_MONTH)
+
+/** 手势协程里用：避开 CalendarMonthGrid 里同名的本地 `daysInMonth` 变量。 */
+private fun monthDayCount(year: Int, month: Int): Int = daysInMonth(year, month)
 
 private fun firstDayOffset(year: Int, month: Int, weekStartsMonday: Boolean): Int {
     val dayOfWeek = Calendar.getInstance().apply {
