@@ -148,6 +148,17 @@ internal fun conflictSideLine(sourceLabel: String, side: SyncConflictSide): Stri
     formatConflictAmount(side.amountCents, side.currency),
 ).joinToString(" · ")
 
+/** 列表里只显示主机名：完整 HTTPS 地址放同步设置页，列表不展示/不从中间断行。 */
+internal fun endpointHost(url: String?): String {
+    val raw = url?.trim().orEmpty()
+    if (raw.isBlank()) return ""
+    val withoutScheme = raw.substringAfter("://", raw)
+    return withoutScheme
+        .substringBefore('/')
+        .substringBefore('?')
+        .substringBefore('#')
+}
+
 /** 相对时间：状态页只关心「多久以前」，不关心秒。 */
 internal fun relativeSyncTime(
     timestampMs: Long,
