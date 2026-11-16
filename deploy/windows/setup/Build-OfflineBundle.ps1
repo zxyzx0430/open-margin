@@ -205,17 +205,31 @@ function Get-ComposeServiceInfoFromYaml {
     $result = New-Object System.Collections.Generic.List[object]
     foreach ($name in $names) {
         $text = Invoke-ComposeCommand -Arguments (@($baseArguments) + @('config', $name)) -Description ('docker compose config ' + $name)
-        $hasBuild = ($text -match '(?m)^    build:')
+        # `compose config <service>` returns the whole model on current Compose
+        # releases, not just the requested service. Scope the inspection to the
+        # requested service block so a sibling's build/image key cannot leak in.
+        $serviceText = $text
+        if ($text -match '(?m)^services:') {
+            $serviceBlock = [regex]::Match(
+                $text,
+                ('(?ms)^  ' + [regex]::Escape($name) + ':\s*\r?\n(.*?)(?=^  [A-Za-z0-9_.-]+:\s*$|^[A-Za-z])')
+            )
+            if (-not $serviceBlock.Success) {
+                throw ('cannot locate service ''' + $name + ''' in docker compose config output: ' + $text.Trim())
+            }
+            $serviceText = $serviceBlock.Groups[1].Value
+        }
+        $hasBuild = ($serviceText -match '(?m)^\s{2,}build:\s*$')
         $image = ''
-        $imageMatch = [regex]::Match($text, '(?m)^    image:\s*["'']?([^"''\r\n]+)["'']?\s*$')
+        $imageMatch = [regex]::Match($serviceText, '(?m)^\s{2,}image:\s*["'']?([^"''\r\n]+)["'']?\s*$')
         if ($imageMatch.Success) { $image = $imageMatch.Groups[1].Value.Trim() }
 
         $context = ''
         $dockerfile = 'Dockerfile'
         if ($hasBuild) {
-            $buildBlock = [regex]::Match($text, '(?ms)^    build:\s*\r?\n((?:      .*\r?\n?)*)')
+            $buildBlock = [regex]::Match($serviceText, '(?ms)^(\s{2,})build:\s*\r?\n((?:\1\s+.*\r?\n?)*)')
             if ($buildBlock.Success) {
-                $block = $buildBlock.Groups[1].Value
+                $block = $buildBlock.Groups[2].Value
                 $contextMatch = [regex]::Match($block, '(?m)^\s+context:\s*["'']?([^"''\r\n]+)["'']?\s*$')
                 if ($contextMatch.Success) { $context = $contextMatch.Groups[1].Value.Trim() }
                 $dockerfileMatch = [regex]::Match($block, '(?m)^\s+dockerfile:\s*["'']?([^"''\r\n]+)["'']?\s*$')
