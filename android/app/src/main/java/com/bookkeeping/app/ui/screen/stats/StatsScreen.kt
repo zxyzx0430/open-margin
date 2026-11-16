@@ -71,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -748,6 +749,8 @@ private fun CategoryDonutCard(
     onCategoryClick: (TransactionCategory) -> Unit,
 ) {
     var expanded by remember(stats.size) { mutableStateOf(false) }
+    // 环图与图例共用同一个选中分类：点扇区高亮、点图例行去账单，两者互不抢状态。
+    var selectedCategory by remember(stats) { mutableStateOf<TransactionCategory?>(null) }
     val visibleStats = if (expanded) stats else stats.take(LEGEND_PREVIEW_COUNT)
     val shape = RoundedCornerShape(20.dp)
     Card(
@@ -765,15 +768,21 @@ private fun CategoryDonutCard(
                 stats = stats,
                 totalCents = totalCents,
                 centerLabel = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
-                // 高度留出扇区外侧的标签环，标签不会压到环上，也不会被卡片裁掉。
+                // 高度留出引线标签的错位空间：标签在环外两侧排开，不再压住扇区。
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(220.dp),
+                    .height(236.dp),
+                selectedCategory = selectedCategory,
+                onSliceClick = { selectedCategory = it },
             )
             HorizontalDivider(color = QingOutline)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 visibleStats.forEach { stat ->
-                    CategoryLegendRow(stat = stat, onClick = { onCategoryClick(stat.category) })
+                    CategoryLegendRow(
+                        stat = stat,
+                        selected = stat.category == selectedCategory,
+                        onClick = { onCategoryClick(stat.category) },
+                    )
                 }
                 if (stats.size > LEGEND_PREVIEW_COUNT) {
                     // 一行文字按钮：展开看全部，再点收起。列表本身在 LazyColumn 里，
@@ -807,15 +816,17 @@ private const val LEGEND_PREVIEW_COUNT = 6
  * 图例行：色块 + 分类名 + 百分比 + 金额。
  *
  * 色块用的是 [categoryColor]，和扇区同一份颜色映射，不在这里另算一遍，
- * 否则图例颜色和饼图对不上时用户就只能靠猜。
+ * 否则图例颜色和饼图对不上时用户就只能靠猜。选中分类时整行铺一层 surfaceVariant，
+ * 环图与图例互相指认。
  */
 @Composable
-private fun CategoryLegendRow(stat: CategoryStat, onClick: () -> Unit) {
+private fun CategoryLegendRow(stat: CategoryStat, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 40.dp)
             .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) QingSurfaceVariant else Color.Transparent)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,

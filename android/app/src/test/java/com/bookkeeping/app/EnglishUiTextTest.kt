@@ -29,6 +29,9 @@ class EnglishUiTextTest {
             "更新范围未注明" to "Update scope not specified",
             "点选单日 · 长按日期拖动选区间，拖到空白处稍作停留可跨月" to
                 "Tap a day · long-press and drag to select a range; pause on the empty space to cross months",
+            "分类占比" to "By category",
+            "已选中" to "Selected",
+            "最高" to "Highest",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
