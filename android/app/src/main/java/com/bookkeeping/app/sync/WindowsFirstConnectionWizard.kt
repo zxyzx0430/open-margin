@@ -28,10 +28,76 @@ fun WindowsFirstConnectionWizard() {
     var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
     var testResult by remember { mutableStateOf<WindowsConnectionPolicy.Result?>(null) }
     var verifiedServer by remember { mutableStateOf("") }
+    // server_id read from the QR. Null means the fields are typed manually and
+    // the probe trusts the identity already stored on the phone (if any).
+    var scannedServerId by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     var confirmed by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+
+    fun syncHistory() = PairingFlowPolicy.History(
+        url = prefs.getString("url", "") ?: "",
+        serverId = prefs.getString("sync_server_id", null),
+        lastUploadedId = prefs.getLong("last_synced_id", 0L),
+        lastPulledRevision = prefs.getLong("last_pull_revision", 0L),
+        lastSuccessMs = prefs.getLong("last_success_ms", 0L),
+        lastResultCode = prefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null),
+    )
+
+    /** Read-only identity probe shared by the typed and scanned paths. */
+    fun startProbe(address: String, tokenValue: String, qrServerId: String?) {
+        val preflight = WindowsConnectionPolicy.preflight(address, tokenValue)
+        if (preflight != WindowsConnectionPolicy.Result.READY) {
+            testResult = preflight
+            message = connectionExplanation(preflight)
+            return
+        }
+        if (PairingFlowPolicy.evaluatePreProbe(syncHistory(), address, qrServerId) ==
+            PairingFlowPolicy.PreProbe.MIGRATION_REQUIRED) {
+            testResult = WindowsConnectionPolicy.Result.WRONG_LEDGER
+            verifiedServer = ""
+            message = pairingText(
+                "手机已有成功同步记录，但这次配对的地址或账本身份与历史不同。为避免跨账本覆盖交易，已阻止配对；请先备份原账本并完成显式迁移。",
+                "This phone already synced with a ledger, but this pairing points to a different URL or ledger. " +
+                    "Pairing was blocked to avoid cross-ledger overwrites. Back up the original ledger and migrate explicitly.",
+            )
+            return
+        }
+        val checkedToken = tokenValue.trim()
+        val expectedIdentity = qrServerId ?: prefs.getString("sync_server_id", null)
+        val checkedCursor = prefs.getLong("last_pull_revision", 0L)
+        testing = true
+        message = tr("正在验证 HTTPS、设备密钥和服务器账本身份…")
+        scope.launch {
+            val probe = withContext(Dispatchers.IO) {
+                probeWindowsServer(address, checkedToken, expectedIdentity, checkedCursor)
+            }
+            testing = false
+            // Never accept a result from a request for previous
+            // credentials if inputs changed before it completed.
+            if (!WindowsConnectionPolicy.isSameAttempt(address, checkedToken, url, token)) {
+                testResult = null
+                verifiedServer = ""
+                message = tr("连接参数已改变，请重新测试")
+            } else {
+                val decision = PairingFlowPolicy.evaluateProbe(
+                    qrServerId, probe.first, probe.second
+                )
+                testResult = decision
+                verifiedServer = probe.second
+                message = if (qrServerId != null &&
+                    decision == WindowsConnectionPolicy.Result.WRONG_LEDGER) {
+                    pairingText(
+                        "二维码里的账本身份与服务器返回的不一致，已阻止连接。",
+                        "The ledger identity in the QR does not match the server response. Connection was blocked.",
+                    )
+                } else {
+                    connectionExplanation(decision)
+                }
+            }
+        }
+    }
 
     Card(
         Modifier.fillMaxWidth(),
@@ -58,9 +124,46 @@ fun WindowsFirstConnectionWizard() {
                         Button(onClick = { step = 1 }) { Text(tr("下一步：连接服务器")) }
                     }
                     1 -> {
+                        Text(pairingText(
+                            "最快的方式：扫描电脑完成页上的配对二维码，会自动填入地址和密钥，再经只读验证后才允许启用。",
+                            "Fastest: scan the pairing QR on the PC completion page. It fills the URL and key, " +
+                                "then the read-only probe must pass before sync can be enabled.",
+                        ))
+                        QrPairingControls(
+                            enabled = !testing,
+                            onPayload = { payload, _ ->
+                                url = payload.url
+                                token = payload.token
+                                scannedServerId = payload.serverId
+                                testResult = null
+                                verifiedServer = ""
+                                confirmed = false
+                                message = pairingText(
+                                    "已读取配对二维码，正在做只读验证…",
+                                    "Pairing QR read; running the read-only check…",
+                                )
+                                startProbe(payload.url, payload.token, payload.serverId)
+                            },
+                            onRejected = { reason -> message = pairingRejectMessage(reason) },
+                            onFailure = { failure ->
+                                message = when (failure) {
+                                    QrScanFailure.CAMERA_DENIED -> pairingText(
+                                        "未获得相机权限，无法扫码。可改用「从相册选择二维码」，或在系统设置中允许相机权限。",
+                                        "Camera permission was denied. Use \"Choose QR from gallery\" or allow the camera in system settings.",
+                                    )
+                                    QrScanFailure.IMAGE_UNREADABLE -> pairingText(
+                                        "所选图片中没有识别到二维码，请换一张清晰的二维码截图。",
+                                        "No QR code was found in the selected image. Try a sharper QR screenshot.",
+                                    )
+                                }
+                            },
+                        )
                         OutlinedTextField(
                             value = url,
-                            onValueChange = { url = it; testResult = null; verifiedServer = ""; message = "" },
+                            onValueChange = {
+                                url = it; testResult = null; verifiedServer = ""
+                                scannedServerId = null; message = ""
+                            },
                             label = { Text(tr("Tailscale HTTPS 地址")) },
                             placeholder = { Text(tr("https://电脑名.网络名.ts.net/finance")) },
                             singleLine = true,
@@ -69,7 +172,10 @@ fun WindowsFirstConnectionWizard() {
                         )
                         OutlinedTextField(
                             value = token,
-                            onValueChange = { token = it; testResult = null; verifiedServer = ""; message = "" },
+                            onValueChange = {
+                                token = it; testResult = null; verifiedServer = ""
+                                scannedServerId = null; message = ""
+                            },
                             label = { Text(tr("设备同步密钥（不会显示）")) },
                             singleLine = true,
                             visualTransformation = PasswordVisualTransformation(),
@@ -82,47 +188,7 @@ fun WindowsFirstConnectionWizard() {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { step = 0 }, enabled = !testing) { Text(tr("上一步")) }
                             Button(enabled = !testing, onClick = {
-                                val address = url.trim().trimEnd('/')
-                                val preflight = WindowsConnectionPolicy.preflight(address, token)
-                                if (preflight != WindowsConnectionPolicy.Result.READY) {
-                                    testResult = preflight
-                                    message = connectionExplanation(preflight)
-                                    return@Button
-                                }
-                                if (!SyncEndpointPolicy.canChangeServer(
-                                        prefs.getString("url", "") ?: "", address,
-                                        prefs.getLong("last_synced_id", 0L),
-                                        prefs.getLong("last_pull_revision", 0L),
-                                        prefs.getLong("last_success_ms", 0L)
-                                    )) {
-                                    message = tr("手机已有另一台服务器的账本，不能直接切换；请先完成备份和迁移。")
-                                    return@Button
-                                }
-                                val checkedToken = token.trim()
-                                val checkedServer = prefs.getString("sync_server_id", null)
-                                val checkedCursor = prefs.getLong("last_pull_revision", 0L)
-                                testing = true
-                                message = tr("正在验证 HTTPS、设备密钥和服务器账本身份…")
-                                scope.launch {
-                                    val probe = withContext(Dispatchers.IO) {
-                                        probeWindowsServer(
-                                            address, checkedToken, checkedServer, checkedCursor
-                                        )
-                                    }
-                                    testing = false
-                                    // Never accept a result from a request for previous
-                                    // credentials if inputs changed before it completed.
-                                    if (!WindowsConnectionPolicy.isSameAttempt(
-                                            address, checkedToken, url, token)) {
-                                        testResult = null
-                                        verifiedServer = ""
-                                        message = tr("连接参数已改变，请重新测试")
-                                    } else {
-                                        testResult = probe.first
-                                        verifiedServer = probe.second
-                                        message = connectionExplanation(probe.first)
-                                    }
-                                }
+                                startProbe(url.trim().trimEnd('/'), token, scannedServerId)
                             }) { Text(tr("测试连接")) }
                         }
                         if (testResult == WindowsConnectionPolicy.Result.READY) {
@@ -144,6 +210,27 @@ fun WindowsFirstConnectionWizard() {
                                 if (testResult != WindowsConnectionPolicy.Result.READY ||
                                     verifiedServer.isBlank()) {
                                     message = tr("请重新测试连接")
+                                    step = 1
+                                    return@Button
+                                }
+                                // A scanned QR pins the ledger identity even if
+                                // prefs changed while this wizard was open.
+                                if (scannedServerId != null && scannedServerId != verifiedServer) {
+                                    message = pairingText(
+                                        "二维码里的账本身份与验证结果不一致，已阻止启用。",
+                                        "The QR ledger identity does not match the verified server. Enabling was blocked.",
+                                    )
+                                    step = 1
+                                    return@Button
+                                }
+                                if (PairingFlowPolicy.evaluatePreProbe(
+                                        syncHistory(), url, scannedServerId
+                                    ) != PairingFlowPolicy.PreProbe.ALLOWED) {
+                                    message = pairingText(
+                                        "检测到历史同步记录与本次配对不一致，已阻止启用；请先备份并完成显式迁移。",
+                                        "Historical sync data does not match this pairing. Enabling was blocked; " +
+                                            "back up and migrate explicitly first.",
+                                    )
                                     step = 1
                                     return@Button
                                 }
@@ -173,6 +260,41 @@ private fun connectionExplanation(result: WindowsConnectionPolicy.Result): Strin
     WindowsConnectionPolicy.Result.WRONG_LEDGER -> tr("服务器账本与手机已同步账本不符，已阻止连接；请核对迁移。")
     WindowsConnectionPolicy.Result.INVALID_RESPONSE -> tr("服务器返回的账本身份不完整，请确认清衡后端版本。")
     WindowsConnectionPolicy.Result.UNAVAILABLE -> tr("无法连接服务器。请检查电脑、Docker、Tailscale 和手机 VPN 状态。")
+}
+
+private fun pairingRejectMessage(reason: PairingRejectReason): String = when (reason) {
+    PairingRejectReason.EMPTY -> pairingText(
+        "二维码内容为空，请重新扫描。",
+        "The QR code is empty. Scan it again.",
+    )
+    PairingRejectReason.OVERSIZED -> pairingText(
+        "二维码内容过长，已拒绝。请扫描电脑完成页上的配对二维码。",
+        "The QR payload is too large and was rejected. Scan the pairing QR on the PC completion page.",
+    )
+    PairingRejectReason.MALFORMED -> pairingText(
+        "这不是清衡配对二维码（内容格式不正确）。",
+        "This is not an Open Margin pairing QR (invalid content).",
+    )
+    PairingRejectReason.UNSUPPORTED_VERSION -> pairingText(
+        "配对二维码版本不受支持，请把手机 App 更新到最新版本。",
+        "This pairing QR version is not supported. Update the phone app.",
+    )
+    PairingRejectReason.WRONG_KIND -> pairingText(
+        "这不是清衡的配对二维码。",
+        "This is not an Open Margin pairing QR.",
+    )
+    PairingRejectReason.INVALID_URL -> pairingText(
+        "二维码里的服务器地址无效：需要 https://设备名.网络名.ts.net/finance，且不能带端口、参数或用户名。",
+        "The QR server URL is invalid. Expected https://device.tailnet.ts.net/finance with no port, query, or user info.",
+    )
+    PairingRejectReason.INVALID_TOKEN -> pairingText(
+        "二维码里的设备密钥无效（至少 16 位，不能包含空白字符）。",
+        "The QR device key is invalid (at least 16 characters, no whitespace).",
+    )
+    PairingRejectReason.INVALID_SERVER_ID -> pairingText(
+        "二维码里的账本身份无效（至少 16 位）。",
+        "The QR ledger identity is invalid (at least 16 characters).",
+    )
 }
 
 private fun probeWindowsServer(
