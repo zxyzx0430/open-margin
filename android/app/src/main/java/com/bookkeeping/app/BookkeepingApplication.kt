@@ -24,6 +24,8 @@ class BookkeepingApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 最先安装：后面任何初始化出错都能留下堆栈
+        CrashCatcher.install(this)
         applicationScope.launch {
             MerchantRules.replace(settings.merchantRulesBlocking())
             val (counts, disabled) = settings.categoryLearningBlocking()

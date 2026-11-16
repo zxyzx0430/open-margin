@@ -76,7 +76,7 @@ object UpdateVersionPolicy {
     // RC12: merged calendar workspace, ledger UI refresh, category drill-down
     // and settings alignment on top of rc.11 capture/import fixes. Keep both
     // release tag and Android versionCode in sync.
-    const val CURRENT_TAG = "v1.2.0-rc.12"
+    const val CURRENT_TAG = "v1.2.0-rc.14"
 
     fun latestNewer(
         releases: List<PublishedRelease>,
