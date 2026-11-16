@@ -32,6 +32,8 @@ class EnglishUiTextTest {
             "分类占比" to "By category",
             "已选中" to "Selected",
             "最高" to "Highest",
+            "可在「账单」页查看，列表会自动刷新。" to
+                "View them on the Records tab; the list refreshes automatically.",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))

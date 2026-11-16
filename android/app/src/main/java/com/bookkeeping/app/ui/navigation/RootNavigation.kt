@@ -1,6 +1,8 @@
 package com.bookkeeping.app.ui.navigation
 
 import com.bookkeeping.app.i18n.tr
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,6 +38,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.bookkeeping.app.ui.screen.billimport.BillImportScreen
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
@@ -48,8 +51,6 @@ import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 @Composable
 fun RootNavigation() {
     val navController = rememberNavController()
-    var requestBillImport by remember { mutableStateOf(false) }
-    var requestAutomationSetup by remember { mutableStateOf(false) }
     var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -123,27 +124,31 @@ fun RootNavigation() {
             startDestination = BottomNavItem.Transactions.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(BottomNavItem.Transactions.route) {
+            // 叶子页（详情、导入）是瞬时切换的，所以从叶子页返回 tab 时也必须瞬时，
+            // 否则会先淡入一帧空白再出现内容。tab 之间仍然保留默认的淡入淡出。
+            composable(
+                route = BottomNavItem.Transactions.route,
+                popEnterTransition = { EnterTransition.None },
+            ) {
                 TransactionListScreen(
-                    onSetupAutomation = {
-                        requestAutomationSetup = true
-                        navController.navigate(BottomNavItem.Settings.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    openBillImport = requestBillImport,
-                    onBillImportOpened = { requestBillImport = false },
+                    onOpenBillImport = { navController.navigate(AppRoutes.BILL_IMPORT) },
                     drilldown = pendingLedgerDrilldown,
                     onDrilldownConsumed = { pendingLedgerDrilldown = null },
-                    onOpenDetail = { id -> navController.navigate("transaction/$id") },
+                    onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
                 )
             }
-            composable(BottomNavItem.Calendar.route) {
-                CalendarScreen(onOpenDetail = { id -> navController.navigate("transaction/$id") })
+            composable(
+                route = BottomNavItem.Calendar.route,
+                popEnterTransition = { EnterTransition.None },
+            ) {
+                CalendarScreen(onOpenDetail = { id ->
+                    navController.navigate(AppRoutes.transactionDetail(id))
+                })
             }
-            composable(BottomNavItem.Stats.route) {
+            composable(
+                route = BottomNavItem.Stats.route,
+                popEnterTransition = { EnterTransition.None },
+            ) {
                 StatsScreen(
                     onOpenLedger = { drilldown ->
                         pendingLedgerDrilldown = drilldown
@@ -153,38 +158,56 @@ fun RootNavigation() {
                             restoreState = true
                         }
                     },
-                    onOpenTransaction = { id -> navController.navigate("transaction/$id") },
+                    onOpenTransaction = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
                 )
             }
+            // 账单导入：独立页面，从设置页或账单页进来都行；关掉就 popBackStack 回原页面。
             composable(
-                route = "transaction/{id}",
-                arguments = listOf(navArgument("id") { type = NavType.LongType }),
+                route = AppRoutes.BILL_IMPORT,
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None },
+            ) {
+                BillImportScreen(onClose = { navController.popBackStack() })
+            }
+            composable(
+                route = AppRoutes.TRANSACTION_DETAIL,
+                arguments = listOf(
+                    navArgument(AppRoutes.TRANSACTION_ID) { type = NavType.LongType },
+                ),
+                // 详情是叶子页。navigation-compose 默认是 700ms 交叉淡入淡出，
+                // 从「分类明细」弹层点进来时，弹层已经关掉、详情还只有很低的透明度，
+                // 露出来的就是统计页 —— 这就是用户看到的「闪一下」。这里改成瞬时切换：
+                // 点下去同一帧就是详情页，返回也是同一帧回到原页面。
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None },
             ) {
                 TransactionDetailScreen(
                     onBack = { navController.popBackStack() },
                     onDeleted = { navController.popBackStack() },
                 )
             }
-            composable(BottomNavItem.Budget.route) { BudgetScreen() }
-            composable(BottomNavItem.Settings.route) {
+            composable(
+                route = BottomNavItem.Budget.route,
+                popEnterTransition = { EnterTransition.None },
+            ) { BudgetScreen() }
+            composable(
+                route = BottomNavItem.Settings.route,
+                popEnterTransition = { EnterTransition.None },
+            ) {
                 SettingsScreen(
-                    onImportBills = {
-                        requestBillImport = true
-                        navController.navigate(BottomNavItem.Transactions.route) {
-                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    openAutomationSetup = requestAutomationSetup,
-                    onAutomationOpened = { requestAutomationSetup = false },
+                    // 导入账单走独立路由：关掉后 popBackStack 回设置页，不再切到账单 tab。
+                    onImportBills = { navController.navigate(AppRoutes.BILL_IMPORT) },
                 )
             }
         }
     }
 }
 
-private sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector) {
+internal sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector) {
     data object Transactions : BottomNavItem("transactions", "账单", Icons.AutoMirrored.Filled.List)
     data object Calendar : BottomNavItem("calendar", "日历", Icons.Outlined.CalendarMonth)
     data object Stats : BottomNavItem("stats", "统计", Icons.Filled.PieChart)
