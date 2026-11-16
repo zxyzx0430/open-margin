@@ -5,8 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -25,14 +23,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Sync
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,11 +54,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -89,7 +86,7 @@ import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.components.LedgerFilterRow
 import com.bookkeeping.app.ui.components.LedgerSearchBar
 import com.bookkeeping.app.ui.components.MerchantAvatar
-import com.bookkeeping.app.ui.components.MerchantRuleDialog
+import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.MonthlySummaryCard
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
@@ -156,9 +153,6 @@ fun TransactionListScreen(
     var showBillImport by remember { mutableStateOf(false) }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
-    var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
-    var editing by remember { mutableStateOf<TransactionEntity?>(null) }
-    var ruleTarget by remember { mutableStateOf<TransactionEntity?>(null) }
     var activeDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     var exactDateFilter by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var duplicateListExpanded by remember { mutableStateOf(false) }
@@ -571,57 +565,11 @@ fun TransactionListScreen(
                         DayCard(
                             items = dayItems,
                             onOpenDetail = onOpenDetail,
-                            onEdit = { editing = it },
-                            onDelete = { pendingDelete = it },
-                            onReview = viewModel::setReviewStatus,
-                            onAddCategoryRule = { ruleTarget = it },
                         )
                     }
                 }
             }
         }
-    }
-
-    pendingDelete?.let { entry ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(tr("删除这笔交易？")) },
-            text = {
-                Text(
-                    tr("删除将在电脑或 VPS 在线后双向同步；其他设备也会删除该笔交易。若只是误识别或退款，建议在网站标记为不计入或退款。")
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.delete(entry)
-                    pendingDelete = null
-                }) {
-                    Text(tr("确认删除"), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text(tr("取消")) }
-            },
-        )
-    }
-
-    editing?.let { entry ->
-        AddTransactionDialog(
-            initial = entry,
-            onDismiss = { editing = null },
-            onConfirm = { amount, type, category, merchant, note, timestampMs ->
-                viewModel.updateTransaction(
-                    entry,
-                    amount,
-                    type,
-                    category,
-                    merchant,
-                    note,
-                    timestampMs,
-                )
-                editing = null
-            },
-        )
     }
 
     if (showBillImport) {
@@ -663,31 +611,12 @@ fun TransactionListScreen(
             onDismiss = { showCategorySheet = false },
         )
     }
-
-    ruleTarget?.let { entry ->
-        MerchantRuleDialog(
-            merchant = entry.merchant,
-            onDismiss = { ruleTarget = null },
-            onSave = { merchant, category ->
-                viewModel.saveMerchantRule(merchant, category)
-                ruleTarget = null
-            },
-            initialCategory = runCatching {
-                TransactionCategory.valueOf(entry.category)
-            }.getOrNull(),
-        )
-    }
-
 }
 
 @Composable
 private fun DayCard(
     items: List<TransactionEntity>,
     onOpenDetail: (Long) -> Unit,
-    onEdit: (TransactionEntity) -> Unit,
-    onDelete: (TransactionEntity) -> Unit,
-    onReview: (TransactionEntity, String) -> Unit,
-    onAddCategoryRule: (TransactionEntity) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -701,10 +630,6 @@ private fun DayCard(
                     transaction = transaction,
                     timeText = timeOnlyFormat.format(Date(transaction.timestamp)),
                     onClick = { onOpenDetail(transaction.id) },
-                    onEdit = { onEdit(transaction) },
-                    onDelete = { onDelete(transaction) },
-                    onReview = { status -> onReview(transaction, status) },
-                    onAddCategoryRule = { onAddCategoryRule(transaction) },
                 )
                 if (index != items.lastIndex) {
                     HorizontalDivider(
@@ -717,133 +642,114 @@ private fun DayCard(
     }
 }
 
+/**
+ * 账单列表行：整行点击进详情页，行内不再有展开箭头和动作栏。
+ *
+ * 排序：商户 → 金额；副行「[扫描]/[导入] 分类 · 来源 · 时间」。
+ * 审核状态只显示已确认/不计入/转账/退款这类非默认值，默认状态不占字。
+ */
 @Composable
 private fun LedgerTransactionRow(
     transaction: TransactionEntity,
     timeText: String,
     onClick: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onReview: (String) -> Unit,
-    onAddCategoryRule: () -> Unit,
 ) {
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }
         .getOrDefault(TransactionCategory.OTHER)
     val type = runCatching { TransactionType.valueOf(transaction.type) }
         .getOrDefault(TransactionType.EXPENSE)
-    var expanded by remember(transaction.id) { mutableStateOf(false) }
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        label = "transaction-expand",
-    )
     val semantic = LocalQingSemanticColors.current
-    val status = when {
-        transaction.duplicateOfId != null || transaction.remoteReviewStatus == "possible_duplicate" ->
-            tr("待确认重复") to semantic.warningText
-        transaction.remoteReviewStatus == "excluded" -> tr("不计入") to MaterialTheme.colorScheme.onSurfaceVariant
-        transaction.remoteReviewStatus == "refund" -> tr("退款") to semantic.income
-        transaction.remoteReviewStatus == "transfer" -> tr("转账") to MaterialTheme.colorScheme.onSurfaceVariant
-        transaction.remoteReviewStatus == "confirmed" -> tr("已确认") to semantic.income
-        else -> tr("未核实") to MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val status = transactionStatusLabel(transaction)
+    val sourceTag = transactionSourceTag(transaction)
     val amount = if (transaction.currency == "CNY") {
         formatCny(transaction.amountCents)
     } else {
         transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
     }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(horizontal = 4.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            MerchantAvatar(
-                merchant = transaction.merchant,
-                merchantIconKey = transaction.merchantIconKey,
-                merchantIconPath = transaction.merchantIconPath,
-                category = category,
-                size = 42.dp,
-            )
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        MerchantAvatar(
+            merchant = transaction.merchant,
+            merchantIconKey = transaction.merchantIconKey,
+            merchantIconPath = transaction.merchantIconPath,
+            category = category,
+            size = 42.dp,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = transaction.merchant.ifBlank { tr(category.displayName) },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                status?.let { (label, color) ->
                     Text(
-                        text = transaction.merchant.ifBlank { tr(category.displayName) },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = " · " + status.first,
+                        text = " · " + label,
                         style = MaterialTheme.typography.labelSmall,
-                        color = status.second,
+                        color = color,
                         maxLines = 1,
                     )
                 }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                sourceTag?.let { SoftBadge(text = it, tone = StatusTone.NEUTRAL) }
                 Text(
-                    text = tr(category.displayName) + " · " + transactionSourceLabel(transaction.source) + " · " + timeText,
+                    text = tr(category.displayName) + " · " +
+                        transactionSourceLabel(transaction.source) + " · " + timeText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                if (transaction.note.isNotBlank()) {
-                    Text(
-                        text = transaction.note,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
-                    maxLines = 1,
-                )
-                IconButton(onClick = { expanded = !expanded }) {
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (expanded) tr("收起详情") else tr("展开详情"),
-                        modifier = Modifier.rotate(rotation),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
-        AnimatedVisibility(visible = expanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                if (transaction.remoteReviewStatus != "refund") {
-                    TextButton(
-                        onClick = {
-                            onReview(
-                                if (transaction.remoteReviewStatus == "excluded") "unverified"
-                                else "excluded",
-                            )
-                        },
-                    ) {
-                        Text(
-                            if (transaction.remoteReviewStatus == "excluded") tr("恢复计入统计")
-                            else tr("不计入统计"),
-                        )
-                    }
-                }
-                TextButton(onClick = onAddCategoryRule) { Text(tr("添加分类规则")) }
-                TextButton(onClick = onEdit) { Text(tr("编辑")) }
-                TextButton(onClick = onDelete) {
-                    Text(tr("删除"), color = MaterialTheme.colorScheme.error)
-                }
-            }
-        }
+        Text(
+            text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
+            maxLines = 1,
+        )
     }
 }
+
+/** 非默认审核状态才有文案；默认（未核实）返回 null，行内不显示。 */
+@Composable
+private fun transactionStatusLabel(transaction: TransactionEntity): Pair<String, Color>? {
+    val semantic = LocalQingSemanticColors.current
+    return when {
+        transaction.duplicateOfId != null ||
+            transaction.remoteReviewStatus == "possible_duplicate" ->
+            tr("待确认重复") to semantic.warningText
+        transaction.remoteReviewStatus == "excluded" ->
+            tr("不计入") to MaterialTheme.colorScheme.onSurfaceVariant
+        transaction.remoteReviewStatus == "refund" -> tr("退款") to semantic.income
+        transaction.remoteReviewStatus == "transfer" ->
+            tr("转账") to MaterialTheme.colorScheme.onSurfaceVariant
+        transaction.remoteReviewStatus == "confirmed" -> tr("已确认") to semantic.income
+        else -> null
+    }
+}
+
+/** 来源标注：[扫描] / [导入] 写在备注开头，列表里单独做成小标签。 */
+private fun transactionSourceTag(transaction: TransactionEntity): String? {
+    val match = SOURCE_TAG.find(transaction.note) ?: return null
+    return tr(match.value)
+}
+
+private val SOURCE_TAG = Regex("^\\[(扫描|导入)]")
 
 private fun transactionSourceLabel(source: String): String = when (source) {
     "ALIPAY" -> tr("支付宝")
