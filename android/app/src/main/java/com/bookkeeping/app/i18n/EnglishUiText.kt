@@ -779,6 +779,13 @@ internal object EnglishUiText {
         "金额不能为负数，请用支出/收入切换方向" to "Amount cannot be negative. Switch between expense and income instead.",
         "金额最多保留两位小数" to "Amount can have at most two decimal places",
 
+        // === 账单详情 · 同步胶囊与列表来源标注 ===
+        "已同步" to "Synced",
+        "待同步" to "Pending sync",
+        "未同步" to "Not synced",
+        "[扫描]" to "[Scanned]",
+        "[导入]" to "[Imported]",
+
         // === 账单详情 · 全字段编辑页 ===
         "记录信息" to "Record info",
         "账户（可选）" to "Account (optional)",
