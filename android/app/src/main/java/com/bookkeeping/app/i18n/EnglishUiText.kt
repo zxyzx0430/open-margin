@@ -231,9 +231,9 @@ internal object EnglishUiText {
         "收起向导" to "Hide setup",
         "开始连接 Windows" to "Connect to Windows",
         "① 电脑已安装 Docker Desktop，清衡服务已启动。" to "① Docker Desktop is installed and Open Margin is running on the PC.",
-        "② 电脑和手机已安装并登录同一 Tailscale 私有网络。" to "② PC and phone are signed into the same Tailscale network.",
-        "③ 已在电脑本机注册 Wallos 首位账户，并开启 API-only Serve。" to "③ Register the first Wallos user locally and enable API-only Serve.",
-        "④ 复制安装器显示的 HTTPS 地址及设备同步密钥。" to "④ Copy the HTTPS address and device sync key from the installer.",
+        "② 电脑已开启 Tailscale Funnel，手机不需要安装 Tailscale。" to "② Tailscale Funnel is enabled on the PC; the phone does not need Tailscale.",
+        "③ 手机用自己的网络或常用 VPN 即可访问 https://电脑名.网络名.ts.net/finance。" to "③ The phone can use its own network or usual VPN to reach https://device.tailnet.ts.net/finance.",
+        "④ 在电脑完成页点「扫码连接」，或手动填写显示的地址和设备同步密钥。" to "④ Tap \"Scan QR code\" on the PC completion page, or type the displayed URL and device key.",
         "电脑关机时仍可在手机离线记账，但暂时不能同步。" to "You can track expenses offline when the PC is off; sync resumes when it reconnects.",
         "下一步：连接服务器" to "Next: Connect",
         "Tailscale HTTPS 地址" to "Tailscale HTTPS address",
@@ -913,6 +913,42 @@ internal object EnglishUiText {
         "%d 分钟" to "%d min",
         "%d 天" to "%d days",
         "显示自动记账采集是否在运行" to "Shows whether automatic capture is running",
+
+        // === Windows 扫码配对（v1 Funnel 远程同步） ===
+        "扫码连接" to "Scan QR code",
+        "从相册选择二维码" to "Choose QR from gallery",
+        "对准电脑上的配对二维码" to "Point at the pairing QR on your PC",
+        "最快的方式：扫描电脑完成页上的配对二维码，会自动填入地址和密钥，再经只读验证后才允许启用。" to
+            "Fastest: scan the pairing QR on the PC completion page. It fills the URL and key, then the read-only check must pass before sync can be enabled.",
+        "已读取配对二维码，正在做只读验证…" to "Pairing QR read; running the read-only check…",
+        "未获得相机权限，无法扫码。可改用「从相册选择二维码」，或在系统设置中允许相机权限。" to
+            "Camera permission was denied. Use \"Choose QR from gallery\" or allow the camera in system settings.",
+        "所选图片中没有识别到二维码，请换一张清晰的二维码截图。" to
+            "No QR code was found in the selected image. Try a sharper QR screenshot.",
+        "所选图片无法读取（权限或格式问题），请重新选择。" to
+            "The selected image could not be read (permission or format). Choose it again.",
+        "手机已有成功同步记录，但这次配对的地址或账本身份与历史不同。为避免跨账本覆盖交易，已阻止配对；请先备份原账本并完成显式迁移。" to
+            "This phone already synced with a ledger, but this pairing points to a different URL or ledger. Pairing was blocked to avoid cross-ledger overwrites. Back up the original ledger and migrate explicitly.",
+        "二维码里的账本身份与服务器返回的不一致，已阻止连接。" to
+            "The ledger identity in the QR does not match the server response. Connection was blocked.",
+        "二维码里的账本身份与验证结果不一致，已阻止启用。" to
+            "The QR ledger identity does not match the verified server. Enabling was blocked.",
+        "检测到历史同步记录与本次配对不一致，已阻止启用；请先备份并完成显式迁移。" to
+            "Historical sync data does not match this pairing. Enabling was blocked; back up and migrate explicitly first.",
+        "二维码内容为空，请重新扫描。" to "The QR code is empty. Scan it again.",
+        "二维码内容过长，已拒绝。请扫描电脑完成页上的配对二维码。" to
+            "The QR payload is too large and was rejected. Scan the pairing QR on the PC completion page.",
+        "这不是清衡配对二维码（内容格式不正确）。" to
+            "This is not an Open Margin pairing QR (invalid content).",
+        "配对二维码版本不受支持，请把手机 App 更新到最新版本。" to
+            "This pairing QR version is not supported. Update the phone app.",
+        "这不是清衡的配对二维码。" to "This is not an Open Margin pairing QR.",
+        "二维码里的服务器地址无效：需要 https://设备名.网络名.ts.net/finance，且不能带端口、参数或用户名。" to
+            "The QR server URL is invalid. Expected https://device.tailnet.ts.net/finance with no port, query, or user info.",
+        "二维码里的设备密钥无效（至少 16 位，不能包含空白字符）。" to
+            "The QR device key is invalid (at least 16 characters, no whitespace).",
+        "二维码里的账本身份无效（至少 16 位）。" to
+            "The QR ledger identity is invalid (at least 16 characters).",
     )
 
     fun translate(chinese: String): String {

@@ -57,11 +57,7 @@ fun WindowsFirstConnectionWizard() {
             PairingFlowPolicy.PreProbe.MIGRATION_REQUIRED) {
             testResult = WindowsConnectionPolicy.Result.WRONG_LEDGER
             verifiedServer = ""
-            message = pairingText(
-                "手机已有成功同步记录，但这次配对的地址或账本身份与历史不同。为避免跨账本覆盖交易，已阻止配对；请先备份原账本并完成显式迁移。",
-                "This phone already synced with a ledger, but this pairing points to a different URL or ledger. " +
-                    "Pairing was blocked to avoid cross-ledger overwrites. Back up the original ledger and migrate explicitly.",
-            )
+            message = tr("手机已有成功同步记录，但这次配对的地址或账本身份与历史不同。为避免跨账本覆盖交易，已阻止配对；请先备份原账本并完成显式迁移。")
             return
         }
         val checkedToken = tokenValue.trim()
@@ -88,10 +84,7 @@ fun WindowsFirstConnectionWizard() {
                 verifiedServer = probe.second
                 message = if (qrServerId != null &&
                     decision == WindowsConnectionPolicy.Result.WRONG_LEDGER) {
-                    pairingText(
-                        "二维码里的账本身份与服务器返回的不一致，已阻止连接。",
-                        "The ledger identity in the QR does not match the server response. Connection was blocked.",
-                    )
+                    tr("二维码里的账本身份与服务器返回的不一致，已阻止连接。")
                 } else {
                     connectionExplanation(decision)
                 }
@@ -117,18 +110,14 @@ fun WindowsFirstConnectionWizard() {
                 when (step) {
                     0 -> {
                         Text(tr("① 电脑已安装 Docker Desktop，清衡服务已启动。"))
-                        Text(tr("② 电脑和手机已安装并登录同一 Tailscale 私有网络。"))
-                        Text(tr("③ 已在电脑本机注册 Wallos 首位账户，并开启 API-only Serve。"))
-                        Text(tr("④ 复制安装器显示的 HTTPS 地址及设备同步密钥。"))
+                        Text(tr("② 电脑已开启 Tailscale Funnel，手机不需要安装 Tailscale。"))
+                        Text(tr("③ 手机用自己的网络或常用 VPN 即可访问 https://电脑名.网络名.ts.net/finance。"))
+                        Text(tr("④ 在电脑完成页点「扫码连接」，或手动填写显示的地址和设备同步密钥。"))
                         Text(tr("电脑关机时仍可在手机离线记账，但暂时不能同步。"))
                         Button(onClick = { step = 1 }) { Text(tr("下一步：连接服务器")) }
                     }
                     1 -> {
-                        Text(pairingText(
-                            "最快的方式：扫描电脑完成页上的配对二维码，会自动填入地址和密钥，再经只读验证后才允许启用。",
-                            "Fastest: scan the pairing QR on the PC completion page. It fills the URL and key, " +
-                                "then the read-only probe must pass before sync can be enabled.",
-                        ))
+                        Text(tr("最快的方式：扫描电脑完成页上的配对二维码，会自动填入地址和密钥，再经只读验证后才允许启用。"))
                         QrPairingControls(
                             enabled = !testing,
                             onPayload = { payload, _ ->
@@ -138,23 +127,18 @@ fun WindowsFirstConnectionWizard() {
                                 testResult = null
                                 verifiedServer = ""
                                 confirmed = false
-                                message = pairingText(
-                                    "已读取配对二维码，正在做只读验证…",
-                                    "Pairing QR read; running the read-only check…",
-                                )
+                                message = tr("已读取配对二维码，正在做只读验证…")
                                 startProbe(payload.url, payload.token, payload.serverId)
                             },
                             onRejected = { reason -> message = pairingRejectMessage(reason) },
                             onFailure = { failure ->
                                 message = when (failure) {
-                                    QrScanFailure.CAMERA_DENIED -> pairingText(
-                                        "未获得相机权限，无法扫码。可改用「从相册选择二维码」，或在系统设置中允许相机权限。",
-                                        "Camera permission was denied. Use \"Choose QR from gallery\" or allow the camera in system settings.",
-                                    )
-                                    QrScanFailure.IMAGE_UNREADABLE -> pairingText(
-                                        "所选图片中没有识别到二维码，请换一张清晰的二维码截图。",
-                                        "No QR code was found in the selected image. Try a sharper QR screenshot.",
-                                    )
+                                    QrScanFailure.CAMERA_DENIED ->
+                                        tr("未获得相机权限，无法扫码。可改用「从相册选择二维码」，或在系统设置中允许相机权限。")
+                                    QrScanFailure.IMAGE_UNREADABLE ->
+                                        tr("所选图片中没有识别到二维码，请换一张清晰的二维码截图。")
+                                    QrScanFailure.IMAGE_ACCESS_DENIED ->
+                                        tr("所选图片无法读取（权限或格式问题），请重新选择。")
                                 }
                             },
                         )
@@ -216,21 +200,14 @@ fun WindowsFirstConnectionWizard() {
                                 // A scanned QR pins the ledger identity even if
                                 // prefs changed while this wizard was open.
                                 if (scannedServerId != null && scannedServerId != verifiedServer) {
-                                    message = pairingText(
-                                        "二维码里的账本身份与验证结果不一致，已阻止启用。",
-                                        "The QR ledger identity does not match the verified server. Enabling was blocked.",
-                                    )
+                                    message = tr("二维码里的账本身份与验证结果不一致，已阻止启用。")
                                     step = 1
                                     return@Button
                                 }
                                 if (PairingFlowPolicy.evaluatePreProbe(
                                         syncHistory(), url, scannedServerId
                                     ) != PairingFlowPolicy.PreProbe.ALLOWED) {
-                                    message = pairingText(
-                                        "检测到历史同步记录与本次配对不一致，已阻止启用；请先备份并完成显式迁移。",
-                                        "Historical sync data does not match this pairing. Enabling was blocked; " +
-                                            "back up and migrate explicitly first.",
-                                    )
+                                    message = tr("检测到历史同步记录与本次配对不一致，已阻止启用；请先备份并完成显式迁移。")
                                     step = 1
                                     return@Button
                                 }
@@ -263,38 +240,14 @@ private fun connectionExplanation(result: WindowsConnectionPolicy.Result): Strin
 }
 
 private fun pairingRejectMessage(reason: PairingRejectReason): String = when (reason) {
-    PairingRejectReason.EMPTY -> pairingText(
-        "二维码内容为空，请重新扫描。",
-        "The QR code is empty. Scan it again.",
-    )
-    PairingRejectReason.OVERSIZED -> pairingText(
-        "二维码内容过长，已拒绝。请扫描电脑完成页上的配对二维码。",
-        "The QR payload is too large and was rejected. Scan the pairing QR on the PC completion page.",
-    )
-    PairingRejectReason.MALFORMED -> pairingText(
-        "这不是清衡配对二维码（内容格式不正确）。",
-        "This is not an Open Margin pairing QR (invalid content).",
-    )
-    PairingRejectReason.UNSUPPORTED_VERSION -> pairingText(
-        "配对二维码版本不受支持，请把手机 App 更新到最新版本。",
-        "This pairing QR version is not supported. Update the phone app.",
-    )
-    PairingRejectReason.WRONG_KIND -> pairingText(
-        "这不是清衡的配对二维码。",
-        "This is not an Open Margin pairing QR.",
-    )
-    PairingRejectReason.INVALID_URL -> pairingText(
-        "二维码里的服务器地址无效：需要 https://设备名.网络名.ts.net/finance，且不能带端口、参数或用户名。",
-        "The QR server URL is invalid. Expected https://device.tailnet.ts.net/finance with no port, query, or user info.",
-    )
-    PairingRejectReason.INVALID_TOKEN -> pairingText(
-        "二维码里的设备密钥无效（至少 16 位，不能包含空白字符）。",
-        "The QR device key is invalid (at least 16 characters, no whitespace).",
-    )
-    PairingRejectReason.INVALID_SERVER_ID -> pairingText(
-        "二维码里的账本身份无效（至少 16 位）。",
-        "The QR ledger identity is invalid (at least 16 characters).",
-    )
+    PairingRejectReason.EMPTY -> tr("二维码内容为空，请重新扫描。")
+    PairingRejectReason.OVERSIZED -> tr("二维码内容过长，已拒绝。请扫描电脑完成页上的配对二维码。")
+    PairingRejectReason.MALFORMED -> tr("这不是清衡配对二维码（内容格式不正确）。")
+    PairingRejectReason.UNSUPPORTED_VERSION -> tr("配对二维码版本不受支持，请把手机 App 更新到最新版本。")
+    PairingRejectReason.WRONG_KIND -> tr("这不是清衡的配对二维码。")
+    PairingRejectReason.INVALID_URL -> tr("二维码里的服务器地址无效：需要 https://设备名.网络名.ts.net/finance，且不能带端口、参数或用户名。")
+    PairingRejectReason.INVALID_TOKEN -> tr("二维码里的设备密钥无效（至少 16 位，不能包含空白字符）。")
+    PairingRejectReason.INVALID_SERVER_ID -> tr("二维码里的账本身份无效（至少 16 位）。")
 }
 
 private fun probeWindowsServer(
