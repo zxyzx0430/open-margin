@@ -7,8 +7,12 @@
 - 显示当前安装的 `versionName`、整数 `versionCode`（构建号）和发布 tag。
 - 点击 **检查更新**，从官方 GitHub Releases 查询最新已发布的**已签名 APK**。
 - 可选择是否包含 RC 测试版；测试版本默认开启，正式版本默认关闭。
-- 有更新时显示版本 tag 与“查看 GitHub 发布页”；也可以直接浏览全部发布版本。
-- 不会自动下载安装，不修改应用权限、Room 数据、服务器身份或同步设置。
+- 有更新时弹出「发现新版本」对话框：版本号、APK 大小、发布日期、最多 3 行更新说明，按钮为「取消」/「下载」。
+- 点「下载」后由系统 DownloadManager 下载到 app 专属外部 Download 目录（无需存储权限），按钮显示「下载中 42%」，通知栏同时显示进度；完成前不能误关对话框。
+- 下载完成后校验文件大小（以及 GitHub 提供的 SHA-256），再用 FileProvider 以 `content://` 交给系统安装器（`ACTION_VIEW` + `application/vnd.android.package-archive`）。
+- Android 8+ 未授予「安装未知应用」时，先跳转本应用的 `ACTION_MANAGE_UNKNOWN_APP_SOURCES` 页面，返回后再点「下载 / 安装」，不会静默失败。
+- 下载失败或断网时对话框显示「下载失败，请重试」，保留「重试」与「取消」；不影响 App 其它功能。
+- 只接受 `https://github.com/zxyzx0430/open-margin/releases/download/...` 的资产地址，不下载其它域名；不修改 Room 数据、服务器身份或同步设置。
 
 ## 版本规则
 

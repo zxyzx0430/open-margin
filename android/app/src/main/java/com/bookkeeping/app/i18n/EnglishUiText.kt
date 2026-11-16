@@ -24,10 +24,33 @@ internal object EnglishUiText {
         "检查更新" to "Check for updates",
         "正在检查更新…" to "Checking for updates…",
         "已是最新版本" to "You're up to date",
-        "发现新版本：" to "New version: ",
         "查看 GitHub 发布页" to "View GitHub release",
         "检查更新失败，请检查网络或稍后重试" to "Unable to check for updates. Check your connection and try again.",
-        "检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。" to "Checks public GitHub Releases without uploading financial data. Install updates manually.",
+        // === 应用内更新：检查 → 下载 → 拉起系统安装器 ===
+        "发现新版本" to "New version available",
+        "版本" to "Version",
+        "APK 大小" to "APK size",
+        "发布日期" to "Release date",
+        "下载" to "Download",
+        "下载中" to "Downloading",
+        "下载中…" to "Downloading…",
+        "正在校验…" to "Verifying…",
+        "安装" to "Install",
+        "下载失败，请重试" to "Download failed. Try again.",
+        "下载文件校验失败，已删除，请重试" to
+            "The downloaded file failed verification and was deleted. Try again.",
+        "更新地址不受信任，已取消下载" to "The update address is not trusted; download cancelled.",
+        "没有可下载的正式版 APK" to "No stable APK is available for download.",
+        "请允许「安装未知应用」，返回后再点「下载」" to
+            "Allow \"install unknown apps\", then come back and tap Download again.",
+        "请允许「安装未知应用」，返回后点「安装」" to
+            "Allow \"install unknown apps\", then come back and tap Install.",
+        "无法打开安装权限设置，请在系统设置中允许本应用安装未知应用" to
+            "Could not open the install permission screen. Allow this app to install unknown apps in system settings.",
+        "没有找到系统安装程序，请用文件管理器打开下载的 APK" to
+            "No system installer found. Open the downloaded APK from a file manager.",
+        "没有找到已下载的安装包，请重新下载" to
+            "The downloaded installer is missing. Download it again.",
         "账单" to "Records",
         "统计" to "Statistics",
         "预算" to "Budget",
