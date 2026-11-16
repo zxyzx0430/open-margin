@@ -189,9 +189,28 @@ class SyncStatusPolicyTest {
     fun shortenedSettingsRowCopyHasEnglishText() {
         // 设置页标题/副标题都只允许一行，长句已缩短；缩短后的文案同样要双语。
         val labels = listOf(
-            "未配置服务器", "微信 / 支付宝 CSV", "修改分类即记住", "通知栏显示连接状态",
-            "入账后弹出提醒", "运行时长与最近入账", "自启动与省电策略", "常驻状态与提醒",
+            "未配置服务器", "微信 / 支付宝 CSV", "修改分类即记住", "通知栏显示采集状态",
+            "入账后弹出提醒", "连接状态与通知排查", "自启动与省电策略", "常驻状态与提醒",
             "抓取支付通知", "识别支付页面", "转账与红包入账", "可选，银行短信",
+        )
+        labels.forEach { label ->
+            assertTrue("Missing English UI label: $label", EnglishUiText.hasTranslation(label))
+        }
+    }
+
+    @Test
+    fun keepAliveDialogCopyHasEnglishText() {
+        // 常驻运行状态弹窗重设计后的全部文案；英文界面不能漏出中文。
+        val labels = listOf(
+            "常驻运行状态", "常驻通知", "在通知栏显示采集状态", "已连接", "未连接", "正在确认",
+            "去系统设置检查通知权限",
+            "关闭后通知栏不再显示采集状态，采集本身不受影响。",
+            "通知栏没有显示？",
+            "允许「常驻 / 持续通知」",
+            "小米 / Redmi / POCO：应用信息 → 通知 → 永久通知",
+            "开启自启动，电池策略设为「无限制」",
+            "打开系统通知设置", "%d 分钟", "%d 小时 %02d 分钟", "%d 天",
+            "显示自动记账采集是否在运行",
         )
         labels.forEach { label ->
             assertTrue("Missing English UI label: $label", EnglishUiText.hasTranslation(label))

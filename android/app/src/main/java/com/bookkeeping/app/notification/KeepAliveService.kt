@@ -170,7 +170,7 @@ class KeepAliveService : Service() {
             ).apply {
                 description = AppLanguage.tr(
                     context,
-                    "显示自动记账是否连接、运行时长和最近一次成功入账",
+                    "显示自动记账采集是否在运行",
                 )
                 setShowBadge(false)
             }
