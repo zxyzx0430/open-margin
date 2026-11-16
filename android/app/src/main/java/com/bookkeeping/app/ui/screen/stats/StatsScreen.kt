@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,7 +65,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -103,11 +108,12 @@ import kotlin.math.abs
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatsScreen(
-    onOpenLedger: () -> Unit = {},
+    onOpenLedger: (StatsLedgerDrilldown) -> Unit = {},
     viewModel: StatsViewModel = hiltViewModel(),
 ) {
     val stats by viewModel.categoryStats.collectAsState()
     val totalCents by viewModel.totalCents.collectAsState()
+    val balanceCents by viewModel.balanceCents.collectAsState()
     val viewingType by viewModel.viewingType.collectAsState()
     val dailyTotals by viewModel.dailyTotals.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
@@ -116,10 +122,22 @@ fun StatsScreen(
     val period by viewModel.period.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val monthlyTotals by viewModel.monthlyTotals.collectAsState()
-    val monthTransactions by viewModel.monthTransactions.collectAsState()
+    val periodTransactions by viewModel.periodTransactions.collectAsState()
 
     var showMonthPicker by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<TransactionCategory?>(null) }
+
+    fun ledgerDrilldown(
+        category: TransactionCategory? = null,
+        day: Int? = null,
+    ) = StatsLedgerDrilldown(
+        period = period,
+        year = selectedYear,
+        month = BudgetMonth.parse(selectedMonth)?.month ?: 1,
+        day = day,
+        category = category,
+        type = viewingType,
+    )
 
     Scaffold(
         containerColor = QingBackground,
@@ -177,6 +195,7 @@ fun StatsScreen(
                 StatsSummaryCard(
                     totalCents = totalCents,
                     dailyAverageCents = dailyAverage,
+                    balanceCents = balanceCents,
                     comparison = comparison,
                     type = viewingType,
                     period = period,
@@ -188,7 +207,11 @@ fun StatsScreen(
 
             if (stats.isEmpty()) {
                 item(key = "empty") {
-                    EmptyStatsCard(type = viewingType, period = period, onOpenLedger = onOpenLedger)
+                    EmptyStatsCard(
+                        type = viewingType,
+                        period = period,
+                        onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
+                    )
                 }
             } else {
                 item(key = "donut") {
@@ -205,6 +228,9 @@ fun StatsScreen(
                             dailyTotals = dailyTotals,
                             dailyAverageCents = dailyAverage,
                             monthKey = selectedMonth,
+                            onOpenLedger = { day ->
+                                onOpenLedger(ledgerDrilldown(day = day))
+                            },
                         )
                     }
                     StatsPeriod.YEAR -> item(key = "monthly_trend") {
@@ -241,9 +267,12 @@ fun StatsScreen(
         CategoryDetailDialog(
             category = category,
             month = selectedMonth,
+            period = period,
+            year = selectedYear,
             type = viewingType,
-            transactions = monthTransactions,
+            transactions = periodTransactions,
             onDismiss = { selectedCategory = null },
+            onOpenLedger = { onOpenLedger(ledgerDrilldown(category = category)) },
         )
     }
 }
@@ -375,6 +404,7 @@ private fun PeriodPill(
 private fun StatsSummaryCard(
     totalCents: Long,
     dailyAverageCents: Long,
+    balanceCents: Long,
     comparison: MonthComparison,
     type: TransactionType,
     period: StatsPeriod,
@@ -429,6 +459,22 @@ private fun StatsSummaryCard(
                     color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = tr("结余"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = mutedOnContainer,
+                )
+                Text(
+                    text = (if (balanceCents >= 0) "+" else "−") +
+                        formatCny(abs(balanceCents)),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (balanceCents >= 0) QingIncome else QingExpense,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(modifier = Modifier.weight(1f)) {
@@ -597,7 +643,11 @@ private fun DailyTrendCard(
     dailyTotals: List<DailyTotal>,
     dailyAverageCents: Long,
     monthKey: String,
+    onOpenLedger: (Int) -> Unit,
 ) {
+    var selectedDay by remember(dailyTotals, monthKey) {
+        mutableIntStateOf(dailyTotals.maxByOrNull { it.totalCents }?.day ?: 1)
+    }
     val shape = RoundedCornerShape(20.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -629,12 +679,51 @@ private fun DailyTrendCard(
                         .padding(horizontal = 9.dp, vertical = 5.dp),
                 )
             }
-            DailyBarChart(
-                dailyTotals = dailyTotals,
-                monthKey = monthKey,
-                dayText = { day -> dayLabel(monthKey, day) },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(190.dp)
+                    .pointerInput(dailyTotals, monthKey) {
+                        awaitEachGesture {
+                            awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial,
+                            )
+                            var tappedPosition: Offset? = null
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull() ?: break
+                                if (!change.pressed) {
+                                    if (!change.isConsumed) tappedPosition = change.position
+                                    break
+                                }
+                            }
+                            val up = tappedPosition ?: return@awaitEachGesture
+                            val leftPad = 34.dp.toPx()
+                            val rightPad = 4.dp.toPx()
+                            val chartWidth = size.width.toFloat() - leftPad - rightPad
+                            if (chartWidth <= 0f || dailyTotals.isEmpty()) return@awaitEachGesture
+                            if (up.x !in leftPad..(leftPad + chartWidth)) return@awaitEachGesture
+                            val slot = chartWidth / dailyTotals.size
+                            val index = ((up.x - leftPad) / slot).toInt()
+                                .coerceIn(0, dailyTotals.lastIndex)
+                            selectedDay = dailyTotals[index].day
+                        }
+                    },
+            ) {
+                DailyBarChart(
+                    dailyTotals = dailyTotals,
+                    monthKey = monthKey,
+                    dayText = { day -> dayLabel(monthKey, day) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            TextButton(
+                onClick = { onOpenLedger(selectedDay) },
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(tr("查看") + " " + dayLabel(monthKey, selectedDay) + " " + tr("账单"))
+            }
         }
     }
 }
@@ -882,9 +971,12 @@ private fun EmptyStatsCard(
 private fun CategoryDetailDialog(
     category: TransactionCategory,
     month: String,
+    period: StatsPeriod,
+    year: Int,
     type: TransactionType,
     transactions: List<TransactionEntity>,
     onDismiss: () -> Unit,
+    onOpenLedger: () -> Unit,
 ) {
     val rows = remember(transactions, category, type) {
         transactions
@@ -901,7 +993,11 @@ private fun CategoryDetailDialog(
             .sortedByDescending { it.timestamp }
     }
     val total = rows.sumOf { it.amountCents }
-    val monthText = BudgetMonth.parse(month)?.let { "${it.year}年${it.month}月" } ?: month
+    val monthText = if (period == StatsPeriod.YEAR) {
+        "$year${tr("年")}"
+    } else {
+        BudgetMonth.parse(month)?.let { "${it.year}${tr("年")}${it.month}${tr("月")}" } ?: month
+    }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -965,6 +1061,14 @@ private fun CategoryDetailDialog(
                             color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
                         )
                     }
+                }
+                Button(
+                    onClick = onOpenLedger,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                ) {
+                    Text(tr("在账单中查看"))
                 }
                 if (rows.isEmpty()) {
                     Box(
