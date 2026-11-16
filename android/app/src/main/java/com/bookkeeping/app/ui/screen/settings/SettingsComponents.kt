@@ -61,7 +61,7 @@ fun SettingsRowDivider() {
 }
 
 @Composable
-private fun SettingsIconBubble(icon: ImageVector, tone: StatusTone) {
+fun SettingsIconBubble(icon: ImageVector, tone: StatusTone) {
     val (background, foreground) = when (tone) {
         StatusTone.POSITIVE -> QingPrimaryContainer to MaterialTheme.colorScheme.primary
         StatusTone.WARNING -> QingWarningContainer to QingWarning

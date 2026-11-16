@@ -5,42 +5,34 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,6 +50,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,10 +71,10 @@ import com.bookkeeping.app.notification.CaptureConnectionState
 import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.notification.NotificationListenerHelper
-import com.bookkeeping.app.notification.SmsPermissionHelper
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import com.bookkeeping.app.ui.components.AutomationSetupPrompt
-import com.bookkeeping.app.ui.components.AutomationStatus
+import com.bookkeeping.app.ui.components.CategoryFilterSheet
+import com.bookkeeping.app.ui.components.CategoryFilterTotal
 import com.bookkeeping.app.ui.components.DayHeader
 import com.bookkeeping.app.ui.components.LedgerEmptyState
 import com.bookkeeping.app.ui.components.LedgerFilterChip
@@ -96,14 +89,9 @@ import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
-import com.bookkeeping.app.ui.theme.QingBackground
-import com.bookkeeping.app.ui.theme.QingErrorContainer
-import com.bookkeeping.app.ui.theme.QingOutline
-import com.bookkeeping.app.ui.theme.QingPrimary
-import com.bookkeeping.app.ui.theme.QingSurface
-import com.bookkeeping.app.ui.theme.QingWarning
-import com.bookkeeping.app.ui.theme.QingWarningContainer
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -116,14 +104,8 @@ private data class LedgerStatus(
     val syncText: String,
     val syncTone: StatusTone,
     val syncIcon: ImageVector,
-    val lastSyncText: String,
-    val missingSetup: List<String>,
 )
 
-/** The filter chips behave as one single-select group. */
-private enum class LedgerFilterSelection { ALL, MONTH, EXPENSE, INCOME, CATEGORY }
-
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransactionListScreen(
     viewModel: TransactionViewModel = hiltViewModel(),
@@ -133,25 +115,28 @@ fun TransactionListScreen(
     onSetupAutomation: () -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
+    val ledgerLoaded by viewModel.ledgerLoaded.collectAsState()
     val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
     val captureReview by captureReviewViewModel.state.collectAsState()
-    val monthlyExpense by viewModel.monthlyExpenseCents.collectAsState()
-    val monthlyIncome by viewModel.monthlyIncomeCents.collectAsState()
+    val periodExpense by viewModel.periodExpenseCents.collectAsState()
+    val periodIncome by viewModel.periodIncomeCents.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val typeFilter by viewModel.typeFilter.collectAsState()
     val categoryFilter by viewModel.categoryFilter.collectAsState()
     val timeFilter by viewModel.timeFilter.collectAsState()
+    val periodTransactions by viewModel.periodTransactions.collectAsState()
     val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showBillImport by remember { mutableStateOf(false) }
     var showCaptureReview by remember { mutableStateOf(false) }
+    var showCategorySheet by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var editing by remember { mutableStateOf<TransactionEntity?>(null) }
     var ruleTarget by remember { mutableStateOf<TransactionEntity?>(null) }
-    var menuExpanded by remember { mutableStateOf(false) }
-    var categoryMenuExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(openBillImport) {
         if (openBillImport) {
@@ -165,25 +150,19 @@ fun TransactionListScreen(
     var notificationListenerEnabled by remember {
         mutableStateOf(NotificationListenerHelper.isEnabled(context))
     }
-    var smsPermissionGranted by remember {
-        mutableStateOf(SmsPermissionHelper.isGranted(context))
+    var pageRecognitionEnabled by remember {
+        mutableStateOf(isPageRecognitionEnabled(context))
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 notificationListenerEnabled = NotificationListenerHelper.isEnabled(context)
-                smsPermissionGranted = SmsPermissionHelper.isGranted(context)
+                pageRecognitionEnabled = isPageRecognitionEnabled(context)
                 statusRefresh++
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    val smsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        smsPermissionGranted = results.values.all { it }
     }
 
     val status by produceState(
@@ -198,26 +177,52 @@ fun TransactionListScreen(
         }
     }
 
-    val userFilterActive = searchQuery.isNotBlank() ||
-        typeFilter != null ||
-        categoryFilter != null
-    val selectedFilter = when {
-        categoryFilter != null -> LedgerFilterSelection.CATEGORY
-        typeFilter == TransactionType.EXPENSE -> LedgerFilterSelection.EXPENSE
-        typeFilter == TransactionType.INCOME -> LedgerFilterSelection.INCOME
-        timeFilter == LedgerTimeFilter.THIS_MONTH -> LedgerFilterSelection.MONTH
-        else -> LedgerFilterSelection.ALL
+    val noChips = searchQuery.isBlank() &&
+        typeFilter == null &&
+        categoryFilter == null
+    val filterActive = !noChips
+    val categoryTotals = remember(periodTransactions, typeFilter) {
+        periodTransactions
+            .filter { transaction ->
+                transaction.isLedgerTotalsCandidate() &&
+                    (typeFilter == null || transaction.type == typeFilter!!.name) &&
+                    (typeFilter != TransactionType.EXPENSE || transaction.category != "TRANSFER")
+            }
+            .groupBy {
+                runCatching { TransactionCategory.valueOf(it.category) }
+                    .getOrDefault(TransactionCategory.OTHER)
+            }
+            .mapValues { (_, list) ->
+                CategoryFilterTotal(
+                    count = list.size,
+                    amountCents = list.sumOf { it.amountCents },
+                )
+            }
     }
+    val periodLabel = tr("全部账单")
+    val duplicatesIndex = 5 +
+        (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
+        (if (captureReview.pending.isNotEmpty()) 1 else 0)
 
     Scaffold(
-        containerColor = QingBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) {
+                Icon(Icons.Default.Add, contentDescription = tr("新建账单"))
+            }
+        },
     ) { innerPadding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "header") {
@@ -232,106 +237,97 @@ fun TransactionListScreen(
                         color = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.weight(1f),
                     )
-                    IconButton(onClick = { showAddDialog = true }) {
+                    IconButton(onClick = {
+                        when {
+                            duplicateCandidates.isNotEmpty() -> {
+                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                            }
+                            captureReview.pending.isNotEmpty() -> {
+                                captureReviewViewModel.refresh()
+                                showCaptureReview = true
+                            }
+                            else -> openAppNotificationSettings(context)
+                        }
+                    }) {
                         Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = tr("新建账单"),
-                            tint = MaterialTheme.colorScheme.primary,
+                            imageVector = Icons.Outlined.NotificationsNone,
+                            contentDescription = if (
+                                duplicateCandidates.isNotEmpty() ||
+                                captureReview.pending.isNotEmpty()
+                            ) tr("待确认提醒") else tr("通知设置"),
+                            tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
-                    // Anchor the menu to the overflow button so it opens from
-                    // the right edge instead of the row's left edge.
-                    Box {
-                        IconButton(onClick = { menuExpanded = true }) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = tr("更多"),
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(tr("打开系统通知设置")) },
-                                onClick = {
-                                    menuExpanded = false
-                                    openAppNotificationSettings(context)
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(tr("导入账单")) },
-                                onClick = {
-                                    menuExpanded = false
-                                    showBillImport = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        tr("扫描结果") +
-                                            if (captureReview.pending.isNotEmpty()) {
-                                                "（${captureReview.pending.size}）"
-                                            } else {
-                                                ""
-                                            },
-                                    )
-                                },
-                                onClick = {
-                                    menuExpanded = false
-                                    captureReviewViewModel.refresh()
-                                    showCaptureReview = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(tr("清空筛选")) },
-                                onClick = {
-                                    menuExpanded = false
-                                    viewModel.clearFilters()
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(tr("刷新状态")) },
-                                onClick = {
-                                    menuExpanded = false
-                                    statusRefresh++
-                                },
-                            )
-                        }
+                    IconButton(onClick = { showBillImport = true }) {
+                        Icon(
+                            imageVector = Icons.Outlined.FileDownload,
+                            contentDescription = tr("导入账单"),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
-                }
-            }
-
-            if (status.missingSetup.isNotEmpty()) {
-                item(key = "setup") {
-                    AutomationSetupPrompt(
-                        missingNames = status.missingSetup,
-                        onStart = onSetupAutomation,
-                    )
                 }
             }
 
             item(key = "status") {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    StatusChip(
-                        text = status.captureText,
-                        tone = status.captureTone,
-                        icon = status.captureIcon,
-                    )
+                    Box(
+                        modifier = Modifier.clickable {
+                            if (!notificationListenerEnabled) {
+                                NotificationListenerHelper.openSettings(context)
+                            } else {
+                                statusRefresh++
+                            }
+                        },
+                    ) {
+                        StatusChip(
+                            text = status.captureText,
+                            tone = status.captureTone,
+                            icon = status.captureIcon,
+                        )
+                    }
                     StatusChip(
                         text = status.syncText,
                         tone = status.syncTone,
                         icon = status.syncIcon,
                     )
-                    StatusChip(
-                        text = status.lastSyncText,
-                        tone = StatusTone.NEUTRAL,
-                        icon = Icons.Outlined.Sync,
+                    if (duplicateCandidates.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier.clickable {
+                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                            },
+                        ) {
+                            StatusChip(
+                                text = tr("待确认重复 ") + duplicateCandidates.size,
+                                tone = StatusTone.WARNING,
+                                icon = Icons.Outlined.ErrorOutline,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (!notificationListenerEnabled || !pageRecognitionEnabled) {
+                item(key = "notification_banner") {
+                    PermissionBanner(
+                        title = tr("自动记账设置未完成"),
+                        body = tr("缺少通知使用权或页面识别；点击补全后，再到设置页做一次检查。"),
+                        onClick = {
+                            if (!notificationListenerEnabled) {
+                                NotificationListenerHelper.openSettings(context)
+                            } else {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+                                    )
+                                }
+                            }
+                        },
+                        error = true,
                     )
                 }
             }
@@ -348,87 +344,73 @@ fun TransactionListScreen(
                 }
             }
 
+            item(key = "period") {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = periodLabel,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = tr("全部时间的支出与收入"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            item(key = "summary") {
+                MonthlySummaryCard(
+                    expenseCents = periodExpense,
+                    incomeCents = periodIncome,
+                )
+            }
+
+            item(key = "search") {
+                LedgerSearchBar(
+                    query = searchQuery,
+                    onQueryChange = viewModel::setSearchQuery,
+                )
+            }
+
             item(key = "filters") {
                 LedgerFilterRow(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                 ) {
                     LedgerFilterChip(
-                        label = tr("全部"),
-                        selected = selectedFilter == LedgerFilterSelection.ALL,
-                        onClick = viewModel::showAll,
-                    )
-                    LedgerFilterChip(
-                        label = tr("本月"),
-                        selected = selectedFilter == LedgerFilterSelection.MONTH,
-                        onClick = { viewModel.selectTimeFilterOnly(LedgerTimeFilter.THIS_MONTH) },
+                        label = categoryFilter?.let { tr(it.displayName) } ?: tr("分类"),
+                        selected = categoryFilter != null,
+                        onClick = { showCategorySheet = true },
                     )
                     LedgerFilterChip(
                         label = tr("支出"),
-                        selected = selectedFilter == LedgerFilterSelection.EXPENSE,
-                        onClick = { viewModel.selectTypeFilterOnly(TransactionType.EXPENSE) },
+                        selected = typeFilter == TransactionType.EXPENSE,
+                        onClick = {
+                            viewModel.setTypeFilter(
+                                if (typeFilter == TransactionType.EXPENSE) null
+                                else TransactionType.EXPENSE
+                            )
+                        },
                     )
                     LedgerFilterChip(
                         label = tr("收入"),
-                        selected = selectedFilter == LedgerFilterSelection.INCOME,
-                        onClick = { viewModel.selectTypeFilterOnly(TransactionType.INCOME) },
-                    )
-                    Box {
-                        LedgerFilterChip(
-                            label = categoryFilter?.let { tr(it.displayName) } ?: tr("分类"),
-                            selected = selectedFilter == LedgerFilterSelection.CATEGORY,
-                            onClick = { categoryMenuExpanded = true },
-                        )
-                        DropdownMenu(
-                            expanded = categoryMenuExpanded,
-                            onDismissRequest = { categoryMenuExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(tr("全部分类")) },
-                                onClick = {
-                                    categoryMenuExpanded = false
-                                    viewModel.setCategoryFilter(null)
-                                },
+                        selected = typeFilter == TransactionType.INCOME,
+                        onClick = {
+                            viewModel.setTypeFilter(
+                                if (typeFilter == TransactionType.INCOME) null
+                                else TransactionType.INCOME
                             )
-                            TransactionCategory.entries.forEach { category ->
-                                DropdownMenuItem(
-                                    text = { Text(tr(category.displayName)) },
-                                    onClick = {
-                                        categoryMenuExpanded = false
-                                        viewModel.selectCategoryFilterOnly(category)
-                                    },
-                                )
-                            }
-                        }
+                        },
+                    )
+                    if (filterActive) {
+                        LedgerFilterChip(
+                            label = tr("清空"),
+                            selected = false,
+                            onClick = viewModel::clearFilters,
+                        )
                     }
-                }
-            }
-
-            if (transactions.isNotEmpty()) {
-                item(key = "summary") {
-                    MonthlySummaryCard(
-                        expenseCents = monthlyExpense,
-                        incomeCents = monthlyIncome,
-                    )
-                }
-            }
-
-            if (transactions.isNotEmpty() || userFilterActive) {
-                item(key = "search") {
-                    LedgerSearchBar(
-                        query = searchQuery,
-                        onQueryChange = viewModel::setSearchQuery,
-                    )
-                }
-            }
-
-            if (transactions.isEmpty()) {
-                item(key = "empty") {
-                    LedgerEmptyState(
-                        filterActive = userFilterActive,
-                        hasAnyTransactions = hasAnyTransactions,
-                        onClearFilters = viewModel::showAll,
-                        onShowAll = viewModel::showAll,
-                    )
                 }
             }
 
@@ -442,37 +424,54 @@ fun TransactionListScreen(
                 }
             }
 
-            if (transactions.isNotEmpty()) {
+            if (!ledgerLoaded) {
+                item(key = "loading") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+            } else if (transactions.isEmpty()) {
+                item(key = "empty") {
+                    LedgerEmptyState(
+                        filterActive = filterActive,
+                        hasAnyTransactions = hasAnyTransactions,
+                        onClearFilters = viewModel::clearFilters,
+                        onShowAll = viewModel::showAll,
+                    )
+                }
+            } else {
                 val groups = transactions.groupBy { dayKey(it.timestamp) }
                 items(groups.entries.toList(), key = { it.key }) { (dayKey, dayItems) ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        val visible = dayItems.filter {
+                        val valid = dayItems.filter {
                             it.currency == "CNY" &&
                                 it.duplicateOfId == null &&
                                 it.remoteReviewStatus !in setOf(
                                     "excluded",
+                                    "transfer",
                                     "refund",
                                     "possible_duplicate",
                                 )
                         }
-                        val counted = visible.filter {
-                            it.type == "INCOME" ||
-                                (it.type == "EXPENSE" && it.category != "TRANSFER")
-                        }
-                        val expense = visible
+                        val expense = valid
                             .filter { it.type == "EXPENSE" && it.category != "TRANSFER" }
                             .sumOf { it.amountCents }
-                        val income = visible
+                        val income = valid
                             .filter { it.type == "INCOME" }
                             .sumOf { it.amountCents }
-                        val foreignOnly = visible.isEmpty() && dayItems.any { it.currency != "CNY" }
+                        val foreignOnly = valid.isEmpty() && dayItems.any { it.currency != "CNY" }
                         DayHeader(
                             label = dayLabel(dayKey),
-                            count = counted.size,
+                            count = valid.size,
                             expenseCents = expense,
                             incomeCents = income,
                             hasForeignOnly = foreignOnly,
-                            excludedCount = dayItems.size - counted.size,
+                            excludedCount = dayItems.size - valid.size,
                         )
                         DayCard(
                             items = dayItems,
@@ -484,7 +483,6 @@ fun TransactionListScreen(
                     }
                 }
             }
-
         }
     }
 
@@ -515,26 +513,17 @@ fun TransactionListScreen(
         AddTransactionDialog(
             initial = entry,
             onDismiss = { editing = null },
-            onConfirm = { amount, type, category, merchant, note, timestamp ->
+            onConfirm = { amount, type, category, merchant, note, timestampMs ->
                 viewModel.updateTransaction(
-                    entry, amount, type, category, merchant, note, timestamp
+                    entry,
+                    amount,
+                    type,
+                    category,
+                    merchant,
+                    note,
+                    timestampMs,
                 )
                 editing = null
-            },
-        )
-    }
-
-    ruleTarget?.let { entry ->
-        MerchantRuleDialog(
-            merchant = entry.merchant,
-            initialCategory = runCatching {
-                TransactionCategory.valueOf(entry.category)
-            }.getOrNull(),
-            onDismiss = { ruleTarget = null },
-            onSave = { merchant, category ->
-                viewModel.saveMerchantRule(merchant, category)
-                viewModel.updateCategory(entry, category)
-                ruleTarget = null
             },
         )
     }
@@ -553,10 +542,43 @@ fun TransactionListScreen(
     if (showAddDialog) {
         AddTransactionDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { amount, type, category, merchant, note, timestamp ->
-                viewModel.addTransaction(amount, type, category, merchant, note, timestamp)
+            onConfirm = { amount, type, category, merchant, note, timestampMs ->
+                viewModel.addTransaction(
+                    amount,
+                    type,
+                    category,
+                    merchant,
+                    note,
+                    timestampMs,
+                )
                 showAddDialog = false
             },
+        )
+    }
+
+    if (showCategorySheet) {
+        CategoryFilterSheet(
+            selected = categoryFilter,
+            totals = categoryTotals,
+            onSelect = { category ->
+                viewModel.setCategoryFilter(category)
+                showCategorySheet = false
+            },
+            onDismiss = { showCategorySheet = false },
+        )
+    }
+
+    ruleTarget?.let { entry ->
+        MerchantRuleDialog(
+            merchant = entry.merchant,
+            onDismiss = { ruleTarget = null },
+            onSave = { merchant, category ->
+                viewModel.saveMerchantRule(merchant, category)
+                ruleTarget = null
+            },
+            initialCategory = runCatching {
+                TransactionCategory.valueOf(entry.category)
+            }.getOrNull(),
         )
     }
 }
@@ -571,9 +593,8 @@ private fun DayCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
@@ -589,7 +610,7 @@ private fun DayCard(
                 if (index != items.lastIndex) {
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 4.dp),
-                        color = QingOutline,
+                        color = MaterialTheme.colorScheme.outlineVariant,
                     )
                 }
             }
@@ -603,10 +624,11 @@ private fun DuplicateReviewCard(
     onKeepBoth: (TransactionEntity) -> Unit,
     onDeleteNew: (TransactionEntity) -> Unit,
 ) {
+    val semantic = LocalQingSemanticColors.current
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = QingWarningContainer),
+        colors = CardDefaults.cardColors(containerColor = semantic.warningContainer),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -616,7 +638,7 @@ private fun DuplicateReviewCard(
                 text = tr("待确认重复") + "（" + candidates.size + "）",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = QingWarning,
+                color = semantic.warningText,
             )
             Text(
                 text = tr("这些记录金额和时间相近，但没有足够证据自动合并。请确认每笔是否真实；确认前不计入本机统计。"),
@@ -672,39 +694,20 @@ private fun transactionSummary(row: TransactionEntity): String {
 }
 
 @Composable
-private fun NotificationPermissionBanner(onClick: () -> Unit) {
-    PermissionBanner(
-        title = tr("未开启通知监听"),
-        body = tr("点击此处开启「通知使用权」，App 才能自动抓取支付宝 / 微信付款记录"),
-        onClick = onClick,
-        error = true,
-    )
-}
-
-@Composable
-private fun SmsPermissionBanner(onClick: () -> Unit) {
-    PermissionBanner(
-        title = tr("未开启短信权限"),
-        body = tr("可选：授予短信权限后，App 能补充抓取银行交易短信"),
-        onClick = onClick,
-        error = false,
-    )
-}
-
-@Composable
 private fun PermissionBanner(
     title: String,
     body: String,
     onClick: () -> Unit,
     error: Boolean,
 ) {
+    val semantic = LocalQingSemanticColors.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (error) QingErrorContainer else QingWarningContainer,
+            containerColor = if (error) semantic.errorContainer else semantic.warningContainer,
         ),
     ) {
         Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -712,7 +715,8 @@ private fun PermissionBanner(
                 text = title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = if (error) MaterialTheme.colorScheme.error else QingWarning,
+                color = if (error) MaterialTheme.colorScheme.onErrorContainer
+                        else semantic.warningText,
             )
             Text(
                 text = body,
@@ -788,11 +792,6 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
         }
     }
 
-    val lastSyncText = if (lastSuccess > 0L) {
-        tr("最近同步 ") + relativeTime(lastSuccess)
-    } else {
-        tr("尚未同步")
-    }
     return LedgerStatus(
         captureText = captureText,
         captureTone = captureTone,
@@ -800,22 +799,19 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
         syncText = syncText,
         syncTone = syncTone,
         syncIcon = syncIcon,
-        lastSyncText = lastSyncText,
-        missingSetup = AutomationStatus.missingNames(context),
     )
 }
 
-private fun relativeTime(timestampMs: Long): String {
-    val minutes = ((System.currentTimeMillis() - timestampMs).coerceAtLeast(0L)) / 60_000L
-    return when {
-        minutes < 1L -> if (AppLanguage.current() == AppLanguage.ENGLISH) "just now" else "刚刚"
-        minutes < 60L -> if (AppLanguage.current() == AppLanguage.ENGLISH) "$minutes min ago"
-                        else "$minutes 分钟前"
-        minutes < 24L * 60L -> if (AppLanguage.current() == AppLanguage.ENGLISH) "${minutes / 60} h ago"
-                              else "${minutes / 60} 小时前"
-        else -> if (AppLanguage.current() == AppLanguage.ENGLISH) "${minutes / (24 * 60)} d ago"
-                else "${minutes / (24 * 60)} 天前"
-    }
+private const val PAGE_RECOGNITION_COMPONENT =
+    "com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+
+private fun isPageRecognitionEnabled(context: Context): Boolean {
+    val expected = "${context.packageName}/$PAGE_RECOGNITION_COMPONENT"
+    val enabled = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ).orEmpty()
+    return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
 }
 
 private fun openAppNotificationSettings(context: Context) {

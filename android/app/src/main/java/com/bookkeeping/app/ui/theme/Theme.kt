@@ -8,8 +8,27 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+
+data class QingSemanticColors(
+    val income: Color,
+    val expenseText: Color,
+    val warningContainer: Color,
+    val warningText: Color,
+    val errorContainer: Color,
+)
+
+val LocalQingSemanticColors = staticCompositionLocalOf {
+    QingSemanticColors(
+        income = QingIncomeBase,
+        expenseText = QingExpenseBase,
+        warningContainer = QingWarningContainerBase,
+        warningText = QingWarningBase,
+        errorContainer = QingErrorContainerBase,
+    )
+}
 
 private val QingLightColors = lightColorScheme(
     primary = QingPrimaryBase,
@@ -96,7 +115,16 @@ fun BookkeepingAppTheme(
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (darkTheme) QingDarkColors else QingLightColors
-    CompositionLocalProvider(LocalQingDark provides darkTheme) {
+    CompositionLocalProvider(
+        LocalQingDark provides darkTheme,
+        LocalQingSemanticColors provides QingSemanticColors(
+            income = colorScheme.secondary,
+            expenseText = colorScheme.error,
+            warningContainer = if (darkTheme) Color(0xFF4A3510) else QingWarningContainerBase,
+            warningText = if (darkTheme) Color(0xFFF0C36A) else QingWarningBase,
+            errorContainer = colorScheme.errorContainer,
+        ),
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,
