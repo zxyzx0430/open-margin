@@ -58,6 +58,22 @@ services:
       - no-new-privileges:true
     networks: [finance-internal]
 
+  # Public Tailscale Funnel ingress. API-only allowlist, rate limited, and
+  # mounted read-only. The host port is parameterized so the wizard can move
+  # away from a busy 18768; Tailscale Serve/Funnel targets the same port.
+  public-sync-gateway:
+    image: nginx:1.28-alpine
+    profiles: [windows-public-sync]
+    restart: unless-stopped
+    depends_on: [finance-api]
+    volumes:
+      - ./deploy/windows/public-sync-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-18768}:80"
+    security_opt:
+      - no-new-privileges:true
+    networks: [finance-internal]
+
   backup:
     image: python:3.11-slim
     profiles: [maintenance]
