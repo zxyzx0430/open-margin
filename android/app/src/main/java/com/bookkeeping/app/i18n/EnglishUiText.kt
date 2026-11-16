@@ -76,6 +76,8 @@ internal object EnglishUiText {
         "疑似原记录：" to "Possible original: ",
         "原记录不可用（可能来自服务器）" to "Original unavailable (possibly server-side)",
         "自动记账成功" to "Transaction saved",
+        "已合并重复采集" to "Duplicate capture merged",
+        "已合并到已有记录" to "Merged into the existing record",
         "已保存，待确认重复" to "Saved — possible duplicate",
         "可能与已有记录重复" to "May duplicate an existing record",
         "保存成功后显示金额、商户和时间" to "Shows amount, merchant and time after a successful save",

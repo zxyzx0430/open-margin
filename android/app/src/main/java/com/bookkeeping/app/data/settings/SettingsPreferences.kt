@@ -44,6 +44,20 @@ class SettingsPreferences @Inject constructor(
     suspend fun successNotificationsEnabledNow(): Boolean =
         context.settingsDataStore.data.first()[KEY_SUCCESS_NOTIFICATIONS] ?: true
 
+    /**
+     * 采集自动合并的一次性纠正标记。只写 prefs，不动数据库结构；版本号变化
+     * （例如以后规则再收紧）会重新跑一遍纠正。
+     */
+    suspend fun captureDuplicateRepairDone(): Boolean =
+        context.settingsDataStore.data.first()[KEY_CAPTURE_DUPLICATE_REPAIR] ==
+            CAPTURE_DUPLICATE_REPAIR_VERSION
+
+    suspend fun markCaptureDuplicateRepairDone() {
+        context.settingsDataStore.edit {
+            it[KEY_CAPTURE_DUPLICATE_REPAIR] = CAPTURE_DUPLICATE_REPAIR_VERSION
+        }
+    }
+
     // 同步读快照值。在 MainActivity.onCreate 里只需要"当前值"决定是否启动 Service，
     // 不需要 observe；用 runBlocking 拿一下，DataStore 本地读很快不会卡 UI。
     fun keepAliveEnabledBlocking(): Boolean = runBlocking {
@@ -228,6 +242,9 @@ class SettingsPreferences @Inject constructor(
             booleanPreferencesKey("success_notifications_enabled")
         private val KEY_MERCHANT_RULES = stringPreferencesKey("merchant_category_rules")
         private val KEY_CATEGORY_LEARNING = stringPreferencesKey("category_learning")
+        private val KEY_CAPTURE_DUPLICATE_REPAIR =
+            stringPreferencesKey("capture_duplicate_repair_version")
+        private const val CAPTURE_DUPLICATE_REPAIR_VERSION = "1"
         // Legacy success_page_capture_enabled and compatibility_accessibility_enabled
         // keys are intentionally ignored: page recognition now runs with the service.
     }

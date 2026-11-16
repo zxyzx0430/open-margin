@@ -8,6 +8,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
+import com.bookkeeping.app.data.repository.CaptureMergePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -174,8 +175,9 @@ class TransactionViewModel @Inject constructor(
                     startMs = start,
                     endMs = end,
                 ).map { list ->
+                    val visible = list.filter { !CaptureMergePolicy.isAutoMergedDuplicate(it) }
                     if (amountQuery != null) {
-                        list.filter {
+                        visible.filter {
                             LedgerFilter.matches(
                                 it,
                                 query,
@@ -186,7 +188,7 @@ class TransactionViewModel @Inject constructor(
                             )
                         }
                     } else {
-                        list
+                        visible
                     }
                 }
             }
@@ -198,12 +200,14 @@ class TransactionViewModel @Inject constructor(
             allTransactions,
         ) { candidates, all ->
             val byId = all.associateBy { it.id }
-            candidates.map { candidate ->
-                DuplicateCandidate(
-                    candidate = candidate,
-                    original = candidate.duplicateOfId?.let(byId::get),
-                )
-            }
+            candidates
+                .filter { CaptureMergePolicy.needsManualReview(it) }
+                .map { candidate ->
+                    DuplicateCandidate(
+                        candidate = candidate,
+                        original = candidate.duplicateOfId?.let(byId::get),
+                    )
+                }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val periodExpenseCents: StateFlow<Long> = periodTransactions

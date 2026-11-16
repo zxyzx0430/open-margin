@@ -147,8 +147,33 @@ interface TransactionDao {
         windowEndMs: Long,
     ): TransactionEntity?
 
+    @Query("""
+        SELECT * FROM transactions
+        WHERE syncDeleted = 0 AND amountCents = :amountCents AND type = :type
+          AND currency = :currency AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
+        ORDER BY id ASC
+    """)
+    suspend fun findRecentByAmount(
+        amountCents: Long,
+        type: String,
+        currency: String,
+        windowStartMs: Long,
+        windowEndMs: Long,
+    ): List<TransactionEntity>
+
+    // 一次性纠正用：所有还挂着「待确认重复」标记的记录（含只有 duplicateOfId 的旧数据）。
+    // 自动合并后留下的那条是 excluded + duplicateOfId，不算待确认。
     @Query("""SELECT * FROM transactions WHERE syncDeleted = 0
-              AND (duplicateOfId IS NOT NULL OR remoteReviewStatus = 'possible_duplicate')
+              AND (remoteReviewStatus = 'possible_duplicate'
+                   OR (duplicateOfId IS NOT NULL
+                       AND (remoteReviewStatus IS NULL OR remoteReviewStatus <> 'excluded')))
+              ORDER BY timestamp ASC""")
+    suspend fun findPossibleDuplicates(): List<TransactionEntity>
+
+    @Query("""SELECT * FROM transactions WHERE syncDeleted = 0
+              AND (remoteReviewStatus = 'possible_duplicate'
+                   OR (duplicateOfId IS NOT NULL
+                       AND (remoteReviewStatus IS NULL OR remoteReviewStatus <> 'excluded')))
               ORDER BY timestamp DESC LIMIT 20""")
     fun observeDuplicateCandidates(): Flow<List<TransactionEntity>>
 
