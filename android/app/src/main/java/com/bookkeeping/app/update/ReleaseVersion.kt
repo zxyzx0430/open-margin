@@ -73,10 +73,10 @@ data class PublishedRelease(
 )
 
 object UpdateVersionPolicy {
-    // Stable v1.2.0: all capture/import/classification/UI work plus the rc.13
-    // startup and duplicate-notification fixes. Keep both release tag and
-    // Android versionCode in sync.
-    const val CURRENT_TAG = "v1.2.5"
+    // Stable v1.3.0: Windows one-click setup (installer, web wizard, Funnel
+    // public gateway, hidden watchdog) and Android QR pairing.
+    // Keep both release tag and Android versionCode in sync.
+    const val CURRENT_TAG = "v1.3.0"
 
     fun latestNewer(
         releases: List<PublishedRelease>,

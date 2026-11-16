@@ -17,10 +17,10 @@
         and its own staging directory).
       * Re-running with -Force overwrites only the bundle outputs.
 
-    Note: v1's setup engine runs `docker compose up --build`. Loading this
-    bundle avoids re-downloading images, but a fully offline rebuild still
-    depends on the engine gaining a `--no-build`/prebuilt-image path. The
-    bundle itself is still useful for pre-seeding Docker and for retries.
+    Note: the setup CLI supports `open-margin-setup.ps1 deploy --no-build`, so
+    a loaded bundle can be used without rebuilding. The web wizard still runs
+    `docker compose up --build` by default; fully offline web-wizard installs
+    are not verified in v1.
 #>
 param(
     [string]$Version = '',
@@ -279,9 +279,9 @@ try {
         '',
         '3. Start the setup wizard from the Start Menu ("清衡设置") and continue.',
         '',
-        'v1 caveat: the wizard currently runs `docker compose up --build`; the',
-        'loaded images avoid re-downloading but a fully offline rebuild is not',
-        'guaranteed until the engine supports prebuilt images / --no-build.',
+        'v1 caveat: the web wizard currently runs `docker compose up --build`;',
+        'the setup CLI supports `deploy --no-build` to use these loaded images.',
+        'Fully offline web-wizard installation is not verified in v1.',
         ''
     ) -join "`r`n"
     [IO.File]::WriteAllText((Join-Path $staging 'RESTORE.md'), $restore, $utf8)

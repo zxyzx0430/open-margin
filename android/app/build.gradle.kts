@@ -16,9 +16,9 @@ android {
         targetSdk = 35
         // Stable v1.2.0: all capture/import/classification/UI work plus the
         // rc.13 startup and duplicate-notification fixes.
-        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0).
-        versionCode = 24
-        versionName = "1.2.5"
+        // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.3.0).
+        versionCode = 25
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
