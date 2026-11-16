@@ -130,7 +130,7 @@ class EnglishUiTextTest {
             "笔" to "transactions",
             "清除" to "Clear",
             "清除选择" to "Clear selection",
-            "热力背景：" to "Heatmap background: ",
+            "日期高亮：" to "Day highlight: ",
             "关闭" to "Close",
             "周起始日：" to "Week starts on: ",
             "周一" to "Monday",
