@@ -81,18 +81,14 @@ def _initialize_database(db: sqlite3.Connection) -> None:
     # scans the whole ledger, so ingest latency grows with history size.
     db.execute("""CREATE INDEX IF NOT EXISTS tx_dedup_lookup
         ON transactions(amount_cents,currency,direction,timestamp_ms)""")
-    # The optional ledger epoch is a durable, DB-wide import boundary.
-    # It stops offline Android retries and manual imports reintroducing
-    # expenses from before the user's requested fresh start.
+    # ledger_settings 里的账本起始日只作为订阅预测的边界，不再是写入闸门：
+    # 历史账单必须完整入库，起始日不能决定一条记录是否存在。
     db.execute("""CREATE TABLE IF NOT EXISTS ledger_settings (
         key TEXT PRIMARY KEY, value TEXT NOT NULL)""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS transactions_start_date_guard
-        BEFORE INSERT ON transactions
-        WHEN EXISTS (
-            SELECT 1 FROM ledger_settings
-            WHERE key='start_timestamp_ms'
-              AND NEW.timestamp_ms < CAST(value AS INTEGER))
-        BEGIN SELECT RAISE(IGNORE); END""")
+    # 曾经这里有个 transactions_start_date_guard 触发器，会把早于账本起始日的
+    # 插入静默丢掉（RAISE(IGNORE)），导致导入的历史账本永远进不了库。
+    # 账本要的是完整性：起始日只作为统计默认范围，不再拦截写入。
+    db.execute("DROP TRIGGER IF EXISTS transactions_start_date_guard")
     db.execute("""CREATE TABLE IF NOT EXISTS expense_budgets (
         month TEXT PRIMARY KEY, amount_cents INTEGER NOT NULL
         CHECK(amount_cents>0))""")
@@ -126,7 +122,7 @@ def db_connection():
         db.close()
 
 def ledger_start_ms(db: sqlite3.Connection) -> int:
-    """Permanent date boundary for the user-requested fresh ledger."""
+    """账本起始日：只用于订阅预测/展示的默认边界，不再拦截任何写入。"""
     row = db.execute(
         "SELECT value FROM ledger_settings WHERE key='start_timestamp_ms'"
     ).fetchone()
@@ -183,17 +179,15 @@ def health():
 
 @app.post("/api/v1/transactions/batch", dependencies=[Depends(device_auth)])
 def ingest(batch: Batch):
-    inserted, existed, ignored_before_start = 0, 0, 0
+    inserted, existed = 0, 0
     with db_connection() as db:
         # Reserve the writer lock before the tombstone/duplicate SELECTs.
         # Upgrading a read transaction to a write transaction can return
         # SQLITE_BUSY immediately in WAL mode, bypassing busy_timeout.
         db.execute("BEGIN IMMEDIATE")
-        cutoff = ledger_start_ms(db)
+        # 收录即完整：早于账本起始日的交易同样入库，起始日只影响统计默认范围，
+        # 不再作为写入闸门。
         for e in batch.events:
-            if e.timestamp_ms < cutoff:
-                ignored_before_start += 1
-                continue
             # Deletion tombstones must defeat retries from pre-v2 Android apps.
             tombstone=db.execute("""SELECT action FROM sync_journal WHERE event_id=?
                     ORDER BY revision DESC LIMIT 1""",(e.event_id,)).fetchone()
@@ -217,8 +211,10 @@ def ingest(batch: Batch):
                     db.execute("UPDATE transactions SET review_status='possible_duplicate' WHERE id=? AND review_status='unverified'",(possible['id'],))
             else:
                 existed += 1
+    # ignored_before_start 保留字段只为兼容旧客户端（它们会在 >0 时阻断同步），
+    # 现在服务端不再丢弃任何记录，恒为 0。
     return {"accepted": len(batch.events), "inserted": inserted,
-            "already_present": existed, "ignored_before_start": ignored_before_start}
+            "already_present": existed, "ignored_before_start": 0}
 
 class AmountCorrection(BaseModel):
     event_id: str = Field(min_length=8, max_length=130, pattern=r"^android:[a-zA-Z0-9_.:-]+$")

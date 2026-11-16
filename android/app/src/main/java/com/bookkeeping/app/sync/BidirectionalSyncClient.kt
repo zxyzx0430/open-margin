@@ -276,12 +276,11 @@ internal class BidirectionalSyncClient(
                         }else conflictIds.add(id)
                     }
                     "before_start"->{
-                        // Server explicitly rejected this row due to the configured
-                        // ledger start date. Keep the unsent mutation visible and
-                        // retryable; acknowledging it would silently diverge the
-                        // phone totals from the server and lose the user's edit.
-                        // A ledger-start rejection needs a server setting review,
-                        // not an optimistic-conflict overwrite choice.
+                        // 只有旧版服务端才会回 before_start（当前服务端不再按
+                        // 账本起始日拒收任何记录）。这条修改仍留在手机里等重试，
+                        // 不能被当作已同步：悄悄确认会让手机与服务器的流水
+                        // 在无人察觉的情况下分叉。这是版本落差，不是安全事件，
+                        // 也不阻断其他记录的同步。
                     }
                     else->Unit
                 }

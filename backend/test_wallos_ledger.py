@@ -212,18 +212,23 @@ class WallosLedgerTests(unittest.TestCase):
 
 
 
-    def test_manual_entry_rejects_prestart_date(self):
+    def test_manual_entry_accepts_prestart_date(self):
+        # 账本起始日只影响订阅预测；手工补录早于它的历史账单必须入库，不能 422。
         from datetime import datetime
         from zoneinfo import ZoneInfo
         cutoff=int(datetime(2026,10,10,tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()*1000)
         with core.db_connection() as db:
             db.execute("INSERT INTO ledger_settings(key,value) VALUES('start_timestamp_ms',?)",(str(cutoff),))
         item=self.payload()
-        item["timestamp_ms"]=cutoff-1
+        item["timestamp_ms"]=cutoff-86_400_000
         response=self.client.post(self.url+"manual",headers=self.headers,json=item)
-        self.assertEqual(response.status_code,422)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertTrue(response.json()["created"])
         with core.db_connection() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],0)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM transactions").fetchone()[0],1)
+            stored=db.execute("SELECT timestamp_ms,source FROM transactions").fetchone()
+            self.assertEqual(stored["timestamp_ms"],cutoff-86_400_000)
+            self.assertEqual(stored["source"],"MANUAL")
 
     def test_validation(self):
         data=self.payload()

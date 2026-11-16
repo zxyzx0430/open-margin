@@ -122,9 +122,6 @@ def attach(api, core):
                         source=row["source"]
                         direction=row["direction"]
                         if timestamp<=946684800000 or timestamp>=4102444800000 or amount<0 or amount>100_000_000_000:raise ValueError()
-                        if timestamp < core.ledger_start_ms(db):
-                            rejected += 1
-                            continue
                         if source not in ("WECHAT","ALIPAY","BANK_SMS","MANUAL","OTHER") or direction not in ("EXPENSE","INCOME"):raise ValueError()
                         currency=row["currency"].upper()
                         if not re.fullmatch(r"[A-Z]{3}",currency):raise ValueError()

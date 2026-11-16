@@ -167,7 +167,6 @@ def push(body:Mutations):
                 # BEGIN IMMEDIATE waits for the first writer to commit, then
                 # performs the revision comparison against its committed state.
                 db.execute("BEGIN IMMEDIATE")
-                cutoff=core.ledger_start_ms(db)
                 prior=db.execute("SELECT revision,event_id,request_hash FROM sync_mutations WHERE mutation_id=?",
                                  (operation.mutation_id,)).fetchone()
                 if prior is not None:
@@ -188,9 +187,6 @@ def push(body:Mutations):
                     if operation.record is None:
                         raise HTTPException(422,"Missing transaction record")
                     record=operation.record
-                    if record.timestamp_ms<cutoff:
-                        results.append({"mutation_id":operation.mutation_id,"status":"before_start"})
-                        continue
                     existing=db.execute("SELECT * FROM transactions WHERE event_id=?",
                                         (operation.event_id,)).fetchone()
                     if existing:
