@@ -1,6 +1,7 @@
 package com.bookkeeping.app.sync
 
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.data.local.entity.TransactionCategory
 import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
@@ -29,6 +30,9 @@ fun SyncSettingsCard() {
     var url by remember { mutableStateOf(prefs.getString("url", "") ?: "") }
     var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
     var message by remember { mutableStateOf(prefs.getString("last_result", tr("同步关闭或尚未执行")) ?: "") }
+    var lastResultCode by remember {
+        mutableStateOf(prefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null))
+    }
 
     // Windows first-connection wizard and this legacy VPS settings card share
     // the same preferences. An external successful wizard configuration must
@@ -51,6 +55,7 @@ fun SyncSettingsCard() {
     }
     fun updateStatus() {
         message = prefs.getString("last_result", tr("尚未执行同步")) ?: ""
+        lastResultCode = prefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null)
         lastSuccess = prefs.getLong("last_success_ms", 0L)
         conflictIds = prefs.getStringSet("pending_conflict_event_ids",emptySet())?.toSet() ?: emptySet()
     }
@@ -147,22 +152,36 @@ fun SyncSettingsCard() {
                             ?.let { JSONObject(it) }
                     }.getOrNull()
                     val serverRecord=preview?.optJSONObject("record")
-                    val serverDescription=when {
-                        preview==null -> tr("服务器版本正在加载")
-                        preview.optString("action")=="delete" -> tr("服务器已删除这笔记录")
-                        serverRecord!=null -> {
-                            val amount=serverRecord.optLong("amount_cents",0L)/100.0
-                            (serverRecord.optString("merchant","").ifBlank { tr("交易") }) +
-                                " · " + serverRecord.optString("currency","CNY") +
-                                " " + "%.2f".format(Locale.CHINA,amount)
-                        }
-                        else -> tr("服务器版本待核对")
-                    }
                     val revision=preview?.optLong("revision",-1L) ?: -1L
+                    val serverRecordId = serverRecord?.optString("id", "").orEmpty()
+                        .ifBlank { preview?.optString("event_id", "").orEmpty() }
+                        .ifBlank { eventId }
                     Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                        Text(tr("本机：") + (row.merchant.ifBlank { row.source }) + " · " +
-                            row.currency + " " + "%.2f".format(Locale.CHINA,row.amountCents/100.0))
-                        Text(tr("服务器：") + serverDescription)
+                        Text(
+                            conflictSideDetails(
+                                source = "本机",
+                                timestampMs = row.timestamp,
+                                category = row.category,
+                                merchant = row.merchant,
+                                amountCents = row.amountCents,
+                                currency = row.currency,
+                                recordId = row.id.takeIf { it > 0L }?.toString(),
+                            )
+                        )
+                        Text(
+                            conflictSideDetails(
+                                source = "服务器",
+                                timestampMs = serverRecord?.longOrNull("timestamp_ms"),
+                                category = serverRecord?.textOrNull("category"),
+                                merchant = serverRecord?.textOrNull("merchant"),
+                                amountCents = serverRecord?.longOrNull("amount_cents"),
+                                currency = serverRecord?.textOrNull("currency"),
+                                recordId = serverRecordId,
+                            )
+                        )
+                        if (preview?.optString("action") == "delete") {
+                            Text(tr("服务器版本已删除"))
+                        }
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(enabled=revision>=0,onClick={
                                 prefs.edit()
@@ -189,8 +208,17 @@ fun SyncSettingsCard() {
                 }
                 if (matching.size>5) Text(tr("还有 ") + (matching.size-5) + tr(" 笔，请处理当前项目后继续查看。"))
             }
+            val resultCode = SyncResultCode.from(lastResultCode)
             val failed = message.contains("失败") || message.contains("异常") ||
                 message.contains("不可用") || message.contains("401") || message.contains("403")
+            val statusColor = when (resultCode) {
+                SyncResultCode.OK -> MaterialTheme.colorScheme.primary
+                SyncResultCode.RETRY, SyncResultCode.BLOCKED, SyncResultCode.AUTH ->
+                    MaterialTheme.colorScheme.error
+                SyncResultCode.CONFIG -> MaterialTheme.colorScheme.onSurfaceVariant
+                null -> if (failed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+            }
             Text(
                 text = "${tr("最近成功")}：" + (
                     if (lastSuccess > 0L) {
@@ -203,11 +231,55 @@ fun SyncSettingsCard() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = "${tr("状态")}：${tr(message)}",
+                text = "${tr("状态")}：${tr(resultCode?.label ?: message)}",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (failed) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = statusColor,
             )
+            if (resultCode != null && message.isNotBlank()) {
+                Text(
+                    text = "${tr("详情")}：${tr(message)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
+
+private fun conflictSideDetails(
+    source: String,
+    timestampMs: Long?,
+    category: String?,
+    merchant: String?,
+    amountCents: Long?,
+    currency: String?,
+    recordId: String?,
+): String {
+    val timestamp = timestampMs?.takeIf { it > 0L }?.let {
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).format(Date(it))
+    } ?: "—"
+    val categoryValue = category?.takeIf { it.isNotBlank() }?.let { raw ->
+        runCatching { TransactionCategory.valueOf(raw).displayName }.getOrNull() ?: raw
+    }?.let { tr(it) } ?: "—"
+    val merchantValue = merchant?.takeIf { it.isNotBlank() } ?: "—"
+    val amount = if (amountCents != null && !currency.isNullOrBlank()) {
+        "$currency ${"%.2f".format(Locale.CHINA, amountCents / 100.0)}"
+    } else {
+        "—"
+    }
+    val idTail = recordId?.takeIf { it.isNotBlank() }?.takeLast(6) ?: "—"
+    return listOf(
+        "${tr("日期时间")}：$timestamp",
+        "${tr("分类")}：$categoryValue",
+        "${tr("商户")}：$merchantValue",
+        "${tr("金额")}：$amount",
+        "${tr("来源")}：${tr(source)}",
+        "${tr("记录 ID 后 6 位")}：$idTail",
+    ).joinToString("\n")
+}
+
+private fun JSONObject.longOrNull(key: String): Long? =
+    if (has(key) && !isNull(key)) optLong(key) else null
+
+private fun JSONObject.textOrNull(key: String): String? =
+    if (has(key) && !isNull(key)) optString(key).takeIf { it.isNotBlank() } else null

@@ -117,6 +117,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.bookkeeping.app.notification.NotificationListenerHelper
 import com.bookkeeping.app.notification.SmsPermissionHelper
+import com.bookkeeping.app.sync.SyncResultCode
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import com.bookkeeping.app.ui.components.AutomationStatus
 import com.bookkeeping.app.ui.components.SectionHeader
@@ -166,6 +167,9 @@ fun SettingsScreen(
     var lastSyncMessage by remember {
         mutableStateOf(syncPrefs.getString("last_result", "") ?: "")
     }
+    var lastSyncCode by remember {
+        mutableStateOf(syncPrefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null))
+    }
     var conflicts by remember { mutableStateOf(syncPrefs.getInt("pending_sync_conflicts", 0)) }
     var syncEnabled by remember { mutableStateOf(syncPrefs.getBoolean("enabled", false)) }
     var endpoint by remember { mutableStateOf(syncPrefs.getString("url", "") ?: "") }
@@ -199,6 +203,7 @@ fun SettingsScreen(
                         isAccessibilityServiceEnabled(context, PAGE_RECOGNITION_COMPONENT)
                     lastSyncMs = syncPrefs.getLong("last_success_ms", 0L)
                     lastSyncMessage = syncPrefs.getString("last_result", "") ?: ""
+                    lastSyncCode = syncPrefs.getString(TransactionSyncWorker.LAST_RESULT_CODE, null)
                     conflicts = syncPrefs.getInt("pending_sync_conflicts", 0)
                     syncEnabled = syncPrefs.getBoolean("enabled", false)
                     endpoint = syncPrefs.getString("url", "") ?: ""
@@ -284,6 +289,7 @@ fun SettingsScreen(
                     conflicts = conflicts,
                     lastSyncMs = lastSyncMs,
                     lastSyncMessage = lastSyncMessage,
+                    lastSyncCode = lastSyncCode,
                     onOpenSyncDetails = { detailDialog = "sync" },
                 )
             }
@@ -390,7 +396,9 @@ fun SettingsScreen(
                     AutomationSetupPanel(
                         notificationEnabled = notificationEnabled,
                         pageRecognitionEnabled = pageRecognitionEnabled,
-                        fallbackAccessibilityEnabled = accessibilityHealth.authorized,
+                        fallbackAccessibilityEnabled =
+                            accessibilityHealth.state == AccessibilityConnectionState.CONNECTED,
+                        fallbackAccessibilityAuthorized = accessibilityHealth.authorized,
                         postNotificationsGranted = postNotificationsGranted,
                         smsGranted = smsGranted,
                         missingNames = missingCapabilityNames,
@@ -609,11 +617,27 @@ private fun SyncOverviewGroup(
     conflicts: Int,
     lastSyncMs: Long,
     lastSyncMessage: String,
+    lastSyncCode: String?,
     onOpenSyncDetails: () -> Unit,
 ) {
-    val syncTone = when {
-        lastSyncMs <= 0L -> StatusTone.NEUTRAL
-        else -> StatusTone.POSITIVE
+    val syncCode = SyncResultCode.from(lastSyncCode)
+    val legacySyncFailed = lastSyncMessage.contains("失败") ||
+        lastSyncMessage.contains("异常") || lastSyncMessage.contains("不可用") ||
+        lastSyncMessage.contains("401") || lastSyncMessage.contains("403")
+    val statusLabel = syncCode?.label ?: when {
+        legacySyncFailed -> "同步异常"
+        lastSyncMs > 0L -> "同步正常"
+        else -> null
+    }
+    val syncTone = when (syncCode) {
+        SyncResultCode.OK -> StatusTone.POSITIVE
+        SyncResultCode.RETRY, SyncResultCode.BLOCKED, SyncResultCode.AUTH -> StatusTone.ERROR
+        SyncResultCode.CONFIG -> StatusTone.NEUTRAL
+        null -> when {
+            legacySyncFailed -> StatusTone.WARNING
+            lastSyncMs <= 0L -> StatusTone.NEUTRAL
+            else -> StatusTone.POSITIVE
+        }
     }
     SettingsGroupCard {
         SettingsStatusRow(
@@ -641,7 +665,8 @@ private fun SyncOverviewGroup(
         SettingsStatusRow(
             icon = Icons.Filled.Sync,
             title = tr("最近同步"),
-            subtitle = lastSyncMessage.ifBlank { tr("尚未执行同步") }.let { tr(it) },
+            subtitle = statusLabel?.let { tr(it) }
+                ?: lastSyncMessage.ifBlank { tr("尚未执行同步") }.let { tr(it) },
             statusText = relativeSyncTime(lastSyncMs),
             tone = syncTone,
             onClick = onOpenSyncDetails,
@@ -665,12 +690,24 @@ private fun PermissionStatusGroup(
     val accessibilityStatus = when (accessibilityHealth.state) {
         AccessibilityConnectionState.CONNECTED -> tr("已连接")
         AccessibilityConnectionState.PERMISSION_OFF -> tr("未开启")
-        else -> tr("已授权未连接")
+        AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> tr("已授权 · 未连接")
     }
     val accessibilityTone = when (accessibilityHealth.state) {
         AccessibilityConnectionState.CONNECTED -> StatusTone.POSITIVE
         AccessibilityConnectionState.PERMISSION_OFF -> StatusTone.ERROR
-        else -> StatusTone.WARNING
+        AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> StatusTone.WARNING
+    }
+    val accessibilitySubtitle = buildString {
+        append(tr("微信/支付宝转账入账"))
+        if (accessibilityHealth.disconnectedAtMs > 0L) {
+            append(" · ")
+            append(tr("上次断开"))
+            append("：")
+            append(formatHealthTime(accessibilityHealth.disconnectedAtMs))
+            accessibilityHealth.disconnectedReason.takeIf { it.isNotBlank() }?.let {
+                append("（$it）")
+            }
+        }
     }
     SettingsGroupCard {
         SettingsStatusRow(
@@ -703,9 +740,9 @@ private fun PermissionStatusGroup(
         SettingsStatusRow(
             icon = Icons.Filled.AccessibilityNew,
             title = tr("无障碍兜底"),
-            subtitle = tr("微信/支付宝转账入账"),
-            statusText = if (accessibilityHealth.authorized) tr("已授权") else tr("未授权"),
-            tone = if (accessibilityHealth.authorized) StatusTone.POSITIVE else StatusTone.WARNING,
+            subtitle = accessibilitySubtitle,
+            statusText = accessibilityStatus,
+            tone = accessibilityTone,
             onClick = onOpenAccessibilityDetails,
         )
         SettingsRowDivider()
@@ -842,6 +879,7 @@ private fun AutomationSetupPanel(
     notificationEnabled: Boolean,
     pageRecognitionEnabled: Boolean,
     fallbackAccessibilityEnabled: Boolean,
+    fallbackAccessibilityAuthorized: Boolean,
     postNotificationsGranted: Boolean,
     smsGranted: Boolean,
     missingNames: List<String>,
@@ -953,10 +991,16 @@ private fun AutomationSetupPanel(
             stepLabel = wizardProgress(step),
             stepIndex = step.ordinal + 1,
             title = tr("开启无障碍兜底"),
-            body = tr("在无障碍页面找到「清衡」并打开，用于微信转账/红包、支付宝转账入账。此开关只能由你在系统设置中手动确认。"),
-            status = if (attempted && !fallbackAccessibilityEnabled) {
-                tr("尚未检测到，请确认已开启后重试。")
-            } else null,
+            body = if (fallbackAccessibilityAuthorized && !fallbackAccessibilityEnabled) {
+                tr("无障碍已授权，但服务当前未连接。请检查系统服务状态，返回应用后重试。")
+            } else {
+                tr("在无障碍页面找到「清衡」并打开，用于微信转账/红包、支付宝转账入账。此开关只能由你在系统设置中手动确认。")
+            },
+            status = when {
+                !attempted || fallbackAccessibilityEnabled -> null
+                fallbackAccessibilityAuthorized -> tr("已授权 · 未连接")
+                else -> tr("尚未检测到，请确认已开启后重试。")
+            },
             statusIsError = attempted && !fallbackAccessibilityEnabled,
             primaryLabel = if (fallbackAccessibilityEnabled) tr("下一步") else tr("去无障碍设置"),
             onPrimary = {
@@ -1365,9 +1409,21 @@ private fun AccessibilityCard(
     }
     val statusText = when (health.state) {
         AccessibilityConnectionState.PERMISSION_OFF -> tr("未授权：无法采集")
+        AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> tr("已授权 · 未连接")
+        AccessibilityConnectionState.CONNECTED -> tr("已连接（不代表已抓取支付记录）")
+    }
+    val badgeText = when (health.state) {
+        AccessibilityConnectionState.PERMISSION_OFF -> tr("未授权")
+        AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> tr("已授权 · 未连接")
+        AccessibilityConnectionState.CONNECTED -> tr("已连接")
+    }
+    val description = when (health.state) {
+        AccessibilityConnectionState.PERMISSION_OFF ->
+            tr("通知里不含金额的微信转账/红包、支付宝转账，需要无障碍服务兜底。")
         AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED ->
-            tr("已授权，但服务未连接（可能被系统停止或尚未启动）")
-        AccessibilityConnectionState.CONNECTED -> tr("服务已连接（不代表已抓取支付记录）")
+            tr("已授权，但服务当前未连接；连接恢复后才能处理没有通知的场景。")
+        AccessibilityConnectionState.CONNECTED ->
+            tr("微信转账/红包、支付宝转账入账等没有通知的场景会自动抓取。")
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1387,17 +1443,13 @@ private fun AccessibilityCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = if (enabled) {
-                            tr("微信转账/红包、支付宝转账入账等没有通知的场景会自动抓取。")
-                        } else {
-                            tr("通知里不含金额的微信转账/红包、支付宝转账，需要无障碍服务兜底。")
-                        },
+                        text = description,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 SoftBadge(
-                    text = if (enabled) tr("已开启") else tr("未开启"),
+                    text = badgeText,
                     tone = statusTone,
                 )
             }
@@ -1424,8 +1476,10 @@ private fun AccessibilityCard(
                 color = QingTextSecondary,
             )
             if (health.disconnectedAtMs > 0L) {
+                val reason = health.disconnectedReason.takeIf { it.isNotBlank() }
                 Text(
-                    "${tr("上次断开")}：${formatHealthTime(health.disconnectedAtMs)}（${health.disconnectedReason}）",
+                    "${tr("上次断开")}：${formatHealthTime(health.disconnectedAtMs)}" +
+                        (reason?.let { "（$it）" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
                 )

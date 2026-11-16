@@ -71,6 +71,7 @@ import com.bookkeeping.app.notification.CaptureConnectionState
 import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.notification.NotificationListenerHelper
+import com.bookkeeping.app.sync.SyncResultCode
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import com.bookkeeping.app.ui.components.AutomationSetupPrompt
 import com.bookkeeping.app.ui.components.CategoryFilterSheet
@@ -760,11 +761,18 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
     val conflicts = prefs.getInt("pending_sync_conflicts", 0)
     val lastSuccess = prefs.getLong("last_success_ms", 0L)
     val lastResult = prefs.getString("last_result", "").orEmpty()
-    val syncFailed = lastResult.contains("失败") ||
+    // Structured code wins; older installs without it fall back to keyword matching.
+    val resultCode = SyncResultCode.from(prefs.getString("last_result_code", null))
+    val legacyFailed = lastResult.contains("失败") ||
         lastResult.contains("异常") ||
         lastResult.contains("不可用") ||
         lastResult.contains("401") ||
         lastResult.contains("403")
+    val syncFailed = when (resultCode) {
+        SyncResultCode.OK -> false
+        null -> legacyFailed
+        else -> true
+    }
 
     val syncText: String
     val syncTone: StatusTone
@@ -779,6 +787,31 @@ private fun readLedgerStatus(context: Context): LedgerStatus {
             syncText = tr("同步待处理 ") + conflicts
             syncTone = StatusTone.WARNING
             syncIcon = Icons.Outlined.ErrorOutline
+        }
+        resultCode == SyncResultCode.BLOCKED -> {
+            syncText = tr("同步已阻断")
+            syncTone = StatusTone.WARNING
+            syncIcon = Icons.Outlined.ErrorOutline
+        }
+        resultCode == SyncResultCode.AUTH -> {
+            syncText = tr("授权失败")
+            syncTone = StatusTone.WARNING
+            syncIcon = Icons.Outlined.ErrorOutline
+        }
+        resultCode == SyncResultCode.CONFIG -> {
+            syncText = tr("未配置")
+            syncTone = StatusTone.NEUTRAL
+            syncIcon = Icons.Outlined.Sync
+        }
+        resultCode == SyncResultCode.RETRY -> {
+            syncText = tr("同步异常")
+            syncTone = StatusTone.WARNING
+            syncIcon = Icons.Outlined.ErrorOutline
+        }
+        resultCode == SyncResultCode.OK -> {
+            syncText = tr("同步正常")
+            syncTone = StatusTone.POSITIVE
+            syncIcon = Icons.Outlined.CheckCircle
         }
         lastSuccess > 0L && !syncFailed -> {
             syncText = tr("同步正常")
