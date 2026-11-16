@@ -890,6 +890,15 @@ internal object EnglishUiText {
         // === 设置页单行行距：标题/副标题都只放一行，长句缩短后放这里 ===
         "未配置服务器" to "No server configured",
         "微信 / 支付宝 CSV" to "WeChat / Alipay CSV",
+        "微信 / 支付宝导出账单教程" to "How to export WeChat / Alipay bills",
+        "两分钟导出 CSV" to "Export a CSV in two minutes",
+        "导出微信 / 支付宝账单" to "Export WeChat / Alipay bills",
+        "我 → 服务 → 钱包 → 账单 → 右上角「常见问题」→「下载账单」→「用于个人对账」，选时间范围并填邮箱，收到邮件后解压得到 CSV。" to
+            "Me → Services → Wallet → Bills → top-right \"Common Questions\" → \"Download Bill\" → \"For personal reconciliation\", pick a date range and enter your email, then unzip the CSV from the email.",
+        "我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」，选时间范围并填邮箱，解压密码在邮件里。" to
+            "Mine → Bills → top-right \"…\" → \"Transaction record certificate\" → \"For personal reconciliation\", pick a date range and enter your email; the unzip password is in the email.",
+        "导入时选解压出的 CSV 文件即可。" to "When importing, choose the CSV file you unzipped.",
+        "知道了" to "Got it",
         "修改分类即记住" to "Category edits are remembered",
         "通知栏显示连接状态" to "Notification shows connection status",
         "入账后弹出提醒" to "Notifies after a record is saved",
