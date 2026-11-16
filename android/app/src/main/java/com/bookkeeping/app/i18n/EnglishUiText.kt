@@ -830,6 +830,20 @@ internal object EnglishUiText {
         "已清空地址和密钥：填写新服务器地址和密钥后再保存" to
             "Address and key cleared; enter the new server details, then save",
         "短信与 ROM 设置可选" to "SMS and ROM settings are optional",
+
+        // === 设置页单行行距：标题/副标题都只放一行，长句缩短后放这里 ===
+        "未配置服务器" to "No server configured",
+        "微信 / 支付宝 CSV" to "WeChat / Alipay CSV",
+        "修改分类即记住" to "Category edits are remembered",
+        "通知栏显示连接状态" to "Notification shows connection status",
+        "入账后弹出提醒" to "Notifies after a record is saved",
+        "运行时长与最近入账" to "Uptime and last capture",
+        "自启动与省电策略" to "Autostart and battery policy",
+        "常驻状态与提醒" to "Status notification and alerts",
+        "抓取支付通知" to "Reads payment notifications",
+        "识别支付页面" to "Reads payment pages",
+        "转账与红包入账" to "Transfers and red packets",
+        "可选，银行短信" to "Optional, bank SMS",
     )
 
     fun translate(chinese: String): String {

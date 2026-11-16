@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.SoftBadge
@@ -119,16 +120,37 @@ fun SettingsStatusRow(
     ) {
         SettingsIconBubble(icon = icon, tone = tone)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            SettingsRowTitle(title)
+            SettingsRowSubtitle(subtitle)
         }
         SoftBadge(text = statusText, tone = tone)
         SettingsTrailingChevron(clickable = onClick != null)
     }
+}
+
+/**
+ * 行标题固定单行：换行会把「双向同步」断成「双向同」+「步」，也很难扫读。
+ * 放不下靠精简文案，省略号只是兜底。
+ */
+@Composable
+fun SettingsRowTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+fun SettingsRowSubtitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -147,7 +169,7 @@ fun SettingsSwitchRow(
                 role = Role.Switch,
                 onValueChange = onCheckedChange,
             )
-            .padding(vertical = 10.dp),
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -156,12 +178,8 @@ fun SettingsSwitchRow(
             tone = if (checked) StatusTone.POSITIVE else StatusTone.NEUTRAL,
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            SettingsRowTitle(title)
+            SettingsRowSubtitle(subtitle)
         }
         Switch(checked = checked, onCheckedChange = null)
     }
@@ -185,18 +203,16 @@ fun SettingsActionRow(
     ) {
         SettingsIconBubble(icon = icon, tone = StatusTone.NEUTRAL)
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            SettingsRowTitle(title)
+            SettingsRowSubtitle(subtitle)
         }
         if (trailing != null) {
             Text(
                 trailing,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         SettingsTrailingChevron(clickable = true)

@@ -7,6 +7,7 @@ import com.bookkeeping.app.sync.SyncConflictSide
 import com.bookkeeping.app.sync.SyncResultCode
 import com.bookkeeping.app.sync.SyncState
 import com.bookkeeping.app.sync.SyncStateKind
+import com.bookkeeping.app.sync.endpointHost
 import com.bookkeeping.app.sync.formatConflictAmount
 import com.bookkeeping.app.sync.relativeSyncTime
 import org.junit.Assert.assertEquals
@@ -182,5 +183,28 @@ class SyncStatusPolicyTest {
             "2 conflicts need review; other changes were uploaded",
             EnglishUiText.translate("有 2 笔冲突待处理；其余修改已上传"),
         )
+    }
+
+    @Test
+    fun shortenedSettingsRowCopyHasEnglishText() {
+        // 设置页标题/副标题都只允许一行，长句已缩短；缩短后的文案同样要双语。
+        val labels = listOf(
+            "未配置服务器", "微信 / 支付宝 CSV", "修改分类即记住", "通知栏显示连接状态",
+            "入账后弹出提醒", "运行时长与最近入账", "自启动与省电策略", "常驻状态与提醒",
+            "抓取支付通知", "识别支付页面", "转账与红包入账", "可选，银行短信",
+        )
+        labels.forEach { label ->
+            assertTrue("Missing English UI label: $label", EnglishUiText.hasTranslation(label))
+        }
+    }
+
+    @Test
+    fun endpointHostKeepsOnlyTheHostName() {
+        // 列表只显示主机名；完整地址留给同步设置页。
+        assertEquals("zxyzx.bbroot.com", endpointHost("https://zxyzx.bbroot.com/finance"))
+        assertEquals("192.168.1.5:8443", endpointHost("https://192.168.1.5:8443/finance"))
+        assertEquals("", endpointHost(""))
+        assertEquals("", endpointHost(null))
+        assertEquals("zxyzx.bbroot.com", endpointHost("https://zxyzx.bbroot.com"))
     }
 }
