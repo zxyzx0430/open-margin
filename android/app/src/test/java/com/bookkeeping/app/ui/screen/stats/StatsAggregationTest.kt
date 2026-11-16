@@ -51,7 +51,7 @@ class StatsAggregationTest {
     }
 
     @Test
-    fun incomeExcludesRefundExcludedDuplicateAndForeignRows() {
+    fun incomeCountsRefundButExcludesExcludedAndDuplicateRows() {
         val transactions = listOf(
             transaction(100L, TransactionType.INCOME, TransactionCategory.SALARY, at(2026, 11, 1)),
             transaction(
@@ -100,11 +100,11 @@ class StatsAggregationTest {
             transaction(800L, TransactionType.EXPENSE, TransactionCategory.FOOD, at(2026, 11, 8)),
         )
 
-        assertEquals(100L, StatsAggregation.totalCents(transactions, TransactionType.INCOME))
+        assertEquals(300L, StatsAggregation.totalCents(transactions, TransactionType.INCOME))
     }
 
     @Test
-    fun expenseKeepsOriginalExclusions() {
+    fun expenseCountsTransferAndRefundButExcludesExcludedAndDuplicateRows() {
         val transactions = listOf(
             transaction(100L, TransactionType.EXPENSE, TransactionCategory.FOOD, at(2026, 11, 1)),
             transaction(
@@ -165,7 +165,7 @@ class StatsAggregationTest {
             ),
         )
 
-        assertEquals(100L, StatsAggregation.totalCents(transactions, TransactionType.EXPENSE))
+        assertEquals(1_000L, StatsAggregation.totalCents(transactions, TransactionType.EXPENSE))
     }
 
     @Test

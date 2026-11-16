@@ -58,44 +58,25 @@ data class MonthlyTotal(
 )
 
 /**
- * Single policy for every Android total (ledger header, stats page, budget).
- * Keep it in sync with TransactionDao.observeTotalIncomeBetween /
- * observeTotalExpenseBetween and BudgetViewModel.expenseByCategory.
+ * Single policy for every Android total (stats page and drilldown).
  *
- * INCOME counts every real CNY income row, including `transfer`-status income
- * and TRANSFER/GIFT categories (incoming transfers and red packets). Only
- * excluded, refund, possible/confirmed duplicate and foreign-currency rows are
- * omitted.
- *
- * EXPENSE keeps the original policy: no transfers, refunds, excluded rows or
- * duplicates.
+ * Stats intentionally count every real CNY movement, including transfer-status
+ * rows, TRANSFER category and refunds. Only rows the user excluded, rows that
+ * are duplicates of another row, and foreign-currency rows are omitted.
+ * Duplicate flags are kept out so one physical payment is not counted twice.
  */
 internal object StatsTransactionPolicy {
-    private val INCOME_EXCLUDED_STATUSES = setOf(
+    private val EXCLUDED_STATUSES = setOf(
         "excluded",
-        "refund",
         "possible_duplicate",
         "duplicate",
-    )
-
-    private val EXPENSE_EXCLUDED_STATUSES = setOf(
-        "excluded",
-        "transfer",
-        "refund",
-        "possible_duplicate",
     )
 
     fun matches(transaction: TransactionEntity, type: TransactionType): Boolean {
         if (transaction.type != type.name) return false
         if (transaction.currency != "CNY") return false
         if (transaction.duplicateOfId != null) return false
-        return when (type) {
-            TransactionType.INCOME ->
-                transaction.remoteReviewStatus !in INCOME_EXCLUDED_STATUSES
-            TransactionType.EXPENSE ->
-                transaction.remoteReviewStatus !in EXPENSE_EXCLUDED_STATUSES &&
-                    transaction.category != TransactionCategory.TRANSFER.name
-        }
+        return transaction.remoteReviewStatus !in EXCLUDED_STATUSES
     }
 
     fun filter(
@@ -424,6 +405,13 @@ class StatsViewModel @Inject constructor(
     fun shiftDay(delta: Int) {
         val shifted = StatsAggregation.shiftDate(_selectedDate.value, delta)
         if (shifted.year in MIN_YEAR..MAX_YEAR) _selectedDate.value = shifted
+    }
+
+    fun setDate(date: StatsDate) {
+        if (date.year !in MIN_YEAR..MAX_YEAR || date.month !in 1..12) return
+        val monthKey = BudgetMonth.keyOf(date.year, date.month)
+        val day = date.day.coerceIn(1, BudgetMonth.daysInMonth(monthKey))
+        _selectedDate.value = StatsDate(date.year, date.month, day)
     }
 
     private fun rangeFor(

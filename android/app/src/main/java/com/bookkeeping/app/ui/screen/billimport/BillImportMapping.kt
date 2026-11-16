@@ -199,9 +199,21 @@ object BillImportMapping {
             }
             // A notification/page record may have no order ID while the official
             // import row does. At payment time these are the same event; do not
-            // let a fallback merchant name defeat deduplication.
+            // let a fallback merchant name defeat deduplication. When the
+            // merchant is the same (or either side is a weak placeholder), use
+            // the full import window because page capture time and bill time
+            // can differ by more than 30 seconds.
             if (rowOrder != null || txOrder != null) {
-                return@firstOrNull abs(tx.timestamp - row.occurredAtMs) <= ORDERLESS_MATCH_WINDOW_MS
+                val txMerchant = normalizeMerchant(tx.merchant)
+                val sameMerchant = rowMerchant == txMerchant ||
+                    isWeakMerchant(row.merchant) ||
+                    isWeakMerchant(tx.merchant)
+                val window = if (sameMerchant) {
+                    IMPORT_MATCH_WINDOW_MS
+                } else {
+                    ORDERLESS_MATCH_WINDOW_MS
+                }
+                return@firstOrNull abs(tx.timestamp - row.occurredAtMs) <= window
             }
             val txMerchant = normalizeMerchant(tx.merchant)
             rowMerchant.isBlank() || txMerchant.isBlank() || rowMerchant == txMerchant
