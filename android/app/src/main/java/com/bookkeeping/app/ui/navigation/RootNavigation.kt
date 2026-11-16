@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -38,6 +40,8 @@ import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
+import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
+import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 
 // 根 NavHost：底部 tab 切换
@@ -46,18 +50,22 @@ fun RootNavigation() {
     val navController = rememberNavController()
     var requestBillImport by remember { mutableStateOf(false) }
     var requestAutomationSetup by remember { mutableStateOf(false) }
+    var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+    val showBottomBar = currentDestination?.hierarchy?.any { destination ->
+        BottomNavItem.ALL.any { it.route == destination.route }
+    } == true
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            Column {
+            if (showBottomBar) Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 NavigationBar(
                     containerColor = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp,
                 ) {
-                    val navBackStackEntry by navController.currentBackStackEntryAsState()
-                    val currentDestination = navBackStackEntry?.destination
                     val showLabels = LocalDensity.current.fontScale <= 1.3f
 
                     BottomNavItem.ALL.forEach { item ->
@@ -123,18 +131,33 @@ fun RootNavigation() {
                     },
                     openBillImport = requestBillImport,
                     onBillImportOpened = { requestBillImport = false },
+                    drilldown = pendingLedgerDrilldown,
+                    onDrilldownConsumed = { pendingLedgerDrilldown = null },
+                    onOpenDetail = { id -> navController.navigate("transaction/$id") },
                 )
             }
-            composable(BottomNavItem.Calendar.route) { CalendarScreen() }
+            composable(BottomNavItem.Calendar.route) {
+                CalendarScreen(onOpenDetail = { id -> navController.navigate("transaction/$id") })
+            }
             composable(BottomNavItem.Stats.route) {
                 StatsScreen(
-                    onOpenLedger = {
+                    onOpenLedger = { drilldown ->
+                        pendingLedgerDrilldown = drilldown
                         navController.navigate(BottomNavItem.Transactions.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
                             restoreState = true
                         }
                     },
+                )
+            }
+            composable(
+                route = "transaction/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.LongType }),
+            ) {
+                TransactionDetailScreen(
+                    onBack = { navController.popBackStack() },
+                    onDeleted = { navController.popBackStack() },
                 )
             }
             composable(BottomNavItem.Budget.route) { BudgetScreen() }

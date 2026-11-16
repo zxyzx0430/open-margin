@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +25,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -54,6 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -81,15 +85,18 @@ import com.bookkeeping.app.ui.components.LedgerEmptyState
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.components.LedgerFilterRow
 import com.bookkeeping.app.ui.components.LedgerSearchBar
+import com.bookkeeping.app.ui.components.MerchantAvatar
 import com.bookkeeping.app.ui.components.MerchantRuleDialog
 import com.bookkeeping.app.ui.components.MonthlySummaryCard
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
-import com.bookkeeping.app.ui.components.TransactionRow
+import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
+import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
+import com.bookkeeping.app.ui.screen.stats.StatsPeriod
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -114,10 +121,13 @@ fun TransactionListScreen(
     openBillImport: Boolean = false,
     onBillImportOpened: () -> Unit = {},
     onSetupAutomation: () -> Unit = {},
+    drilldown: StatsLedgerDrilldown? = null,
+    onDrilldownConsumed: () -> Unit = {},
+    onOpenDetail: (Long) -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val ledgerLoaded by viewModel.ledgerLoaded.collectAsState()
-    val duplicateCandidates by viewModel.duplicateCandidates.collectAsState()
+    val allTransactions by viewModel.allTransactions.collectAsState()
     val captureReview by captureReviewViewModel.state.collectAsState()
     val periodExpense by viewModel.periodExpenseCents.collectAsState()
     val periodIncome by viewModel.periodIncomeCents.collectAsState()
@@ -127,6 +137,19 @@ fun TransactionListScreen(
     val timeFilter by viewModel.timeFilter.collectAsState()
     val periodTransactions by viewModel.periodTransactions.collectAsState()
     val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
+    val duplicateCandidates = remember(allTransactions) {
+        val byId = allTransactions.associateBy { it.id }
+        allTransactions
+            .filter {
+                it.duplicateOfId != null || it.remoteReviewStatus == "possible_duplicate"
+            }
+            .map { candidate ->
+                TransactionViewModel.DuplicateCandidate(
+                    candidate = candidate,
+                    original = candidate.duplicateOfId?.let(byId::get),
+                )
+            }
+    }
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showBillImport by remember { mutableStateOf(false) }
@@ -135,6 +158,9 @@ fun TransactionListScreen(
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var editing by remember { mutableStateOf<TransactionEntity?>(null) }
     var ruleTarget by remember { mutableStateOf<TransactionEntity?>(null) }
+    var activeDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
+    var exactDateFilter by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var duplicateListExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -144,6 +170,27 @@ fun TransactionListScreen(
             showBillImport = true
             onBillImportOpened()
         }
+    }
+
+    LaunchedEffect(drilldown) {
+        val request = drilldown ?: return@LaunchedEffect
+        activeDrilldown = request
+        viewModel.setTypeFilter(request.type)
+        viewModel.setCategoryFilter(request.category)
+        if (request.day != null) {
+            viewModel.setMonth(request.year, request.month)
+            exactDateFilter = localDayRange(request.year, request.month, request.day)
+        } else {
+            exactDateFilter = null
+            when (request.period) {
+                StatsPeriod.MONTH -> viewModel.setMonth(request.year, request.month)
+                StatsPeriod.YEAR -> viewModel.setYear(request.year)
+            }
+        }
+        onDrilldownConsumed()
+    }
+    LaunchedEffect(duplicateCandidates.isEmpty()) {
+        if (duplicateCandidates.isEmpty()) duplicateListExpanded = false
     }
 
     val context = LocalContext.current
@@ -180,8 +227,9 @@ fun TransactionListScreen(
 
     val noChips = searchQuery.isBlank() &&
         typeFilter == null &&
-        categoryFilter == null
-    val filterActive = !noChips
+        categoryFilter == null &&
+        timeFilter == LedgerTimeFilter.ALL
+    val filterActive = !noChips || exactDateFilter != null
     val categoryTotals = remember(periodTransactions, typeFilter) {
         periodTransactions
             .filter { transaction ->
@@ -200,7 +248,38 @@ fun TransactionListScreen(
                 )
             }
     }
-    val periodLabel = tr("全部账单")
+    val periodLabel = activeDrilldown?.let { request ->
+        val range = if (request.day != null) {
+            "${request.year}${tr("年")}${request.month}${tr("月")}${request.day}${tr("日")}"
+        } else if (request.period == StatsPeriod.YEAR) {
+            "${request.year}${tr("年")}"
+        } else {
+            "${request.year}${tr("年")}${request.month}${tr("月")}"
+        }
+        range + (request.category?.let { " · " + tr(it.displayName) } ?: "") + tr("账单")
+    } ?: tr("全部账单")
+    val exactDateTransactions = remember(periodTransactions, exactDateFilter) {
+        exactDateFilter?.let { (start, end) ->
+            periodTransactions.filter { it.timestamp >= start && it.timestamp < end }
+        }.orEmpty()
+    }
+    val visibleTransactions = remember(transactions, exactDateFilter) {
+        exactDateFilter?.let { (start, end) ->
+            transactions.filter { it.timestamp >= start && it.timestamp < end }
+        } ?: transactions
+    }
+    val shownExpense = if (exactDateFilter == null) periodExpense else {
+        exactDateTransactions.filter {
+            it.isLedgerTotalsCandidate() &&
+                it.type == TransactionType.EXPENSE.name &&
+                it.category != TransactionCategory.TRANSFER.name
+        }.sumOf { it.amountCents }
+    }
+    val shownIncome = if (exactDateFilter == null) periodIncome else {
+        exactDateTransactions.filter {
+            it.isLedgerTotalsCandidate() && it.type == TransactionType.INCOME.name
+        }.sumOf { it.amountCents }
+    }
     val duplicatesIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0)
@@ -353,7 +432,11 @@ fun TransactionListScreen(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = tr("全部时间的支出与收入"),
+                        text = if (activeDrilldown == null) {
+                            tr("全部时间的支出与收入")
+                        } else {
+                            tr("所选范围的支出与收入")
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -362,8 +445,8 @@ fun TransactionListScreen(
 
             item(key = "summary") {
                 MonthlySummaryCard(
-                    expenseCents = periodExpense,
-                    incomeCents = periodIncome,
+                    expenseCents = shownExpense,
+                    incomeCents = shownIncome,
                 )
             }
 
@@ -409,7 +492,11 @@ fun TransactionListScreen(
                         LedgerFilterChip(
                             label = tr("清空"),
                             selected = false,
-                            onClick = viewModel::clearFilters,
+                            onClick = {
+                                activeDrilldown = null
+                                exactDateFilter = null
+                                viewModel.clearFilters()
+                            },
                         )
                     }
                 }
@@ -419,6 +506,8 @@ fun TransactionListScreen(
                 item(key = "duplicates") {
                     DuplicateReviewCard(
                         candidates = duplicateCandidates,
+                        expanded = duplicateListExpanded,
+                        onToggleExpanded = { duplicateListExpanded = !duplicateListExpanded },
                         onKeepBoth = viewModel::keepBoth,
                         onDeleteNew = { pendingDelete = it },
                     )
@@ -436,17 +525,25 @@ fun TransactionListScreen(
                         CircularProgressIndicator()
                     }
                 }
-            } else if (transactions.isEmpty()) {
+            } else if (visibleTransactions.isEmpty()) {
                 item(key = "empty") {
                     LedgerEmptyState(
                         filterActive = filterActive,
                         hasAnyTransactions = hasAnyTransactions,
-                        onClearFilters = viewModel::clearFilters,
-                        onShowAll = viewModel::showAll,
+                        onClearFilters = {
+                            activeDrilldown = null
+                            exactDateFilter = null
+                            viewModel.clearFilters()
+                        },
+                        onShowAll = {
+                            activeDrilldown = null
+                            exactDateFilter = null
+                            viewModel.showAll()
+                        },
                     )
                 }
             } else {
-                val groups = transactions.groupBy { dayKey(it.timestamp) }
+                val groups = visibleTransactions.groupBy { dayKey(it.timestamp) }
                 items(groups.entries.toList(), key = { it.key }) { (dayKey, dayItems) ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         val valid = dayItems.filter {
@@ -476,6 +573,7 @@ fun TransactionListScreen(
                         )
                         DayCard(
                             items = dayItems,
+                            onOpenDetail = onOpenDetail,
                             onEdit = { editing = it },
                             onDelete = { pendingDelete = it },
                             onReview = viewModel::setReviewStatus,
@@ -582,11 +680,13 @@ fun TransactionListScreen(
             }.getOrNull(),
         )
     }
+
 }
 
 @Composable
 private fun DayCard(
     items: List<TransactionEntity>,
+    onOpenDetail: (Long) -> Unit,
     onEdit: (TransactionEntity) -> Unit,
     onDelete: (TransactionEntity) -> Unit,
     onReview: (TransactionEntity, String) -> Unit,
@@ -600,9 +700,10 @@ private fun DayCard(
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
             items.forEachIndexed { index, transaction ->
-                TransactionRow(
+                LedgerTransactionRow(
                     transaction = transaction,
                     timeText = timeOnlyFormat.format(Date(transaction.timestamp)),
+                    onClick = { onOpenDetail(transaction.id) },
                     onEdit = { onEdit(transaction) },
                     onDelete = { onDelete(transaction) },
                     onReview = { status -> onReview(transaction, status) },
@@ -620,8 +721,146 @@ private fun DayCard(
 }
 
 @Composable
+private fun LedgerTransactionRow(
+    transaction: TransactionEntity,
+    timeText: String,
+    onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onReview: (String) -> Unit,
+    onAddCategoryRule: () -> Unit,
+) {
+    val category = runCatching { TransactionCategory.valueOf(transaction.category) }
+        .getOrDefault(TransactionCategory.OTHER)
+    val type = runCatching { TransactionType.valueOf(transaction.type) }
+        .getOrDefault(TransactionType.EXPENSE)
+    var expanded by remember(transaction.id) { mutableStateOf(false) }
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "transaction-expand",
+    )
+    val semantic = LocalQingSemanticColors.current
+    val status = when {
+        transaction.duplicateOfId != null || transaction.remoteReviewStatus == "possible_duplicate" ->
+            tr("待确认重复") to semantic.warningText
+        transaction.remoteReviewStatus == "excluded" -> tr("不计入") to MaterialTheme.colorScheme.onSurfaceVariant
+        transaction.remoteReviewStatus == "refund" -> tr("退款") to semantic.income
+        transaction.remoteReviewStatus == "transfer" -> tr("转账") to MaterialTheme.colorScheme.onSurfaceVariant
+        transaction.remoteReviewStatus == "confirmed" -> tr("已确认") to semantic.income
+        else -> tr("未核实") to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val amount = if (transaction.currency == "CNY") {
+        formatCny(transaction.amountCents)
+    } else {
+        transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 4.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            MerchantAvatar(
+                merchant = transaction.merchant,
+                merchantIconKey = transaction.merchantIconKey,
+                merchantIconPath = transaction.merchantIconPath,
+                category = category,
+                size = 42.dp,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = transaction.merchant.ifBlank { tr(category.displayName) },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = " · " + status.first,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = status.second,
+                        maxLines = 1,
+                    )
+                }
+                Text(
+                    text = tr(category.displayName) + " · " + transactionSourceLabel(transaction.source) + " · " + timeText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                if (transaction.note.isNotBlank()) {
+                    Text(
+                        text = transaction.note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
+                    maxLines = 1,
+                )
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (expanded) tr("收起详情") else tr("展开详情"),
+                        modifier = Modifier.rotate(rotation),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        AnimatedVisibility(visible = expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                if (transaction.remoteReviewStatus != "refund") {
+                    TextButton(
+                        onClick = {
+                            onReview(
+                                if (transaction.remoteReviewStatus == "excluded") "unverified"
+                                else "excluded",
+                            )
+                        },
+                    ) {
+                        Text(
+                            if (transaction.remoteReviewStatus == "excluded") tr("恢复计入统计")
+                            else tr("不计入统计"),
+                        )
+                    }
+                }
+                TextButton(onClick = onAddCategoryRule) { Text(tr("添加分类规则")) }
+                TextButton(onClick = onEdit) { Text(tr("编辑")) }
+                TextButton(onClick = onDelete) {
+                    Text(tr("删除"), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+}
+
+private fun transactionSourceLabel(source: String): String = when (source) {
+    "ALIPAY" -> tr("支付宝")
+    "WECHAT" -> tr("微信")
+    "BANK_SMS" -> tr("银行短信")
+    "MANUAL" -> tr("手动")
+    else -> tr("其他来源")
+}
+
+@Composable
 private fun DuplicateReviewCard(
     candidates: List<TransactionViewModel.DuplicateCandidate>,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
     onKeepBoth: (TransactionEntity) -> Unit,
     onDeleteNew: (TransactionEntity) -> Unit,
 ) {
@@ -646,7 +885,7 @@ private fun DuplicateReviewCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            candidates.take(3).forEach { item ->
+            candidates.take(if (expanded) candidates.size else 3).forEach { item ->
                 val row = item.candidate
                 Column(Modifier.fillMaxWidth()) {
                     Text(
@@ -678,10 +917,12 @@ private fun DuplicateReviewCard(
                 }
             }
             if (candidates.size > 3) {
-                Text(
-                    text = tr("还有 ") + (candidates.size - 3) + tr(" 笔待确认。"),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                TextButton(onClick = onToggleExpanded) {
+                    Text(
+                        if (expanded) tr("收起")
+                        else tr("展开全部") + " ${candidates.size} " + tr("条")
+                    )
+                }
             }
         }
     }
@@ -868,6 +1109,17 @@ private val monthDayFormat = SimpleDateFormat("MM月dd日", Locale.CHINA)
 private val englishMonthDayFormat = SimpleDateFormat("MMM d", Locale.ENGLISH)
 
 private fun dayKey(timestampMs: Long): String = dayKeyFormat.format(Date(timestampMs))
+
+private fun localDayRange(year: Int, month: Int, day: Int): Pair<Long, Long> {
+    val start = Calendar.getInstance().apply {
+        clear()
+        set(year, month - 1, day, 0, 0, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    val startMs = start.timeInMillis
+    start.add(Calendar.DAY_OF_MONTH, 1)
+    return startMs to start.timeInMillis
+}
 
 private fun dayLabel(dayKey: String): String {
     val today = Calendar.getInstance().apply {
