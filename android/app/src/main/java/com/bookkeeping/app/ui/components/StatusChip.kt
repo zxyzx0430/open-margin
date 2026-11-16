@@ -2,9 +2,11 @@ package com.bookkeeping.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -15,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
@@ -39,6 +42,28 @@ internal fun statusToneColors(tone: StatusTone): Pair<Color, Color> {
         StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to
             MaterialTheme.colorScheme.onSurfaceVariant
     }
+}
+
+/** 状态圆点：和状态词共用同一套语义色，界面里不再硬编码绿/红。 */
+@Composable
+fun StatusDot(
+    tone: StatusTone,
+    modifier: Modifier = Modifier,
+    size: Dp = 10.dp,
+) {
+    val semantic = LocalQingSemanticColors.current
+    val color = when (tone) {
+        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primary
+        StatusTone.WARNING -> semantic.warningText
+        StatusTone.ERROR -> MaterialTheme.colorScheme.error
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(color),
+    )
 }
 
 @Composable

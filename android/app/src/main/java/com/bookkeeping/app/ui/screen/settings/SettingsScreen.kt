@@ -11,14 +11,8 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.SystemClock
 import android.provider.Settings
-import com.bookkeeping.app.notification.CaptureConnectionState
 import com.bookkeeping.app.data.local.entity.TransactionCategory
-import com.bookkeeping.app.notification.CaptureHealth
-import com.bookkeeping.app.notification.CaptureHealthSnapshot
-import com.bookkeeping.app.notification.CaptureUptime
-import com.bookkeeping.app.notification.KeepAliveService
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -104,7 +98,7 @@ import com.bookkeeping.app.update.UpdateVersionPolicy
 import com.bookkeeping.app.sync.SyncSettingsPanel
 import com.bookkeeping.app.sync.SyncState
 import com.bookkeeping.app.sync.SyncStateKind
-import com.bookkeeping.app.sync.SyncStatusPanel
+import com.bookkeeping.app.sync.SyncStatusSheet
 import com.bookkeeping.app.sync.endpointHost
 import com.bookkeeping.app.sync.readPendingCounts
 import com.bookkeeping.app.sync.relativeSyncTime
@@ -365,7 +359,7 @@ fun SettingsScreen(
                     SettingsSwitchRow(
                         icon = Icons.Filled.Notifications,
                         title = tr("常驻运行状态"),
-                        subtitle = tr("通知栏显示连接状态"),
+                        subtitle = tr("通知栏显示采集状态"),
                         checked = keepAlive,
                         onCheckedChange = viewModel::setKeepAlive,
                     )
@@ -381,7 +375,7 @@ fun SettingsScreen(
                     SettingsActionRow(
                         icon = Icons.Filled.Sync,
                         title = tr("常驻状态详情"),
-                        subtitle = tr("运行时长与最近入账"),
+                        subtitle = tr("连接状态与通知排查"),
                         onClick = { detailDialog = "keepAlive" },
                     )
                 }
@@ -436,11 +430,10 @@ fun SettingsScreen(
                         onFinish = { detailDialog = null },
                     )
                 }
-                "syncStatus" -> SettingsDetailDialog(tr("同步状态"), { detailDialog = null }) {
-                    SyncStatusPanel(
-                        onOpenSyncSettings = { detailDialog = "syncSettings" },
-                    )
-                }
+                "syncStatus" -> SyncStatusSheet(
+                    onDismiss = { detailDialog = null },
+                    onOpenSyncSettings = { detailDialog = "syncSettings" },
+                )
                 "syncSettings" -> SettingsDetailDialog(tr("同步设置"), { detailDialog = null }) {
                     SyncSettingsPanel(
                         onOpenWizard = { detailDialog = "wizard" },
@@ -584,7 +577,11 @@ fun SettingsScreen(
                     }
                 }
                 "keepAlive" -> SettingsDetailDialog(tr("常驻运行状态"), { detailDialog = null }) {
-                    KeepAliveCard(enabled = keepAlive, onToggle = viewModel::setKeepAlive)
+                    KeepAlivePanel(
+                        enabled = keepAlive,
+                        onToggle = viewModel::setKeepAlive,
+                        onOpenNotificationSettings = { openAppNotificationSettings(context) },
+                    )
                 }
             }
         }
@@ -1182,128 +1179,6 @@ private fun SectionTitle(text: String) {
         color = MaterialTheme.colorScheme.primary,
         modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
     )
-}
-
-@Composable
-private fun KeepAliveCard(enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var nowElapsed by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
-    var nowWall by remember { mutableStateOf(System.currentTimeMillis()) }
-    var health by remember { mutableStateOf<CaptureHealthSnapshot?>(null) }
-    LaunchedEffect(lifecycleOwner) {
-        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                nowElapsed = SystemClock.elapsedRealtime()
-                nowWall = System.currentTimeMillis()
-                health = withContext(Dispatchers.IO) {
-                    CaptureHealth.snapshot(context, KeepAliveService.startedAtMs)
-                }
-                delay(1_000L)
-            }
-        }
-    }
-    val snapshot = health
-    val uptime = CaptureUptime.format(
-        CaptureUptime.elapsed(
-            connectedAtMs = snapshot?.connectedAtMs ?: 0L,
-            connectedElapsedMs = snapshot?.connectedElapsedMs ?: 0L,
-            nowMs = nowWall,
-            nowElapsedMs = nowElapsed,
-        ),
-        tr("%02d 小时 %02d 分钟 %02d 秒"),
-    )
-    val downtime = CaptureUptime.formatDowntime(
-        CaptureUptime.elapsed(
-            connectedAtMs = snapshot?.disconnectedAtMs ?: 0L,
-            connectedElapsedMs = snapshot?.disconnectedElapsedMs ?: 0L,
-            nowMs = nowWall,
-            nowElapsedMs = nowElapsed,
-        ),
-        tr("%02d 秒"),
-        tr("%02d 分钟"),
-        tr("%d 小时 %02d 分钟"),
-    )
-    val statusText = when (snapshot?.state) {
-        null -> "⚪ " + tr("正在确认")
-        CaptureConnectionState.CONNECTED ->
-            "🟢 " + tr("已连接 · 已稳定运行") + " " + uptime
-        CaptureConnectionState.DISCONNECTED -> {
-            val disconnectedAt = snapshot.disconnectedAtMs
-            if (disconnectedAt > 0L) {
-                val wall = android.text.format.DateFormat.getTimeFormat(context)
-                    .format(Date(disconnectedAt))
-                "🔴 " + String.format(
-                    Locale.getDefault(),
-                    tr("%s 断开 · 已断开 %s"),
-                    wall,
-                    downtime,
-                )
-            } else {
-                "🔴 " + tr("尚未连接")
-            }
-        }
-        CaptureConnectionState.PERMISSION_OFF -> "🔴 " + tr("通知使用权已关闭")
-        CaptureConnectionState.UNKNOWN -> "⚪ " + tr("正在确认")
-    }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = tr("常驻运行状态"),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Text(
-                        text = if (enabled) tr("已开启：通知栏显示连接状态与运行时长")
-                               else tr("未开启：不会显示常驻状态条，也可能被国产 ROM 杀掉"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-                Switch(checked = enabled, onCheckedChange = onToggle)
-            }
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 8.dp),
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f),
-            )
-            Text(
-                text = tr("当前状态：") + statusText,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                text = tr("开启后通知栏会显示绿色/红色状态圆点：绿色表示通知监听已连接，红色表示已断开或权限关闭；") +
-                       tr("同时显示本次连接运行时长、断开时间和最近一次成功入账。") +
-                       tr("刚启动的几秒会先显示灰色确认中，避免误报。") +
-                       tr("Android 13 及以上需要通知权限，否则状态条不会显示。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                text = tr("如果通知栏没有状态条：请在系统设置中允许本应用的常驻/持续通知。") +
-                       tr("小米/Redmi/POCO 的路径是：应用信息 → 通知 → Permanent notifications。") +
-                       tr("同时开启自启动，并把电池策略设为「无限制」；否则小米可能不会发送开机广播。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-            FilledTonalButton(
-                onClick = { openAppNotificationSettings(context) },
-                modifier = Modifier.padding(top = 8.dp),
-            ) {
-                Text(tr("打开系统通知设置"))
-            }
-        }
-    }
 }
 
 private fun openAppNotificationSettings(context: Context) {
