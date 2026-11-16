@@ -782,6 +782,54 @@ internal object EnglishUiText {
         "后一天" to "Next day",
         "按日" to "Day",
         "年" to "year",
+
+        // === 同步状态页 / 同步设置页（状态与配置拆成两页后新增） ===
+        // 状态只写状态词，括号解释、复述状态的副标题都不再出现。
+        "同步状态" to "Sync status",
+        "待处理" to "Pending",
+        "操作" to "Actions",
+        "重新连接" to "Reconnect",
+        "最近一次结果" to "Last result",
+        "展开" to "Expand",
+        "复制" to "Copy",
+        "已复制" to "Copied",
+        "冲突" to "Conflict",
+        "冲突 %d/%d" to "Conflict %d/%d",
+        "本机" to "Phone",
+        "服务器" to "Server",
+        "本机这笔记录已不在待上传列表" to "This phone record is no longer in the upload queue",
+        "服务器上找不到这条记录" to "The server has no record of this transaction",
+        "不一致" to "Differences",
+        "内容相同，仅版本号不同" to "Same content; only the revision differs",
+        "日期时间不同：" to "Date/time differs: ",
+        "商户不同：" to "Merchant differs: ",
+        "金额不同：" to "Amount differs: ",
+        "分类不同：" to "Category differs: ",
+        "稍后处理" to "Later",
+        "稍后处理，仍在待处理列表" to "Deferred; still on the pending list",
+        "尚未成功同步" to "No successful sync yet",
+        "%d 笔修改待上传" to "%d changes to upload",
+        "%d 笔冲突" to "%d conflicts",
+        "%d 笔待上传" to "%d to upload",
+        "%d 笔冲突待处理，每个按钮只影响对应的一笔" to
+            "%d conflicts need review; each button affects only that transaction",
+        "没有待上传的修改" to "No changes to upload",
+        "没有需要逐笔核对的冲突" to "No conflicts to review",
+        "无待上传" to "Nothing to upload",
+        "逐笔核对后才能继续同步" to "Sync resumes after each conflict is resolved",
+        "还有 %d 笔，处理完当前项目后继续查看" to "%d more; resolve the ones above to see them",
+        "待上传 " to "To upload ",
+        "服务器地址、设备同步密钥、双向同步开关" to "Server address, device key, two-way sync switch",
+        "更换服务器" to "Change server",
+        "换地址等于换账本，本地记录不会自动迁移。" to
+            "Changing the address means a different ledger; local records are not migrated.",
+        "换地址等于换账本，本地记录不会自动迁移。请先在原服务器备份并迁移数据；已成功同步的手机不能直接换服务器。" to
+            "Changing the address means a different ledger; local records are not migrated. " +
+            "Back up and migrate on the old server first; a phone that has already synced cannot switch directly.",
+        "我已备份，继续更换" to "I've backed up; continue",
+        "已清空地址和密钥：填写新服务器地址和密钥后再保存" to
+            "Address and key cleared; enter the new server details, then save",
+        "短信与 ROM 设置可选" to "SMS and ROM settings are optional",
     )
 
     fun translate(chinese: String): String {
@@ -805,6 +853,14 @@ internal object EnglishUiText {
             val count = chinese.removePrefix("已同步无冲突交易；仍有 ")
                 .removeSuffix(" 笔修改待核对，请不要卸载应用")
             return "Synced non-conflicting records; $count changes still need review. Do not uninstall."
+        }
+        if (chinese.startsWith("已同步；还有 ") && chinese.endsWith(" 笔修改待上传")) {
+            val count = chinese.removePrefix("已同步；还有 ").removeSuffix(" 笔修改待上传")
+            return "Synced; $count changes still to upload"
+        }
+        if (chinese.startsWith("有 ") && chinese.endsWith(" 笔冲突待处理；其余修改已上传")) {
+            val count = chinese.removePrefix("有 ").removeSuffix(" 笔冲突待处理；其余修改已上传")
+            return "$count conflicts need review; other changes were uploaded"
         }
         if (chinese.startsWith("无法读取 XLSX：")) {
             return "Could not read XLSX: " + chinese.removePrefix("无法读取 XLSX：")
