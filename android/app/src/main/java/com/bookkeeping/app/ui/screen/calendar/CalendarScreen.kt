@@ -245,7 +245,7 @@ fun CalendarScreen(
                         HeatmapMode.entries.forEach { mode ->
                             DropdownMenuItem(
                                 text = {
-                                    Text((if (mode == heatmap) "✓ " else "") + tr("热力背景：") + tr(mode.label))
+                                    Text((if (mode == heatmap) "✓ " else "") + tr("日期高亮：") + tr(mode.label))
                                 },
                                 onClick = {
                                     heatmap = mode
@@ -771,6 +771,8 @@ private fun CalendarMonthGrid(
                                         when {
                                             isEdge -> MaterialTheme.colorScheme.primary
                                             inRange -> MaterialTheme.colorScheme.primaryContainer
+                                            // 有支出/收入的日子直接把整格底色染上，不再用底部小条
+                                            heat > 0f -> base.copy(alpha = 0.06f + 0.16f * heat)
                                             else -> Color.Transparent
                                         },
                                     ),
@@ -803,17 +805,6 @@ private fun CalendarMonthGrid(
                                                 maxLines = 1,
                                             )
                                         }
-                                    }
-                                    if (heat > 0f && !isEdge && !inRange) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomCenter)
-                                                .padding(bottom = 3.dp)
-                                                .width(18.dp)
-                                                .height(3.dp)
-                                                .clip(RoundedCornerShape(50))
-                                                .background(base.copy(alpha = heat)),
-                                        )
                                     }
                                 }
                             }

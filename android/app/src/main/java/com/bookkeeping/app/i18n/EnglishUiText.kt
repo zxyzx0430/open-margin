@@ -780,7 +780,7 @@ internal object EnglishUiText {
         "清除" to "Clear",
         "清除选择" to "Clear selection",
         "滑动日期选择区间，或点选单日" to "Swipe to select a date range, or tap a single day",
-        "热力背景：" to "Heatmap background: ",
+        "日期高亮：" to "Day highlight: ",
         "疑似重复原记录" to "Possible original transaction",
         "结余" to "Balance",
         "继续" to "Continue",
