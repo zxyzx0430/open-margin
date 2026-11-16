@@ -201,15 +201,24 @@ internal class BidirectionalSyncClient(
             .apply()
     }
 
-    private suspend fun push():Pair<Boolean,Set<String>> {
+    private data class PushOutcome(
+        val success: Boolean,
+        /** 两端都改过、需要用户逐笔决定的 event id。 */
+        val conflicts: Set<String>,
+        /** 服务器上已经找不到这条记录的 event id（current == null）。 */
+        val missingOnServer: Set<String>,
+    )
+
+    private suspend fun push(): PushOutcome {
         val conflictIds=mutableSetOf<String>()
+        val missingIds=mutableSetOf<String>()
         var skipped=0
         repeat(1000){
             val pending=dao.getPendingMutations(50,skipped)
-            if(pending.isEmpty())return true to conflictIds
+            if(pending.isEmpty())return PushOutcome(true,conflictIds,missingIds)
             var progress=false
             for(row in pending){
-                val result=send(row) ?: return false to conflictIds
+                val result=send(row) ?: return PushOutcome(false,conflictIds,missingIds)
                 val live=dao.getById(row.id) ?: continue
                 if(live.syncModifiedMs!=row.syncModifiedMs ||
                    (row.syncMutationId!=null && live.syncMutationId!=row.syncMutationId))continue
@@ -221,11 +230,18 @@ internal class BidirectionalSyncClient(
                             syncDirty=false,syncMutationId=null))
                         clearConflictApproval(id)
                         conflictIds.remove(id)
+                        missingIds.remove(id)
                         progress=true
                     }
                     "conflict"->{
                         val current=result.optJSONObject("current")
-                        if(current==null){conflictIds.add(id);continue}
+                        if(current==null){
+                            // 服务器上查不到这笔：没有可比对的服务器版本，
+                            // 状态页要单独说「服务器上找不到这条」，不能笼统算冲突。
+                            conflictIds.add(id)
+                            missingIds.add(id)
+                            continue
+                        }
                         val serverMs=current.optLong("changed_at_ms",0L)
                         val phoneMs=live.syncModifiedMs
                         val serverRevision=current.getLong("revision")
@@ -261,6 +277,7 @@ internal class BidirectionalSyncClient(
                                     syncDirty=false,syncMutationId=null))
                                 clearConflictApproval(id)
                                 conflictIds.remove(id)
+                                missingIds.remove(id)
                                 progress=true
                             }else conflictIds.add(id)
                         }else if(decision==SyncConflictPolicy.Decision.KEEP_SERVER){
@@ -270,6 +287,7 @@ internal class BidirectionalSyncClient(
                                 dao.update(updated)
                                 clearConflictApproval(id)
                                 conflictIds.remove(id)
+                                missingIds.remove(id)
                                 progress=true
                             }
                             else conflictIds.add(id)
@@ -288,22 +306,34 @@ internal class BidirectionalSyncClient(
             }
             if(progress) skipped=0 else skipped+=pending.size
         }
-        return false to conflictIds
+        return PushOutcome(false,conflictIds,missingIds)
     }
 
     suspend fun run():Boolean=withContext(Dispatchers.IO){
         if(!pull())return@withContext false
-        val (success,conflictIds)=push()
-        if(!success)return@withContext false
+        val push=push()
+        if(!push.success)return@withContext false
         if(!pull())return@withContext false
+        // 两个数字分开写：pending 是还没推上去的本地修改（正常现象），
+        // conflictIds 才是两端都改过、需要用户逐笔决定的冲突。
         val waiting=dao.pendingCount()
-        prefs.edit().putInt("pending_sync_conflicts",waiting)
-            .putStringSet("pending_conflict_event_ids",conflictIds.toSet())
+        prefs.edit()
+            .putInt(TransactionSyncWorker.PENDING_UPLOADS,waiting)
+            .putInt(TransactionSyncWorker.PENDING_CONFLICTS,push.conflicts.size)
+            .putStringSet(TransactionSyncWorker.PENDING_CONFLICT_IDS,push.conflicts.toSet())
+            .putStringSet(
+                TransactionSyncWorker.PENDING_CONFLICT_MISSING_IDS,
+                push.missingOnServer.toSet(),
+            )
             .putString("last_result",
-            if(waiting>0 || conflictIds.isNotEmpty())
-                "已同步无冲突交易；仍有 $waiting 笔修改待核对，请不要卸载应用"
-            else "双向同步成功：手机和服务器交易已更新"
-        ).putLong("last_success_ms",System.currentTimeMillis()).apply()
+            when{
+                push.conflicts.isNotEmpty()->
+                    "有 ${push.conflicts.size} 笔冲突待处理；其余修改已上传"
+                waiting>0->"已同步；还有 $waiting 笔修改待上传"
+                else->"双向同步成功：手机和服务器交易已更新"
+            }
+        ).putLong(TransactionSyncWorker.LAST_RESULT_MS,System.currentTimeMillis())
+            .putLong("last_success_ms",System.currentTimeMillis()).apply()
         true
     }
 }

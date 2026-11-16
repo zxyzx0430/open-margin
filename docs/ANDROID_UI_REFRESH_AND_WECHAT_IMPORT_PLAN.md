@@ -42,7 +42,7 @@
 - 交易实体：`TransactionEntity` 有金额、币种、方向、分类、商户、来源、账户、时间、审核状态、本地 `duplicateOfId`；**没有商户图标字段**。
 - 预算：`BudgetPreferences` 用 DataStore 存“月总预算 + 分类预算”，**没有月份维度**。
 - 统计：`StatsViewModel` 只算当前月；`TransactionDao.observeBetween` 可复用做月份/上月查询；**没有搜索查询**。
-- 同步状态：`BidirectionalSyncClient` / `TransactionSyncWorker` 写入 `last_result`、`last_success_ms`、`pending_sync_conflicts`、`pending_conflict_event_ids`（SharedPreferences），可复用做顶部状态 chip 和设置状态行。
+- 同步状态：`BidirectionalSyncClient` / `TransactionSyncWorker` 写入 `last_result`、`last_result_ms`、`last_success_ms`、`pending_sync_uploads`（未推送的本地修改）、`pending_sync_conflicts`（真冲突数）、`pending_conflict_event_ids`、`pending_conflict_missing_ids`（服务器已找不到的记录）（SharedPreferences），可复用做顶部状态 chip 和设置状态行。
 - 采集状态：rc.8 的 `CaptureHealth` / `KeepAliveService` 已能给出连接/断开/最近成功；可复用做“采集中”chip。
 - 无障碍：`accessibility_service_config.xml` 开了 `canRetrieveWindowContent`、`flagIncludeNotImportantViews`，**没有 `canTakeScreenshot`**；`ScreenSnapshot` 只保留文本/描述/类名，**没有节点边界**。这决定了图标截取需要扩展。
 - 现有无障碍规则：微信转账、微信红包、支付宝转账（`WechatTransferExtractor` 等），尚未覆盖“微信支付账单页”。
