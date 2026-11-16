@@ -189,6 +189,7 @@ fun SettingsScreen(
         mutableStateOf(endpointHost(syncPrefs.getString("url", "")))
     }
     var detailDialog by remember { mutableStateOf<String?>(null) }
+    var showExportGuide by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(openAutomationSetup) {
@@ -333,8 +334,11 @@ fun SettingsScreen(
                         onClick = onImportBills,
                     )
                 }
-                SettingsHint(
-                    tr("历史账单请使用官方导出文件。自动采集的高置信度记录会自动入账，低置信度记录进入待确认；密码/验证页面会跳过。"),
+                SettingsActionRow(
+                    icon = Icons.Filled.Info,
+                    title = tr("微信 / 支付宝导出账单教程"),
+                    subtitle = tr("两分钟导出 CSV"),
+                    onClick = { showExportGuide = true },
                 )
             }
 
@@ -1800,6 +1804,29 @@ private fun AboutUpdateCard() {
                 }
             }
         }
+    }
+
+    if (showExportGuide) {
+        AlertDialog(
+            onDismissRequest = { showExportGuide = false },
+            title = { Text(tr("导出微信 / 支付宝账单")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(tr("微信"), style = MaterialTheme.typography.titleSmall)
+                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「常见问题」→「下载账单」→「用于个人对账」，选时间范围并填邮箱，收到邮件后解压得到 CSV。"))
+                    Text(tr("支付宝"), style = MaterialTheme.typography.titleSmall)
+                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」，选时间范围并填邮箱，解压密码在邮件里。"))
+                    Text(
+                        tr("导入时选解压出的 CSV 文件即可。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showExportGuide = false }) { Text(tr("知道了")) }
+            },
+        )
     }
 
     installDialog?.let { state ->

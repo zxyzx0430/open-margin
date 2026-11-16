@@ -285,15 +285,6 @@ fun CalendarScreen(
                 }
             },
         )
-        Text(
-            text = tr("点选单日 · 长按日期拖动选区间，拖到空白处稍作停留可跨月"),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 4.dp),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
         MonthTotalsRow(monthTransactions)
         CalendarMonthGrid(
             year = parts.year,
@@ -354,15 +345,17 @@ fun CalendarScreen(
                     .weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = when {
-                        rangeStart == null || rangeEnd == null -> tr("长按日期拖动选择区间，或点选单日")
-                        rangeStart == rangeEnd -> tr("这一天你还没有任何记账")
-                        else -> tr("这段时间你还没有任何记账")
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (rangeStart != null && rangeEnd != null) {
+                    Text(
+                        text = if (rangeStart == rangeEnd) {
+                            tr("这一天你还没有任何记账")
+                        } else {
+                            tr("这段时间你还没有任何记账")
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

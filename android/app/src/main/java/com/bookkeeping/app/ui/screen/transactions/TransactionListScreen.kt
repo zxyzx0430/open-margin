@@ -420,15 +420,6 @@ fun TransactionListScreen(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
-                    Text(
-                        text = if (activeDrilldown == null) {
-                            tr("全部时间的支出与收入")
-                        } else {
-                            tr("所选范围的支出与收入")
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
 
