@@ -847,6 +847,26 @@ internal object EnglishUiText {
         "识别支付页面" to "Reads payment pages",
         "转账与红包入账" to "Transfers and red packets",
         "可选，银行短信" to "Optional, bank SMS",
+
+        // === 状态弹窗重设计：同步状态改成底部面板，常驻状态改成四块式布局 ===
+        // 状态词仍然只有六个（同步正常 / 同步异常 / 同步已阻断 / 授权失败 / 未配置 / 同步未开启）。
+        "常驻通知" to "Persistent notification",
+        "在通知栏显示采集状态" to "Shows capture status in the notification",
+        "通知栏显示采集状态" to "Notification shows capture status",
+        "连接状态与通知排查" to "Connection status and notification help",
+        "未连接" to "Disconnected",
+        "去系统设置检查通知权限" to "Check notification access in system settings",
+        "关闭后通知栏不再显示采集状态，采集本身不受影响。" to
+            "When off, the notification stops showing capture status; capture itself is unaffected.",
+        "通知栏没有显示？" to "Notification not showing?",
+        "允许「常驻 / 持续通知」" to "Allow \"ongoing / persistent notifications\"",
+        "小米 / Redmi / POCO：应用信息 → 通知 → 永久通知" to
+            "Xiaomi / Redmi / POCO: App info → Notifications → Permanent notifications",
+        "开启自启动，电池策略设为「无限制」" to
+            "Enable autostart and set the battery policy to \"No restrictions\"",
+        "%d 分钟" to "%d min",
+        "%d 天" to "%d days",
+        "显示自动记账采集是否在运行" to "Shows whether automatic capture is running",
     )
 
     fun translate(chinese: String): String {
