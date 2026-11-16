@@ -332,9 +332,11 @@ fun StatsScreen(
             onDismiss = { selectedCategory = null },
             onOpenLedger = { onOpenLedger(ledgerDrilldown(category = category)) },
             onOpenTransaction = { id ->
-                // 先关面板再跳详情，返回时统计页停在原滚动位置。
-                selectedCategory = null
+                // 先导航、再关面板：导航是同一帧完成的（详情路由无转场动画），
+                // 面板跟着统计页一起离开组合，中间不会露出「面板已关、详情还没来」
+                // 的统计页帧。返回时统计页重新组合，面板状态已丢，不会自己弹回来。
                 onOpenTransaction(id)
+                selectedCategory = null
             },
         )
     }

@@ -27,6 +27,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +54,7 @@ import com.bookkeeping.app.ui.components.MerchantRuleDialog
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +75,18 @@ fun TransactionDetailScreen(
 ) {
     val transaction by detailViewModel.transaction.collectAsState()
     val entry = transaction
+    // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
+    // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
+    // 真被删掉的记录 300ms 后照样给出提示。
+    var missingConfirmed by remember { mutableStateOf(false) }
+    LaunchedEffect(entry) {
+        if (entry == null) {
+            delay(300)
+            missingConfirmed = true
+        } else {
+            missingConfirmed = false
+        }
+    }
     var editing by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
@@ -123,11 +137,13 @@ fun TransactionDetailScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Text(
-                        text = tr("这笔记录已不存在"),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
+                    if (missingConfirmed) {
+                        Text(
+                            text = tr("这笔记录已不存在"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
                 }
             } else {
                 DetailContent(
