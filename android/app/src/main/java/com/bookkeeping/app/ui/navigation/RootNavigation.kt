@@ -9,6 +9,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -21,12 +22,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -34,7 +35,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
-import com.bookkeeping.app.ui.screen.billimport.BillImportDialog
+import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
@@ -43,11 +44,7 @@ import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 @Composable
 fun RootNavigation() {
     val navController = rememberNavController()
-    // Keep the request outside the Transactions destination until the import
-    // dialog is dismissed. The previous one-shot flag was consumed during a
-    // transient composition, so state restoration could recreate the screen
-    // with the flag already cleared and no dialog visible.
-    var showBillImport by rememberSaveable { mutableStateOf(false) }
+    var requestBillImport by remember { mutableStateOf(false) }
     var requestAutomationSetup by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -59,46 +56,52 @@ fun RootNavigation() {
                     containerColor = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp,
                 ) {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+                    val navBackStackEntry by navController.currentBackStackEntryAsState()
+                    val currentDestination = navBackStackEntry?.destination
+                    val showLabels = LocalDensity.current.fontScale <= 1.3f
 
-                BottomNavItem.ALL.forEach { item ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
+                    BottomNavItem.ALL.forEach { item ->
+                        val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                        val label: (@Composable () -> Unit)? = if (showLabels) {
+                            {
+                                Text(
+                                    text = tr(item.label),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
                             }
-                        },
-                        icon = {
-                            Icon(
-                                item.icon,
-                                contentDescription = tr(item.label),
-                                modifier = Modifier.size(24.dp),
-                            )
-                        },
-                        // Keep navigation compact at large system font sizes:
-                        // English "Transactions" previously wrapped to two lines.
-                        label = {
-                            Text(
-                                text = tr(item.label),
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = MaterialTheme.colorScheme.primary,
-                            selectedTextColor = MaterialTheme.colorScheme.primary,
-                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
-                    )
-                }
+                        } else {
+                            null
+                        }
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick = {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    item.icon,
+                                    contentDescription = tr(item.label),
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            },
+                            label = label,
+                            alwaysShowLabel = showLabels,
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = MaterialTheme.colorScheme.primary,
+                                selectedTextColor = MaterialTheme.colorScheme.primary,
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
+                        )
+                    }
                 }
             }
         }
@@ -118,17 +121,27 @@ fun RootNavigation() {
                             restoreState = true
                         }
                     },
+                    openBillImport = requestBillImport,
+                    onBillImportOpened = { requestBillImport = false },
                 )
-                if (showBillImport) {
-                    BillImportDialog(onDismiss = { showBillImport = false })
-                }
             }
-            composable(BottomNavItem.Stats.route) { StatsScreen() }
+            composable(BottomNavItem.Calendar.route) { CalendarScreen() }
+            composable(BottomNavItem.Stats.route) {
+                StatsScreen(
+                    onOpenLedger = {
+                        navController.navigate(BottomNavItem.Transactions.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
+            }
             composable(BottomNavItem.Budget.route) { BudgetScreen() }
             composable(BottomNavItem.Settings.route) {
                 SettingsScreen(
                     onImportBills = {
-                        showBillImport = true
+                        requestBillImport = true
                         navController.navigate(BottomNavItem.Transactions.route) {
                             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                             launchSingleTop = true
@@ -145,11 +158,12 @@ fun RootNavigation() {
 
 private sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector) {
     data object Transactions : BottomNavItem("transactions", "账单", Icons.AutoMirrored.Filled.List)
+    data object Calendar : BottomNavItem("calendar", "日历", Icons.Outlined.CalendarMonth)
     data object Stats : BottomNavItem("stats", "统计", Icons.Filled.PieChart)
     data object Budget : BottomNavItem("budget", "预算", Icons.Filled.AccountBalanceWallet)
     data object Settings : BottomNavItem("settings", "设置", Icons.Filled.Settings)
 
     companion object {
-        val ALL = listOf(Transactions, Stats, Budget, Settings)
+        val ALL = listOf(Transactions, Calendar, Stats, Budget, Settings)
     }
 }

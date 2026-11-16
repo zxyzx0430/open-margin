@@ -36,7 +36,8 @@ internal object CaptureStatusNotifier {
             else -> "🔴 " + AppLanguage.tr(context, "自动记账已断开")
         }
         val connectedLine = if (connected) {
-            AppLanguage.tr(context, "通知监听已连接，已稳定运行") + " " +
+            AppLanguage.tr(context, "通知监听已连接") + "\n" +
+                AppLanguage.tr(context, "已稳定运行") + " " +
                 CaptureUptime.format(
                     CaptureUptime.elapsed(
                         connectedAtMs = health.connectedAtMs,
