@@ -18,7 +18,12 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 应用内更新：下载已签名 APK 后拉起系统安装器。系统仍会逐次确认安装。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 语音记账：只在用户按住说话时录音，音频只在本机内存与本地模型里处理，不上传。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 没有麦克风的设备（平板/车机）仍可用通知、短信、OCR 记账，不因权限过滤掉安装。 -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <!-- 扫码连接 Windows：只在用户点「扫码连接」时申请；相册解码不需要相机。 -->
+
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
