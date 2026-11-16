@@ -63,17 +63,41 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $lines = @(& ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -Version 0.0.0-dryrun)
-          $lines | ForEach-Object { Write-Host $_ }
-          $built = ($lines | Where-Object { $_ -like 'built=*' } | Select-Object -First 1)
-          $base = ($lines | Where-Object { $_ -like 'base=*' } | Select-Object -First 1)
-          if (-not $built -or -not $base) { throw 'dry run did not print built= and base= lines' }
-          foreach ($required in @('finance-api', 'wallos')) {
-            if ($built -notmatch [regex]::Escape($required)) { throw "built image plan is missing $required" }
+
+          function Assert-Plan([object[]]$Lines, [string]$Label) {
+            $built = ($Lines | Where-Object { $_ -like 'built=*' } | Select-Object -First 1)
+            $base = ($Lines | Where-Object { $_ -like 'base=*' } | Select-Object -First 1)
+            if (-not $built -or -not $base) { throw "$Label : dry run did not print built= and base= lines" }
+            foreach ($required in @('finance-api', 'wallos')) {
+              if ($built -notmatch [regex]::Escape($required)) { throw "$Label : built image plan is missing $required" }
+            }
+            foreach ($required in @('nginx:1.28-alpine', 'python:3.11-slim', 'bellamy/wallos')) {
+              if ($base -notmatch [regex]::Escape($required)) { throw "$Label : base image plan is missing $required" }
+            }
+            if ($base -match 'finance-api|personal-finance-system-wallos') {
+              throw "$Label : built images must not be classified as base images"
+            }
+            if (Test-Path 'secrets/backend.env') { throw "$Label : placeholder secrets were not cleaned up" }
+            if (Test-Path 'secrets/wallos-ledger.env') { throw "$Label : placeholder ledger env was not cleaned up" }
+            if (Test-Path '.env') { throw "$Label : placeholder .env was not cleaned up" }
           }
-          foreach ($required in @('nginx:1.28-alpine', 'python:3.11-slim', 'bellamy/wallos')) {
-            if ($base -notmatch [regex]::Escape($required)) { throw "base image plan is missing $required" }
-          }
-          if ($base -match 'finance-api|personal-finance-system-wallos') {
-            throw 'built images must not be classified as base images'
-          }
+
+          # Reproduce a clean runner: compose must succeed without checked-out
+          # secrets/.env because the script creates temporary placeholders.
+          Remove-Item -Force 'secrets/backend.env' -ErrorAction SilentlyContinue
+          Remove-Item -Force 'secrets/wallos-ledger.env' -ErrorAction SilentlyContinue
+          Remove-Item -Force '.env' -ErrorAction SilentlyContinue
+
+          Write-Host '--- compose JSON path ---'
+          $jsonLines = @(& ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -Version 0.0.0-dryrun)
+          $jsonLines | ForEach-Object { Write-Host $_ }
+          Assert-Plan $jsonLines 'json'
+
+          # Force the portable YAML path used when --format json is unavailable.
+          Remove-Item -Force 'secrets/backend.env' -ErrorAction SilentlyContinue
+          Remove-Item -Force 'secrets/wallos-ledger.env' -ErrorAction SilentlyContinue
+          Remove-Item -Force '.env' -ErrorAction SilentlyContinue
+          Write-Host '--- compose YAML fallback path ---'
+          $yamlLines = @(& ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -ForceLegacyComposeConfig -Version 0.0.0-dryrun)
+          $yamlLines | ForEach-Object { Write-Host $_ }
+          Assert-Plan $yamlLines 'yaml'

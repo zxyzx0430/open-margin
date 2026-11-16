@@ -100,6 +100,7 @@ jobs:
         shell: pwsh
         run: |
           ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -Version '${{ steps.version.outputs.value }}'
+          ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -ForceLegacyComposeConfig -Version '${{ steps.version.outputs.value }}'
 
       - name: Build offline Docker image bundle
         shell: pwsh
