@@ -110,4 +110,56 @@ class EnglishUiTextTest {
         assertEquals("View transaction details", EnglishUiText.translate("查看账单详情"))
         assertEquals("categories", EnglishUiText.translate("类"))
     }
+
+    @Test
+    fun calendarScreenLabelsTranslate() {
+        // 日历页是「中文是 key」最容易漏的一块：底部 tab、标题、汇总卡、菜单、
+        // 空状态、农历开关、周起始日、月份选择器，缺一条英文就会在英文模式里露出中文。
+        val expected = mapOf(
+            "日历" to "Calendar",
+            "日历设置" to "Calendar settings",
+            "上个月" to "Previous month",
+            "下个月" to "Next month",
+            "本月汇总" to "This month's summary",
+            "支出" to "Expense",
+            "收入" to "Income",
+            "结余" to "Balance",
+            "笔" to "transactions",
+            "清除" to "Clear",
+            "清除选择" to "Clear selection",
+            "热力背景：" to "Heatmap background: ",
+            "关闭" to "Close",
+            "周起始日：" to "Week starts on: ",
+            "周一" to "Monday",
+            "周日" to "Sunday",
+            "农历：" to "Lunar calendar: ",
+            "显示" to "Show",
+            "隐藏" to "Hide",
+            "点选单日 · 长按日期拖动选区间，拖到空白处稍作停留可跨月" to
+                "Tap a day · long-press and drag to select a range; pause on the empty space to cross months",
+            "长按日期拖动选择区间，或点选单日" to
+                "Press and drag on a day to select a range, or tap a single day",
+            "这一天你还没有任何记账" to "No transactions recorded on this day",
+            "这段时间你还没有任何记账" to "No transactions recorded during this period",
+            "滑动日期选择区间，或点选单日" to "Swipe to select a date range, or tap a single day",
+            "未知商户" to "Unknown merchant",
+            "退款" to "Refund",
+            "待确认重复" to "Possible duplicates",
+            "转账" to "Transfer",
+            "不计入" to "Excluded",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
+    fun monthPickerLabelsTranslate() {
+        assertEquals("Select month", EnglishUiText.translate("选择月份"))
+        assertEquals("Back to this month", EnglishUiText.translate("回到本月"))
+        assertEquals("Previous year", EnglishUiText.translate("上一年"))
+        assertEquals("Next year", EnglishUiText.translate("下一年"))
+        assertEquals("Cancel", EnglishUiText.translate("取消"))
+    }
 }

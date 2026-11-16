@@ -52,6 +52,7 @@ internal object EnglishUiText {
         "没有找到已下载的安装包，请重新下载" to
             "The downloaded installer is missing. Download it again.",
         "账单" to "Records",
+        "日历" to "Calendar",
         "统计" to "Statistics",
         "预算" to "Budget",
         "设置" to "Settings",
