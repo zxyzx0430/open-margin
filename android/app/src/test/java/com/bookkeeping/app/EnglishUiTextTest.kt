@@ -40,6 +40,47 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun windowsQrPairingLabelsTranslate() {
+        val expected = mapOf(
+            "扫码连接" to "Scan QR code",
+            "从相册选择二维码" to "Choose QR from gallery",
+            "对准电脑上的配对二维码" to "Point at the pairing QR on your PC",
+            "② 电脑已开启 Tailscale Funnel，手机不需要安装 Tailscale。" to
+                "② Tailscale Funnel is enabled on the PC; the phone does not need Tailscale.",
+            "③ 手机用自己的网络或常用 VPN 即可访问 https://电脑名.网络名.ts.net/finance。" to
+                "③ The phone can use its own network or usual VPN to reach https://device.tailnet.ts.net/finance.",
+            "④ 在电脑完成页点「扫码连接」，或手动填写显示的地址和设备同步密钥。" to
+                "④ Tap \"Scan QR code\" on the PC completion page, or type the displayed URL and device key.",
+            "二维码内容为空，请重新扫描。" to "The QR code is empty. Scan it again.",
+            "二维码里的账本身份无效（至少 16 位）。" to
+                "The QR ledger identity is invalid (at least 16 characters).",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+        listOf(
+            "最快的方式：扫描电脑完成页上的配对二维码，会自动填入地址和密钥，再经只读验证后才允许启用。",
+            "已读取配对二维码，正在做只读验证…",
+            "未获得相机权限，无法扫码。可改用「从相册选择二维码」，或在系统设置中允许相机权限。",
+            "所选图片中没有识别到二维码，请换一张清晰的二维码截图。",
+            "所选图片无法读取（权限或格式问题），请重新选择。",
+            "手机已有成功同步记录，但这次配对的地址或账本身份与历史不同。为避免跨账本覆盖交易，已阻止配对；请先备份原账本并完成显式迁移。",
+            "二维码里的账本身份与服务器返回的不一致，已阻止连接。",
+            "二维码里的账本身份与验证结果不一致，已阻止启用。",
+            "检测到历史同步记录与本次配对不一致，已阻止启用；请先备份并完成显式迁移。",
+            "二维码内容过长，已拒绝。请扫描电脑完成页上的配对二维码。",
+            "这不是清衡配对二维码（内容格式不正确）。",
+            "配对二维码版本不受支持，请把手机 App 更新到最新版本。",
+            "这不是清衡的配对二维码。",
+            "二维码里的服务器地址无效：需要 https://设备名.网络名.ts.net/finance，且不能带端口、参数或用户名。",
+            "二维码里的设备密钥无效（至少 16 位，不能包含空白字符）。",
+        ).forEach { source ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+        }
+    }
+
+    @Test
     fun historicalSyncStatusesWithDynamicNumbersTranslate() {
         assertEquals(
             "Local transaction 12 is invalid and cannot sync",

@@ -6,8 +6,9 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
-import android.os.Build
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -21,11 +22,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.i18n.tr
+import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.ChecksumException
 import com.google.zxing.DecodeHintType
 import com.google.zxing.FormatException
+import com.google.zxing.InvertedLuminanceSource
+import com.google.zxing.LuminanceSource
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.RGBLuminanceSource
@@ -35,21 +40,24 @@ import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/**
- * UI label for the two new pairing controls. The project-wide English map lives
- * outside this sync module's scope, so these labels stay local; prefer adding
- * them to EnglishUiText when that file is next touched.
- */
-internal fun pairingText(chinese: String, english: String): String =
-    if (AppLanguage.current() == AppLanguage.ENGLISH) english else chinese
+import java.io.ByteArrayInputStream
 
 internal enum class QrScanFailure {
-    /** No camera permission; Barcode scanning was never started. */
+    /** No camera permission; barcode scanning was never started. */
     CAMERA_DENIED,
 
     /** A picked image decoded but held no QR code. */
     IMAGE_UNREADABLE,
+
+    /** The content resolver refused to open the picked image. */
+    IMAGE_ACCESS_DENIED,
+}
+
+/** Result of the gallery path; keeps "no QR" separate from "cannot read file". */
+internal sealed interface QrImageDecodeResult {
+    data class Decoded(val text: String) : QrImageDecodeResult
+    data object Unreadable : QrImageDecodeResult
+    data object AccessDenied : QrImageDecodeResult
 }
 
 /**
@@ -85,11 +93,10 @@ internal fun QrPairingControls(
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val text = withContext(Dispatchers.IO) { decodeQrFromUri(context, uri) }
-            if (text.isNullOrBlank()) {
-                onFailure(QrScanFailure.IMAGE_UNREADABLE)
-            } else {
-                accept(text, true)
+            when (val decoded = withContext(Dispatchers.IO) { decodeQrFromUri(context, uri) }) {
+                is QrImageDecodeResult.Decoded -> accept(decoded.text, true)
+                QrImageDecodeResult.AccessDenied -> onFailure(QrScanFailure.IMAGE_ACCESS_DENIED)
+                QrImageDecodeResult.Unreadable -> onFailure(QrScanFailure.IMAGE_UNREADABLE)
             }
         }
     }
@@ -119,37 +126,80 @@ internal fun QrPairingControls(
                     permissionLauncher.launch(Manifest.permission.CAMERA)
                 }
             },
-        ) { Text(pairingText("扫码连接", "Scan QR code")) }
+        ) { Text(tr("扫码连接")) }
         OutlinedButton(
             enabled = enabled,
             onClick = { galleryLauncher.launch("image/*") },
-        ) { Text(pairingText("从相册选择二维码", "Choose QR from gallery")) }
+        ) { Text(tr("从相册选择二维码")) }
     }
 }
 
 private fun scanOptions(): ScanOptions = ScanOptions().apply {
     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-    setPrompt(pairingText("对准电脑上的配对二维码", "Point at the pairing QR on your PC"))
+    setPrompt(tr("对准电脑上的配对二维码"))
     setBeepEnabled(false)
     setOrientationLocked(false)
     setBarcodeImageEnabled(false)
 }
 
-private const val MAX_DECODE_DIMENSION = 1600
+/** Cap large photos; 2560 px still leaves ample pixels per QR module. */
+private const val MAX_DECODE_DIMENSION = 2560
 
 /**
- * Decodes the first QR found in a picked image. Kept off the main thread by
- * the caller; photos are sampled down before luminance conversion so a large
- * gallery image cannot exhaust the heap.
+ * Decodes the first QR found in a picked image. Runs off the main thread.
+ *
+ * The gallery path is deliberately independent from the camera path: it reads
+ * the provider stream once, applies EXIF orientation, forces ARGB pixels and
+ * tries normal/inverted binarization plus a pure-barcode fallback. A token is
+ * never logged; only safe diagnostics (URI authority, sizes, exception type).
  */
-internal fun decodeQrFromUri(context: Context, uri: Uri): String? = runCatching {
-    // Read once: photo-picker grants can be one-shot providers, and decoding
-    // bounds + pixels from the same bytes avoids a second provider round-trip.
-    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-        ?: return@runCatching null
+internal fun decodeQrFromUri(context: Context, uri: Uri): QrImageDecodeResult {
+    val bytes = try {
+        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    } catch (error: SecurityException) {
+        logDebug("access denied: ${uri.scheme}://${uri.authority}")
+        return QrImageDecodeResult.AccessDenied
+    } catch (error: Exception) {
+        logDebug("open failed: ${error.javaClass.simpleName}")
+        return QrImageDecodeResult.Unreadable
+    } ?: return QrImageDecodeResult.Unreadable
+    if (bytes.isEmpty()) return QrImageDecodeResult.Unreadable
+
+    val bitmap = try {
+        decodeBitmap(bytes)
+    } catch (error: Exception) {
+        logDebug("bitmap failed: ${error.javaClass.simpleName}")
+        null
+    } ?: return QrImageDecodeResult.Unreadable
+
+    return try {
+        logDebug(
+            "uri=${uri.scheme}://${uri.authority} bytes=${bytes.size} " +
+                "bitmap=${bitmap.width}x${bitmap.height} config=${bitmap.config}"
+        )
+        val text = decodeQrBitmap(bitmap)
+        logDebug("decoded length=${text?.length ?: -1}")
+        if (text.isNullOrBlank()) {
+            QrImageDecodeResult.Unreadable
+        } else {
+            QrImageDecodeResult.Decoded(text)
+        }
+    } catch (error: Exception) {
+        logDebug("decode failed: ${error.javaClass.simpleName}")
+        QrImageDecodeResult.Unreadable
+    } finally {
+        bitmap.recycle()
+    }
+}
+
+private fun logDebug(message: String) {
+    if (BuildConfig.DEBUG) Log.d("QrPairing", message)
+}
+
+private fun decodeBitmap(bytes: ByteArray): Bitmap? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
     var sample = 1
     while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_DECODE_DIMENSION) {
@@ -158,79 +208,105 @@ internal fun decodeQrFromUri(context: Context, uri: Uri): String? = runCatching 
     val options = BitmapFactory.Options().apply {
         inSampleSize = sample
         // ARGB_8888 + mutable keeps the decoder on a software bitmap.
-        // Hardware bitmaps throw from getPixels(), which would look like
-        // "no QR code found" for a perfectly readable image.
+        // Hardware bitmaps throw from getPixels().
         inPreferredConfig = Bitmap.Config.ARGB_8888
         inMutable = true
     }
-    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        ?: return@runCatching null
-    try {
-        decodeQrBitmap(bitmap)
-    } finally {
-        bitmap.recycle()
-    }
-}.getOrNull()
+    val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
 
-/** Tries the four right-angle orientations, then gives up. */
+    val orientation = try {
+        ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL,
+        )
+    } catch (_: Exception) {
+        ExifInterface.ORIENTATION_NORMAL
+    }
+    return applyOrientation(decoded, orientation)
+}
+
+private fun applyOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            matrix.postRotate(90f)
+            matrix.postScale(-1f, 1f)
+        }
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            matrix.postRotate(270f)
+            matrix.postScale(-1f, 1f)
+        }
+        else -> return bitmap
+    }
+    val oriented = Bitmap.createBitmap(
+        bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true,
+    )
+    if (oriented !== bitmap) bitmap.recycle()
+    return oriented
+}
+
+/** Tries the four right-angle orientations, normal and inverted. */
 internal fun decodeQrBitmap(bitmap: Bitmap): String? {
-    // Defensive: callers may hand over a hardware bitmap despite the
-    // BitmapFactory options above; getPixels() is not supported there.
-    val readable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-        bitmap.config == Bitmap.Config.HARDWARE) {
-        bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null
-    } else {
+    val readable = if (bitmap.config == Bitmap.Config.ARGB_8888) {
         bitmap
+    } else {
+        bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null
     }
     try {
-        return decodeQrBitmapReadable(readable)
+        decodeAtOrientation(readable, allowPureMode = true)?.let { return it }
+        for (degrees in intArrayOf(90, 180, 270)) {
+            val rotated = Bitmap.createBitmap(
+                readable, 0, 0, readable.width, readable.height,
+                Matrix().apply { postRotate(degrees.toFloat()) }, true,
+            )
+            try {
+                decodeAtOrientation(rotated, allowPureMode = false)?.let { return it }
+            } finally {
+                if (rotated !== readable) rotated.recycle()
+            }
+        }
     } finally {
         if (readable !== bitmap) readable.recycle()
     }
+    return null
 }
 
-private fun decodeQrBitmapReadable(bitmap: Bitmap): String? {
-    // Normal detector first (photos, screenshots with surrounding page).
-    decodeWithHints(bitmap, mapOf(DecodeHintType.TRY_HARDER to true))?.let { return it }
-    // Some screenshot crops have no quiet zone; the setup page renders QR
-    // modules edge-to-edge. Pure mode can still read those.
-    return decodeWithHints(
-        bitmap,
-        mapOf(DecodeHintType.TRY_HARDER to true, DecodeHintType.PURE_BARCODE to true),
-    )
-}
-
-private fun decodeWithHints(
-    bitmap: Bitmap,
-    hints: Map<DecodeHintType, Any>,
-): String? {
-    val reader = MultiFormatReader().apply { setHints(hints) }
-    for (degrees in intArrayOf(0, 90, 180, 270)) {
-        val candidate = if (degrees == 0) {
-            bitmap
-        } else {
-            Bitmap.createBitmap(
-                bitmap, 0, 0, bitmap.width, bitmap.height,
-                Matrix().apply { postRotate(degrees.toFloat()) }, true,
-            )
-        }
-        try {
-            val pixels = IntArray(candidate.width * candidate.height)
-            candidate.getPixels(pixels, 0, candidate.width, 0, 0, candidate.width, candidate.height)
-            val source = RGBLuminanceSource(candidate.width, candidate.height, pixels)
-            return reader.decode(BinaryBitmap(HybridBinarizer(source))).text
-        } catch (_: NotFoundException) {
-            // Try the next orientation.
-        } catch (_: ChecksumException) {
-            // Try the next orientation.
-        } catch (_: FormatException) {
-            // Try the next orientation.
-        } catch (_: Exception) {
-            // A bitmap-level failure is not retryable in another orientation.
-            return null
-        } finally {
-            if (candidate !== bitmap) candidate.recycle()
-        }
+private fun decodeAtOrientation(bitmap: Bitmap, allowPureMode: Boolean): String? {
+    val pixels = IntArray(bitmap.width * bitmap.height)
+    bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+    val source = RGBLuminanceSource(bitmap.width, bitmap.height, pixels)
+    decodeSource(source, pure = false)?.let { return it }
+    val inverted = InvertedLuminanceSource(source)
+    decodeSource(inverted, pure = false)?.let { return it }
+    if (allowPureMode) {
+        // Setup-page QRs are rendered edge-to-edge; a tight crop has no quiet
+        // zone, which the normal detector needs.
+        decodeSource(source, pure = true)?.let { return it }
+        decodeSource(inverted, pure = true)?.let { return it }
     }
     return null
+}
+
+private fun decodeSource(source: LuminanceSource, pure: Boolean): String? {
+    val hints = buildMap<DecodeHintType, Any> {
+        put(DecodeHintType.TRY_HARDER, true)
+        put(DecodeHintType.POSSIBLE_FORMATS, listOf(BarcodeFormat.QR_CODE))
+        if (pure) put(DecodeHintType.PURE_BARCODE, true)
+    }
+    return try {
+        MultiFormatReader().apply { setHints(hints) }
+            .decode(BinaryBitmap(HybridBinarizer(source)))
+            .text
+    } catch (_: NotFoundException) {
+        null
+    } catch (_: ChecksumException) {
+        null
+    } catch (_: FormatException) {
+        null
+    }
 }
