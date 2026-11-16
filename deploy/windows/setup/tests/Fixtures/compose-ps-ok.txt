@@ -1,0 +1,3 @@
+{"Command":"docker compose ps","Service":"finance-api","State":"running","Health":"healthy"}
+{"Command":"docker compose ps","Service":"wallos","State":"running","Health":""}
+{"Command":"docker compose ps","Service":"public-sync-gateway","State":"running","Health":""}
