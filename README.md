@@ -51,6 +51,12 @@ Android v2 transaction sync supports pull + push (including edits and deletion t
 - Android 8+ with notification listener support to use the optional collector.
 - Optional: ChatGPT-compatible OAuth/MCP client.
 
+## Windows one-click setup (v1.3.0, remote sync)
+
+Download `OpenMargin-Setup.exe` from [GitHub Releases](https://github.com/zxyzx0430/open-margin/releases). The v1 installer is unsigned by design: verify the published SHA256 first, and use SmartScreen's **更多信息 → 仍要运行** only for a file you trust. It installs to `%ProgramData%\OpenMargin\app` and creates Start Menu items **清衡设置** (local wizard) and **清衡账本** (`http://127.0.0.1:18082/`).
+
+v1 ships **remote Tailscale Funnel sync only**; the wizard has no mode selection. The phone does not need Tailscale and may keep a commercial VPN, provided that VPN can reach `https://<pc>.<tailnet>.ts.net/finance`. Docker images are not inside the installer; a separate `OpenMargin-Offline-<version>.tar.gz` Release asset exists for blocked/slow networks. See [Windows deployment](docs/DEPLOY_WINDOWS.md) for SmartScreen, SHA256, UAC, reboot, Funnel limits and the list of items **not yet verified on real hardware**.
+
 ## Windows quick start (local-only)
 
 Install Git and Docker Desktop (Linux containers / WSL2), then in PowerShell:
