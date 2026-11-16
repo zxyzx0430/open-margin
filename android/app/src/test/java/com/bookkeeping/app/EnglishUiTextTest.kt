@@ -75,4 +75,14 @@ class EnglishUiTextTest {
         assertEquals("Set this month's budget", EnglishUiText.translate("设置该月预算"))
         assertEquals("No data this month", EnglishUiText.translate("本月没有数据"))
     }
+
+    @Test
+    fun statsReadabilityLabelsTranslate() {
+        // 统计页环形图标签、图例展开与分类明细跳转文案：中文是 key，缺一条英文就会静默显示中文。
+        assertEquals("Last month's total", EnglishUiText.translate("上月金额"))
+        assertEquals("Last year's total", EnglishUiText.translate("上一年金额"))
+        assertEquals("Collapse", EnglishUiText.translate("收起"))
+        assertEquals("View transaction details", EnglishUiText.translate("查看账单详情"))
+        assertEquals("categories", EnglishUiText.translate("类"))
+    }
 }
