@@ -121,6 +121,19 @@ function Get-DockerfileBaseImages {
     return @($result)
 }
 
+function Get-ComposeDeclaredImages {
+    $result = New-Object System.Collections.Generic.List[string]
+    $text = Get-Content -Path $composePath -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { return @() }
+    foreach ($match in [regex]::Matches([string]$text, '(?m)^\s*image:\s*["'']?([^"''\s#]+)')) {
+        $image = $match.Groups[1].Value.Trim()
+        if ($image -and -not $image.Contains('${') -and -not $result.Contains($image)) {
+            $result.Add($image)
+        }
+    }
+    return @($result)
+}
+
 if (-not $Version) { $Version = Resolve-BundleVersion '' }
 if (-not $OutputDir) { $OutputDir = Join-Path $repoRoot 'releases/offline' }
 $OutputDir = [IO.Path]::GetFullPath($OutputDir)
@@ -212,7 +225,7 @@ try {
         }
     }
 
-    foreach ($baseImage in @($BaseImages) + @(Get-DockerfileBaseImages)) {
+    foreach ($baseImage in @($BaseImages) + @(Get-DockerfileBaseImages) + @(Get-ComposeDeclaredImages)) {
         if (-not $baseImage) { continue }
         if (-not (Test-ImagePresent -Image $baseImage)) {
             Write-Step ('pulling base image ' + $baseImage)
