@@ -243,6 +243,15 @@ class NotificationParserTest {
         }
     }
 
+    @Test fun aggregateGroupSummaryIsNotABill() {
+        assertNull(
+            wechat(
+                "微信支付",
+                "微信支付 [3条]微信支付: 已支付¥2.00",
+            ),
+        )
+    }
+
     @Test fun adversarialLongTextCompletesWithoutCrashing() {
         val longTexts = listOf(
             "1,".repeat(50_000),
