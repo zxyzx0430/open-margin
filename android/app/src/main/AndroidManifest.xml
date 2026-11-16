@@ -18,6 +18,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 应用内更新：下载已签名 APK 后拉起系统安装器。系统仍会逐次确认安装。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 扫码连接 Windows：只在用户点「扫码连接」时申请；相册解码不需要相机。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".BookkeepingApplication"
