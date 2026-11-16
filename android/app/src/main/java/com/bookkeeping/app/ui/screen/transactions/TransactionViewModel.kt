@@ -2,6 +2,7 @@ package com.bookkeeping.app.ui.screen.transactions
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -25,7 +26,13 @@ import java.math.BigDecimal
 import java.util.Calendar
 import javax.inject.Inject
 
-enum class LedgerTimeFilter { ALL, THIS_MONTH }
+enum class LedgerTimeFilter { MONTH, YEAR, ALL }
+
+internal fun TransactionEntity.isLedgerTotalsCandidate(): Boolean =
+    currency == "CNY" &&
+        !syncDeleted &&
+        duplicateOfId == null &&
+        remoteReviewStatus !in setOf("excluded", "transfer", "refund", "possible_duplicate")
 
 internal object LedgerFilter {
     fun parseAmountCents(query: String): Long? {
@@ -80,10 +87,16 @@ class TransactionViewModel @Inject constructor(
         val original: TransactionEntity?,
     )
 
+    private data class PeriodState(
+        val time: LedgerTimeFilter,
+        val month: String,
+        val year: Int,
+    )
+
     private data class FilterState(
         val type: TransactionType?,
         val category: TransactionCategory?,
-        val time: LedgerTimeFilter,
+        val period: PeriodState,
     )
 
     private val _searchQuery = MutableStateFlow("")
@@ -95,34 +108,57 @@ class TransactionViewModel @Inject constructor(
     private val _categoryFilter = MutableStateFlow<TransactionCategory?>(null)
     val categoryFilter: StateFlow<TransactionCategory?> = _categoryFilter
 
-    private val _timeFilter = MutableStateFlow(LedgerTimeFilter.THIS_MONTH)
+    private val _timeFilter = MutableStateFlow(LedgerTimeFilter.ALL)
     val timeFilter: StateFlow<LedgerTimeFilter> = _timeFilter
+
+    private val _selectedMonth = MutableStateFlow(BudgetMonth.currentKey())
+    val selectedMonth: StateFlow<String> = _selectedMonth
+
+    private val _selectedYear = MutableStateFlow(Calendar.getInstance().get(Calendar.YEAR))
+    val selectedYear: StateFlow<Int> = _selectedYear
+
+    private val periodState: StateFlow<PeriodState> =
+        combine(_timeFilter, _selectedMonth, _selectedYear) { time, month, year ->
+            PeriodState(time, month, year)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            PeriodState(LedgerTimeFilter.ALL, BudgetMonth.currentKey(), Calendar.getInstance().get(Calendar.YEAR)),
+        )
 
     private val _ledgerLoaded = MutableStateFlow(false)
     val ledgerLoaded: StateFlow<Boolean> = _ledgerLoaded
 
-    // Kept for callers that only need the raw list (duplicate originals).
-    private val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
+    // Kept for callers that only need the raw list (duplicate originals, calendar).
+    val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val hasAnyTransactions: StateFlow<Boolean> = allTransactions
         .map { it.isNotEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    val periodTransactions: StateFlow<List<TransactionEntity>> =
+        combine(allTransactions, periodState) { all, period ->
+            val range = periodRange(period)
+            all.filter { transaction ->
+                !transaction.syncDeleted &&
+                    (range == null ||
+                        (transaction.timestamp >= range.first && transaction.timestamp < range.second))
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
         combine(
             _searchQuery.debounce(220),
-            combine(_typeFilter, _categoryFilter, _timeFilter) { type, category, time ->
-                FilterState(type, category, time)
+            combine(_typeFilter, _categoryFilter, periodState) { type, category, period ->
+                FilterState(type, category, period)
             },
         ) { query, filters -> query to filters }
             .flatMapLatest { (query, filters) ->
-                val (start, end) = if (filters.time == LedgerTimeFilter.THIS_MONTH) {
-                    currentMonthRange()
-                } else {
-                    null to null
-                }
+                val range = periodRange(filters.period)
+                val start = range?.first
+                val end = range?.second
                 val amountQuery = LedgerFilter.parseAmountCents(query)
                 val daoQuery = if (amountQuery != null) "" else query
                 dao.observeFiltered(
@@ -165,17 +201,24 @@ class TransactionViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val monthlyExpenseCents: StateFlow<Long> = run {
-        val (start, end) = currentMonthRange()
-        repository.observeTotalExpenseBetween(start, end)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
-    }
+    val periodExpenseCents: StateFlow<Long> = periodTransactions
+        .map { list ->
+            list.filter {
+                it.type == TransactionType.EXPENSE.name &&
+                    it.category != TransactionCategory.TRANSFER.name &&
+                    it.isLedgerTotalsCandidate()
+            }.sumOf { it.amountCents }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
-    val monthlyIncomeCents: StateFlow<Long> = run {
-        val (start, end) = currentMonthRange()
-        repository.observeTotalIncomeBetween(start, end)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
-    }
+    val periodIncomeCents: StateFlow<Long> = periodTransactions
+        .map { list ->
+            list.filter {
+                it.type == TransactionType.INCOME.name &&
+                    it.isLedgerTotalsCandidate()
+            }.sumOf { it.amountCents }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
@@ -212,11 +255,24 @@ class TransactionViewModel @Inject constructor(
         _categoryFilter.value = category
     }
 
+    fun setMonth(year: Int, month: Int) {
+        _selectedYear.value = year
+        _selectedMonth.value = BudgetMonth.keyOf(year, month)
+        _timeFilter.value = LedgerTimeFilter.MONTH
+    }
+
+    fun setYear(year: Int) {
+        _selectedYear.value = year
+        _timeFilter.value = LedgerTimeFilter.YEAR
+    }
+
     fun clearFilters() {
         _searchQuery.value = ""
         _typeFilter.value = null
         _categoryFilter.value = null
-        _timeFilter.value = LedgerTimeFilter.THIS_MONTH
+        _selectedMonth.value = BudgetMonth.currentKey()
+        _selectedYear.value = Calendar.getInstance().get(Calendar.YEAR)
+        _timeFilter.value = LedgerTimeFilter.ALL
     }
 
     /** Show every transaction, used by the explicit “全部” filter chip. */
@@ -314,17 +370,19 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch { repository.keepBoth(entity) }
     }
 
-    private fun currentMonthRange(): Pair<Long, Long> {
-        val cal = Calendar.getInstance().apply {
-            set(Calendar.DAY_OF_MONTH, 1)
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
+    private fun periodRange(period: PeriodState): Pair<Long, Long>? = when (period.time) {
+        LedgerTimeFilter.MONTH -> BudgetMonth.range(period.month)
+        LedgerTimeFilter.YEAR -> {
+            val start = Calendar.getInstance().apply {
+                clear()
+                set(period.year, Calendar.JANUARY, 1, 0, 0, 0)
+            }.timeInMillis
+            val end = Calendar.getInstance().apply {
+                clear()
+                set(period.year + 1, Calendar.JANUARY, 1, 0, 0, 0)
+            }.timeInMillis
+            start to end
         }
-        val start = cal.timeInMillis
-        cal.add(Calendar.MONTH, 1)
-        val end = cal.timeInMillis
-        return start to end
+        LedgerTimeFilter.ALL -> null
     }
 }

@@ -277,6 +277,14 @@ class StatsViewModel @Inject constructor(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
+    // 分类下钻使用：当前选中月份的全部交易
+    val monthTransactions: StateFlow<List<TransactionEntity>> = _selectedMonth
+        .flatMapLatest { month ->
+            val (start, end) = BudgetMonth.range(month)
+            repository.observeBetween(start, end)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val previousComparison: StateFlow<MonthComparison> = combine(
         totalCents,
         previousPeriodTotalCents,

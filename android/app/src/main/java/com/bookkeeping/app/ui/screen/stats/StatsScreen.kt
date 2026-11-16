@@ -23,18 +23,21 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -45,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -64,9 +68,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.budget.MonthComparison
+import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
@@ -88,12 +96,16 @@ import com.bookkeeping.app.ui.theme.QingText
 import com.bookkeeping.app.ui.theme.QingTextSecondary
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
+fun StatsScreen(
+    onOpenLedger: () -> Unit = {},
+    viewModel: StatsViewModel = hiltViewModel(),
+) {
     val stats by viewModel.categoryStats.collectAsState()
     val totalCents by viewModel.totalCents.collectAsState()
     val viewingType by viewModel.viewingType.collectAsState()
@@ -104,8 +116,10 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
     val period by viewModel.period.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val monthlyTotals by viewModel.monthlyTotals.collectAsState()
+    val monthTransactions by viewModel.monthTransactions.collectAsState()
 
     var showMonthPicker by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<TransactionCategory?>(null) }
 
     Scaffold(
         containerColor = QingBackground,
@@ -174,7 +188,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
 
             if (stats.isEmpty()) {
                 item(key = "empty") {
-                    EmptyStatsCard(type = viewingType, period = period)
+                    EmptyStatsCard(type = viewingType, period = period, onOpenLedger = onOpenLedger)
                 }
             } else {
                 item(key = "donut") {
@@ -182,6 +196,7 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                         stats = stats,
                         totalCents = totalCents,
                         type = viewingType,
+                        onCategoryClick = { selectedCategory = it },
                     )
                 }
                 when (period) {
@@ -201,7 +216,11 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                     }
                 }
                 item(key = "category_detail") {
-                    CategoryDetailCard(stats = stats, type = viewingType)
+                    CategoryDetailCard(
+                        stats = stats,
+                        type = viewingType,
+                        onCategoryClick = { selectedCategory = it },
+                    )
                 }
             }
         }
@@ -215,6 +234,16 @@ fun StatsScreen(viewModel: StatsViewModel = hiltViewModel()) {
                 viewModel.setMonth(it)
                 showMonthPicker = false
             },
+        )
+    }
+
+    selectedCategory?.let { category ->
+        CategoryDetailDialog(
+            category = category,
+            month = selectedMonth,
+            type = viewingType,
+            transactions = monthTransactions,
+            onDismiss = { selectedCategory = null },
         )
     }
 }
@@ -491,6 +520,7 @@ private fun CategoryDonutCard(
     stats: List<CategoryStat>,
     totalCents: Long,
     type: TransactionType,
+    onCategoryClick: (TransactionCategory) -> Unit,
 ) {
     val shape = RoundedCornerShape(20.dp)
     Card(
@@ -515,7 +545,7 @@ private fun CategoryDonutCard(
             HorizontalDivider(color = QingOutline)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 stats.take(6).forEach { stat ->
-                    CategoryLegendRow(stat = stat)
+                    CategoryLegendRow(stat = stat, onClick = { onCategoryClick(stat.category) })
                 }
                 if (stats.size > 6) {
                     Text(
@@ -530,9 +560,11 @@ private fun CategoryDonutCard(
 }
 
 @Composable
-private fun CategoryLegendRow(stat: CategoryStat) {
+private fun CategoryLegendRow(stat: CategoryStat, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -704,6 +736,7 @@ private fun MonthlyTrendCard(
 private fun CategoryDetailCard(
     stats: List<CategoryStat>,
     type: TransactionType,
+    onCategoryClick: (TransactionCategory) -> Unit,
 ) {
     val shape = RoundedCornerShape(20.dp)
     val amountColor = if (type == TransactionType.INCOME) QingIncome else QingExpense
@@ -736,6 +769,7 @@ private fun CategoryDetailCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clickable { onCategoryClick(stat.category) }
                         .padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -773,7 +807,11 @@ private fun CategoryDetailCard(
 }
 
 @Composable
-private fun EmptyStatsCard(type: TransactionType, period: StatsPeriod) {
+private fun EmptyStatsCard(
+    type: TransactionType,
+    period: StatsPeriod,
+    onOpenLedger: () -> Unit,
+) {
     val annual = period == StatsPeriod.YEAR
     val shape = RoundedCornerShape(20.dp)
     Card(
@@ -829,9 +867,173 @@ private fun EmptyStatsCard(type: TransactionType, period: StatsPeriod) {
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
                 )
+                Button(
+                    onClick = onOpenLedger,
+                    modifier = Modifier.padding(top = 8.dp),
+                ) {
+                    Text(tr("去记一笔"))
+                }
             }
         }
     }
+}
+
+@Composable
+private fun CategoryDetailDialog(
+    category: TransactionCategory,
+    month: String,
+    type: TransactionType,
+    transactions: List<TransactionEntity>,
+    onDismiss: () -> Unit,
+) {
+    val rows = remember(transactions, category, type) {
+        transactions
+            .filter {
+                it.type == type.name &&
+                    it.category == category.name &&
+                    it.currency == "CNY" &&
+                    it.duplicateOfId == null &&
+                    it.remoteReviewStatus !in setOf(
+                        "excluded", "transfer", "refund", "possible_duplicate",
+                    ) &&
+                    (it.type == "INCOME" || it.category != "TRANSFER")
+            }
+            .sortedByDescending { it.timestamp }
+    }
+    val total = rows.sumOf { it.amountCents }
+    val monthText = BudgetMonth.parse(month)?.let { "${it.year}年${it.month}月" } ?: month
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CategoryIcon(category = category, size = 40.dp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 10.dp),
+                    ) {
+                        Text(
+                            text = tr(category.displayName),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "$monthText · ${rows.size} ${tr("笔")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = QingTextSecondary,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = tr("关闭"))
+                    }
+                }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = QingSurface),
+                    border = BorderStroke(1.dp, QingOutline),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (type == TransactionType.INCOME) {
+                                tr("该分类收入")
+                            } else {
+                                tr("该分类支出")
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = QingTextSecondary,
+                        )
+                        Text(
+                            text = formatCny(total),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
+                        )
+                    }
+                }
+                if (rows.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(tr("该分类暂无记录"), color = QingTextSecondary)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(top = 8.dp),
+                    ) {
+                        items(rows, key = { it.id }) { transaction ->
+                            CategoryDetailTransactionRow(transaction, type)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategoryDetailTransactionRow(
+    transaction: TransactionEntity,
+    type: TransactionType,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
+                .format(Date(transaction.timestamp)),
+            style = MaterialTheme.typography.labelSmall,
+            color = QingTextSecondary,
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = transaction.merchant.ifBlank { tr("未知商户") },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = transaction.note,
+                style = MaterialTheme.typography.labelSmall,
+                color = QingTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = (if (type == TransactionType.EXPENSE) "−" else "+") +
+                formatCny(transaction.amountCents),
+            style = MaterialTheme.typography.titleSmall,
+            color = if (type == TransactionType.EXPENSE) QingExpense else QingIncome,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+    HorizontalDivider(color = QingOutline)
 }
 
 @Composable

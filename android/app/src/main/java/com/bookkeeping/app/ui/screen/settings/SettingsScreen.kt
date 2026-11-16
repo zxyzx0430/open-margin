@@ -100,12 +100,15 @@ import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
 import com.bookkeeping.app.update.UpdateComponentScope
+import com.bookkeeping.app.update.UpdateVersionPolicy
 import com.bookkeeping.app.sync.SyncSettingsCard
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Sync
@@ -1556,18 +1559,35 @@ private fun LanguageCard() {
     val context = LocalContext.current
     var current by remember { mutableStateOf(AppLanguage.read(context)) }
     var error by remember { mutableStateOf(false) }
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(tr("界面语言"), style = MaterialTheme.typography.titleSmall)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+    SettingsGroupCard {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SettingsIconBubble(Icons.Filled.Language, StatusTone.NEUTRAL)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                Text(tr("界面语言"), style = MaterialTheme.typography.titleSmall)
+                Text(
+                    tr("只切换界面文案，不改动账本数据"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        SettingsRowDivider()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(
                     AppLanguage.CHINESE to "简体中文",
                     AppLanguage.ENGLISH to "English"
@@ -1642,21 +1662,36 @@ private fun AboutUpdateCard() {
         onDispose { context.unregisterReceiver(receiver) }
     }
 
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
+    SettingsGroupCard {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SettingsIconBubble(Icons.Filled.Info, StatusTone.NEUTRAL)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    tr("当前版本") + ": " + BuildConfig.VERSION_NAME +
+                        " (Build " + BuildConfig.VERSION_CODE + ")",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    tr("发布标识") + ": " + UpdateVersionPolicy.CURRENT_TAG,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        SettingsRowDivider()
         Column(
-            Modifier.padding(16.dp),
+            Modifier.fillMaxWidth().padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                tr("当前版本") + ": " + BuildConfig.VERSION_NAME +
-                    " (" + BuildConfig.VERSION_CODE + ")",
-                style = MaterialTheme.typography.titleMedium,
-            )
             FilledTonalButton(
                 enabled = !checking,
                 modifier = Modifier.fillMaxWidth(),
@@ -1746,6 +1781,11 @@ private fun AboutUpdateCard() {
                     }
                 }
             }
+            Text(
+                tr("检查更新仅访问项目的公开 GitHub Releases，不上传财务数据；更新需要手动下载安装。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
