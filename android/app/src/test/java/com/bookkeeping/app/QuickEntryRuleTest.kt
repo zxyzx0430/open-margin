@@ -1,0 +1,53 @@
+package com.bookkeeping.app
+
+import com.bookkeeping.app.ui.components.QuickEntryRule
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/**
+ * 长按 1 秒的时序与「空白不提交」都是纯规则，直接测数值，不依赖 Composables。
+ */
+class QuickEntryRuleTest {
+    @Test
+    fun ringSweepsZeroToOneOverOneSecond() {
+        assertEquals(0f, QuickEntryRule.ringProgress(0L), 0.0001f)
+        assertEquals(0.25f, QuickEntryRule.ringProgress(250L), 0.0001f)
+        assertEquals(0.5f, QuickEntryRule.ringProgress(QuickEntryRule.HAPTIC_TICK_MS), 0.0001f)
+        assertEquals(1f, QuickEntryRule.ringProgress(QuickEntryRule.HOLD_TO_RECORD_MS), 0.0001f)
+    }
+
+    @Test
+    fun ringNeverOverflowsAndIgnoresNegativeTime() {
+        assertEquals(1f, QuickEntryRule.ringProgress(5_000L), 0.0001f)
+        assertEquals(0f, QuickEntryRule.ringProgress(-40L), 0.0001f)
+    }
+
+    @Test
+    fun voiceTriggersAtOneSecondAndNotBefore() {
+        assertFalse(QuickEntryRule.isLongEnough(999L))
+        assertTrue(QuickEntryRule.isLongEnough(1_000L))
+    }
+
+    @Test
+    fun lightHapticComesAtHalfASecond() {
+        assertFalse(QuickEntryRule.shouldTick(499L))
+        assertTrue(QuickEntryRule.shouldTick(500L))
+        // 轻震必须早于真正触发，否则用户感觉不到「快到了」。
+        assertTrue(QuickEntryRule.HAPTIC_TICK_MS < QuickEntryRule.HOLD_TO_RECORD_MS)
+    }
+
+    @Test
+    fun blankInputIsNotSubmitted() {
+        assertFalse(QuickEntryRule.canSubmit(""))
+        assertFalse(QuickEntryRule.canSubmit("   "))
+        assertFalse(QuickEntryRule.canSubmit("\n\t"))
+        assertTrue(QuickEntryRule.canSubmit("麦当劳 36.5"))
+    }
+
+    @Test
+    fun hintStaysVisibleForFourSeconds() {
+        assertEquals(4_000L, QuickEntryRule.HINT_VISIBLE_MS)
+    }
+}
