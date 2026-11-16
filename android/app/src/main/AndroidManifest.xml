@@ -40,6 +40,13 @@
             </intent-filter>
         </activity>
 
+        <!-- 崩溃报告页：只在未捕获异常时拉起，独立主题避免依赖 Compose -->
+        <activity
+            android:name=".CrashActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.DeviceDefault.Light" />
+
         <!-- 通知监听服务：抓取支付宝/微信等的支付成功通知 -->
         <!-- BIND_NOTIFICATION_LISTENER_SERVICE 是系统级权限，只能由系统授予 -->
         <!-- 用户必须在「设置 - 通知 - 通知使用权」里手动勾选我们的应用 -->

@@ -17,7 +17,7 @@ android {
         // RC12: merged calendar workspace, ledger UI refresh, category drill-down
         // and settings alignment on top of rc.11 capture/import fixes.
         // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.2.0-rc.12).
-        versionCode = 18
+        versionCode = 19
         versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -34,6 +34,12 @@ android {
         }
         release {
             isMinifyEnabled = false
+            // 真机只有 arm64：把 x86/x86_64/armeabi-v7a 的 OCR 与 onnx 库去掉，
+            // 包体从 ~77MB 降到 ~45MB。模拟器请用 debug 变体。
+            ndk {
+                abiFilters.clear()
+                abiFilters += "arm64-v8a"
+            }
         }
     }
     compileOptions {
