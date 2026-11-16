@@ -64,9 +64,11 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.formatCny
+import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -84,7 +86,7 @@ private const val KEY_LUNAR = "lunar"
 private enum class HeatmapMode(val label: String) {
     EXPENSE("支出"),
     INCOME("收入"),
-    NET("净额"),
+    NET("结余"),
     OFF("关闭"),
 }
 
@@ -334,8 +336,12 @@ private fun MonthHeader(
 @Composable
 private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
     val semantic = LocalQingSemanticColors.current
-    val expense = transactions.filter { it.countsAsExpense() }.sumOf { it.amountCents }
-    val income = transactions.filter { it.countsAsIncome() }.sumOf { it.amountCents }
+    val expense = transactions
+        .filter { StatsTransactionPolicy.matches(it, TransactionType.EXPENSE) }
+        .sumOf { it.amountCents }
+    val income = transactions
+        .filter { StatsTransactionPolicy.matches(it, TransactionType.INCOME) }
+        .sumOf { it.amountCents }
     val net = income - expense
     Row(
         modifier = Modifier
@@ -399,11 +405,19 @@ private fun CalendarMonthGrid(
     val heatValues = remember(byDay, heatmap) {
         byDay.mapValues { (_, list) ->
             when (heatmap) {
-                HeatmapMode.EXPENSE -> list.filter { it.countsAsExpense() }.sumOf { it.amountCents }
-                HeatmapMode.INCOME -> list.filter { it.countsAsIncome() }.sumOf { it.amountCents }
+                HeatmapMode.EXPENSE -> list
+                    .filter { StatsTransactionPolicy.matches(it, TransactionType.EXPENSE) }
+                    .sumOf { it.amountCents }
+                HeatmapMode.INCOME -> list
+                    .filter { StatsTransactionPolicy.matches(it, TransactionType.INCOME) }
+                    .sumOf { it.amountCents }
                 HeatmapMode.NET -> {
-                    val income = list.filter { it.countsAsIncome() }.sumOf { it.amountCents }
-                    val expense = list.filter { it.countsAsExpense() }.sumOf { it.amountCents }
+                    val income = list
+                        .filter { StatsTransactionPolicy.matches(it, TransactionType.INCOME) }
+                        .sumOf { it.amountCents }
+                    val expense = list
+                        .filter { StatsTransactionPolicy.matches(it, TransactionType.EXPENSE) }
+                        .sumOf { it.amountCents }
                     abs(income - expense)
                 }
                 HeatmapMode.OFF -> 0L
@@ -584,8 +598,15 @@ private fun SelectionSummary(
     val semantic = LocalQingSemanticColors.current
     val hasSelection = start != null && end != null
     val source = if (hasSelection) transactions else monthFallback
-    val expense = source.filter { it.countsAsExpense() }.sumOf { it.amountCents }
-    val income = source.filter { it.countsAsIncome() }.sumOf { it.amountCents }
+    val includedExpenses = source.filter {
+        StatsTransactionPolicy.matches(it, TransactionType.EXPENSE)
+    }
+    val includedIncomes = source.filter {
+        StatsTransactionPolicy.matches(it, TransactionType.INCOME)
+    }
+    val expense = includedExpenses.sumOf { it.amountCents }
+    val income = includedIncomes.sumOf { it.amountCents }
+    val includedCount = includedExpenses.size + includedIncomes.size
     val net = income - expense
     val title = when {
         !hasSelection -> tr("本月汇总")
@@ -615,7 +636,7 @@ private fun SelectionSummary(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "${source.size} ${tr("笔")}",
+                    text = "$includedCount ${tr("笔")}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -644,7 +665,25 @@ private fun SelectionSummary(
 
 @Composable
 private fun CalendarTransactionRow(transaction: TransactionEntity) {
-    val expense = transaction.type == "EXPENSE"
+    val expense = transaction.type == TransactionType.EXPENSE.name
+    val type = when (transaction.type) {
+        TransactionType.EXPENSE.name -> TransactionType.EXPENSE
+        TransactionType.INCOME.name -> TransactionType.INCOME
+        else -> null
+    }
+    val includedInStats = type?.let { StatsTransactionPolicy.matches(transaction, it) } == true
+    val excludedReason = if (includedInStats) {
+        null
+    } else {
+        when {
+            transaction.remoteReviewStatus == "refund" -> tr("退款")
+            transaction.remoteReviewStatus == "possible_duplicate" ||
+                transaction.duplicateOfId != null -> tr("待确认重复")
+            transaction.remoteReviewStatus == "transfer" ||
+                (expense && transaction.category == "TRANSFER") -> tr("转账")
+            else -> tr("不计入")
+        }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -671,6 +710,18 @@ private fun CalendarTransactionRow(transaction: TransactionEntity) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            excludedReason?.let { reason ->
+                Text(
+                    text = reason,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Text(
             text = (if (expense) "−" else "+") + formatCny(transaction.amountCents),
@@ -685,16 +736,6 @@ private fun CalendarTransactionRow(transaction: TransactionEntity) {
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
-
-private fun TransactionEntity.countsAsExpense(): Boolean =
-    type == "EXPENSE" && category != "TRANSFER" && currency == "CNY" &&
-        !syncDeleted && duplicateOfId == null &&
-        remoteReviewStatus !in setOf("excluded", "transfer", "refund", "possible_duplicate")
-
-private fun TransactionEntity.countsAsIncome(): Boolean =
-    type == "INCOME" && currency == "CNY" &&
-        !syncDeleted && duplicateOfId == null &&
-        remoteReviewStatus !in setOf("excluded", "transfer", "refund", "possible_duplicate")
 
 private fun dayAt(
     position: Offset,
