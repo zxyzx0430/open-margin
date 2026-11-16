@@ -216,6 +216,7 @@ internal object EnglishUiText {
         "选择分类" to "Select category",
         "本月统计" to "Monthly statistics",
         "分类占比" to "By category",
+        "已选中" to "Selected",
         "每日趋势" to "Daily trend",
         "本月总收入" to "Total monthly income",
         "本月总支出" to "Total monthly expenses",
