@@ -96,6 +96,11 @@ jobs:
           }
           "value=$version" >> $env:GITHUB_OUTPUT
 
+      - name: Validate offline image plan (dry run)
+        shell: pwsh
+        run: |
+          ./deploy/windows/setup/Build-OfflineBundle.ps1 -DryRun -Version '${{ steps.version.outputs.value }}'
+
       - name: Build offline Docker image bundle
         shell: pwsh
         run: |

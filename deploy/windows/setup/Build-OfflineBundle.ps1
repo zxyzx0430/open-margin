@@ -17,6 +17,17 @@
         and its own staging directory).
       * Re-running with -Force overwrites only the bundle outputs.
 
+    Image collection:
+      * Built images come from compose services with a `build:` key under the
+        windows-public-sync profile.
+      * Base images come from image-only compose services (all profiles), every
+        Dockerfile FROM line, and the explicit nginx/python/Wallos defaults.
+      * Missing base images are pulled explicitly; a failed pull stops with a
+        clear error before docker save.
+
+    Use -DryRun to print the built/base image plan without building, pulling,
+    saving, or creating any output.
+
     Note: the setup CLI supports `open-margin-setup.ps1 deploy --no-build`, so
     a loaded bundle can be used without rebuilding. The web wizard still runs
     `docker compose up --build` by default; fully offline web-wizard installs
@@ -33,7 +44,8 @@ param(
     ),
     [switch]$SkipBuild,
     [switch]$Force,
-    [switch]$KeepStaging
+    [switch]$KeepStaging,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -91,23 +103,97 @@ function Test-ImagePresent {
     }
 }
 
-function Get-ComposeImages {
+function Get-ComposeConfig {
+    param([switch]$AllProfiles)
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = & $script:DockerPath compose --project-name $ProjectName --profile windows-public-sync config --images 2>$null
-        if ($LASTEXITCODE -ne 0) { return @() }
-        return @($output | Where-Object { $_ -and $_.Trim() -match '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$' } | ForEach-Object { $_.Trim() })
+        $arguments = @('compose', '--project-name', $ProjectName)
+        if ($AllProfiles) {
+            $arguments += @('--profile', '*')
+        } else {
+            $arguments += @('--profile', 'windows-public-sync')
+        }
+        $arguments += @('config', '--format', 'json')
+        $output = & $script:DockerPath @arguments 2>$null | Out-String
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($output)) {
+            throw 'docker compose config --format json failed; Docker Compose v2 is required.'
+        }
+        return ($output | ConvertFrom-Json)
     } finally {
         $ErrorActionPreference = $previous
     }
 }
 
+function Get-ImagePlan {
+    # Built images come only from services enabled by the build profile.
+    $built = New-Object System.Collections.Generic.List[string]
+    $dockerfiles = New-Object System.Collections.Generic.List[string]
+    $enabled = Get-ComposeConfig
+    foreach ($property in @($enabled.services.PSObject.Properties)) {
+        $service = $property.Value
+        $buildProperty = $service.PSObject.Properties['build']
+        if ($null -eq $buildProperty) { continue }
+        $imageProperty = $service.PSObject.Properties['image']
+        $image = if ($imageProperty) { [string]$imageProperty.Value } else { '' }
+        $builtImage = if ($image) { $image } else { $ProjectName + '-' + $property.Name }
+        if ($builtImage -and -not $built.Contains($builtImage)) { $built.Add($builtImage) }
+
+        # Compose resolves build.context to an absolute path; dockerfile is
+        # relative to that context unless absolute.
+        $build = $buildProperty.Value
+        $context = '.'
+        $dockerfile = 'Dockerfile'
+        if ($build -is [string]) {
+            $context = $build
+        } else {
+            if ($build.PSObject.Properties['context']) { $context = [string]$build.context }
+            if ($build.PSObject.Properties['dockerfile']) { $dockerfile = [string]$build.dockerfile }
+        }
+        if ($context -and $dockerfile) {
+            $dockerfilePath = if ([IO.Path]::IsPathRooted($dockerfile)) { $dockerfile } else { Join-Path $context $dockerfile }
+            if (Test-Path $dockerfilePath) { $dockerfiles.Add($dockerfilePath) }
+        }
+    }
+
+    # Base images come from every image-only service in every profile, every
+    # build Dockerfile FROM line, and the explicit defaults
+    # (nginx/python/Wallos).
+    $base = New-Object System.Collections.Generic.List[string]
+    $all = Get-ComposeConfig -AllProfiles
+    foreach ($property in @($all.services.PSObject.Properties)) {
+        $service = $property.Value
+        if ($null -ne $service.PSObject.Properties['build']) { continue }
+        $imageProperty = $service.PSObject.Properties['image']
+        if (-not $imageProperty) { continue }
+        $image = [string]$imageProperty.Value
+        if ($image -and -not $base.Contains($image)) { $base.Add($image) }
+    }
+    foreach ($image in @(Get-DockerfileBaseImages -Paths @($dockerfiles))) {
+        if ($image -and -not $base.Contains($image)) { $base.Add($image) }
+    }
+    foreach ($image in @($BaseImages)) {
+        if ($image -and -not $base.Contains($image)) { $base.Add($image) }
+    }
+    foreach ($image in @($built)) {
+        if ($base.Contains($image)) { [void]$base.Remove($image) }
+    }
+
+    return [pscustomobject]@{ Built = @($built); Base = @($base) }
+}
+
 function Get-DockerfileBaseImages {
+    param([string[]]$Paths = @())
     $result = New-Object System.Collections.Generic.List[string]
-    foreach ($relative in @('backend/Dockerfile', 'deploy/wallos-extension/Dockerfile')) {
-        $dockerfile = Join-Path $repoRoot $relative
-        if (-not (Test-Path $dockerfile)) { continue }
+    $candidates = @($Paths)
+    if ($candidates.Count -eq 0) {
+        $candidates = @(
+            (Join-Path $repoRoot 'backend/Dockerfile'),
+            (Join-Path $repoRoot 'deploy/wallos-extension/Dockerfile')
+        )
+    }
+    foreach ($dockerfile in $candidates) {
+        if (-not $dockerfile -or -not (Test-Path $dockerfile)) { continue }
         foreach ($line in @(Get-Content -Path $dockerfile -ErrorAction SilentlyContinue)) {
             $match = [regex]::Match([string]$line, '^\s*FROM\s+([^\s]+)', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
             if ($match.Success) {
@@ -121,19 +207,6 @@ function Get-DockerfileBaseImages {
     return @($result)
 }
 
-function Get-ComposeDeclaredImages {
-    $result = New-Object System.Collections.Generic.List[string]
-    $text = Get-Content -Path $composePath -Raw -ErrorAction SilentlyContinue
-    if (-not $text) { return @() }
-    foreach ($match in [regex]::Matches([string]$text, '(?m)^\s*image:\s*["'']?([^"''\s#]+)')) {
-        $image = $match.Groups[1].Value.Trim()
-        if ($image -and -not $image.Contains('${') -and -not $result.Contains($image)) {
-            $result.Add($image)
-        }
-    }
-    return @($result)
-}
-
 if (-not $Version) { $Version = Resolve-BundleVersion '' }
 if (-not $OutputDir) { $OutputDir = Join-Path $repoRoot 'releases/offline' }
 $OutputDir = [IO.Path]::GetFullPath($OutputDir)
@@ -142,7 +215,7 @@ $bundlePath = Join-Path $OutputDir $bundleName
 $shaPath = $bundlePath + '.sha256'
 $manifestPath = Join-Path $OutputDir ('OpenMargin-Offline-' + $Version + '.manifest.json')
 
-if ((Test-Path $bundlePath) -and -not $Force) {
+if ((Test-Path $bundlePath) -and -not $Force -and -not $DryRun) {
     Write-Step ('bundle already exists: ' + $bundlePath)
     Write-Step 'use -Force to rebuild it'
     if (Test-Path $shaPath) { Get-Content -Path $shaPath -Raw | Write-Output }
@@ -153,15 +226,6 @@ $dockerCommand = Get-Command docker.exe -ErrorAction SilentlyContinue
 if (-not $dockerCommand) { $dockerCommand = Get-Command docker -ErrorAction SilentlyContinue }
 if (-not $dockerCommand) { throw 'docker was not found. Install Docker Desktop with Linux containers first.' }
 $script:DockerPath = $dockerCommand.Source
-
-$previousEap = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-& $script:DockerPath info 2>$null | Out-Null
-$dockerReady = ($LASTEXITCODE -eq 0)
-$ErrorActionPreference = $previousEap
-if (-not $dockerReady) { throw 'Docker engine is not running. Start Docker Desktop and retry.' }
-
-if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null }
 
 $createdSecretFiles = New-Object System.Collections.Generic.List[string]
 $createdSecretsDir = $false
@@ -199,6 +263,28 @@ try {
         }
     }
 
+    $plan = Get-ImagePlan
+    $builtText = if (@($plan.Built).Count -gt 0) { @($plan.Built) -join ', ' } else { '(none)' }
+    $baseText = if (@($plan.Base).Count -gt 0) { @($plan.Base) -join ', ' } else { '(none)' }
+    Write-Step ('built images: ' + $builtText)
+    Write-Step ('base images: ' + $baseText)
+
+    if ($DryRun) {
+        Write-Output 'DRY RUN: no build, pull, docker save or bundle output'
+        Write-Output ('built=' + (@($plan.Built) -join ','))
+        Write-Output ('base=' + (@($plan.Base) -join ','))
+        return
+    }
+
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $script:DockerPath info 2>$null | Out-Null
+    $dockerReady = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $previousEap
+    if (-not $dockerReady) { throw 'Docker engine is not running. Start Docker Desktop and retry.' }
+
+    if (-not (Test-Path $OutputDir)) { New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null }
+
     if (-not $SkipBuild) {
         Write-Step ('building compose project ' + $ProjectName + ' (profile windows-public-sync)')
         Invoke-Docker -Arguments @('compose', '--project-name', $ProjectName, '--profile', 'windows-public-sync', 'build')
@@ -206,37 +292,33 @@ try {
         Write-Step 'skipping build (-SkipBuild)'
     }
 
+    foreach ($image in @($plan.Built)) {
+        if (-not (Test-ImagePresent -Image $image)) {
+            throw ('build did not produce image: ' + $image + '. Run without -SkipBuild and check the compose build output.')
+        }
+    }
+
+    foreach ($image in @($plan.Base)) {
+        if (Test-ImagePresent -Image $image) { continue }
+        Write-Step ('pulling missing base image ' + $image)
+        try {
+            Invoke-Docker -Arguments @('pull', $image)
+        } catch {
+            throw ('cannot pull base image ''' + $image + '''. Check Docker Hub access/proxy or load it locally, then retry. ' + $_.Exception.Message)
+        }
+        if (-not (Test-ImagePresent -Image $image)) {
+            throw ('base image ''' + $image + ''' is still missing after docker pull.')
+        }
+    }
+
     $images = New-Object System.Collections.Generic.List[string]
-    foreach ($image in @(Get-ComposeImages)) {
-        if (-not $images.Contains($image)) { $images.Add($image) }
-    }
-    if ($images.Count -eq 0) {
-        # Compose v2 normally names built images <project>-<service>.
-        foreach ($image in @($ProjectName + '-finance-api', $ProjectName + '-wallos')) {
-            if (-not $images.Contains($image)) { $images.Add($image) }
-        }
-    }
-
-    # Fail before pulling large base images if the build did not produce the
-    # expected service images.
-    foreach ($image in @($images)) {
-        if (-not (Test-ImagePresent -Image $image)) {
-            throw ('built image is missing after build: ' + $image + ' (run without -SkipBuild)')
-        }
-    }
-
-    foreach ($baseImage in @($BaseImages) + @(Get-DockerfileBaseImages) + @(Get-ComposeDeclaredImages)) {
-        if (-not $baseImage) { continue }
-        if (-not (Test-ImagePresent -Image $baseImage)) {
-            Write-Step ('pulling base image ' + $baseImage)
-            Invoke-Docker -Arguments @('pull', $baseImage)
-        }
-        if (-not $images.Contains($baseImage)) { $images.Add($baseImage) }
+    foreach ($image in @($plan.Built) + @($plan.Base)) {
+        if ($image -and -not $images.Contains($image)) { $images.Add($image) }
     }
 
     foreach ($image in @($images)) {
         if (-not (Test-ImagePresent -Image $image)) {
-            throw ('image is missing after build: ' + $image)
+            throw ('image is missing before docker save: ' + $image)
         }
     }
 
