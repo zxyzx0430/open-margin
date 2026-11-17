@@ -9,7 +9,7 @@ import java.security.MessageDigest
  * 目录必须满足：
  * 1. 每个文件存在且字节数等于 [AsrModelSpec] 里的期望值；
  * 2. 有 `.ready` 标记，且标记里 `version=` 与当前 spec 一致；
- * 3. deep=true 时再逐文件比对 sha256（安装时用；每次启动只做 1+2，省 169MB 的哈希时间）。
+ * 3. deep=true 时再逐文件比对 sha256（安装时用；每次启动只做 1+2，省 71MB 的哈希时间）。
  */
 object AsrModelVerifier {
 

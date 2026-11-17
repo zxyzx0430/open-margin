@@ -31,7 +31,7 @@ class AsrModelException(
  */
 class AsrModelInstaller(
     private val context: Context,
-    private val spec: AsrModelSpec = AsrModelSpec.X_ASR_480MS,
+    private val spec: AsrModelSpec = AsrModelSpec.DEFAULT,
 ) {
     private val appContext = context.applicationContext
 
@@ -58,7 +58,7 @@ class AsrModelInstaller(
                 AsrModelException(AsrErrorCode.MODEL_CORRUPTED, "无法创建语音模型目录"),
             )
         }
-        // 169MB 模型 + 余量；空间不够时提前给出可读错误，而不是写到一半 ENOSPC。
+        // 模型约 71MB + 余量；空间不够时提前给出可读错误，而不是写到一半 ENOSPC。
         val required = spec.totalBytes + (32L * 1024 * 1024)
         if (root.usableSpace in 1 until required) {
             return@withContext Result.failure(
