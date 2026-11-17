@@ -335,7 +335,7 @@ class EnglishUiTextTest {
                 "Describe the expense or income and the form fills itself",
             "语音记账" to "Voice entry",
             "新建账单，长按说话记账" to "New transaction; press and hold to speak",
-            "长按 1 秒说话，点停止结束" to "Hold for 1 second and speak; tap Stop to finish",
+            "长按开始说话，点停止结束" to "Hold to speak; tap Stop to finish",
             "没看出金额，请手动补上" to "No amount found; please fill it in",
             "已按这句话填好，请核对金额、分类和时间" to
                 "Filled from your sentence; check the amount, category and time",
@@ -506,6 +506,8 @@ class EnglishUiTextTest {
             "账本里已有一笔相似的账单。" to "There is already a similar record in the ledger.",
             "仍然记这一笔" to "Record it anyway",
             "正在检查…" to "Checking…",
+            "正在保存…" to "Saving…",
+            "保存失败，请重试" to "Save failed. Try again.",
             "时间" to "Time",
             "商户" to "Merchant",
             "金额" to "Amount",
