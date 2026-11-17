@@ -1,15 +1,15 @@
 package com.bookkeeping.app.i18n
 
 import android.content.Context
-import android.content.res.Configuration
-import java.util.Locale
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 
 /**
  * User-selected Android UI language. Persistence is independent of bookkeeping
  * database and sync settings. No transaction/category values are rewritten.
  *
- * A localized Activity context is attached before Activity.onCreate so both
- * string resources and Compose Material components use the selected locale.
+ * AppCompatDelegate applies the selected locale to Android resources, while
+ * the active value remains available for Compose text translated through tr().
  */
 object AppLanguage {
     private const val PREFS = "open_margin_ui_language"
@@ -26,22 +26,26 @@ object AppLanguage {
 
     fun set(context: Context, language: String): Boolean {
         val selected = normalize(language)
-        // commit before Activity.recreate(), otherwise attachBaseContext can
-        // read the old value and silently show the wrong UI after navigation.
+        // Persist first so startup restoration always agrees with AndroidX/system state.
         val ok = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, selected).commit()
-        if (ok) active = selected
+        if (ok) {
+            active = selected
+            applyApplicationLocale(selected)
+        }
         return ok
     }
 
-    fun wrap(context: Context): Context {
+    /** Restore the persisted choice before the first Activity is created. */
+    fun restoreApplicationLocale(context: Context) {
         val selected = read(context)
         active = selected
-        val desired = Locale.forLanguageTag(if (selected == ENGLISH) "en" else "zh-CN")
-        val config = Configuration(context.resources.configuration)
-        config.setLocale(desired)
-        config.setLayoutDirection(desired)
-        return context.createConfigurationContext(config)
+        applyApplicationLocale(selected)
+    }
+
+    private fun applyApplicationLocale(language: String) {
+        val tags = if (language == ENGLISH) "en" else "zh-CN"
+        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tags))
     }
 
     fun current(): String = active
