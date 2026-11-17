@@ -367,7 +367,7 @@ internal object EnglishUiText {
         "显示自动记账是否连接、运行时长和最近一次成功入账" to "Shows whether automatic capture is connected, its uptime and the last successful capture",
         "自动记账运行中" to "Auto capture running",
         "自动记账服务正常运行中" to "Auto capture service is running normally",
-        "清衡 OpenMargin" to "Qingheng OpenMargin",
+        "清衡 OpenMargin" to "Open Margin",
         "自动记账已断开" to "Auto capture disconnected",
         "正在确认运行状态" to "Checking capture status",
         "通知监听已连接 · 已稳定运行" to "Notification access connected · running for",
