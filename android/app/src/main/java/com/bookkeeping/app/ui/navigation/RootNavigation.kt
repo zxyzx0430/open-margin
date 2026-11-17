@@ -77,7 +77,7 @@ fun RootNavigation() {
     val showBottomBar = currentDestination?.hierarchy?.any { destination ->
         navItems.any { it.route == destination.route }
     } == true
-    // 长按 FAB 的录音面板：满 1 秒就打开（不等松手），开着的时候禁掉 FAB 的新按压。
+    // 长按 FAB 达到录音阈值就打开面板；开着的时候禁掉 FAB 的新按压。
     var voiceSheetOpen by remember { mutableStateOf(false) }
     // 面板交回的文本。账单页消费后置回 null。
     var voiceRequest by remember { mutableStateOf<VoiceEntryRequest?>(null) }
@@ -174,7 +174,7 @@ fun RootNavigation() {
                         drilldown = pendingLedgerDrilldown,
                         onDrilldownConsumed = { pendingLedgerDrilldown = null },
                         onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
-                        // 长按满 1 秒：立刻打开录音面板并开始录音。面板已经开着就不再开第二个会话。
+                        // 长按达到阈值：立刻打开录音面板并开始录音。面板已经开着就不再开第二个会话。
                         onVoiceEntry = {
                             if (!voiceSheetOpen) voiceSheetOpen = true
                         },
@@ -296,7 +296,7 @@ fun RootNavigation() {
             }
         }
 
-        // 录音面板是和 FAB 同一个窗口的覆盖层（不是 Dialog）：满 1 秒开面板后仍允许
+        // 录音面板是和 FAB 同一个窗口的覆盖层（不是 Dialog）：达到长按阈值后仍允许
         // 按住时滑出取消；点面板「停止」才结束录音。
         // 面板只铺在 Scaffold 之上，录音期间底下的 tab / FAB 都点不到。
         if (voiceSheetOpen) {
