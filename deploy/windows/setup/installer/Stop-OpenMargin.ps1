@@ -122,7 +122,18 @@ if ($null -ne $wizardStatus.state) {
     if ($remaining.Count -gt 0) {
         $actions.Add((New-OmLcAction -Name 'wizard state' -Status 'skipped' -Detail 'wizard still running; setup-web.json kept'))
     } elseif ($wizardStatus.statePidAlive -and -not $wizardStatus.stateMatches) {
-        $actions.Add((New-OmLcAction -Name 'wizard state' -Status 'skipped' -Detail 'setup-web.json PID belongs to another process; not killed'))
+        # PID reuse: the recorded process is not our wizard. Never kill it, but
+        # the state file is stale and must not make Launch-Setup reuse it.
+        if ($DryRun) {
+            $actions.Add((New-OmLcAction -Name 'wizard state' -Status 'planned' -Detail ('PID belongs to another process; remove stale ' + $wizardStatus.state.path)))
+        } else {
+            try {
+                Remove-Item -Force $wizardStatus.state.path -ErrorAction Stop
+                $actions.Add((New-OmLcAction -Name 'wizard state' -Status 'done' -Detail 'PID belongs to another process; removed stale setup-web.json'))
+            } catch {
+                $actions.Add((New-OmLcAction -Name 'wizard state' -Status 'failed' -Detail $_.Exception.Message))
+            }
+        }
     } elseif ($DryRun) {
         $actions.Add((New-OmLcAction -Name 'wizard state' -Status 'planned' -Detail ('remove ' + $wizardStatus.state.path)))
     } else {
