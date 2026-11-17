@@ -185,8 +185,10 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 - `docker compose --profile windows-private-sync config -q` 与 `--profile windows-public-sync config -q`（使用临时占位 secrets）。
 - 新增 GitHub Actions YAML 通过 Python YAML 解析。
 - `python scripts/check-public-ready.py` 通过（若本机依赖可用）。
-- Pester 5.7.1：`deploy/windows/setup/tests` 全部通过（本机 Windows 10 19045；测试数量以本次集成验证记录为准），含 `Lifecycle.Tests.ps1`、`OfflineBundle.Tests.ps1`、`Installer.Tests.ps1` 与 `Probes.Tests.ps1`。Lifecycle 测试使用临时目录 + 假 `docker.cmd` / `tailscale.cmd`，覆盖：dry-run 不产生外部调用、真实路径 `compose down` 无 `-v`、只杀命令行匹配本安装目录的向导进程、`setup-web.json` 单实例状态、保留 `secrets/`、Funnel/Serve 只删自己的路由、Docker/Tailscale 缺失时继续、ACL 的 `icacls`/`netsh` 参数计划、`OpenMargin.iss` 的 `[UninstallRun]`/`PrepareToInstall` 静态接线。
-- 安装器已用 **Inno Setup 6.7.4** 和 **6.3.3** 在本机实际编译通过：`Build-Installer.ps1 -OutputDir ... -NoAutoInstall` 分别产出 `OpenMargin-Setup.exe`。编译覆盖中文语言文件、`MinVersion`、Docker 许可自定义页、`REQUIREMENTS.txt` 的 `InfoBeforeFile` 和自定义目录警告。6.3.3 会忽略 6.5 新增的下载/校验消息并把 3 条旧消息回退为英文（仅下载/哈希错误路径），不影响安装主流程。
+- Pester 5.7.1：`deploy/windows/setup/tests` 共 **133 项全部通过（0 失败、0 跳过）**，本机 Windows 10 19045；含 `Lifecycle.Tests.ps1`、`OfflineBundle.Tests.ps1`（20 项，含路径穿越/符号链接拒绝）、`Installer.Tests.ps1`、`Probes.Tests.ps1` 和 `Dependencies.Tests.ps1`（Docker 许可门禁 9 项）。Lifecycle 测试使用临时目录 + 假 `docker.cmd` / `tailscale.cmd`，覆盖：dry-run 不产生外部调用、真实路径 `compose down` 无 `-v`、只杀命令行匹配本安装目录的向导进程、`setup-web.json` 单实例状态、保留 `secrets/`、Funnel/Serve 只删自己的路由、Docker/Tailscale 缺失时继续、ACL 的 `icacls`/`netsh` 参数计划、`OpenMargin.iss` 的 `[UninstallRun]`/`PrepareToInstall` 静态接线。
+- 安装器已用 **Inno Setup 6.7.4** 和 **6.3.3** 在本机实际编译通过：`Build-Installer.ps1 -OutputDir ... -NoAutoInstall` 分别产出 `OpenMargin-Setup.exe`。编译覆盖中文语言文件、`MinVersion`、Docker 许可自定义页、`REQUIREMENTS.txt` 的 `InfoBeforeFile` 和自定义目录警告。6.3.3 只对 6.5 新增的下载/校验消息给出“未识别、忽略并回退英文”警告（仅下载/哈希错误路径），不影响安装主流程。
+- ego-browser 在 `-Dev -DryRun` 向导上对本机 18790 做了页面验收：9 个屏幕（含运行状态）的“返回主界面”按钮均可见；离线卡片的下载链接与 SHA256 正确、手动路径行可展开；Docker 许可复选框默认显示，未勾选时“一键安装依赖”被前端拦截；页面无 console error，DOM/URL 中没有 40+ 字符的 setup token。
+- 单实例运行验收：用临时 StateRoot 启动 `Launch-Setup.ps1 -NoBrowser` 两次，第二次复用同一隐藏向导（进程数保持 1）并打印带 token 的 URL；构造 `pid=4` 的过期 `setup-web.json` 后启动，`Stop-OpenMargin.ps1 -WizardOnly` 清除过期状态并只启动一个新向导；`Stop-OpenMargin.ps1 -WizardOnly` 随后把向导进程降到 0。
 - `Migrate-OpenMargin.ps1` 在 Windows PowerShell 5.1 下以只读模式识别到本机现有安装 `D:\OpenMargin\app`（未修改/卸载该目录）；在 `E:\DevCaches` 合成目录完成 `-Backup -Yes` 与 `-CopySecrets -Yes`，验证备份清单、SHA256 与不覆盖行为。未对真实安装执行 `-StopOld`/`-CopySecrets`。
 
 未验证（发布前必须做）：
