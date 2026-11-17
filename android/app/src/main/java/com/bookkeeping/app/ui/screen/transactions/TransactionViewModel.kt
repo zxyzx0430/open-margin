@@ -16,6 +16,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -353,7 +354,7 @@ class TransactionViewModel @Inject constructor(
         note: String,
         timestampMs: Long = System.currentTimeMillis(),
         account: String? = null,
-    ): Long {
+    ): Long = viewModelScope.async {
         val entity = TransactionEntity(
             amountCents = amountCents,
             type = type.name,
@@ -369,8 +370,8 @@ class TransactionViewModel @Inject constructor(
         if (merchant.isNotBlank()) {
             settings.recordCategoryLearning(merchant, category)
         }
-        return id
-    }
+        id
+    }.await()
 
     /**
      * 保存前的疑似重复检查：先按金额 + 方向 + 币种 + 12 小时粗筛，再交给纯逻辑
