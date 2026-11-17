@@ -82,10 +82,11 @@ object CaptureNotifier {
         }
     }
 
-    private fun ensureChannel(context: Context) {
+    internal fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        // Re-submit the same channel ID to update its localized label; Android keeps
+        // the user's channel settings when an existing channel is recreated.
         val channel = NotificationChannel(
             CHANNEL_ID,
             AppLanguage.tr(context, "自动记账提醒"),

@@ -1,7 +1,12 @@
 package com.bookkeeping.app.i18n
 
+import android.app.LocaleManager
 import android.content.Context
 import android.content.res.Configuration
+import android.os.Build
+import android.os.LocaleList
+import com.bookkeeping.app.notification.CaptureNotifier
+import com.bookkeeping.app.notification.KeepAliveService
 import java.util.Locale
 
 /**
@@ -30,18 +35,34 @@ object AppLanguage {
         // read the old value and silently show the wrong UI after navigation.
         val ok = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, selected).commit()
-        if (ok) active = selected
+        if (ok) {
+            active = selected
+            syncApplicationLocale(context, selected)
+            KeepAliveService.ensureChannel(context)
+            CaptureNotifier.ensureChannel(context)
+        }
         return ok
     }
 
     fun wrap(context: Context): Context {
         val selected = read(context)
         active = selected
+        syncApplicationLocale(context, selected)
         val desired = Locale.forLanguageTag(if (selected == ENGLISH) "en" else "zh-CN")
         val config = Configuration(context.resources.configuration)
         config.setLocale(desired)
         config.setLayoutDirection(desired)
         return context.createConfigurationContext(config)
+    }
+
+    private fun syncApplicationLocale(context: Context, language: String) {
+        // The system resolves the notification header's app name from this locale.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val localeManager = context.getSystemService(LocaleManager::class.java) ?: return
+        val tags = if (language == ENGLISH) "en" else "zh-CN"
+        if (localeManager.applicationLocales.toLanguageTags() != tags) {
+            localeManager.applicationLocales = LocaleList.forLanguageTags(tags)
+        }
     }
 
     fun current(): String = active
