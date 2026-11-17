@@ -298,6 +298,16 @@ Write-OmAtomicJson -Path $pidPath -Value ([pscustomobject]@{
     dev = [bool]$Dev; dryRun = [bool]$DryRun; url = ('http://127.0.0.1:' + $Port + '/')
 })
 $url = $prefix + '?token=' + [uri]::EscapeDataString($setupToken)
+# One-time handoff for an elevated wizard process: Launch-Setup reads this
+# loopback URL and opens the browser through explorer.exe (original user).
+# The file is ACL-restricted and removed when the server exits.
+$launchUrlPath = Join-Path $StateRoot 'setup-web-url.txt'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($launchUrlPath, $url, $utf8NoBom)
+try {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls.exe $launchUrlPath /inheritance:r /grant:r ($currentUser + ':R') '*S-1-5-32-544:(F)' '*S-1-5-18:(F)' *> $null
+} catch { }
 Write-Output ('Open Margin setup wizard: ' + $url)
 if (-not $NoBrowser) {
     try { Start-Process $url | Out-Null } catch { }
@@ -460,4 +470,5 @@ try {
 } finally {
     try { $listener.Stop(); $listener.Close() } catch { }
     Remove-Item -Force $pidPath -ErrorAction SilentlyContinue
+    Remove-Item -Force $launchUrlPath -ErrorAction SilentlyContinue
 }
