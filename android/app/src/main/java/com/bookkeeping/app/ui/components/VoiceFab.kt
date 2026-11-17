@@ -48,16 +48,22 @@ import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 
 /**
- * 账单页右下角的「+」：点一下是手动新建账单，按住满 1 秒说话记账。
+ * 账单页右下角的「+」：点一下手动新建账单，**按住满 1 秒立刻开始录音**。
  *
  * 时序（时间常量都在 [QuickEntryRule]，改那里就是改这里）：
  * - 按下：图标立刻从「+」换成麦克风，进度弧从 0 开始，在 1000ms 内正好扫满一圈；
  * - 500ms：轻震一次（TextHandleMove），提示「再坚持一下」；
- * - 1000ms：重震一次（LongPress），进度弧满格，表示已经「上膛」；
- * - 松手（按住 ≥1s）：回调 [onVoiceStart]，本次按住只触发一次；
- * - 提前松手（<1s）：取消计时、进度弧回弹，按普通点击回调 [onTap]；
- * - 手指滑出超过两倍触摸阈值：整段放弃，既不录音也不算点击；
- * - 系统取消（来电、多指抢占等）：同上，只收弧不触发。
+ * - 1000ms：重震一次（LongPress）+ 进度弧满格 + **立即回调 [onHoldStart]**（开录音、开面板），
+ *   不等松手——这就是「按住即录」；
+ * - 松手（已开录）：回调 [onHoldRelease]，由上层 `finishInput()` 结束录音；面板不关；
+ * - 松手（没到 1 秒）：取消计时、进度弧回弹，按普通点击回调 [onTap]；
+ * - 开录后手指滑出两倍触摸阈值：回调 [onHoldAbort]（取消录音并关面板），不当作点击；
+ * - 没开录就滑出 / 系统取消：只收弧，什么都不回调。
+ *
+ * 为什么手势装在 `pointerInput(Unit)` 上而不是 `pointerInput(enabled)`：满 1 秒时面板会打开，
+ * 上层同时把 `enabled` 置 false（禁止再开第二个会话）。如果手势跟着 key 重建，正在按着的
+ * 这一段会被取消，松手事件就永远收不到——「松手结束」直接失效。所以 `enabled` 只在按下
+ * 的那一刻检查，已经开始的这一段完整走完。
  *
  * 进度弧画在 FAB 外侧，整体（含外圈）宽度比 FAB 直径大 12dp，
  * 仍在 Scaffold 为 FAB 留的 16dp 边距之内，所以不会被裁掉。
@@ -65,17 +71,22 @@ import com.bookkeeping.app.i18n.tr
 @Composable
 fun VoiceFab(
     onTap: () -> Unit,
-    onVoiceStart: () -> Unit,
+    onHoldStart: () -> Unit,
+    onHoldRelease: () -> Unit,
+    onHoldAbort: () -> Unit,
     modifier: Modifier = Modifier,
     fabSize: Dp = 56.dp,
     ringWidth: Dp = 2.5.dp,
     ringGap: Dp = 3.dp,
-    // 录音会话进行中由调用方置 false：按压手势和读屏动作一起失效，避免同一时刻开两个会话。
+    // 录音会话进行中由调用方置 false：不允许再起一段；已经按住的那一段不受影响。
     enabled: Boolean = true,
 ) {
     val haptics = rememberUpdatedState(LocalHapticFeedback.current)
     val tapAction = rememberUpdatedState(onTap)
-    val voiceAction = rememberUpdatedState(onVoiceStart)
+    val startAction = rememberUpdatedState(onHoldStart)
+    val releaseAction = rememberUpdatedState(onHoldRelease)
+    val abortAction = rememberUpdatedState(onHoldAbort)
+    val enabledState = rememberUpdatedState(enabled)
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
     val description = tr("新建账单，长按说话记账")
@@ -83,6 +94,8 @@ fun VoiceFab(
     val voiceLabel = tr("语音记账")
 
     var pressing by remember { mutableStateOf(false) }
+    // 满 1 秒已经开录：这一次松手要「结束录音」而不是「点击」。
+    var armed by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     val pressScale by animateFloatAsState(
         targetValue = if (pressing) 0.94f else 1f,
@@ -90,7 +103,7 @@ fun VoiceFab(
     )
 
     // 计时与进度弧：用真实时钟推进，掉帧也不会把「按满 1 秒」拖成更久。
-    // 满 1 秒只做重震 + 满格，不在这里触发：真正开始说话是在松手那一刻。
+    // 满 1 秒这一帧就回调 onHoldStart（开始录音 + 开面板），然后退出循环把进度留在满格。
     LaunchedEffect(pressing) {
         if (!pressing) {
             val from = progress
@@ -110,7 +123,6 @@ fun VoiceFab(
         }
         val startMs = SystemClock.uptimeMillis()
         var ticked = false
-        var armed = false
         while (true) {
             withFrameNanos { }
             // 松手后立即退出，避免松手与满 1 秒撞在同一帧时还多推一帧进度。
@@ -125,6 +137,7 @@ fun VoiceFab(
                 armed = true
                 progress = 1f
                 haptics.value.performHapticFeedback(HapticFeedbackType.LongPress)
+                startAction.value()
                 return@LaunchedEffect
             }
         }
@@ -168,18 +181,20 @@ fun VoiceFab(
             modifier = Modifier
                 .size(fabSize)
                 .scale(pressScale)
-                .alpha(if (enabled) 1f else 0.5f)
+                .alpha(if (enabled || pressing) 1f else 0.5f)
                 .shadow(6.dp, CircleShape)
                 .clip(CircleShape)
                 .background(primary)
-                .pointerInput(enabled) {
-                    // 面板开着（会话进行中）时整段手势不装：按住既不录音也不算点击。
-                    if (!enabled) return@pointerInput
+                // key 固定为 Unit：面板打开导致 enabled 变 false 时不能重建手势，
+                // 否则正在按着的那一段被取消，松手就收不到了。
+                .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
+                        // 只在按下这一刻检查：面板开着时既不录音，也不抢底下的点击。
+                        if (!enabledState.value) return@awaitEachGesture
                         down.consume()
-                        val startMs = SystemClock.uptimeMillis()
                         val downPosition = down.position
+                        armed = false
                         pressing = true
                         var cancelled = false
                         try {
@@ -202,16 +217,17 @@ fun VoiceFab(
                             // 抬手、滑出、被系统取消都要停表：不能留下一条还在走的进度弧。
                             pressing = false
                         }
-                        val elapsed = SystemClock.uptimeMillis() - startMs
-                        when {
-                            cancelled -> Unit
-                            // 松手触发：按住够 1 秒才算语音，否则当普通点击。
-                            QuickEntryRule.isLongEnough(elapsed) -> voiceAction.value()
-                            else -> tapAction.value()
+                        when (QuickEntryRule.releaseAction(armed = armed, cancelled = cancelled)) {
+                            HoldRelease.TAP -> tapAction.value()
+                            HoldRelease.FINISH_RECORDING -> releaseAction.value()
+                            HoldRelease.ABORT_RECORDING -> abortAction.value()
+                            HoldRelease.NOTHING -> Unit
                         }
+                        armed = false
                     }
                 }
-                // TalkBack：读屏用户长按走 onLongClick 动作，不依赖计时手势。
+                // TalkBack：读屏用户长按走 onLongClick 动作，不依赖计时手势；
+                // 开录之后用面板上的「停止」结束，不需要一直按住。
                 .semantics {
                     contentDescription = description
                     role = Role.Button
@@ -221,7 +237,7 @@ fun VoiceFab(
                             true
                         }
                         onLongClick(label = voiceLabel) {
-                            voiceAction.value()
+                            startAction.value()
                             true
                         }
                     }
@@ -230,7 +246,7 @@ fun VoiceFab(
         ) {
             Icon(
                 // 按住时图标换成麦克风：一眼就能看出「现在是说话，不是新建」。
-                imageVector = if (pressing) Icons.Filled.Mic else Icons.Filled.Add,
+                imageVector = if (pressing || armed) Icons.Filled.Mic else Icons.Filled.Add,
                 contentDescription = null,
                 tint = onPrimary,
                 modifier = Modifier.size(24.dp),
