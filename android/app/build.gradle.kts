@@ -17,8 +17,8 @@ android {
         // Stable v1.2.0: all capture/import/classification/UI work plus the
         // rc.13 startup and duplicate-notification fixes.
         // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.3.0).
-        versionCode = 37
-        versionName = "1.37"
+        versionCode = 38
+        versionName = "1.38"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
