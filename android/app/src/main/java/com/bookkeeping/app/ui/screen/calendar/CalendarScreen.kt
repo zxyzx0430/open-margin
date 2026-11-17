@@ -12,9 +12,13 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -58,12 +62,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -97,6 +103,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.floor
@@ -104,6 +111,8 @@ import kotlin.math.floor
 // 跨月节奏：手指进入空白格后要停够这么久才翻一页。
 // 350ms 是「明显能感觉到停了一下、又不觉得卡」的位置；调小会一拖就跳两三个月。
 private const val CROSS_MONTH_DWELL_MS = 350L
+internal const val CALENDAR_DRAWER_COLLAPSED_FRACTION = 0.40f
+internal const val CALENDAR_DRAWER_EXPANDED_FRACTION = 0.85f
 
 private const val CALENDAR_PREFS = "calendar_view_prefs"
 private const val KEY_HEATMAP = "heatmap"
@@ -168,6 +177,28 @@ internal fun calendarNumberModeLabel(mode: CalendarNumberMode, english: Boolean)
         CalendarNumberMode.NET -> "Balance"
         CalendarNumberMode.OFF -> "Off"
     }
+
+internal fun calendarDrawerTitle(dateLabel: String, itemCount: Int, english: Boolean): String {
+    val countLabel = if (english) {
+        "$itemCount ${if (itemCount == 1) "item" else "items"}"
+    } else {
+        "$itemCount 笔"
+    }
+    return "$dateLabel · $countLabel"
+}
+
+internal fun calendarDrawerEmptyLabel(isRange: Boolean, english: Boolean): String = when {
+    english && isRange -> "No transactions in this range"
+    english -> "No transactions for this day"
+    isRange -> "这段时间没有记账"
+    else -> "这天没有记账"
+}
+
+internal fun calendarDrawerCollapseLabel(english: Boolean): String =
+    if (english) "Collapse" else "收起"
+
+internal fun calendarDrawerClearLabel(english: Boolean): String =
+    if (english) "Clear" else "清除"
 
 /** Small, exact-from-cents text for the calendar's narrow day cells. */
 internal fun compactCalendarAmount(amountCents: Long, english: Boolean): String {
@@ -302,6 +333,8 @@ fun CalendarScreen(
             !it.syncDeleted && dateOf(it.timestamp) in start..end
         }.sortedByDescending { it.timestamp }
     }
+    val selectionStart = rangeStart
+    val selectionEnd = rangeEnd
 
     fun save() {
         prefs.edit()
@@ -312,12 +345,14 @@ fun CalendarScreen(
             .apply()
     }
 
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             // 顶部状态栏留白由外层 Scaffold 的 innerPadding 负责，这里再加会翻倍
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
+        val availableHeight = maxHeight
+        Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -469,47 +504,32 @@ fun CalendarScreen(
                 }
             },
         )
-        Spacer(Modifier.height(4.dp))
-        SelectionSummary(
-            start = rangeStart,
-            end = rangeEnd,
-            transactions = selectedTransactions,
-            monthFallback = monthTransactions,
-            onClear = {
-                rangeStart = null
-                rangeEnd = null
-            },
-        )
-        if (selectedTransactions.isNotEmpty()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 8.dp),
-            ) {
-                items(selectedTransactions, key = { it.id }) { transaction ->
-                    CalendarTransactionRow(transaction) { onOpenDetail(transaction.id) }
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (rangeStart != null && rangeEnd != null) {
-                    Text(
-                        text = if (rangeStart == rangeEnd) {
-                            tr("这一天你还没有任何记账")
-                        } else {
-                            tr("这段时间你还没有任何记账")
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+        if (selectionStart == null || selectionEnd == null) {
+            Spacer(Modifier.height(4.dp))
+            SelectionSummary(
+                start = null,
+                end = null,
+                transactions = emptyList(),
+                monthFallback = monthTransactions,
+                onClear = {},
+            )
+            Spacer(Modifier.weight(1f))
+        }
+        }
+        if (selectionStart != null && selectionEnd != null) {
+            CalendarListDrawer(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                availableHeight = availableHeight,
+                start = selectionStart,
+                end = selectionEnd,
+                transactions = selectedTransactions,
+                monthFallback = monthTransactions,
+                onClear = {
+                    rangeStart = null
+                    rangeEnd = null
+                },
+                onOpenDetail = onOpenDetail,
+            )
         }
     }
 }
@@ -1033,12 +1053,192 @@ private fun CalendarMonthGrid(
 }
 
 @Composable
+private fun CalendarListDrawer(
+    modifier: Modifier,
+    availableHeight: androidx.compose.ui.unit.Dp,
+    start: CalendarDate,
+    end: CalendarDate,
+    transactions: List<TransactionEntity>,
+    monthFallback: List<TransactionEntity>,
+    onClear: () -> Unit,
+    onOpenDetail: (Long) -> Unit,
+) {
+    val english = AppLanguage.current() == AppLanguage.ENGLISH
+    val heightAnimation = remember { Animatable(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
+    var dragFraction by remember { mutableStateOf(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
+    var dragging by remember { mutableStateOf(false) }
+    val availableHeightPx = with(LocalDensity.current) { availableHeight.toPx().coerceAtLeast(1f) }
+    val dragState = rememberDraggableState { delta ->
+        dragFraction = (dragFraction - delta / availableHeightPx).coerceIn(
+            CALENDAR_DRAWER_COLLAPSED_FRACTION,
+            CALENDAR_DRAWER_EXPANDED_FRACTION,
+        )
+    }
+    val scope = rememberCoroutineScope()
+    val visibleFraction = if (dragging) dragFraction else heightAnimation.value
+    val title = calendarDrawerTitle(calendarDateRangeLabel(start, end, english), transactions.size, english)
+    val drawerShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+
+    Box(
+        modifier = modifier
+            .height(availableHeight * visibleFraction)
+            .shadow(12.dp, drawerShape)
+            .clip(drawerShape)
+            .background(MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(44.dp)
+                        .height(40.dp)
+                        .draggable(
+                            state = dragState,
+                            orientation = Orientation.Vertical,
+                            onDragStarted = {
+                                heightAnimation.stop()
+                                dragFraction = heightAnimation.value
+                                dragging = true
+                            },
+                            onDragStopped = {
+                                val target = if (
+                                    abs(dragFraction - CALENDAR_DRAWER_COLLAPSED_FRACTION) <=
+                                    abs(CALENDAR_DRAWER_EXPANDED_FRACTION - dragFraction)
+                                ) {
+                                    CALENDAR_DRAWER_COLLAPSED_FRACTION
+                                } else {
+                                    CALENDAR_DRAWER_EXPANDED_FRACTION
+                                }
+                                heightAnimation.snapTo(dragFraction)
+                                dragging = false
+                                heightAnimation.animateTo(target, tween(durationMillis = 180))
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)),
+                    )
+                }
+                Text(
+                    text = title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                TextButton(
+                    onClick = onClear,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        calendarDrawerClearLabel(english),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        dragging = false
+                        scope.launch {
+                            heightAnimation.animateTo(
+                                CALENDAR_DRAWER_COLLAPSED_FRACTION,
+                                tween(durationMillis = 180),
+                            )
+                        }
+                    },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        calendarDrawerCollapseLabel(english),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            SelectionSummary(
+                start = start,
+                end = end,
+                transactions = transactions,
+                monthFallback = monthFallback,
+                onClear = onClear,
+                showHeading = false,
+            )
+            if (transactions.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 4.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp),
+                ) {
+                    items(transactions, key = { it.id }) { transaction ->
+                        CalendarTransactionRow(transaction) { onOpenDetail(transaction.id) }
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = calendarDrawerEmptyLabel(start != end, english),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun calendarDateRangeLabel(
+    start: CalendarDate,
+    end: CalendarDate,
+    english: Boolean,
+): String = when {
+    start == end -> CalendarDateText.day(start.year, start.month, start.day, english)
+    start.year == end.year && start.month == end.month -> CalendarDateText.sameMonthRange(
+        start.year, start.month, start.day, end.day, english,
+    )
+    else -> CalendarDateText.crossMonthRange(
+        start.year, start.month, start.day,
+        end.year, end.month, end.day, english,
+    )
+}
+
+@Composable
 private fun SelectionSummary(
     start: CalendarDate?,
     end: CalendarDate?,
     transactions: List<TransactionEntity>,
     monthFallback: List<TransactionEntity>,
     onClear: () -> Unit,
+    showHeading: Boolean = true,
 ) {
     val semantic = LocalQingSemanticColors.current
     val hasSelection = start != null && end != null
@@ -1083,26 +1283,28 @@ private fun SelectionSummary(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = title,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (hasSelection) {
-                    TextButton(
-                        onClick = onClear,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    ) {
-                        Text(
-                            tr("清除"),
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
+            if (showHeading) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (hasSelection) {
+                        TextButton(
+                            onClick = onClear,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text(
+                                tr("清除"),
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
             }
