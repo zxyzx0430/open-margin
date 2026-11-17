@@ -370,14 +370,9 @@ fun AddTransactionDialog(
     EntryPanelLayout(
         title = if (initial == null) tr("新建账单") else tr("编辑账单"),
         onDismiss = { if (!saving) onDismiss() },
-        fillPanelHeight = false,
     ) {
         Column(
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             QuickEntryBar(
@@ -666,51 +661,43 @@ fun AddTransactionDialog(
             )
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        Spacer(Modifier.height(12.dp))
+        saveError?.let { error ->
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            saveError?.let { error ->
-                Text(
-                    text = error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            TextButton(
+                onClick = { if (!saving) onDismiss() },
+                enabled = !saving,
             ) {
-                TextButton(
-                    onClick = { if (!saving) onDismiss() },
-                    enabled = !saving,
-                    modifier = Modifier.height(44.dp),
-                ) {
-                    Text(tr("取消"), maxLines = 1)
-                }
-                Button(
-                    onClick = requestSave,
-                    enabled = !checking && !saving &&
-                        (amountValid || (amountText.isBlank() && QuickEntryRule.canSubmit(quickEntry))),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(44.dp)
-                        .widthIn(min = 96.dp),
-                ) {
-                    Text(
-                        when {
-                            checking -> tr("正在检查…")
-                            saving -> tr("正在保存…")
-                            else -> tr("保存")
-                        },
-                        maxLines = 1,
-                    )
-                }
+                Text(tr("取消"), maxLines = 1)
+            }
+            Button(
+                onClick = requestSave,
+                enabled = !checking && !saving &&
+                    (amountValid || (amountText.isBlank() && QuickEntryRule.canSubmit(quickEntry))),
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(min = 96.dp),
+            ) {
+                Text(
+                    when {
+                        checking -> tr("正在检查…")
+                        saving -> tr("正在保存…")
+                        else -> tr("保存")
+                    },
+                    maxLines = 1,
+                )
             }
         }
     }
