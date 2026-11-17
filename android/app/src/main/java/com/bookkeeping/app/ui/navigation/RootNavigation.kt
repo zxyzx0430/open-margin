@@ -24,6 +24,15 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.bookkeeping.app.billexport.BillExport
+import com.bookkeeping.app.ui.screen.billimport.BillImportExportSheet
+import com.bookkeeping.app.ui.screen.billimport.BillImportViewModel
+import com.bookkeeping.app.ui.screen.settings.SettingsViewModel
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -71,6 +80,24 @@ fun RootNavigation() {
     var voiceSheetOpen by remember { mutableStateOf(false) }
     // 面板交回的文本。账单页消费后置回 null。
     var voiceRequest by remember { mutableStateOf<VoiceEntryRequest?>(null) }
+    // 账单页与设置页共用同一个导入 / 导出底部面板
+    var showBillImportSheet by remember { mutableStateOf(false) }
+    val billImportViewModel: BillImportViewModel = hiltViewModel()
+    val billSettingsViewModel: SettingsViewModel = hiltViewModel()
+    var billExportFeedback by remember { mutableStateOf<String?>(null) }
+    var billExportInProgress by remember { mutableStateOf(false) }
+    val billExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri != null) {
+            billExportInProgress = true
+            billExportFeedback = null
+            billSettingsViewModel.exportBills(uri) { message ->
+                billExportFeedback = message
+                billExportInProgress = false
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -142,7 +169,7 @@ fun RootNavigation() {
                     popEnterTransition = { EnterTransition.None },
                 ) {
                     TransactionListScreen(
-                        onOpenBillImport = { navController.navigate(AppRoutes.BILL_IMPORT) },
+                        onOpenBillImport = { showBillImportSheet = true },
                         drilldown = pendingLedgerDrilldown,
                         onDrilldownConsumed = { pendingLedgerDrilldown = null },
                         onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
@@ -237,6 +264,34 @@ fun RootNavigation() {
                         onOpenSyncSettings = { navController.navigate(AppRoutes.SYNC_SETTINGS) },
                     )
                 }
+            }
+        }
+
+        if (showBillImportSheet) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = {
+                    if (!billImportViewModel.state.value.importing) {
+                        showBillImportSheet = false
+                        billImportViewModel.reset()
+                        billExportFeedback = null
+                    }
+                },
+                sheetState = sheetState,
+            ) {
+                BillImportExportSheet(
+                    onClose = {
+                        if (!billImportViewModel.state.value.importing) {
+                            showBillImportSheet = false
+                            billImportViewModel.reset()
+                            billExportFeedback = null
+                        }
+                    },
+                    onExportBills = { billExportLauncher.launch(BillExport.defaultFileName()) },
+                    exportFeedback = billExportFeedback,
+                    exportInProgress = billExportInProgress,
+                    viewModel = billImportViewModel,
+                )
             }
         }
 

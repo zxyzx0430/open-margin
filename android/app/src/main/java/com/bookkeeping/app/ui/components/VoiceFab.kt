@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
 
 /**
- * 账单页右下角的「+」：点一下手动新建账单，**按住满 1 秒立刻开始录音**。
+ * 账单页右下角的「+」：点一下手动新建账单，**按住满 0.75 秒立刻开始录音**。
  *
  * 时序（时间常量都在 [QuickEntryRule]，改那里就是改这里）：
  * - 按下：图标立刻从「+」换成麦克风，进度弧从 0 开始，在 1000ms 内正好扫满一圈；
@@ -56,11 +56,11 @@ import com.bookkeeping.app.i18n.tr
  * - 1000ms：重震一次（LongPress）+ 进度弧满格 + **立即回调 [onLongPressStart]**（开录音、开面板），
  *   不等松手——这就是「按住即录」；
  * - 松手（已开录）：什么也不发生，录音继续；
- * - 松手（没到 1 秒）：取消计时、进度弧回弹，按普通点击回调 [onTap]；
+ * - 松手（没到 0.75 秒）：取消计时、进度弧回弹，按普通点击回调 [onTap]；
  * - 开录后手指仍按住时滑出两倍触摸阈值：回调 [onAbort]（取消录音并关面板），不当作点击；
  * - 没开录就滑出 / 系统取消：只收弧，什么都不回调。
  *
- * 为什么手势装在 `pointerInput(Unit)` 上而不是 `pointerInput(enabled)`：满 1 秒时面板会打开，
+ * 为什么手势装在 `pointerInput(Unit)` 上而不是 `pointerInput(enabled)`：满 0.75 秒时面板会打开，
  * 上层同时把 `enabled` 置 false（禁止再开第二个会话）。如果手势跟着 key 重建，正在按着的
  * 这一段会被取消；固定 key 保证滑出取消仍可收到。
  *
@@ -91,7 +91,7 @@ fun VoiceFab(
     val voiceLabel = tr("语音记账")
 
     var pressing by remember { mutableStateOf(false) }
-    // 满 1 秒已经开录：抬手只结束按压，不结束录音。
+    // 满 0.75 秒已经开录：抬手只结束按压，不结束录音。
     var armed by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     val pressScale by animateFloatAsState(
@@ -99,8 +99,8 @@ fun VoiceFab(
         label = "voiceFabPressScale",
     )
 
-    // 计时与进度弧：用真实时钟推进，掉帧也不会把「按满 1 秒」拖成更久。
-    // 满 1 秒这一帧就回调 onLongPressStart（开始录音 + 开面板），然后退出循环把进度留在满格。
+    // 计时与进度弧：用真实时钟推进，掉帧也不会把「按满 0.75 秒」拖成更久。
+    // 满 0.75 秒这一帧就回调 onLongPressStart（开始录音 + 开面板），然后退出循环把进度留在满格。
     LaunchedEffect(pressing) {
         if (!pressing) {
             val from = progress
@@ -122,7 +122,7 @@ fun VoiceFab(
         var ticked = false
         while (true) {
             withFrameNanos { }
-            // 松手后立即退出，避免松手与满 1 秒撞在同一帧时还多推一帧进度。
+            // 松手后立即退出，避免松手与满 0.75 秒撞在同一帧时还多推一帧进度。
             if (!pressing) return@LaunchedEffect
             val elapsed = SystemClock.uptimeMillis() - startMs
             progress = QuickEntryRule.ringProgress(elapsed)

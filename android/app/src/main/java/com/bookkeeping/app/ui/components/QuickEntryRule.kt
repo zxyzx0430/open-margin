@@ -2,7 +2,7 @@ package com.bookkeeping.app.ui.components
 
 /** 一次「按住 +」结束时的动作分类：VoiceFab 只按这个结果回调，判断本身可单测。 */
 enum class HoldRelease {
-    /** 没到 1 秒就松手：普通点击，打开新建账单表单。 */
+    /** 没到 0.75 秒就松手：普通点击，打开新建账单表单。 */
     TAP,
 
     /** 已经开录，手指仍按住时滑出：取消本次录音并关面板。 */
@@ -20,8 +20,8 @@ enum class HoldRelease {
  * 不依赖 Android 运行时。
  */
 object QuickEntryRule {
-    /** 按住满 1 秒就开始录音（不是松手才录）；不足 1 秒松手仍是普通点击。 */
-    const val HOLD_TO_RECORD_MS = 1_000L
+    /** 按住满 0.75 秒就开始录音（不是松手才录）；不足 0.75 秒松手仍是普通点击。 */
+    const val HOLD_TO_RECORD_MS = 750L
 
     /** 按住 0.5 秒轻震一次：提示「再坚持一下」。 */
     const val HAPTIC_TICK_MS = 500L
@@ -32,11 +32,11 @@ object QuickEntryRule {
     /** 松手后进度弧回收的时间（毫秒），比扫出去快，避免拖尾。 */
     const val RING_RELEASE_MS = 140f
 
-    /** 0 → 1 的进度：到 1 秒正好扫满一圈，之后保持满格。 */
+    /** 0 → 1 的进度：到 0.75 秒正好扫满一圈，之后保持满格。 */
     fun ringProgress(elapsedMs: Long): Float =
         (elapsedMs.coerceAtLeast(0L).toFloat() / HOLD_TO_RECORD_MS).coerceIn(0f, 1f)
 
-    /** 是否已经按够了 1 秒（到达这一帧就开录，不等松手）。 */
+    /** 是否已经按够了 0.75 秒（到达这一帧就开录，不等松手）。 */
     fun isLongEnough(elapsedMs: Long): Boolean = elapsedMs >= HOLD_TO_RECORD_MS
 
     /** 是否该给第一次轻震。 */
@@ -48,7 +48,7 @@ object QuickEntryRule {
     /**
      * 这一段按压结束时该做什么。
      *
-     * @param armed 满 1 秒时已经回调过「开始录音」。
+     * @param armed 满 0.75 秒时已经回调过「开始录音」。
      * @param cancelled 手指仍按住时滑出阈值。
      */
     fun releaseAction(armed: Boolean, cancelled: Boolean): HoldRelease = when {
@@ -58,7 +58,7 @@ object QuickEntryRule {
         armed -> HoldRelease.NOTHING
         // 没开录就滑走：既不算点击也不算录音。
         cancelled -> HoldRelease.NOTHING
-        // 不到 1 秒的普通点击。
+        // 不到 0.75 秒的普通点击。
         else -> HoldRelease.TAP
     }
 }
