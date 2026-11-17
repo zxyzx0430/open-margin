@@ -329,7 +329,8 @@ class EnglishUiTextTest {
             "比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐" to
                 "e.g. Nov 16, 12:00 PM at McDonald's, 36.50, food, WeChat Pay, note: overtime meal",
             "一句话记账" to "Quick entry",
-            "例如：午饭 25 微信\n打车 18 支付宝" to "e.g. Lunch ¥25 · WeChat\nTaxi ¥18 · Alipay",
+            "例如：午饭 25 微信" to "e.g. Lunch ¥25 · WeChat",
+            "打车 18 支付宝" to "Taxi ¥18 · Alipay",
             "没认出金额，请手填" to "No amount recognized; enter it manually",
             "移除" to "Remove",
             "写下消费或收入，自动帮你填好账单" to

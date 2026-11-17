@@ -121,8 +121,8 @@ object VoiceTransactionParser {
         dateInfo?.span?.let { excluded += it }
         clock?.span?.let { excluded += it }
 
-        val amountScan = scanAmounts(text, excluded)
         val accountHit = findAccount(text)
+        val amountScan = scanAmounts(text, excluded, listOfNotNull(accountHit?.second))
         val amountSpans = amountScan.hits.map { it.span }
         val merchantHit = findMerchant(text, excluded, amountSpans, accountHit?.second)
 
@@ -362,7 +362,11 @@ object VoiceTransactionParser {
 
     private val APPROX_PREFIX = listOf("差不多", "大概", "大约", "将近", "接近", "约为", "约", "快")
 
-    private fun scanAmounts(text: String, excluded: List<Span>): AmountScan {
+    private fun scanAmounts(
+        text: String,
+        excluded: List<Span>,
+        nonQuantitySpans: List<Span>,
+    ): AmountScan {
         val hits = mutableListOf<AmountHit>()
         var quantitySeen = false
         var currency: String? = null
@@ -475,7 +479,9 @@ object VoiceTransactionParser {
             }
 
             val next = k
-            val classifier = next < n && text[next] in QUANTITY_CLASSIFIERS
+            // A recognized account name may start with a classifier character (e.g. 支付宝).
+            val classifier = next < n && text[next] in QUANTITY_CLASSIFIERS &&
+                !inAnySpan(nonQuantitySpans, next)
             if (classifier) {
                 quantitySeen = true
                 i = j
