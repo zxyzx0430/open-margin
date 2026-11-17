@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -60,6 +62,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -338,6 +341,36 @@ internal fun compactCalendarAmount(amountCents: Long, english: Boolean): String 
     return sign + body
 }
 
+internal const val CALENDAR_GRID_MIN_ROW_HEIGHT_DP = 44f
+internal const val CALENDAR_GRID_MAX_ROW_HEIGHT_DP = 48f
+internal const val CALENDAR_MIN_AMOUNT_FONT_SIZE_SP = 2f
+
+internal fun calendarGridRowHeightDp(availableHeightDp: Float): Float =
+    (availableHeightDp / 10.5f).coerceIn(
+        CALENDAR_GRID_MIN_ROW_HEIGHT_DP,
+        CALENDAR_GRID_MAX_ROW_HEIGHT_DP,
+    )
+
+internal fun calendarCellAmountFontSizeSp(
+    amountLength: Int,
+    showBoth: Boolean,
+    rowHeightDp: Float,
+): Float {
+    val baseFontSize = when {
+        amountLength > 8 -> 6f
+        showBoth -> 7f
+        else -> 8f
+    }
+    val scale = rowHeightDp.coerceIn(
+        CALENDAR_GRID_MIN_ROW_HEIGHT_DP,
+        CALENDAR_GRID_MAX_ROW_HEIGHT_DP,
+    ) / CALENDAR_GRID_MAX_ROW_HEIGHT_DP
+    return baseFontSize * scale
+}
+
+internal fun nextCalendarAmountFontSizeSp(currentFontSizeSp: Float): Float =
+    (currentFontSizeSp - 0.5f).coerceAtLeast(CALENDAR_MIN_AMOUNT_FONT_SIZE_SP)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreen(
@@ -382,6 +415,8 @@ fun CalendarScreen(
     var hasManuallyNavigatedMonth by rememberSaveable { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
+    val pageScrollState = rememberScrollState()
+    var rangeDragActive by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestToday = rememberUpdatedState(today)
@@ -457,7 +492,12 @@ fun CalendarScreen(
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         val availableHeight = maxHeight
-        Column(modifier = Modifier.fillMaxSize()) {
+        val gridRowHeight = calendarGridRowHeightDp(availableHeight.value).dp
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(pageScrollState, enabled = !rangeDragActive),
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -679,6 +719,7 @@ fun CalendarScreen(
             year = parts.year,
             month = parts.month,
             transactions = monthTransactions,
+            gridRowHeight = gridRowHeight,
             weekStartsMonday = weekStartsMonday,
             showLunar = showLunar,
             calendarNumberMode = calendarNumberMode,
@@ -689,6 +730,7 @@ fun CalendarScreen(
                 rangeStart = start
                 rangeEnd = end
             },
+            onRangeDragStateChange = { rangeDragActive = it },
             onCrossMonth = { targetKey, anchor ->
                 // 跨月拖动不调用 navigateMonth：它会把区间清空，而这里必须保留
                 // 长按的那个起点，只把终点落到目标月最靠近起点的一天。
@@ -715,7 +757,7 @@ fun CalendarScreen(
                 monthFallback = monthTransactions,
                 onClear = {},
             )
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(16.dp))
         }
         }
         if (selectionStart != null && selectionEnd != null) {
@@ -858,6 +900,7 @@ private fun CalendarMonthGrid(
     year: Int,
     month: Int,
     transactions: List<TransactionEntity>,
+    gridRowHeight: androidx.compose.ui.unit.Dp,
     weekStartsMonday: Boolean,
     showLunar: Boolean,
     calendarNumberMode: CalendarNumberMode,
@@ -865,12 +908,12 @@ private fun CalendarMonthGrid(
     rangeStart: CalendarDate?,
     rangeEnd: CalendarDate?,
     onSelect: (CalendarDate, CalendarDate) -> Unit,
+    onRangeDragStateChange: (Boolean) -> Unit,
     onCrossMonth: (targetMonthKey: String, anchor: CalendarDate) -> Unit,
 ) {
     val daysInMonth = daysInMonth(year, month)
     val firstOffset = firstDayOffset(year, month, weekStartsMonday)
     val density = LocalDensity.current
-    val gridRowHeight = 48.dp
     val rowHeightPx = with(density) { gridRowHeight.toPx() }
     val reverseCrossDragPx = with(density) { 24.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
@@ -882,6 +925,7 @@ private fun CalendarMonthGrid(
     val latestDays = rememberUpdatedState(daysInMonth)
     val latestWeekStartsMonday = rememberUpdatedState(weekStartsMonday)
     val latestOnSelect = rememberUpdatedState(onSelect)
+    val latestOnRangeDragStateChange = rememberUpdatedState(onRangeDragStateChange)
     val latestOnCrossMonth = rememberUpdatedState(onCrossMonth)
     val latestHaptics = rememberUpdatedState(LocalHapticFeedback.current)
     val byDay = remember(transactions) { transactions.groupBy { dayOf(it.timestamp) } }
@@ -911,6 +955,7 @@ private fun CalendarMonthGrid(
         }
     }
     val heatSamples = remember(heatValues) { heatValues.values.filter { it > 0L }.sorted() }
+    val cellFontScale = gridRowHeight.value / CALENDAR_GRID_MAX_ROW_HEIGHT_DP
     val labels = if (weekStartsMonday) {
         if (AppLanguage.current() == AppLanguage.ENGLISH) listOf("M", "T", "W", "T", "F", "S", "S")
         else listOf("一", "二", "三", "四", "五", "六", "日")
@@ -1009,115 +1054,120 @@ private fun CalendarMonthGrid(
                             )
                         }
 
-                        while (true) {
-                            // 手指停在空白里不会再有指针事件，所以按「还差多少毫秒」等事件：
-                            // 等到超时说明已经停够 CROSS_MONTH_DWELL_MS，翻一页。
-                            // 停留途中手指出空白格或反向，计时会被清掉，不会翻。
-                            val nowMs = SystemClock.uptimeMillis()
-                            val blankDueMs = if (blankDwellStartMs > 0L) {
-                                blankDwellStartMs + CROSS_MONTH_DWELL_MS
-                            } else {
-                                Long.MAX_VALUE
-                            }
-                            val reverseDueMs = if (reverseDwellStartMs > 0L) {
-                                reverseDwellStartMs + CROSS_MONTH_DWELL_MS
-                            } else {
-                                Long.MAX_VALUE
-                            }
-                            val dueMs = minOf(blankDueMs, reverseDueMs)
-                            val event = when {
-                                dueMs == Long.MAX_VALUE -> awaitPointerEvent()
-                                dueMs <= nowMs -> null
-                                else -> withTimeoutOrNull(dueMs - nowMs) { awaitPointerEvent() }
-                            }
-                            if (event == null) {
-                                // 停留到点：只翻一页，然后按新月份重新判断手指位置、重新起算停留。
-                                val retreat = reverseDwellStartMs > 0L && reverseDueMs <= blankDueMs
-                                latestHaptics.value.performHapticFeedback(
-                                    HapticFeedbackType.LongPress,
-                                )
-                                blankDwellStartMs = 0L
-                                reverseDwellStartMs = 0L
-                                reverseTravelPx = 0f
-                                if (retreat) retreatMonth() else flipMonth(blankDir > 0)
-                                blankDir = blankDirectionAt(
+                        latestOnRangeDragStateChange.value(true)
+                        try {
+                            while (true) {
+                                // 手指停在空白里不会再有指针事件，所以按「还差多少毫秒」等事件：
+                                // 等到超时说明已经停够 CROSS_MONTH_DWELL_MS，翻一页。
+                                // 停留途中手指出空白格或反向，计时会被清掉，不会翻。
+                                val nowMs = SystemClock.uptimeMillis()
+                                val blankDueMs = if (blankDwellStartMs > 0L) {
+                                    blankDwellStartMs + CROSS_MONTH_DWELL_MS
+                                } else {
+                                    Long.MAX_VALUE
+                                }
+                                val reverseDueMs = if (reverseDwellStartMs > 0L) {
+                                    reverseDwellStartMs + CROSS_MONTH_DWELL_MS
+                                } else {
+                                    Long.MAX_VALUE
+                                }
+                                val dueMs = minOf(blankDueMs, reverseDueMs)
+                                val event = when {
+                                    dueMs == Long.MAX_VALUE -> awaitPointerEvent()
+                                    dueMs <= nowMs -> null
+                                    else -> withTimeoutOrNull(dueMs - nowMs) { awaitPointerEvent() }
+                                }
+                                if (event == null) {
+                                    // 停留到点：只翻一页，然后按新月份重新判断手指位置、重新起算停留。
+                                    val retreat = reverseDwellStartMs > 0L && reverseDueMs <= blankDueMs
+                                    latestHaptics.value.performHapticFeedback(
+                                        HapticFeedbackType.LongPress,
+                                    )
+                                    blankDwellStartMs = 0L
+                                    reverseDwellStartMs = 0L
+                                    reverseTravelPx = 0f
+                                    if (retreat) retreatMonth() else flipMonth(blankDir > 0)
+                                    blankDir = blankDirectionAt(
+                                        pointer, gridWidthPx, rowHeightPx, viewOffset, viewDays,
+                                    )
+                                    blankDwellStartMs = if (blankDir != 0) {
+                                        SystemClock.uptimeMillis()
+                                    } else {
+                                        0L
+                                    }
+                                    continue
+                                }
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) {
+                                    change.consume()
+                                    break
+                                }
+                                pointer = change.position
+                                val dx = pointer.x - lastX
+                                lastX = pointer.x
+                                // 上一次跨月是往右翻的，就往左退回；反之亦然。
+                                // 反向位移够 24dp 只解除抑制，还要再停留 350ms 才真的回翻一页。
+                                val lastCross = crossedMonths.lastOrNull()
+                                val reversing = lastCross != null && dx != 0f &&
+                                    (if (lastCross.second) dx < 0f else dx > 0f)
+                                if (reversing) {
+                                    // 反向优先：先清掉「停在空白里」的正向计时，
+                                    // 否则边往回拖边把上一个月又翻过去。
+                                    blankDir = 0
+                                    blankDwellStartMs = 0L
+                                    reverseTravelPx += abs(dx)
+                                    if (reverseTravelPx >= reverseCrossDragPx &&
+                                        reverseDwellStartMs == 0L
+                                    ) {
+                                        reverseDwellStartMs = SystemClock.uptimeMillis()
+                                    }
+                                    change.consume()
+                                    continue
+                                }
+                                if (dx != 0f) {
+                                    reverseTravelPx = 0f
+                                    reverseDwellStartMs = 0L
+                                }
+                                // 手指拖进本月「末尾空白格 / 开头空白格」才跨月：
+                                // 往右进尾部空白翻下月（终点 1 号），往左进头部空白翻上月（终点月末）。
+                                // 不能只看第 0/6 列——像 11 月 30 日在第 6 行第 0 列，
+                                // 往右拖是穿过一整行空白，永远到不了第 6 列。
+                                val blankDirNow = blankDirectionAt(
                                     pointer, gridWidthPx, rowHeightPx, viewOffset, viewDays,
                                 )
-                                blankDwellStartMs = if (blankDir != 0) {
-                                    SystemClock.uptimeMillis()
-                                } else {
-                                    0L
+                                if (blankDirNow != blankDir) {
+                                    // 刚进空白格：开始计时；出空白格回日期格：取消计时。
+                                    blankDir = blankDirNow
+                                    blankDwellStartMs = if (blankDirNow != 0) {
+                                        SystemClock.uptimeMillis()
+                                    } else {
+                                        0L
+                                    }
                                 }
-                                continue
-                            }
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) {
-                                change.consume()
-                                break
-                            }
-                            pointer = change.position
-                            val dx = pointer.x - lastX
-                            lastX = pointer.x
-                            // 上一次跨月是往右翻的，就往左退回；反之亦然。
-                            // 反向位移够 24dp 只解除抑制，还要再停留 350ms 才真的回翻一页。
-                            val lastCross = crossedMonths.lastOrNull()
-                            val reversing = lastCross != null && dx != 0f &&
-                                (if (lastCross.second) dx < 0f else dx > 0f)
-                            if (reversing) {
-                                // 反向优先：先清掉「停在空白里」的正向计时，
-                                // 否则边往回拖边把上一个月又翻过去。
-                                blankDir = 0
-                                blankDwellStartMs = 0L
-                                reverseTravelPx += abs(dx)
-                                if (reverseTravelPx >= reverseCrossDragPx &&
-                                    reverseDwellStartMs == 0L
-                                ) {
-                                    reverseDwellStartMs = SystemClock.uptimeMillis()
+                                if (blankDirNow != 0) {
+                                    // 停在空白里先不翻，交给上面的超时分支到点再翻。
+                                    change.consume()
+                                    continue
                                 }
-                                change.consume()
-                                continue
-                            }
-                            if (dx != 0f) {
-                                reverseTravelPx = 0f
-                                reverseDwellStartMs = 0L
-                            }
-                            // 手指拖进本月「末尾空白格 / 开头空白格」才跨月：
-                            // 往右进尾部空白翻下月（终点 1 号），往左进头部空白翻上月（终点月末）。
-                            // 不能只看第 0/6 列——像 11 月 30 日在第 6 行第 0 列，
-                            // 往右拖是穿过一整行空白，永远到不了第 6 列。
-                            val blankDirNow = blankDirectionAt(
-                                pointer, gridWidthPx, rowHeightPx, viewOffset, viewDays,
-                            )
-                            if (blankDirNow != blankDir) {
-                                // 刚进空白格：开始计时；出空白格回日期格：取消计时。
-                                blankDir = blankDirNow
-                                blankDwellStartMs = if (blankDirNow != 0) {
-                                    SystemClock.uptimeMillis()
-                                } else {
-                                    0L
-                                }
-                            }
-                            if (blankDirNow != 0) {
-                                // 停在空白里先不翻，交给上面的超时分支到点再翻。
-                                change.consume()
-                                continue
-                            }
-                            val day = dayAt(
-                                pointer,
-                                gridWidthPx,
-                                rowHeightPx,
-                                viewOffset,
-                                viewDays,
-                            )
-                            if (day != null && day != lastDay) {
-                                lastDay = day
-                                val current = CalendarDate(viewYear, viewMonth, day)
-                                latestOnSelect.value(
-                                    minOf(anchor, current),
-                                    maxOf(anchor, current),
+                                val day = dayAt(
+                                    pointer,
+                                    gridWidthPx,
+                                    rowHeightPx,
+                                    viewOffset,
+                                    viewDays,
                                 )
+                                if (day != null && day != lastDay) {
+                                    lastDay = day
+                                    val current = CalendarDate(viewYear, viewMonth, day)
+                                    latestOnSelect.value(
+                                        minOf(anchor, current),
+                                        maxOf(anchor, current),
+                                    )
+                                }
+                                change.consume()
                             }
-                            change.consume()
+                        } finally {
+                            latestOnRangeDragStateChange.value(false)
                         }
                     }
                 },
@@ -1156,6 +1206,15 @@ private fun CalendarMonthGrid(
                                 ""
                             }
                             val showBoth = lunarText.isNotEmpty() && amountText.isNotEmpty()
+                            var amountFontSizeSp by remember(amountText, showBoth, gridRowHeight) {
+                                mutableFloatStateOf(
+                                    calendarCellAmountFontSizeSp(
+                                        amountText.length,
+                                        showBoth,
+                                        gridRowHeight.value,
+                                    ),
+                                )
+                            }
                             val semantic = LocalQingSemanticColors.current
                             val numberColor = when {
                                 isEdge -> MaterialTheme.colorScheme.onPrimary
@@ -1205,8 +1264,8 @@ private fun CalendarMonthGrid(
                                         Text(
                                             text = "$day",
                                             style = MaterialTheme.typography.bodyMedium.copy(
-                                                fontSize = if (showBoth) 13.sp else 14.sp,
-                                                lineHeight = if (showBoth) 14.sp else 17.sp,
+                                                fontSize = (if (showBoth) 13f else 14f).times(cellFontScale).sp,
+                                                lineHeight = (if (showBoth) 14f else 17f).times(cellFontScale).sp,
                                             ),
                                             fontWeight = if (isEdge || inRange) FontWeight.Bold else FontWeight.Normal,
                                             color = when {
@@ -1220,8 +1279,8 @@ private fun CalendarMonthGrid(
                                             Text(
                                                 text = lunarText,
                                                 style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontSize = if (showBoth) 7.sp else 8.sp,
-                                                    lineHeight = if (showBoth) 8.sp else 10.sp,
+                                                    fontSize = (if (showBoth) 7f else 8f).times(cellFontScale).sp,
+                                                    lineHeight = (if (showBoth) 8f else 10f).times(cellFontScale).sp,
                                                 ),
                                                 color = when {
                                                     isEdge -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
@@ -1235,17 +1294,20 @@ private fun CalendarMonthGrid(
                                             Text(
                                                 text = amountText,
                                                 style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontSize = when {
-                                                        amountText.length > 8 -> 6.sp
-                                                        showBoth -> 7.sp
-                                                        else -> 8.sp
-                                                    },
-                                                    lineHeight = if (showBoth) 8.sp else 9.sp,
+                                                    fontSize = amountFontSizeSp.sp,
+                                                    lineHeight = (if (showBoth) 8f else 9f)
+                                                        .times(cellFontScale).sp,
                                                 ),
                                                 color = numberColor,
                                                 maxLines = 1,
                                                 softWrap = false,
-                                                overflow = TextOverflow.Ellipsis,
+                                                onTextLayout = { layout ->
+                                                    if (layout.didOverflowWidth || layout.didOverflowHeight) {
+                                                        amountFontSizeSp = nextCalendarAmountFontSizeSp(
+                                                            amountFontSizeSp,
+                                                        )
+                                                    }
+                                                },
                                             )
                                         }
                                     }
