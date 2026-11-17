@@ -2,7 +2,6 @@ package com.bookkeeping.app.ui.screen.settings
 
 import com.bookkeeping.app.i18n.tr
 import android.Manifest
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -1470,7 +1469,6 @@ private fun LanguageCard() {
                             if (code != current) {
                                 if (AppLanguage.set(context, code)) {
                                     current = code
-                                    (context as? Activity)?.recreate()
                                 } else error = true
                             }
                         },

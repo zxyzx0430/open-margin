@@ -5,9 +5,8 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
-import android.content.Context
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,7 +20,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.bookkeeping.app.data.settings.SettingsPreferences
-import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.KeepAliveService
 import com.bookkeeping.app.ui.navigation.RootNavigation
@@ -31,14 +29,9 @@ import javax.inject.Inject
 
 // @AndroidEntryPoint = 让 Hilt 能给这个 Activity 及其下属 Composable 注入依赖
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var settings: SettingsPreferences
-
-    override fun attachBaseContext(newBase: Context) {
-        // Read the language before views/resources are initialized.
-        super.attachBaseContext(AppLanguage.wrap(newBase))
-    }
 
     // Android 13+ 必须运行时申请 POST_NOTIFICATIONS，否则前台服务的常驻通知不可见
     private val notificationPermissionLauncher = registerForActivityResult(
