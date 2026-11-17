@@ -64,6 +64,8 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
 @Composable
+@androidx.compose.material3.ExperimentalMaterial3Api
+@Composable
 fun RootNavigation() {
     val navController = rememberNavController()
     var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
