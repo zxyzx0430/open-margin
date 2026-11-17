@@ -131,11 +131,16 @@ interface TransactionDao {
     ): TransactionEntity?
 
     /**
-     * 手工记账保存前的疑似重复候选：同金额、时间在 ±1 天内。
+     * 手工记账保存前的疑似重复候选：同金额、同方向、同币种，时间在粗筛窗口内
+     * （最宽 12 小时，按时间精度分档的收窄交给纯逻辑）。
      *
-     * 只读查询，不动表结构（timestamp 已有索引）。商户相似度、10 分钟窗口这些
-     * 判定放在纯逻辑 [com.bookkeeping.app.ui.screen.transactions.DuplicateRule] 里，
-     * 这里只做粗筛，避免把全库拉进内存。
+     * 只读查询，不动表结构（timestamp 已有索引）。商户相似度、10 分钟 / 1 小时 /
+     * 12 小时窗口这些判定放在纯逻辑
+     * [com.bookkeeping.app.ui.screen.transactions.DuplicateRule] 里，这里只做粗筛，
+     * 避免把全库拉进内存。
+     *
+     * 方向与币种必须在 SQL 里过滤：36.5 的退款和 36.5 的支出、USD 36.5 和 CNY 36.5
+     * 不是同一笔，靠金额粗筛会把它们混进候选里互相误报。
      *
      * 已隐藏的重复副本（duplicateOfId 非空）和不计入统计的记录不参与，
      * 否则用户会被一条列表里根本看不到的旧记录拦下来。
@@ -143,6 +148,7 @@ interface TransactionDao {
     @Query("""
         SELECT * FROM transactions
         WHERE syncDeleted = 0 AND amountCents = :amountCents
+          AND type = :type AND currency = :currency
           AND (remoteReviewStatus IS NULL OR remoteReviewStatus <> 'excluded')
           AND duplicateOfId IS NULL
           AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
@@ -151,6 +157,8 @@ interface TransactionDao {
     """)
     suspend fun findAmountCandidatesAround(
         amountCents: Long,
+        type: String,
+        currency: String,
         windowStartMs: Long,
         windowEndMs: Long,
     ): List<TransactionEntity>

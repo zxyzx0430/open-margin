@@ -672,8 +672,17 @@ fun TransactionListScreen(
             },
             initialQuickEntry = addDialogQuickEntry,
             // 手动新建和语音预填共用这一条保存路径：先查疑似重复，再入账。
-            checkDuplicate = { amount, merchant, timestampMs ->
-                viewModel.findPossibleDuplicate(amount, merchant, timestampMs)
+            // 方向/币种/时间精度都一起传下去：不同方向的同金额、不同币种的同数字金额
+            // 不是同一笔；时间精度决定同商户窗口（1 小时 / 12 小时）。
+            checkDuplicate = { amount, type, currency, merchant, timestampMs, precision ->
+                viewModel.findPossibleDuplicate(
+                    amountCents = amount,
+                    type = type,
+                    currency = currency,
+                    merchant = merchant,
+                    timestampMs = timestampMs,
+                    precision = precision,
+                )
             },
             onConfirm = { amount, type, category, merchant, note, timestampMs, account ->
                 viewModel.addTransaction(

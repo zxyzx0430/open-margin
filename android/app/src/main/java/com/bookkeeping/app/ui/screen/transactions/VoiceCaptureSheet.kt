@@ -57,8 +57,8 @@ import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.voice.asr.AsrErrorCode
 import com.bookkeeping.app.voice.asr.AsrEvent
 import com.bookkeeping.app.voice.asr.AsrModelException
-import com.bookkeeping.app.voice.asr.SherpaStreamingAsrEngine
 import com.bookkeeping.app.voice.asr.StreamingAsrEngine
+import com.bookkeeping.app.voice.asr.VoiceAsrHolder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
@@ -68,9 +68,10 @@ import kotlinx.coroutines.launch
  * 长按「+」1 秒后出现的录音面板。
  *
  * 状态流转全部走 [VoiceCaptureLogic]（纯 JVM 可测），这里只负责：
- * - 持有一个 [SherpaStreamingAsrEngine]，面板离开组合（关闭 / Activity 销毁）时 close()；
+ * - 从进程级 [VoiceAsrHolder] 拿引擎（首次懒加载，之后常驻），面板关闭/销毁只
+ *   `cancelSession()` 结束会话，**绝不 close() 引擎**；
  * - 把引擎事件翻译成面板状态：Partial 只刷大字预览，Final 才收面板；
- * - 权限、切后台、超时这些「会捂着麦克风」的路径都收敛到 close() + 取消。
+ * - 权限、切后台、超时这些「会捂着麦克风」的路径都收敛到 `cancelSession()` + 取消。
  *
  * 关键取舍：**Partial 绝不进表单**。CTC 的 Partial 只是「当前前缀」，用户还在说话时
  * 它随时会被改写；拿它记账会把半句话记成一笔。
@@ -89,14 +90,14 @@ fun VoiceCaptureSheet(
     val latestCancel by rememberUpdatedState(onCancel)
     val latestFinal by rememberUpdatedState(onFinal)
 
-    // 每次打开面板都新建引擎：接口约定 close() 后实例不可复用（prepare 会返回 ENGINE_CLOSED），
-    // 而面板关闭必须 close() 才不会捂着麦克风。模型已在 filesDir，重新 prepare 只做浅校验，很快。
-    val engine: StreamingAsrEngine = remember { SherpaStreamingAsrEngine(context) }
+    // 引擎是进程级常驻的：这里只是拿引用，不负责它的生死。
+    // 已经预热过就同步拿到实例；还没加载完则由下面的 acquire() 等它。
+    var engine by remember { mutableStateOf(VoiceAsrHolder.current()) }
 
     var state by remember {
         mutableStateOf<VoiceCaptureState>(VoiceCaptureState.Preparing(tr("正在准备语音模型…")))
     }
-    // 重试只换 attempt、重跑 prepare + 开会话；引擎实例不动（prepare 可重复调用）。
+    // 重试只换 attempt、重跑 acquire；引擎实例由 holder 复用（已就绪时 acquire 立即返回）。
     var attempt by remember { mutableIntStateOf(0) }
     // 结果只交付一次：交付或取消之后，迟到的 Partial/Final/Error 全部丢弃。
     var settled by remember { mutableStateOf(false) }
@@ -106,13 +107,18 @@ fun VoiceCaptureSheet(
     /** 停止后的收尾：等 Final。 */
     fun stopListening() {
         state = VoiceCaptureLogic.stop(state)
-        engine.finishInput()
+        engine?.finishInput()
     }
 
-    /** 开一次会话。没 prepare 成功 / 已 close 会抛 IllegalStateException，转成可重试失败。 */
-    fun startListening() {
+    /** 开一次会话。引擎没准备好 / 已释放会抛 IllegalStateException，转成可重试失败。 */
+    fun startListening(active: StreamingAsrEngine?) {
+        val target = active ?: engine
+        if (target == null) {
+            state = VoiceCaptureLogic.forError(AsrErrorCode.NOT_PREPARED)
+            return
+        }
         val language = if (AppLanguage.current() == AppLanguage.ENGLISH) "en" else "zh"
-        val started = runCatching { engine.startSession(language) }
+        val started = runCatching { target.startSession(language) }
         state = if (started.isSuccess) {
             VoiceCaptureState.Listening("")
         } else {
@@ -120,9 +126,12 @@ fun VoiceCaptureSheet(
         }
     }
 
-    /** 收面板：先放麦克风（取消时立刻），再滑下去，最后把结果交给调用方。 */
+    /**
+     * 收面板：先结束会话放掉麦克风（取消时立刻），再滑下去，最后把结果交给调用方。
+     * 注意只 end session，不 close 引擎——模型留在内存里，下一次长按直接能用。
+     */
     fun closePanel(deliver: () -> Unit) {
-        engine.close()
+        engine?.cancelSession()
         scope.launch {
             // 收起动画失败/被取消都不影响交付：结果已经定了。
             runCatching { sheetState.hide() }
@@ -150,7 +159,7 @@ fun VoiceCaptureSheet(
         awaitingPermission = false
         if (settled) return@rememberLauncherForActivityResult
         if (granted) {
-            startListening()
+            startListening(engine)
         } else {
             // 被拒不是静默失败：面板留在失败态，给「重试」和「去设置」。
             state = VoiceCaptureLogic.permissionDenied()
@@ -158,8 +167,11 @@ fun VoiceCaptureSheet(
     }
 
     // 引擎事件：Partial 只刷新预览，Final 才结束，Error 转可重试失败。
+    // 放在 acquire 之前声明：Compose 按声明顺序启动 effect，先订阅再开会话，
+    // 不会漏掉第一段 Partial。
     LaunchedEffect(engine) {
-        engine.events.collect { event ->
+        val active = engine ?: return@LaunchedEffect
+        active.events.collect { event ->
             if (settled) return@collect
             when (event) {
                 AsrEvent.Ready -> Unit
@@ -176,13 +188,14 @@ fun VoiceCaptureSheet(
         }
     }
 
-    // 准备模型 → 检查权限 → 开录音。首次可能要拷 71MB 模型，进度直接用引擎给的文案。
+    // 懒加载 → 权限 → 开录音。首次可能要拷 71MB 模型，进度直接用引擎给的文案；
+    // 预热过之后 acquire() 立即返回，面板基本是秒开。
     LaunchedEffect(attempt) {
         if (settled) return@LaunchedEffect
         if (state !is VoiceCaptureState.Preparing) {
             state = VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
         }
-        val prepared = engine.prepare { message ->
+        val acquired = VoiceAsrHolder.acquire { message ->
             // 进度回调不在主线程：只换文案，不碰引擎。
             scope.launch(Dispatchers.Main) {
                 if (!settled && state is VoiceCaptureState.Preparing) {
@@ -191,13 +204,15 @@ fun VoiceCaptureSheet(
             }
         }
         if (settled) return@LaunchedEffect
-        val failure = prepared.exceptionOrNull()
+        val failure = acquired.exceptionOrNull()
         if (failure != null) {
             state = VoiceCaptureLogic.forError((failure as? AsrModelException)?.code)
             return@LaunchedEffect
         }
+        val ready = acquired.getOrThrow()
+        engine = ready
         if (hasRecordPermission(context)) {
-            startListening()
+            startListening(ready)
         } else {
             state = VoiceCaptureState.Preparing(tr("正在请求麦克风权限…"))
             awaitingPermission = true
@@ -216,9 +231,9 @@ fun VoiceCaptureSheet(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && !settled && !awaitingPermission) {
-                Log.i(TAG, "页面离开前台，关闭语音会话")
+                Log.i(TAG, "页面离开前台，结束语音会话（引擎常驻）")
                 settled = true
-                engine.close()
+                engine?.cancelSession()
                 latestCancel()
             }
         }
@@ -226,11 +241,12 @@ fun VoiceCaptureSheet(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 面板离开组合（关闭、Activity 销毁、配置变更）时释放识别器与 AudioRecord。
-    DisposableEffect(engine) {
+    // 面板离开组合（关闭、Activity 销毁、配置变更）只结束会话；引擎由 holder 管，
+    // 不在这里 close()，否则下一次长按又要重新加载模型。
+    DisposableEffect(Unit) {
         onDispose {
-            engine.close()
-            Log.i(TAG, "语音面板销毁，引擎已释放")
+            engine?.cancelSession()
+            Log.i(TAG, "语音面板销毁，会话已结束（引擎保持常驻）")
         }
     }
 
@@ -239,7 +255,7 @@ fun VoiceCaptureSheet(
             // 下滑 / 系统返回：用户主动取消，直接放麦克风回账单页。
             if (!settled) {
                 settled = true
-                engine.close()
+                engine?.cancelSession()
                 latestCancel()
             }
         },
