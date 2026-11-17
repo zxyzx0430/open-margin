@@ -5,7 +5,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,13 +37,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bookkeeping.app.billimport.BillDirection
 import com.bookkeeping.app.billimport.BillImportPreview
 import com.bookkeeping.app.billimport.BillPreviewKind
 import com.bookkeeping.app.billimport.BillPreviewRow
+import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingExpense
 import com.bookkeeping.app.ui.theme.QingIncome
@@ -133,7 +140,11 @@ fun BillImportScreen(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(top = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
             )
         }
 
@@ -164,7 +175,11 @@ fun BillImportScreen(
                             "\n" + tr("可在「账单」页查看，列表会自动刷新。"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = QingPrimary,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Button(onClick = onClose) { Text(tr("完成")) }
                 } else {
@@ -177,6 +192,9 @@ fun BillImportScreen(
                         Text(
                             if (state.importing) tr("导入中…")
                             else tr("确认导入") + " $count " + tr("笔"),
+                            maxLines = 2,
+                            textAlign = TextAlign.Center,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -218,6 +236,8 @@ internal fun BillImportExportSheet(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             IconButton(onClick = onClose, enabled = !state.importing) {
                 Icon(Icons.Filled.Close, contentDescription = tr("关闭"))
@@ -227,6 +247,9 @@ internal fun BillImportExportSheet(
             text = tr("支持微信/支付宝 CSV、XLSX 或文本；确认前不写入账本"),
             style = MaterialTheme.typography.bodyMedium,
             color = QingTextSecondary,
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
         )
         Button(
             onClick = {
@@ -241,20 +264,33 @@ internal fun BillImportExportSheet(
             modifier = Modifier.fillMaxWidth(),
             enabled = !state.loading && !state.importing && !exportInProgress,
         ) {
-            Text(tr("选择账单文件"))
+            Text(
+                tr("选择账单文件"),
+                maxLines = 2,
+                textAlign = TextAlign.Center,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         OutlinedButton(
             onClick = onExportBills,
             modifier = Modifier.fillMaxWidth(),
             enabled = !state.loading && !state.importing && !exportInProgress,
         ) {
-            Text(tr("导出全部账单"))
+            Text(
+                tr("导出全部账单"),
+                maxLines = 2,
+                textAlign = TextAlign.Center,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         exportFeedback?.let { message ->
             Text(
                 text = message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (state.loading || exportInProgress) {
@@ -270,6 +306,9 @@ internal fun BillImportExportSheet(
                 text = message,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
             )
         }
 
@@ -278,6 +317,7 @@ internal fun BillImportExportSheet(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .weight(1f, fill = false)
                     .heightIn(max = 360.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -290,6 +330,9 @@ internal fun BillImportExportSheet(
                         " · " + tr("已补齐") + " ${state.enrichedCount ?: 0} " + tr("笔"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = QingPrimary,
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
                     Text(tr("完成"))
@@ -304,6 +347,9 @@ internal fun BillImportExportSheet(
                     Text(
                         if (state.importing) tr("导入中…")
                         else tr("确认导入") + " $count " + tr("笔"),
+                        maxLines = 2,
+                        textAlign = TextAlign.Center,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -311,17 +357,30 @@ internal fun BillImportExportSheet(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ImportSummary(preview: BillImportPreview) {
-    Text(
-        text = tr("有效") + " ${preview.validRows.size} · " +
-            tr("可补齐") + " ${preview.enrichableRows.size} · " +
-            tr("重复") + " ${preview.duplicateRows.size - preview.enrichableRows.size} · " +
-            tr("已跳过") + " ${preview.skippedRows.size} · " +
-            tr("错误") + " ${preview.errorRows.size}",
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.SemiBold,
-    )
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        listOf(
+            "${tr("有效")} ${preview.validRows.size}",
+            "${tr("可补齐")} ${preview.enrichableRows.size}",
+            "${tr("重复")} ${preview.duplicateRows.size - preview.enrichableRows.size}",
+            "${tr("已跳过")} ${preview.skippedRows.size}",
+            "${tr("错误")} ${preview.errorRows.size}",
+        ).forEach { summary ->
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
     if (preview.validRows.isEmpty() && preview.enrichableRows.isEmpty() &&
         preview.errorRows.isNotEmpty()
     ) {
@@ -329,6 +388,8 @@ private fun ImportSummary(preview: BillImportPreview) {
             text = preview.errorRows.firstOrNull()?.message ?: tr("没有可导入的有效记录"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -357,17 +418,24 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = labelColor,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = " · " + tr("第") + row.rowNumber + tr("行"),
                 style = MaterialTheme.typography.labelSmall,
                 color = QingTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = row.parsed?.let {
@@ -377,15 +445,18 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
                 style = MaterialTheme.typography.labelSmall,
                 color = QingTextSecondary,
                 modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             row.parsed?.let { parsed ->
-                Text(
+                AutoSizeAmountText(
                     text = when (parsed.direction) {
                         BillDirection.INCOME -> "+"
                         BillDirection.EXPENSE -> "−"
                         BillDirection.NEUTRAL -> "±"
                     } + formatCny(parsed.amountCents),
                     style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.widthIn(min = 82.dp),
                     fontWeight = FontWeight.SemiBold,
                     color = when {
                         row.kind == BillPreviewKind.ERROR -> MaterialTheme.colorScheme.error
@@ -393,16 +464,36 @@ private fun ImportPreviewRow(row: BillPreviewRow) {
                         parsed.direction == BillDirection.INCOME -> QingIncome
                         else -> QingExpense
                     },
+                    textAlign = TextAlign.End,
                 )
             }
         }
         val parsed = row.parsed
         if (parsed != null) {
-            Text(
-                text = parsed.merchant.ifBlank { tr("未知商户") },
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-            )
+            val mappedCategory = BillImportMapping.toTransactionEntity(parsed)?.category
+            val category = mappedCategory?.let { TransactionCategory.valueOf(it) }
+                ?: BillImportMapping.classificationFor(parsed).category
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = parsed.merchant.ifBlank { tr("未知商户") },
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = tr(category.displayName),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.widthIn(max = 120.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             val message = row.message ?: row.duplicateOfRow?.let { tr("与第") + it + tr("行重复") }
             if (!message.isNullOrBlank()) {
                 Text(
