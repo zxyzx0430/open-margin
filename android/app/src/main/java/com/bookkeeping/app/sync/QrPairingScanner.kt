@@ -142,6 +142,7 @@ internal fun QrPairingControls(
 @Composable
 internal fun PairingQrScanAction(
     enabled: Boolean = true,
+    buttonLabel: String = "扫一扫",
     onPayload: (PairingPayload) -> Unit,
     onRejected: (PairingRejectReason) -> Unit,
     onFailure: (QrScanFailure) -> Unit,
@@ -172,7 +173,7 @@ internal fun PairingQrScanAction(
         },
     ) {
         Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
-        Text(tr("扫一扫"))
+        Text(tr(buttonLabel))
     }
 }
 
