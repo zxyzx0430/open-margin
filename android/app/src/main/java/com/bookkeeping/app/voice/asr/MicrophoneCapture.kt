@@ -1,7 +1,7 @@
 package com.bookkeeping.app.voice.asr
 
 import android.content.Context
-import android.media.AudioEffect
+import android.media.audiofx.AudioEffect
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
