@@ -888,6 +888,8 @@ internal object EnglishUiText {
         "账本里已有一笔相似的账单。" to "There is already a similar record in the ledger.",
         "仍然记这一笔" to "Record it anyway",
         "正在检查…" to "Checking…",
+        "正在保存…" to "Saving…",
+        "保存失败，请重试" to "Save failed. Try again.",
         "时间不能晚于当前时间 5 分钟以上" to "Time cannot be more than 5 minutes in the future",
         "请选择有效分类" to "Choose a valid category",
         "请选择有效来源" to "Choose a valid source",
@@ -1088,7 +1090,7 @@ internal object EnglishUiText {
             "Describe the expense or income and the form fills itself",
         "语音记账" to "Voice entry",
         "新建账单，长按说话记账" to "New transaction; press and hold to speak",
-        "长按 1 秒说话，点停止结束" to "Hold for 1 second and speak; tap Stop to finish",
+        "长按开始说话，点停止结束" to "Hold to speak; tap Stop to finish",
         // 录音面板：准备模型 → 听 → 收尾 → 失败，以及失败后的两个出口。
         "正在准备语音模型…" to "Preparing the voice model…",
         "正在请求麦克风权限…" to "Requesting microphone permission…",
