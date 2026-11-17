@@ -12,6 +12,59 @@ import java.util.Calendar
 class StatsAggregationTest {
 
     @Test
+    fun dayAndCategoryCountsMatchFilteredAmounts() {
+        val transactions = listOf(
+            transaction(100L, TransactionType.EXPENSE, TransactionCategory.FOOD, at(2026, 11, 1)),
+            transaction(
+                200L,
+                TransactionType.EXPENSE,
+                TransactionCategory.FOOD,
+                at(2026, 11, 2),
+                currency = "USD",
+            ),
+            transaction(
+                300L,
+                TransactionType.EXPENSE,
+                TransactionCategory.FOOD,
+                at(2026, 11, 3),
+                duplicateOfId = 1L,
+            ),
+            transaction(
+                400L,
+                TransactionType.EXPENSE,
+                TransactionCategory.FOOD,
+                at(2026, 11, 4),
+                status = "excluded",
+            ),
+            transaction(500L, TransactionType.INCOME, TransactionCategory.SALARY, at(2026, 11, 5)),
+            transaction(
+                600L,
+                TransactionType.INCOME,
+                TransactionCategory.SALARY,
+                at(2026, 11, 6),
+                status = "possible_duplicate",
+            ),
+        )
+
+        val expenseCategory = StatsAggregation.categoryStats(
+            transactions,
+            TransactionType.EXPENSE,
+        ).single()
+        val incomeCategory = StatsAggregation.categoryStats(
+            transactions,
+            TransactionType.INCOME,
+        ).single()
+
+        assertEquals(100L, StatsAggregation.totalCents(transactions, TransactionType.EXPENSE))
+        assertEquals(500L, StatsAggregation.totalCents(transactions, TransactionType.INCOME))
+        assertEquals(1, expenseCategory.count)
+        assertEquals(100L, expenseCategory.totalCents)
+        assertEquals(1, incomeCategory.count)
+        assertEquals(500L, incomeCategory.totalCents)
+        assertEquals(2, StatsAggregation.transactionCount(transactions))
+    }
+
+    @Test
     fun incomeCountsTransferStatusAndTransferCategory() {
         val transactions = listOf(
             transaction(
