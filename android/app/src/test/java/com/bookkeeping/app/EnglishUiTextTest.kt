@@ -10,13 +10,38 @@ class EnglishUiTextTest {
     fun billImportExportLabelsTranslate() {
         val expected = mapOf(
             "账单导入" to "Bill import",
-            "导入 / 导出账单" to "Import / export bills",
+            "导入 / 导出账单" to "Import / Export bills",
+            "导入 CSV、导出全部账单" to "Import CSV, export all bills",
             "支持微信/支付宝 CSV、XLSX 或文本；确认前不写入账本" to
                 "Supports WeChat/Alipay CSV, XLSX or text; nothing is written until you confirm.",
             "选择账单文件" to "Choose bill file",
             "导出全部账单" to "Export all bills",
             "账单已导出" to "Bills exported",
             "账单导出失败" to "Bill export failed",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
+    fun diagnosticsAndRemainingUiLabelsTranslate() {
+        val expected = mapOf(
+            "版本: " to "Version: ",
+            "机型: " to "Device: ",
+            "Android: " to "Android: ",
+            "语言: " to "Language: ",
+            "说明: 该报告只含版本与设备信息，不含账单金额、商户、账户或日志内容。" to
+                "Note: This report includes only the app version and device details; it contains no bill amounts, merchants, accounts, or log contents.",
+            "清衡反馈" to "Qingheng feedback",
+            "清衡诊断信息" to "Qingheng diagnostics",
+            "清衡崩溃了，日志在这里" to "Open Margin crashed; the log is below.",
+            "复制日志" to "Copy log",
+            "已复制，粘贴发给 Hermes" to "Copied. Paste it into your message to Hermes.",
+            "分享日志" to "Share log",
+            "分享崩溃日志" to "Share crash log",
+            "将电脑上的二维码放入框内" to "Place the QR code shown on your computer inside the frame.",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))

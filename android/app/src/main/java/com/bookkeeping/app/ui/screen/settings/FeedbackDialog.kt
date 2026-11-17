@@ -55,7 +55,7 @@ internal fun FeedbackDialog(onDismiss: () -> Unit) {
         append("\n\n---\n")
         append(diagnostics)
     }
-    val subject = "清衡反馈 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+    val subject = "${tr("清衡反馈")} ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
     fun openLink(intent: Intent) {
         runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -112,7 +112,7 @@ internal fun FeedbackDialog(onDismiss: () -> Unit) {
                 TextButton(
                     onClick = {
                         val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        clip.setPrimaryClip(ClipData.newPlainText("清衡诊断信息", diagnostics))
+                        clip.setPrimaryClip(ClipData.newPlainText(tr("清衡诊断信息"), diagnostics))
                         copied = true
                     },
                     modifier = Modifier.fillMaxWidth(),
