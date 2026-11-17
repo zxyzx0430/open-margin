@@ -33,7 +33,7 @@ internal sealed interface PairingParseResult {
  * payload only prefills the wizard. Nothing is saved or enabled until the
  * existing read-only probe verifies the ledger and the user confirms.
  */
-internal data class PairingPayload(
+data class PairingPayload(
     val url: String,
     val token: String,
     val serverId: String,
