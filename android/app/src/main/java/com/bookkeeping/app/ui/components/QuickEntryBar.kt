@@ -58,7 +58,7 @@ fun QuickEntryBar(
             onValueChange = onValueChange,
             modifier = fieldModifier
                 .fillMaxWidth()
-                .height(124.dp)
+                .height(116.dp)
                 .semantics { contentDescription = tr("一句话记账") },
             label = null,
             minLines = 4,

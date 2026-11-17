@@ -374,7 +374,7 @@ fun AddTransactionDialog(
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             QuickEntryBar(
                 value = quickEntry,
@@ -662,7 +662,7 @@ fun AddTransactionDialog(
             )
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(20.dp))
         saveError?.let { error ->
             Text(
                 text = error,
