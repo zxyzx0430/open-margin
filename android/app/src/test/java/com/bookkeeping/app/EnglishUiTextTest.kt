@@ -403,6 +403,30 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun budgetLabelsTranslateAndUseCompactActionCopy() {
+        val expected = mapOf(
+            "月预算" to "Monthly budget",
+            "已使用" to "Used",
+            "预算剩余" to "Budget remaining",
+            "剩余天数" to "Days left",
+            "本月节奏" to "This month's pace",
+            "预算建议" to "Budget advice",
+            "调整预算" to "Adjust",
+            "添加分类" to "Add category",
+            "按当前节奏，本月可能超支" to "At the current pace, this month may overspend",
+            "按当前节奏，本月可控，预计可结余" to
+                "At the current pace, this month is under control; projected remaining",
+            "建议后续控制在日均 ≤" to "keep future daily spending at or below",
+            "建议调整预算或减少后续支出。" to
+                "consider adjusting the budget or reducing future spending.",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun duplicateWarningAndAccountLabels() {
         // 新建账单：账户预设 + 保存前的疑似重复提示。
         val expected = mapOf(
