@@ -1,8 +1,8 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -10,13 +10,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
@@ -24,13 +28,13 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -44,19 +48,25 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bookkeeping.app.data.MoneyAmount
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
-import com.bookkeeping.app.data.MoneyAmount
+import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.CategoryClassifier
+import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.QuickEntryBar
 import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.voice.VoiceTransactionParser
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -66,6 +76,8 @@ import java.util.TimeZone
 
 /** 新建账单里账户一栏的常用值；account 本身是自由文本，存进库里的就是这里的中文。 */
 private val ACCOUNT_PRESETS = listOf("微信", "支付宝", "现金", "银行卡")
+
+private enum class QuickEntryPreviewField { AMOUNT, CATEGORY, MERCHANT, ACCOUNT }
 
 /** 点「保存」时算好的待写入内容；重复检查是异步的，命中后还要拿它继续记账。 */
 private data class PendingSave(
@@ -135,16 +147,26 @@ fun AddTransactionDialog(
     // 账户：空串 = 「不填」，写库时转成 null。编辑已有账单时回填原值。
     var account by remember(initial?.id) { mutableStateOf(initial?.account.orEmpty()) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
-    // 用户是否亲手改过分类：改过之后重新解析一句话也不许覆盖他的选择（「只预填不覆盖」）。
-    var categoryTouched by remember(initial?.id) { mutableStateOf(false) }
-    var timestamp by remember(initial?.id) {
-        mutableLongStateOf(initial?.timestamp ?: System.currentTimeMillis())
+    var amountTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    var typeTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    var categoryTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    var merchantTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    var noteTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    var accountTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    var timestampTouched by remember(initial?.id) { mutableStateOf(initial != null) }
+    val defaultTimestamp = remember(initial?.id) {
+        initial?.timestamp ?: System.currentTimeMillis()
     }
+    var timestamp by remember(initial?.id) { mutableLongStateOf(defaultTimestamp) }
     var showDatePicker by remember { mutableStateOf(false) }
     // 一句话记账的原文：解析失败要能改两个字重提，所以提交后不清空。
     var quickEntry by remember(initial?.id, initialQuickEntry) { mutableStateOf(initialQuickEntry) }
-    var quickEntryFocused by remember { mutableStateOf(false) }
     var quickEntryNotice by remember(initial?.id) { mutableStateOf<QuickEntryNotice?>(null) }
+    var quickEntryPreview by remember(initial?.id) { mutableStateOf<QuickEntryPrefill?>(null) }
+    var lastAutoPrefill by remember(initial?.id) { mutableStateOf<QuickEntryPrefill?>(null) }
+    var quickEntryTimePrecision by remember(initial?.id) { mutableStateOf(TimePrecision.NONE) }
+    val amountFocusRequester = remember(initial?.id) { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     // 保存路径的三个状态：正在查 / 查到的疑似重复 / 待写入内容（命中后还要用它继续记账）。
     var checking by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -152,27 +174,45 @@ fun AddTransactionDialog(
     var duplicateHit by remember { mutableStateOf<DuplicateCandidate?>(null) }
     var pendingSave by remember { mutableStateOf<PendingSave?>(null) }
 
-    // 解析一句话 → 回填字段。只写解析出来的那一部分，解析不出的保持原值。
-    // 分类额外走一次「商户记忆」：用户显式规则 > 学到的纠正 > 内置关键词（复用
-    // CategoryClassifier 的现成管道），都没有命中才保留解析器猜的分类。
+    // 解析一句话 → 回填字段。只写解析出来的那一部分，且只覆盖用户没亲手改过的字段。
+    // 分类额外走现有商户记忆：用户规则优先，之后才用解析器分类。
     val applyQuickEntry: (String) -> QuickEntryPrefill = { raw ->
+        val parsedAt = System.currentTimeMillis()
         val prefill = QuickEntryPrefill.from(
-            VoiceTransactionParser.parse(raw, System.currentTimeMillis()),
-            System.currentTimeMillis(),
+            VoiceTransactionParser.parse(raw, parsedAt),
+            parsedAt,
             categoryResolver = { merchant, _ -> CategoryClassifier.rememberedCategory(merchant) },
         )
-        prefill.amountText?.let {
-            amountText = it
-            amountInputError = null
+        val previous = lastAutoPrefill
+        if (!amountTouched) {
+            if (prefill.amountText != null) {
+                amountText = prefill.amountText
+                amountInputError = null
+            } else if (previous?.amountText != null) {
+                amountText = ""
+                amountInputError = null
+            }
         }
-        prefill.type?.let { selectedType = it }
-        // 用户自己选过分类就不再覆盖；没选过才用解析 + 记忆的结果。
+        if (!typeTouched) prefill.type?.let { selectedType = it }
         if (!categoryTouched) prefill.category?.let { selectedCategory = it }
-        prefill.merchant?.let { merchant = it }
-        prefill.note?.let { note = it }
-        prefill.account?.let { account = it }
-        prefill.timestampMs?.let { timestamp = it }
+        if (!merchantTouched) {
+            merchant = prefill.merchant ?: if (previous?.merchant != null) "" else merchant
+        }
+        if (!noteTouched) note = prefill.note ?: if (previous?.note != null) "" else note
+        if (!accountTouched) account = prefill.account ?: if (previous?.account != null) "" else account
+        if (!timestampTouched) {
+            timestamp = prefill.timestampMs
+                ?: if (previous?.timestampMs != null) defaultTimestamp else timestamp
+        }
         quickEntryNotice = prefill.notice
+        quickEntryTimePrecision = prefill.timePrecision
+        lastAutoPrefill = prefill
+        quickEntryPreview = prefill.copy(
+            amountText = prefill.amountText.takeUnless { amountTouched },
+            category = prefill.category.takeUnless { categoryTouched },
+            merchant = prefill.merchant.takeUnless { merchantTouched },
+            account = prefill.account.takeUnless { accountTouched },
+        )
         prefill
     }
 
@@ -223,9 +263,10 @@ fun AddTransactionDialog(
     // （表单只有日期选择器，没有改时分的入口，判断不了就默认精确）。
     val entryCurrency = initial?.currency?.trim()?.takeIf { it.isNotEmpty() } ?: "CNY"
     val buildPayload: () -> PendingSave? = {
+        if (QuickEntryRule.canSubmit(quickEntry)) applyQuickEntry(quickEntry)
         val typed = MoneyAmount.cents(amountText)
-        if (typed != null) {
-            PendingSave(
+        when {
+            typed != null -> PendingSave(
                 amountCents = typed,
                 type = selectedType,
                 currency = entryCurrency,
@@ -234,28 +275,11 @@ fun AddTransactionDialog(
                 note = note,
                 timestamp = timestamp,
                 account = account,
-                timePrecision = TimePrecision.PRECISE,
+                timePrecision = if (
+                    !timestampTouched && quickEntryTimePrecision != TimePrecision.NONE
+                ) quickEntryTimePrecision else TimePrecision.PRECISE,
             )
-        } else if (QuickEntryRule.canSubmit(quickEntry)) {
-            val prefill = applyQuickEntry(quickEntry)
-            val parsed = prefill.amountText?.let { MoneyAmount.cents(it) }
-            if (parsed == null) {
-                null
-            } else {
-                PendingSave(
-                    amountCents = parsed,
-                    type = prefill.type ?: selectedType,
-                    currency = entryCurrency,
-                    category = prefill.category ?: selectedCategory,
-                    merchant = prefill.merchant ?: merchant,
-                    note = prefill.note ?: note,
-                    timestamp = prefill.timestampMs ?: timestamp,
-                    account = prefill.account ?: account,
-                    timePrecision = prefill.timePrecision,
-                )
-            }
-        } else {
-            null
+            else -> null
         }
     }
 
@@ -296,10 +320,13 @@ fun AddTransactionDialog(
         }
     }
 
-    // 语音/上一轮结果直接带进来的原文：打开就填好，用户只需核对。
-    LaunchedEffect(initial?.id, initialQuickEntry) {
-        if (QuickEntryRule.canSubmit(initialQuickEntry)) applyQuickEntry(initialQuickEntry)
+    // 一句话停顿约 500ms 后自动预填；清空原文不会清掉已填表单。
+    LaunchedEffect(quickEntry) {
+        if (!QuickEntryRule.canSubmit(quickEntry)) return@LaunchedEffect
+        delay(500)
+        applyQuickEntry(quickEntry)
     }
+    LaunchedEffect(amountFocusRequester) { amountFocusRequester.requestFocus() }
 
     val amountIsNegative = amountText.contains('-') || amountText.contains('−') ||
         (amountText.toDoubleOrNull()?.let { it < 0.0 } == true)
@@ -310,50 +337,84 @@ fun AddTransactionDialog(
         else -> null
     }
     val amountValid = amountError == null && MoneyAmount.cents(amountText) != null
+    val dismissQuickEntryPreview: (QuickEntryPreviewField) -> Unit = { field ->
+        quickEntryPreview = when (field) {
+            QuickEntryPreviewField.AMOUNT -> quickEntryPreview?.copy(amountText = null)
+            QuickEntryPreviewField.CATEGORY -> quickEntryPreview?.copy(category = null)
+            QuickEntryPreviewField.MERCHANT -> quickEntryPreview?.copy(merchant = null)
+            QuickEntryPreviewField.ACCOUNT -> quickEntryPreview?.copy(account = null)
+        }
+        when (field) {
+            QuickEntryPreviewField.AMOUNT -> {
+                amountTouched = true
+                amountText = ""
+                amountInputError = null
+            }
+            QuickEntryPreviewField.CATEGORY -> {
+                categoryTouched = true
+                selectedCategory = TransactionCategory.OTHER
+            }
+            QuickEntryPreviewField.MERCHANT -> {
+                merchantTouched = true
+                merchant = ""
+            }
+            QuickEntryPreviewField.ACCOUNT -> {
+                accountTouched = true
+                account = ""
+            }
+        }
+    }
 
     EntryPanelLayout(
         title = if (initial == null) tr("新建账单") else tr("编辑账单"),
         onDismiss = { if (!saving) onDismiss() },
-        fillPanelHeight = true,
+        fillPanelHeight = false,
     ) {
         Column(
             modifier = Modifier
-                .weight(1f)
+                .weight(1f, fill = false)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // 一句话记账：可以不填；填了就在回车（键盘「完成」）或离开输入框时解析成下面的字段。
-            // 失焦补解析只在表单还没被手工填过时做，免得把用户刚改的金额/商户冲掉。
             QuickEntryBar(
                 value = quickEntry,
-                onValueChange = {
-                    quickEntry = it
-                    if (quickEntryNotice != null) quickEntryNotice = null
+                onValueChange = { raw ->
+                    quickEntry = raw
+                    quickEntryNotice = null
+                    quickEntryPreview = null
                 },
                 onSubmit = { raw -> applyQuickEntry(raw) },
-                warning = quickEntryNotice?.let { tr(it.message) },
-                fieldModifier = Modifier.onFocusChanged { state ->
-                    if (quickEntryFocused && !state.isFocused) {
-                        val formUntouched =
-                            amountText.isBlank() && merchant.isBlank() && note.isBlank()
-                        if (formUntouched && QuickEntryRule.canSubmit(quickEntry)) {
-                            applyQuickEntry(quickEntry)
-                        }
+                previewContent = {
+                    quickEntryPreview?.let { preview ->
+                        QuickEntryPreviewRow(
+                            prefill = preview,
+                            onDismiss = dismissQuickEntryPreview,
+                        )
                     }
-                    quickEntryFocused = state.isFocused
+                },
+                warning = quickEntryNotice?.let {
+                    tr(
+                        if (it == QuickEntryNotice.AMOUNT_MISSING) {
+                            "没认出金额，请手填"
+                        } else {
+                            it.message
+                        },
+                    )
                 },
             )
 
-            // 收入 / 支出切换
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = selectedType == TransactionType.EXPENSE,
                     onClick = {
                         selectedType = TransactionType.EXPENSE
+                        typeTouched = true
                         if (selectedCategory == TransactionCategory.SALARY) {
                             selectedCategory = TransactionCategory.FOOD
+                            categoryTouched = true
+                            quickEntryPreview = quickEntryPreview?.copy(category = null)
                         }
                     },
                     label = { Text(tr("支出")) },
@@ -362,28 +423,62 @@ fun AddTransactionDialog(
                     selected = selectedType == TransactionType.INCOME,
                     onClick = {
                         selectedType = TransactionType.INCOME
+                        typeTouched = true
                         if (selectedCategory == TransactionCategory.FOOD) {
                             selectedCategory = TransactionCategory.SALARY
+                            categoryTouched = true
+                            quickEntryPreview = quickEntryPreview?.copy(category = null)
                         }
                     },
                     label = { Text(tr("收入")) },
                 )
             }
 
-            // 日期与金额并排，金额使用剩余宽度。
+            // 金额优先；日期按钮保持单行并使用固有宽度。
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { raw ->
+                        if (raw.contains('-') || raw.contains('−')) {
+                            amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
+                        } else {
+                            val candidate = raw.filter { c -> c.isDigit() || c == '.' }
+                            if (candidate.hasMoreThanTwoFractionDigits()) {
+                                amountInputError = tr("金额最多保留两位小数")
+                            } else {
+                                amountText = candidate
+                                amountTouched = true
+                                quickEntryPreview = quickEntryPreview?.copy(amountText = null)
+                                amountInputError = null
+                            }
+                        }
+                    },
+                    label = { Text(tr("金额（元）"), maxLines = 1, softWrap = false) },
+                    textStyle = MaterialTheme.typography.headlineSmall,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Decimal,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
+                    singleLine = true,
+                    isError = amountError != null,
+                    supportingText = {
+                        if (amountError != null) {
+                            Text(amountError, color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    modifier = Modifier.weight(1f).focusRequester(amountFocusRequester),
+                )
+
                 OutlinedButton(
                     onClick = { showDatePicker = true },
-                    modifier = Modifier.widthIn(min = 84.dp, max = 112.dp),
+                    modifier = Modifier.widthIn(min = 88.dp, max = 112.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.CalendarMonth,
-                        contentDescription = null,
-                    )
+                    Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text(
                         text = formatCompactDate(timestamp),
@@ -392,89 +487,55 @@ fun AddTransactionDialog(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { raw ->
-                        if (raw.contains('-') || raw.contains('−')) {
-                            // Keep the previous amount, but surface the rejected negative input.
-                            amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
-                        } else {
-                            val candidate = raw.filter { c -> c.isDigit() || c == '.' }
-                            if (candidate.hasMoreThanTwoFractionDigits()) {
-                                // Reject the edit rather than silently dropping extra decimal digits.
-                                amountInputError = tr("金额最多保留两位小数")
-                            } else {
-                                amountText = candidate
-                                amountInputError = null
-                            }
-                        }
-                    },
-                    label = { Text(tr("金额（元）")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    isError = amountError != null,
-                    supportingText = {
-                        if (amountError != null) {
-                            Text(amountError, color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                )
             }
 
-            // 分类与商户并排，分类下拉保留原有分类集合与选择语义。
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ExposedDropdownMenuBox(
-                    expanded = categoryMenuExpanded,
-                    onExpandedChange = { categoryMenuExpanded = it },
-                    modifier = Modifier.weight(1.25f),
+            Box {
+                OutlinedButton(
+                    onClick = { categoryMenuExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 ) {
-                    OutlinedTextField(
-                        value = tr(selectedCategory.displayName),
-                        onValueChange = { },
-                        readOnly = true,
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodySmall,
-                        label = { Text(tr("分类"), maxLines = 1, softWrap = false) },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded)
-                        },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                    )
-                    DropdownMenu(
-                        expanded = categoryMenuExpanded,
-                        onDismissRequest = { categoryMenuExpanded = false },
-                        modifier = Modifier.heightIn(max = 320.dp),
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        TransactionCategory.entries.forEach { cat ->
-                            DropdownMenuItem(
-                                text = { Text(tr(cat.displayName)) },
-                                onClick = {
-                                    selectedCategory = cat
-                                    // 手工选过就锁定：后面再解析一句话也不覆盖。
-                                    categoryTouched = true
-                                    categoryMenuExpanded = false
-                                },
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = merchant,
-                    onValueChange = { merchant = it },
-                    label = {
+                        CategoryIcon(category = selectedCategory, size = 24.dp)
                         Text(
-                            text = tr("商户/对方（可选）"),
+                            text = tr(selectedCategory.displayName),
+                            modifier = Modifier.weight(1f),
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                         )
-                    },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
+                        Text(tr("分类"), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
+                DropdownMenu(
+                    expanded = categoryMenuExpanded,
+                    onDismissRequest = { categoryMenuExpanded = false },
+                    modifier = Modifier.heightIn(max = 320.dp),
+                ) {
+                    TransactionCategory.entries.forEach { cat ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    CategoryIcon(category = cat, size = 24.dp)
+                                    Text(tr(cat.displayName), maxLines = 1)
+                                }
+                            },
+                            onClick = {
+                                selectedCategory = cat
+                                categoryTouched = true
+                                quickEntryPreview = quickEntryPreview?.copy(category = null)
+                                categoryMenuExpanded = false
+                            },
+                        )
+                    }
+                }
             }
 
             // 账户 chips 横向滚动，英文界面下最后一个选项仍可完整查看和点击。
@@ -495,7 +556,11 @@ fun AddTransactionDialog(
                 ) {
                     FilterChip(
                         selected = account.isBlank(),
-                        onClick = { account = "" },
+                        onClick = {
+                            account = ""
+                            accountTouched = true
+                            quickEntryPreview = quickEntryPreview?.copy(account = null)
+                        },
                         label = {
                             Text(
                                 tr("不填"),
@@ -508,7 +573,11 @@ fun AddTransactionDialog(
                     ACCOUNT_PRESETS.forEach { preset ->
                         FilterChip(
                             selected = account == preset,
-                            onClick = { account = if (account == preset) "" else preset },
+                            onClick = {
+                                account = preset
+                                accountTouched = true
+                                quickEntryPreview = quickEntryPreview?.copy(account = null)
+                            },
                             label = {
                                 Text(
                                     tr(preset),
@@ -524,7 +593,11 @@ fun AddTransactionDialog(
                     if (custom.isNotEmpty() && custom !in ACCOUNT_PRESETS) {
                         FilterChip(
                             selected = true,
-                            onClick = { account = "" },
+                            onClick = {
+                                account = ""
+                                accountTouched = true
+                                quickEntryPreview = quickEntryPreview?.copy(account = null)
+                            },
                             label = {
                                 Text(
                                     text = custom,
@@ -540,10 +613,33 @@ fun AddTransactionDialog(
             }
 
             OutlinedTextField(
-                value = note,
-                onValueChange = { note = it },
-                label = { Text(tr("备注（可选）")) },
+                value = merchant,
+                onValueChange = {
+                    merchant = it
+                    merchantTouched = true
+                    quickEntryPreview = quickEntryPreview?.copy(merchant = null)
+                },
+                label = {
+                    Text(
+                        text = tr("商户/对方（可选）"),
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            OutlinedTextField(
+                value = note,
+                onValueChange = {
+                    note = it
+                    noteTouched = true
+                },
+                label = { Text(tr("备注（可选）"), maxLines = 1, softWrap = false) },
+                minLines = 2,
+                maxLines = 3,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -551,7 +647,7 @@ fun AddTransactionDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             saveError?.let { error ->
@@ -575,7 +671,7 @@ fun AddTransactionDialog(
                 Button(
                     onClick = requestSave,
                     enabled = !checking && !saving &&
-                        (amountValid || QuickEntryRule.canSubmit(quickEntry)),
+                        (amountValid || (amountText.isBlank() && QuickEntryRule.canSubmit(quickEntry))),
                 ) {
                     Text(
                         when {
@@ -631,6 +727,7 @@ fun AddTransactionDialog(
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let {
                         timestamp = applyUtcDate(it, timestamp)
+                        timestampTouched = true
                     }
                     showDatePicker = false
                 }) { Text(tr("确定")) }
@@ -640,6 +737,71 @@ fun AddTransactionDialog(
             },
         ) {
             DatePicker(state = datePickerState)
+        }
+    }
+}
+
+@Composable
+private fun QuickEntryPreviewRow(
+    prefill: QuickEntryPrefill,
+    onDismiss: (QuickEntryPreviewField) -> Unit,
+) {
+    if (
+        prefill.amountText == null && prefill.category == null &&
+        prefill.merchant == null && prefill.account == null
+    ) return
+
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        prefill.amountText?.let { amount ->
+            val compactAmount = amount.removeSuffix(".00")
+            QuickEntryPreviewChip("¥$compactAmount") {
+                onDismiss(QuickEntryPreviewField.AMOUNT)
+            }
+        }
+        prefill.category?.let { category ->
+            QuickEntryPreviewChip(tr(category.displayName)) {
+                onDismiss(QuickEntryPreviewField.CATEGORY)
+            }
+        }
+        prefill.merchant?.let { value ->
+            QuickEntryPreviewChip(value) { onDismiss(QuickEntryPreviewField.MERCHANT) }
+        }
+        prefill.account?.let { value ->
+            QuickEntryPreviewChip(tr(value)) { onDismiss(QuickEntryPreviewField.ACCOUNT) }
+        }
+    }
+}
+
+@Composable
+private fun QuickEntryPreviewChip(label: String, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(50),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 9.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                modifier = Modifier.widthIn(max = 150.dp),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+            IconButton(onClick = onDismiss, modifier = Modifier.size(26.dp)) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = tr("移除"),
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
     }
 }
