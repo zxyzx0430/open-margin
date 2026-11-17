@@ -5,6 +5,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -21,6 +25,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +45,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
@@ -177,7 +185,12 @@ fun TransactionListScreen(
     var exactDateFilter by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var duplicateListExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
+    var saveRequestSequence by remember { mutableIntStateOf(0) }
+    var latestFeedbackSaveSequence by remember { mutableIntStateOf(0) }
+    var scrollTargetTransactionId by remember { mutableStateOf<Long?>(null) }
+    var highlightedTransactionId by remember { mutableStateOf<Long?>(null) }
     val listState = rememberLazyListState()
+    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(drilldown) {
@@ -292,6 +305,9 @@ fun TransactionListScreen(
             transactions.filter { it.timestamp >= start && it.timestamp < end }
         } ?: transactions
     }
+    val visibleDayGroups = remember(visibleTransactions) {
+        visibleTransactions.groupBy { dayKey(it.timestamp) }.entries.toList()
+    }
     val shownExpense = if (exactDateFilter == null) periodExpense else {
         exactDateTransactions.filter {
             it.isLedgerTotalsCandidate() &&
@@ -307,6 +323,22 @@ fun TransactionListScreen(
     val duplicatesIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0)
+    val dayGroupsStartIndex = 6 +
+        (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
+        (if (captureReview.pending.isNotEmpty()) 1 else 0) +
+        (if (duplicateCandidates.isNotEmpty()) 1 else 0)
+
+    LaunchedEffect(scrollTargetTransactionId, visibleDayGroups, ledgerLoadState, dayGroupsStartIndex) {
+        val targetId = scrollTargetTransactionId ?: return@LaunchedEffect
+        if (ledgerLoadState != LedgerLoadState.READY) return@LaunchedEffect
+        val groupIndex = visibleDayGroups.indexOfFirst { (_, dayItems) ->
+            dayItems.any { it.id == targetId }
+        }
+        if (groupIndex >= 0) {
+            listState.animateScrollToItem(dayGroupsStartIndex + groupIndex)
+        }
+    }
+
     // pointerInput 只会创建一次：用 rememberUpdatedState 保证按下时调用最新的收起逻辑。
     val latestDismissVoiceHint by rememberUpdatedState(dismissVoiceHint)
 
@@ -362,6 +394,7 @@ fun TransactionListScreen(
                 }
             }
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         LazyColumn(
             state = listState,
@@ -604,8 +637,7 @@ fun TransactionListScreen(
                     )
                 }
             } else {
-                val groups = visibleTransactions.groupBy { dayKey(it.timestamp) }
-                items(groups.entries.toList(), key = { it.key }) { (dayKey, dayItems) ->
+                items(visibleDayGroups, key = { it.key }) { (dayKey, dayItems) ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         val valid = dayItems.filter {
                             it.currency == "CNY" &&
@@ -635,6 +667,19 @@ fun TransactionListScreen(
                         DayCard(
                             items = dayItems,
                             onOpenDetail = onOpenDetail,
+                            scrollTargetTransactionId = scrollTargetTransactionId,
+                            highlightedTransactionId = highlightedTransactionId,
+                            onScrollTargetReached = { id ->
+                                if (scrollTargetTransactionId == id) {
+                                    scrollTargetTransactionId = null
+                                    highlightedTransactionId = id
+                                }
+                            },
+                            onHighlightFinished = { id ->
+                                if (highlightedTransactionId == id) {
+                                    highlightedTransactionId = null
+                                }
+                            },
                         )
                     }
                 }
@@ -693,17 +738,44 @@ fun TransactionListScreen(
                 )
             },
             onConfirm = { amount, type, category, merchant, note, timestampMs, account ->
-                viewModel.addTransaction(
-                    amountCents = amount,
-                    type = type,
-                    category = category,
-                    merchant = merchant,
-                    note = note,
-                    timestampMs = timestampMs,
-                    account = account,
-                )
+                saveRequestSequence += 1
+                val requestSequence = saveRequestSequence
                 showAddDialog = false
                 addDialogQuickEntry = ""
+                scope.launch {
+                    val savedId = viewModel.addTransaction(
+                        amountCents = amount,
+                        type = type,
+                        category = category,
+                        merchant = merchant,
+                        note = note,
+                        timestampMs = timestampMs,
+                        account = account,
+                    )
+                    if (requestSequence < latestFeedbackSaveSequence) return@launch
+                    latestFeedbackSaveSequence = requestSequence
+                    scrollTargetTransactionId = null
+                    highlightedTransactionId = null
+                    val saved = TransactionEntity(
+                        id = savedId,
+                        amountCents = amount,
+                        type = type.name,
+                        category = category.name,
+                        merchant = merchant,
+                        note = note,
+                        account = account.trim().ifBlank { null },
+                        source = "MANUAL",
+                        timestamp = timestampMs,
+                    )
+                    val inExactDateRange = exactDateFilter?.let { (start, end) ->
+                        timestampMs >= start && timestampMs < end
+                    } ?: true
+                    if (inExactDateRange && viewModel.isVisibleWithCurrentFilters(saved)) {
+                        scrollTargetTransactionId = savedId
+                    }
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    snackbarHostState.showSnackbar(tr("已记录"))
+                }
             },
         )
     }
@@ -725,6 +797,10 @@ fun TransactionListScreen(
 private fun DayCard(
     items: List<TransactionEntity>,
     onOpenDetail: (Long) -> Unit,
+    scrollTargetTransactionId: Long?,
+    highlightedTransactionId: Long?,
+    onScrollTargetReached: (Long) -> Unit,
+    onHighlightFinished: (Long) -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -737,6 +813,10 @@ private fun DayCard(
                 LedgerTransactionRow(
                     transaction = transaction,
                     timeText = timeOnlyFormat.format(Date(transaction.timestamp)),
+                    scrollTargetTransactionId = scrollTargetTransactionId,
+                    highlightedTransactionId = highlightedTransactionId,
+                    onScrollTargetReached = onScrollTargetReached,
+                    onHighlightFinished = onHighlightFinished,
                     onClick = { onOpenDetail(transaction.id) },
                 )
                 if (index != items.lastIndex) {
@@ -756,10 +836,15 @@ private fun DayCard(
  * 排序：商户 → 金额；副行「[扫描]/[导入] 分类 · 来源 · 时间」。
  * 审核状态只显示已确认/不计入/转账/退款这类非默认值，默认状态不占字。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LedgerTransactionRow(
     transaction: TransactionEntity,
     timeText: String,
+    scrollTargetTransactionId: Long?,
+    highlightedTransactionId: Long?,
+    onScrollTargetReached: (Long) -> Unit,
+    onHighlightFinished: (Long) -> Unit,
     onClick: () -> Unit,
 ) {
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }
@@ -769,6 +854,26 @@ private fun LedgerTransactionRow(
     val semantic = LocalQingSemanticColors.current
     val status = transactionStatusLabel(transaction)
     val sourceTag = transactionSourceTag(transaction)
+    val bringIntoViewRequester = remember(transaction.id) { BringIntoViewRequester() }
+    val highlightAlpha = remember(transaction.id) { Animatable(0f) }
+
+    LaunchedEffect(scrollTargetTransactionId) {
+        if (scrollTargetTransactionId == transaction.id) {
+            bringIntoViewRequester.bringIntoView()
+            onScrollTargetReached(transaction.id)
+        }
+    }
+    LaunchedEffect(highlightedTransactionId) {
+        if (highlightedTransactionId == transaction.id) {
+            highlightAlpha.snapTo(0.32f)
+            delay(1_100L)
+            highlightAlpha.animateTo(0f, animationSpec = tween(durationMillis = 500))
+            onHighlightFinished(transaction.id)
+        } else {
+            highlightAlpha.snapTo(0f)
+        }
+    }
+
     val amount = if (transaction.currency == "CNY") {
         formatCny(transaction.amountCents)
     } else {
@@ -777,6 +882,11 @@ private fun LedgerTransactionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = highlightAlpha.value),
+                shape = RoundedCornerShape(14.dp),
+            )
+            .bringIntoViewRequester(bringIntoViewRequester)
             .clickable(onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -814,8 +924,12 @@ private fun LedgerTransactionRow(
             ) {
                 sourceTag?.let { SoftBadge(text = it, tone = StatusTone.NEUTRAL) }
                 Text(
-                    text = tr(category.displayName) + " · " +
-                        transactionSourceLabel(transaction.source) + " · " + timeText,
+                    text = transactionSubtitle(
+                        categoryLabel = tr(category.displayName),
+                        sourceLabel = transactionSourceLabel(transaction.source),
+                        account = transaction.account,
+                        timeText = timeText,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
