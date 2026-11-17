@@ -389,7 +389,7 @@ private fun TypePill(
                 role = Role.RadioButton,
                 onClick = onClick,
             )
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -399,11 +399,14 @@ private fun TypePill(
             tint = foreground,
             modifier = Modifier.size(15.dp),
         )
+        Spacer(Modifier.width(4.dp))
         Text(
             text = text,
             style = MaterialTheme.typography.labelLarge,
             color = foreground,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -458,7 +461,7 @@ private fun PeriodPill(
                 role = Role.RadioButton,
                 onClick = onClick,
             )
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -467,6 +470,7 @@ private fun PeriodPill(
             color = foreground,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -672,6 +676,7 @@ private fun DaySummaryMetric(
             style = MaterialTheme.typography.labelMedium,
             color = QingPrimaryDeep.copy(alpha = 0.72f),
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         AutoSizeAmountText(
             text = value,
@@ -772,7 +777,7 @@ private fun CategoryLegendRow(stat: CategoryStat, selected: Boolean, onClick: ()
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 2.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
             modifier = Modifier
@@ -791,14 +796,14 @@ private fun CategoryLegendRow(stat: CategoryStat, selected: Boolean, onClick: ()
             text = categoryPercentText(stat.percentage),
             style = MaterialTheme.typography.labelMedium,
             color = QingTextSecondary,
-            modifier = Modifier.widthIn(min = 48.dp),
+            modifier = Modifier.widthIn(min = 48.dp, max = 52.dp),
             textAlign = TextAlign.End,
             maxLines = 1,
         )
         AutoSizeAmountText(
             text = formatCny(stat.totalCents),
             style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.widthIn(min = 84.dp),
+            modifier = Modifier.widthIn(min = 84.dp, max = 96.dp),
             color = QingText,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.End,
@@ -836,16 +841,32 @@ private fun DailyTrendCard(
                     text = tr("每日趋势"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = "${tr("日均")} ${formatCny(dailyAverageCents)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = QingPrimaryDeep,
+                Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(QingMintSoft)
                         .padding(horizontal = 9.dp, vertical = 5.dp),
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = tr("日均"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingPrimaryDeep,
+                        maxLines = 1,
+                    )
+                    AutoSizeAmountText(
+                        text = formatCny(dailyAverageCents),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingPrimaryDeep,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.widthIn(max = 96.dp),
+                    )
+                }
             }
             Box(
                 modifier = Modifier
@@ -1323,6 +1344,7 @@ private fun DateStepper(
             color = QingPrimaryDeep,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .clickable(onClick = onClick)
                 .padding(horizontal = 4.dp, vertical = 8.dp),

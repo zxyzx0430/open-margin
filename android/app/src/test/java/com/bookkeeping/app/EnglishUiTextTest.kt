@@ -223,7 +223,8 @@ class EnglishUiTextTest {
             "Duplicate in this file; first occurrence on row 7",
             EnglishUiText.translate("文件内重复，首次出现在第 7 行"),
         )
-        assertEquals("Daily average income", EnglishUiText.translate("日均收入"))
+        assertEquals("Avg. income/day", EnglishUiText.translate("日均收入"))
+        assertEquals("Avg. spend/day", EnglishUiText.translate("日均支出"))
         assertEquals("Total expenses this month", EnglishUiText.translate("该月总支出"))
         assertEquals("Set this month's budget", EnglishUiText.translate("设置该月预算"))
         assertEquals("No data this month", EnglishUiText.translate("本月没有数据"))
@@ -232,8 +233,13 @@ class EnglishUiTextTest {
     @Test
     fun statsReadabilityLabelsTranslate() {
         // 统计页环形图标签、图例展开与分类明细跳转文案：中文是 key，缺一条英文就会静默显示中文。
-        assertEquals("Last month's total", EnglishUiText.translate("上月金额"))
-        assertEquals("Last year's total", EnglishUiText.translate("上一年金额"))
+        assertEquals("Last month", EnglishUiText.translate("上月金额"))
+        assertEquals("Last year", EnglishUiText.translate("上一年金额"))
+        assertEquals("Month", EnglishUiText.translate("月度"))
+        assertEquals("Count", EnglishUiText.translate("当日交易笔数"))
+        assertEquals("Expenses", EnglishUiText.translate("当日支出"))
+        assertEquals("Income", EnglishUiText.translate("当日收入"))
+        assertEquals("Balance", EnglishUiText.translate("当日结余"))
         assertEquals("Collapse", EnglishUiText.translate("收起"))
         assertEquals("View transaction details", EnglishUiText.translate("查看账单详情"))
         assertEquals("categories", EnglishUiText.translate("类"))
@@ -324,16 +330,16 @@ class EnglishUiTextTest {
             "请说话…" to "Speak now…",
             "停止" to "Stop",
             "录音中…" to "Recording…",
-            "已停止录音" to "Recording stopped",
+            "已停止录音" to "Stopped",
             "点停止结束，说话时可以直接改" to
-                "Tap Stop to finish; you can edit the text while speaking",
+                "Tap Stop to finish; edit as you speak",
             "已暂停自动更新" to "Auto-update paused",
             "恢复" to "Resume",
-            "识别更新了，点此替换" to "Recognition updated; tap to replace",
-            "填入账单" to "Fill the form",
+            "识别更新了，点此替换" to "Updated; tap to replace",
+            "填入账单" to "Fill form",
             "重说" to "Say again",
-            "正在识别最后几个字…" to "Finishing the last words…",
-            "本地识别，音频不会上传" to "Recognized on this device; audio is never uploaded",
+            "正在识别最后几个字…" to "Finishing recognition…",
+            "本地识别，音频不会上传" to "On-device; audio isn't uploaded",
             "去系统设置授权" to "Allow in system settings",
             // 引擎错误码对应的提示（VoiceCaptureLogic.messageFor）。
             "没有麦克风权限，无法语音记账" to
@@ -350,7 +356,7 @@ class EnglishUiTextTest {
             "语音引擎还没准备好，请重试" to "The speech engine is not ready yet. Try again.",
             "语音会话已经结束，请重新长按" to
                 "The voice session has ended. Press and hold again.",
-            "没有听清，请再说一次" to "Didn't catch that. Please say it again.",
+            "没有听清，请再说一次" to "Didn't catch that. Try again.",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
