@@ -12,10 +12,10 @@ import org.junit.Test
  */
 class QuickEntryRuleTest {
     @Test
-    fun ringSweepsZeroToOneOverOneSecond() {
+    fun ringSweepsZeroToOneOverHoldTime() {
         assertEquals(0f, QuickEntryRule.ringProgress(0L), 0.0001f)
-        assertEquals(0.25f, QuickEntryRule.ringProgress(250L), 0.0001f)
-        assertEquals(0.5f, QuickEntryRule.ringProgress(QuickEntryRule.HAPTIC_TICK_MS), 0.0001f)
+        assertEquals(1f / 3f, QuickEntryRule.ringProgress(250L), 0.0001f)
+        assertEquals(0.5f, QuickEntryRule.ringProgress(375L), 0.0001f)
         assertEquals(1f, QuickEntryRule.ringProgress(QuickEntryRule.HOLD_TO_RECORD_MS), 0.0001f)
     }
 
