@@ -323,21 +323,27 @@ class TransactionViewModel @Inject constructor(
     }
 
     /**
-     * 保存前的疑似重复检查：先按金额 + ±1 天粗筛，再交给纯逻辑 [DuplicateRule] 判定。
+     * 保存前的疑似重复检查：先按金额 + 方向 + 币种 + 12 小时粗筛，再交给纯逻辑
+     * [DuplicateRule] 按 [TimePrecision] 分档判定。
      *
      * 只读、不改任何记录；命中只用于在表单上多问一句，是否入账由用户决定。
      * 查询失败时返回 null（当作没命中）——数据库读不出来不应该拦住用户记账。
      */
     suspend fun findPossibleDuplicate(
         amountCents: Long,
+        type: TransactionType,
+        currency: String,
         merchant: String,
         timestampMs: Long,
+        precision: TimePrecision,
     ): SaveCandidate? {
-        val window = DuplicateRule.SAME_MERCHANT_WINDOW_MS
+        val window = DuplicateRule.candidateWindowMs(precision)
         // 读失败按「没命中」处理；协程取消要原样抛出去，否则弹窗已关还会继续保存。
         val rows = try {
             dao.findAmountCandidatesAround(
                 amountCents = amountCents,
+                type = type.name,
+                currency = DuplicateRule.normalizeCurrency(currency),
                 windowStartMs = timestampMs - window,
                 windowEndMs = timestampMs + window,
             )
@@ -349,8 +355,11 @@ class TransactionViewModel @Inject constructor(
         return DuplicateRule.find(
             list = rows.map { it.toDuplicateCandidate() },
             amountCents = amountCents,
+            type = type.name,
+            currency = currency,
             merchant = merchant,
             timestampMs = timestampMs,
+            precision = precision,
         )
     }
 
