@@ -90,6 +90,10 @@ internal object StatsAggregation {
     fun totalCents(transactions: List<TransactionEntity>, type: TransactionType): Long =
         StatsTransactionPolicy.filter(transactions, type).sumOf { it.amountCents }
 
+    fun transactionCount(transactions: List<TransactionEntity>): Int =
+        StatsTransactionPolicy.filter(transactions, TransactionType.EXPENSE).size +
+            StatsTransactionPolicy.filter(transactions, TransactionType.INCOME).size
+
     fun categoryStats(
         transactions: List<TransactionEntity>,
         type: TransactionType,
@@ -281,7 +285,7 @@ class StatsViewModel @Inject constructor(
                     expenseCents = expenses,
                     incomeCents = income,
                     balanceCents = income - expenses,
-                    transactionCount = transactions.size,
+                    transactionCount = StatsAggregation.transactionCount(transactions),
                     isLoaded = true,
                 )
             }.onStart { emit(DayStatsSummary(0L, 0L, 0L, 0)) }

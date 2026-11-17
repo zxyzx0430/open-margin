@@ -639,7 +639,7 @@ internal object EnglishUiText {
         "这笔记录已存在，已从待确认中移除" to "This record already exists and was removed from review",
         "扫描结果已忽略" to "Capture result ignored",
         "无法读取文件" to "Could not read the file",
-        "文件过大" to "File is too large",
+        "文件超过 20 MB，请先拆分" to "File exceeds 20 MB. Please split it first.",
         "账本已有相同记录" to "The ledger already has this record",
         "无法解析账单文件" to "Could not parse the bill file",
         "部分有效行无法映射，未写入任何记录" to "Some valid rows could not be mapped; nothing was written",

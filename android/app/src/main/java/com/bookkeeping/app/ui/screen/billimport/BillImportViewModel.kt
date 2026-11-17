@@ -5,6 +5,8 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bookkeeping.app.billimport.BillImportFileReader
+import com.bookkeeping.app.billimport.BillImportFileTooLargeException
 import com.bookkeeping.app.billimport.BillImportParser
 import com.bookkeeping.app.billimport.BillImportPreview
 import com.bookkeeping.app.billimport.BillParserOptions
@@ -46,17 +48,23 @@ class BillImportViewModel @Inject constructor(
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    val name = displayName(uri)
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        ?: error(AppLanguage.tr(context, "无法读取文件"))
-                    require(bytes.size <= MAX_FILE_BYTES) {
-                        AppLanguage.tr(context, "文件过大")
+                    val metadata = fileMetadata(uri)
+                    val tooLargeMessage = AppLanguage.tr(context, "文件超过 20 MB，请先拆分")
+                    if (metadata.sizeBytes != null && metadata.sizeBytes > MAX_FILE_BYTES.toLong()) {
+                        error(tooLargeMessage)
                     }
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                        try {
+                            BillImportFileReader.readAtMost(input, MAX_FILE_BYTES)
+                        } catch (_: BillImportFileTooLargeException) {
+                            error(tooLargeMessage)
+                        }
+                    } ?: error(AppLanguage.tr(context, "无法读取文件"))
                     val transactions = repository.observeAll().first()
                     val existingKeys = BillImportMapping.existingRowKeys(transactions)
                     val parsed = BillImportParser.parse(
                         bytes = bytes,
-                        fileName = name,
+                        fileName = metadata.displayName,
                         options = BillParserOptions(existingDuplicateKeys = existingKeys),
                     )
                     BillImportMapping.markExistingRows(
@@ -137,18 +145,35 @@ class BillImportViewModel @Inject constructor(
         _state.value = UiState()
     }
 
-    private fun displayName(uri: Uri): String? =
-        runCatching {
-            context.contentResolver.query(
-                uri,
-                arrayOf(OpenableColumns.DISPLAY_NAME),
-                null,
-                null,
-                null,
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
+    private data class FileMetadata(
+        val displayName: String?,
+        val sizeBytes: Long?,
+    )
+
+    private fun fileMetadata(uri: Uri): FileMetadata = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                FileMetadata(null, null)
+            } else {
+                val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
+                FileMetadata(
+                    displayName = if (nameColumn >= 0) cursor.getString(nameColumn) else null,
+                    sizeBytes = if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) {
+                        cursor.getLong(sizeColumn).takeIf { it >= 0L }
+                    } else {
+                        null
+                    },
+                )
             }
-        }.getOrNull()
+        } ?: FileMetadata(null, null)
+    }.getOrDefault(FileMetadata(null, null))
 
     companion object {
         private const val MAX_FILE_BYTES = 20 * 1024 * 1024
