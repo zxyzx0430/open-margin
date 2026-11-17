@@ -1,6 +1,6 @@
 <!-- open-margin-components: android -->
 
-# 清衡 v1.3.2
+# 清衡 v1.32
 
 这次主要是日历的操作与视觉，加上系统层的中英文支持。
 
