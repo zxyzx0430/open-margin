@@ -14,6 +14,9 @@ object AppRoutes {
     /** 商户分类记忆是全屏子页：从设置进入，返回回设置。 */
     const val MERCHANT_RULES = "merchant-rules"
 
+    /** 同步状态与配置使用同一独立页面，返回回到原设置页。 */
+    const val SYNC_SETTINGS = "sync-settings"
+
     const val TRANSACTION_DETAIL = "transaction/{id}"
     const val TRANSACTION_ID = "id"
 

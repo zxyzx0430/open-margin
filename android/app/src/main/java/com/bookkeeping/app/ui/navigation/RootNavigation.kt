@@ -40,6 +40,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.bookkeeping.app.sync.SyncSettingsScreen
 import com.bookkeeping.app.ui.screen.billimport.BillImportScreen
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
@@ -193,6 +194,15 @@ fun RootNavigation() {
                     BillImportScreen(onClose = { navController.popBackStack() })
                 }
                 composable(
+                    route = AppRoutes.SYNC_SETTINGS,
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
+                ) {
+                    SyncSettingsScreen(onBack = { navController.popBackStack() })
+                }
+                composable(
                     route = AppRoutes.TRANSACTION_DETAIL,
                     arguments = listOf(
                         navArgument(AppRoutes.TRANSACTION_ID) { type = NavType.LongType },
@@ -224,6 +234,7 @@ fun RootNavigation() {
                 ) {
                     SettingsScreen(
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
+                        onOpenSyncSettings = { navController.navigate(AppRoutes.SYNC_SETTINGS) },
                     )
                 }
             }
