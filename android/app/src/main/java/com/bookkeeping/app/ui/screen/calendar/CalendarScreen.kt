@@ -36,6 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
@@ -49,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,7 +64,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -103,7 +104,6 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.floor
@@ -120,7 +120,7 @@ private const val KEY_WEEK_START_MONDAY = "week_start_monday"
 private const val KEY_LUNAR = "lunar"
 private const val KEY_CALENDAR_NUMBERS = "calendar_numbers"
 
-private enum class HeatmapMode(val label: String) {
+internal enum class HeatmapMode(val label: String) {
     EXPENSE("支出"),
     INCOME("收入"),
     NET("结余"),
@@ -134,12 +134,106 @@ internal enum class CalendarNumberMode(val label: String) {
     OFF("不显示"),
 }
 
+internal enum class CalendarDrawerSnapTarget {
+    HIDDEN,
+    COLLAPSED,
+    EXPANDED,
+}
+
+internal const val CALENDAR_DRAWER_FLING_THRESHOLD_DP_PER_SECOND = 800f
+
+/** Fast vertical flings take priority; slow drags settle at the closest visible anchor. */
+internal fun calendarDrawerSnapTarget(
+    currentFraction: Float,
+    velocityDpPerSecond: Float,
+): CalendarDrawerSnapTarget = when {
+    velocityDpPerSecond <= -CALENDAR_DRAWER_FLING_THRESHOLD_DP_PER_SECOND ->
+        CalendarDrawerSnapTarget.EXPANDED
+    velocityDpPerSecond >= CALENDAR_DRAWER_FLING_THRESHOLD_DP_PER_SECOND ->
+        CalendarDrawerSnapTarget.HIDDEN
+    abs(currentFraction - CALENDAR_DRAWER_COLLAPSED_FRACTION) <=
+        abs(CALENDAR_DRAWER_EXPANDED_FRACTION - currentFraction) ->
+        CalendarDrawerSnapTarget.COLLAPSED
+    else -> CalendarDrawerSnapTarget.EXPANDED
+}
+
+internal fun isCalendarHighlightMenuExpanded(mode: HeatmapMode): Boolean =
+    mode != HeatmapMode.OFF
+
+internal fun setCalendarHighlightEnabled(mode: HeatmapMode, enabled: Boolean): HeatmapMode = when {
+    !enabled -> HeatmapMode.OFF
+    mode == HeatmapMode.OFF -> HeatmapMode.EXPENSE
+    else -> mode
+}
+
+internal fun toggleCalendarHighlightMode(mode: HeatmapMode): HeatmapMode =
+    setCalendarHighlightEnabled(mode, enabled = !isCalendarHighlightMenuExpanded(mode))
+
+internal fun isCalendarNumberMenuExpanded(mode: CalendarNumberMode): Boolean =
+    mode != CalendarNumberMode.OFF
+
+internal fun setCalendarNumberEnabled(
+    mode: CalendarNumberMode,
+    enabled: Boolean,
+): CalendarNumberMode = when {
+    !enabled -> CalendarNumberMode.OFF
+    mode == CalendarNumberMode.OFF -> CalendarNumberMode.EXPENSE
+    else -> mode
+}
+
+internal fun toggleCalendarNumberMode(mode: CalendarNumberMode): CalendarNumberMode =
+    setCalendarNumberEnabled(mode, enabled = !isCalendarNumberMenuExpanded(mode))
+
 internal data class CalendarNumberTotals(
     val expenseCents: Long = 0L,
     val incomeCents: Long = 0L,
     val expenseCount: Int = 0,
     val incomeCount: Int = 0,
 )
+
+internal data class CalendarSelectionTotals(
+    val expenseCents: Long,
+    val incomeCents: Long,
+    val netCents: Long,
+    val includedCount: Int,
+)
+
+internal data class CalendarDrawerDayAmount(
+    val type: TransactionType,
+    val amountCents: Long,
+)
+
+internal fun calendarSelectionTotals(
+    transactions: List<TransactionEntity>,
+): CalendarSelectionTotals {
+    val expenses = StatsTransactionPolicy.filter(transactions, TransactionType.EXPENSE)
+    val incomes = StatsTransactionPolicy.filter(transactions, TransactionType.INCOME)
+    val expense = expenses.sumOf { it.amountCents }
+    val income = incomes.sumOf { it.amountCents }
+    return CalendarSelectionTotals(
+        expenseCents = expense,
+        incomeCents = income,
+        netCents = income - expense,
+        includedCount = expenses.size + incomes.size,
+    )
+}
+
+/** A single-day title has room for one direction; mixed days use the larger aggregate. */
+internal fun calendarDrawerDayAmount(
+    transactions: List<TransactionEntity>,
+): CalendarDrawerDayAmount? {
+    val totals = calendarSelectionTotals(transactions)
+    return when {
+        totals.includedCount == 0 -> null
+        totals.expenseCents == 0L -> CalendarDrawerDayAmount(
+            TransactionType.INCOME,
+            totals.incomeCents,
+        )
+        totals.incomeCents == 0L || totals.expenseCents >= totals.incomeCents ->
+            CalendarDrawerDayAmount(TransactionType.EXPENSE, totals.expenseCents)
+        else -> CalendarDrawerDayAmount(TransactionType.INCOME, totals.incomeCents)
+    }
+}
 
 internal fun calendarNumberTotals(transactions: List<TransactionEntity>): CalendarNumberTotals {
     val expenses = StatsTransactionPolicy.filter(transactions, TransactionType.EXPENSE)
@@ -168,23 +262,37 @@ internal fun shouldShowCalendarLunar(showLunar: Boolean, english: Boolean): Bool
     showLunar && !english
 
 internal fun calendarNumbersMenuPrefix(english: Boolean): String =
-    if (english) "Calendar numbers: " else "日历数字："
+    if (english) "Day numbers: " else "日历数字："
 
 internal fun calendarNumberModeLabel(mode: CalendarNumberMode, english: Boolean): String =
     if (!english) mode.label else when (mode) {
         CalendarNumberMode.EXPENSE -> "Expense"
         CalendarNumberMode.INCOME -> "Income"
-        CalendarNumberMode.NET -> "Balance"
+        CalendarNumberMode.NET -> "Net"
         CalendarNumberMode.OFF -> "Off"
     }
 
-internal fun calendarDrawerTitle(dateLabel: String, itemCount: Int, english: Boolean): String {
+internal fun calendarHeatmapModeLabel(mode: HeatmapMode, english: Boolean): String =
+    when (mode) {
+        HeatmapMode.EXPENSE -> if (english) "Expense" else mode.label
+        HeatmapMode.INCOME -> if (english) "Income" else mode.label
+        HeatmapMode.NET -> if (english) "Net" else mode.label
+        HeatmapMode.OFF -> if (english) "Off" else mode.label
+    }
+
+internal fun calendarDrawerTitle(
+    dateLabel: String,
+    itemCount: Int,
+    english: Boolean,
+    singleDaySummary: String? = null,
+): String {
     val countLabel = if (english) {
         "$itemCount ${if (itemCount == 1) "item" else "items"}"
     } else {
         "$itemCount 笔"
     }
-    return "$dateLabel · $countLabel"
+    val title = "$dateLabel · $countLabel"
+    return if (singleDaySummary.isNullOrBlank()) title else "$title · $singleDaySummary"
 }
 
 internal fun calendarDrawerEmptyLabel(isRange: Boolean, english: Boolean): String = when {
@@ -193,9 +301,6 @@ internal fun calendarDrawerEmptyLabel(isRange: Boolean, english: Boolean): Strin
     isRange -> "这段时间没有记账"
     else -> "这天没有记账"
 }
-
-internal fun calendarDrawerCollapseLabel(english: Boolean): String =
-    if (english) "Collapse" else "收起"
 
 internal fun calendarDrawerClearLabel(english: Boolean): String =
     if (english) "Clear" else "清除"
@@ -380,47 +485,136 @@ fun CalendarScreen(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false },
                     ) {
-                        HeatmapMode.entries.forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        (if (mode == heatmap) "✓ " else "") +
-                                            tr("日期高亮：") + tr(mode.label),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
+                        val english = AppLanguage.current() == AppLanguage.ENGLISH
+                        val highlightEnabled = isCalendarHighlightMenuExpanded(heatmap)
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    when {
+                                        english && !highlightEnabled -> "Highlight: Off"
+                                        english -> "Highlight"
+                                        !highlightEnabled -> "日期高亮：关闭"
+                                        else -> "日期高亮"
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            trailingIcon = {
+                                Switch(
+                                    checked = highlightEnabled,
+                                    onCheckedChange = { enabled ->
+                                        heatmap = setCalendarHighlightEnabled(heatmap, enabled)
+                                        save()
+                                    },
+                                )
+                            },
+                            onClick = {
+                                heatmap = toggleCalendarHighlightMode(heatmap)
+                                save()
+                            },
+                        )
+                        if (highlightEnabled) {
+                            listOf(HeatmapMode.EXPENSE, HeatmapMode.INCOME, HeatmapMode.NET)
+                                .forEach { mode ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                calendarHeatmapModeLabel(mode, english),
+                                                modifier = Modifier.padding(start = 20.dp),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            if (heatmap == mode) {
+                                                Icon(
+                                                    Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            heatmap = mode
+                                            save()
+                                        },
                                     )
-                                },
-                                onClick = {
-                                    heatmap = mode
-                                    save()
-                                    menuExpanded = false
-                                },
-                            )
+                                }
                         }
-                        CalendarNumberMode.entries.forEach { mode ->
-                            val english = AppLanguage.current() == AppLanguage.ENGLISH
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        (if (mode == calendarNumberMode) "✓ " else "") +
-                                            calendarNumbersMenuPrefix(english) +
+                        val numberEnabled = isCalendarNumberMenuExpanded(calendarNumberMode)
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    when {
+                                        english && !numberEnabled -> "Day numbers: Off"
+                                        english -> "Day numbers"
+                                        !numberEnabled -> "日历数字：不显示"
+                                        else -> "日历数字"
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            trailingIcon = {
+                                Switch(
+                                    checked = numberEnabled,
+                                    onCheckedChange = { enabled ->
+                                        calendarNumberMode = setCalendarNumberEnabled(
+                                            calendarNumberMode,
+                                            enabled,
+                                        )
+                                        save()
+                                    },
+                                )
+                            },
+                            onClick = {
+                                calendarNumberMode = toggleCalendarNumberMode(calendarNumberMode)
+                                save()
+                            },
+                        )
+                        if (numberEnabled) {
+                            listOf(
+                                CalendarNumberMode.EXPENSE,
+                                CalendarNumberMode.INCOME,
+                                CalendarNumberMode.NET,
+                            ).forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
                                             calendarNumberModeLabel(mode, english),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                },
-                                onClick = {
-                                    calendarNumberMode = mode
-                                    save()
-                                    menuExpanded = false
-                                },
-                            )
+                                            modifier = Modifier.padding(start = 20.dp),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    },
+                                    trailingIcon = {
+                                        if (calendarNumberMode == mode) {
+                                            Icon(
+                                                Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        calendarNumberMode = mode
+                                        save()
+                                    },
+                                )
+                            }
                         }
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    tr("周起始日：") +
-                                        if (weekStartsMonday) tr("周一") else tr("周日"),
+                                    (if (english) "Week starts: " else "周起始日：") +
+                                        if (english) {
+                                            if (weekStartsMonday) "Monday" else "Sunday"
+                                        } else if (weekStartsMonday) {
+                                            tr("周一")
+                                        } else {
+                                            tr("周日")
+                                        },
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -433,7 +627,14 @@ fun CalendarScreen(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    tr("农历：") + if (showLunar) tr("显示") else tr("隐藏"),
+                                    (if (english) "Lunar: " else tr("农历：")) +
+                                        if (english) {
+                                            if (showLunar) "Show" else "Hide"
+                                        } else if (showLunar) {
+                                            tr("显示")
+                                        } else {
+                                            tr("隐藏")
+                                        },
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -470,6 +671,7 @@ fun CalendarScreen(
                     navigateMonth(picked)
                     showMonthPicker = false
                 },
+                calendarPickerActions = true,
             )
         }
 
@@ -523,7 +725,6 @@ fun CalendarScreen(
                 start = selectionStart,
                 end = selectionEnd,
                 transactions = selectedTransactions,
-                monthFallback = monthTransactions,
                 onClear = {
                     rangeStart = null
                     rangeEnd = null
@@ -613,7 +814,6 @@ private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         CalendarMetric(tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f))
         CalendarMetric(tr("收入"), formatCny(income), semantic.income, Modifier.weight(1f))
@@ -633,7 +833,10 @@ private fun CalendarMetric(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.Start,
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
@@ -667,7 +870,8 @@ private fun CalendarMonthGrid(
     val daysInMonth = daysInMonth(year, month)
     val firstOffset = firstDayOffset(year, month, weekStartsMonday)
     val density = LocalDensity.current
-    val rowHeightPx = with(density) { 44.dp.toPx() }
+    val gridRowHeight = 48.dp
+    val rowHeightPx = with(density) { gridRowHeight.toPx() }
     val reverseCrossDragPx = with(density) { 24.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
     // 手势协程的 key 只有尺寸：跨月会重组，但手指还没松，协程不能重启。
@@ -729,7 +933,7 @@ private fun CalendarMonthGrid(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp * 6)
+                .height(gridRowHeight * 6)
                 .onSizeChanged { gridWidthPx = it.width.toFloat() }
                 .pointerInput(gridWidthPx, rowHeightPx, reverseCrossDragPx) {
                     awaitEachGesture {
@@ -923,7 +1127,7 @@ private fun CalendarMonthGrid(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(44.dp),
+                            .height(gridRowHeight),
                     ) {
                         for (col in 0 until 7) {
                             val day = row * 7 + col - firstOffset + 1
@@ -994,7 +1198,10 @@ private fun CalendarMonthGrid(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 if (inMonth) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Column(
+                                        modifier = Modifier.padding(bottom = 2.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
                                         Text(
                                             text = "$day",
                                             style = MaterialTheme.typography.bodyMedium.copy(
@@ -1059,24 +1266,37 @@ private fun CalendarListDrawer(
     start: CalendarDate,
     end: CalendarDate,
     transactions: List<TransactionEntity>,
-    monthFallback: List<TransactionEntity>,
     onClear: () -> Unit,
     onOpenDetail: (Long) -> Unit,
 ) {
     val english = AppLanguage.current() == AppLanguage.ENGLISH
+    val density = LocalDensity.current
     val heightAnimation = remember { Animatable(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
     var dragFraction by remember { mutableStateOf(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
     var dragging by remember { mutableStateOf(false) }
-    val availableHeightPx = with(LocalDensity.current) { availableHeight.toPx().coerceAtLeast(1f) }
+    val availableHeightPx = with(density) { availableHeight.toPx().coerceAtLeast(1f) }
     val dragState = rememberDraggableState { delta ->
         dragFraction = (dragFraction - delta / availableHeightPx).coerceIn(
             CALENDAR_DRAWER_COLLAPSED_FRACTION,
             CALENDAR_DRAWER_EXPANDED_FRACTION,
         )
     }
-    val scope = rememberCoroutineScope()
     val visibleFraction = if (dragging) dragFraction else heightAnimation.value
-    val title = calendarDrawerTitle(calendarDateRangeLabel(start, end, english), transactions.size, english)
+    val dayAmount = if (start == end) calendarDrawerDayAmount(transactions) else null
+    val dayAmountLabel = dayAmount?.let {
+        val typeLabel = tr(
+            if (it.type == TransactionType.EXPENSE) "支出" else "收入",
+        )
+        "$typeLabel ${formatCny(it.amountCents)}"
+    }
+    val title = calendarDrawerTitle(
+        calendarDateRangeLabel(start, end, english),
+        transactions.size,
+        english,
+        singleDaySummary = dayAmountLabel,
+    )
+    val rangeTotals = remember(transactions) { calendarSelectionTotals(transactions) }
+    val semantic = LocalQingSemanticColors.current
     val drawerShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
 
     Box(
@@ -1089,58 +1309,72 @@ private fun CalendarListDrawer(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 16.dp),
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 52.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    .height(36.dp)
+                    .draggable(
+                        state = dragState,
+                        orientation = Orientation.Vertical,
+                        onDragStarted = {
+                            heightAnimation.stop()
+                            dragFraction = heightAnimation.value
+                            dragging = true
+                        },
+                        onDragStopped = { velocity ->
+                            val velocityDpPerSecond = with(density) { velocity.toDp().value }
+                            val snapTarget = calendarDrawerSnapTarget(
+                                dragFraction,
+                                velocityDpPerSecond,
+                            )
+                            when (snapTarget) {
+                                CalendarDrawerSnapTarget.HIDDEN -> {
+                                    dragging = false
+                                    onClear()
+                                }
+                                CalendarDrawerSnapTarget.COLLAPSED,
+                                CalendarDrawerSnapTarget.EXPANDED -> {
+                                    val targetFraction = if (
+                                        snapTarget == CalendarDrawerSnapTarget.COLLAPSED
+                                    ) {
+                                        CALENDAR_DRAWER_COLLAPSED_FRACTION
+                                    } else {
+                                        CALENDAR_DRAWER_EXPANDED_FRACTION
+                                    }
+                                    heightAnimation.snapTo(dragFraction)
+                                    dragging = false
+                                    heightAnimation.animateTo(
+                                        targetFraction,
+                                        tween(durationMillis = 180),
+                                    )
+                                }
+                            }
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier = Modifier
-                        .width(44.dp)
-                        .height(40.dp)
-                        .draggable(
-                            state = dragState,
-                            orientation = Orientation.Vertical,
-                            onDragStarted = {
-                                heightAnimation.stop()
-                                dragFraction = heightAnimation.value
-                                dragging = true
-                            },
-                            onDragStopped = {
-                                val target = if (
-                                    abs(dragFraction - CALENDAR_DRAWER_COLLAPSED_FRACTION) <=
-                                    abs(CALENDAR_DRAWER_EXPANDED_FRACTION - dragFraction)
-                                ) {
-                                    CALENDAR_DRAWER_COLLAPSED_FRACTION
-                                } else {
-                                    CALENDAR_DRAWER_EXPANDED_FRACTION
-                                }
-                                heightAnimation.snapTo(dragFraction)
-                                dragging = false
-                                heightAnimation.animateTo(target, tween(durationMillis = 180))
-                            },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .width(40.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)),
-                    )
-                }
-                Text(
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AutoSizeAmountText(
                     text = title,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
                     style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
                 )
                 TextButton(
                     onClick = onClear,
@@ -1154,35 +1388,34 @@ private fun CalendarListDrawer(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                TextButton(
-                    onClick = {
-                        dragging = false
-                        scope.launch {
-                            heightAnimation.animateTo(
-                                CALENDAR_DRAWER_COLLAPSED_FRACTION,
-                                tween(durationMillis = 180),
-                            )
-                        }
-                    },
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            }
+            if (start != end) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp, bottom = 4.dp),
                 ) {
-                    Text(
-                        calendarDrawerCollapseLabel(english),
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
+                    CalendarMetric(
+                        tr("支出"),
+                        formatCny(rangeTotals.expenseCents),
+                        semantic.expenseText,
+                        Modifier.weight(1f),
+                    )
+                    CalendarMetric(
+                        tr("收入"),
+                        formatCny(rangeTotals.incomeCents),
+                        semantic.income,
+                        Modifier.weight(1f),
+                    )
+                    CalendarMetric(
+                        if (english) "Net" else tr("结余"),
+                        (if (rangeTotals.netCents >= 0) "+" else "−") +
+                            formatCny(abs(rangeTotals.netCents)),
+                        if (rangeTotals.netCents >= 0) semantic.income else semantic.expenseText,
+                        Modifier.weight(1f),
                     )
                 }
             }
-            SelectionSummary(
-                start = start,
-                end = end,
-                transactions = transactions,
-                monthFallback = monthFallback,
-                onClear = onClear,
-                showHeading = false,
-            )
             if (transactions.isNotEmpty()) {
                 LazyColumn(
                     modifier = Modifier
@@ -1222,9 +1455,9 @@ private fun calendarDateRangeLabel(
     english: Boolean,
 ): String = when {
     start == end -> CalendarDateText.day(start.year, start.month, start.day, english)
-    start.year == end.year && start.month == end.month -> CalendarDateText.sameMonthRange(
-        start.year, start.month, start.day, end.day, english,
-    )
+    start.year == end.year && start.month == end.month ->
+        "${CalendarDateText.day(start.year, start.month, start.day, english)} – " +
+            CalendarDateText.day(end.year, end.month, end.day, english)
     else -> CalendarDateText.crossMonthRange(
         start.year, start.month, start.day,
         end.year, end.month, end.day, english,
