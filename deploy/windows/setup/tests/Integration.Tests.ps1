@@ -39,4 +39,17 @@ Describe 'CLI check ignores the wizard setup port' {
         $portsCheck.code | Should -Not -Be 'PORT_CONFLICT'
         $portsCheck.detail | Should -Not -Match (':' + $script:wizardPort)
     }
+
+    It 'ignores the live port recorded in setup-web.json' {
+        $cliState = Join-Path $TestDrive ('cli-state-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Force -Path $cliState | Out-Null
+        [pscustomobject]@{ port = $script:wizardPort; pid = $PID; url = ('http://127.0.0.1:' + $script:wizardPort + '/') } |
+            ConvertTo-Json | Set-Content -Path (Join-Path $cliState 'setup-web.json') -Encoding UTF8
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:cliPath check -Json -StateRoot $cliState -RepoRoot $repoRoot 2>$null | Out-String
+        $json = $output | ConvertFrom-Json
+        $portsCheck = @($json.checks) | Where-Object { $_.id -eq 'ports' }
+        $portsCheck.code | Should -Not -Be 'PORT_CONFLICT'
+        $portsCheck.detail | Should -Not -Match (':' + $script:wizardPort)
+    }
 }
