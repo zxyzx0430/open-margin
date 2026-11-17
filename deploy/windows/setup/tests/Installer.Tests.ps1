@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $script:setupRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $script:issPath = Join-Path $script:setupRoot 'installer\OpenMargin.iss'
     $script:iss = Get-Content -Path $script:issPath -Raw -Encoding UTF8
@@ -156,6 +156,12 @@ Describe 'Browser fallback and wizard single-instance' {
         $server | Should -Match 'dockerLicenseAcknowledged'
         $server | Should -Match 'elevated = \[bool\]\(Test-OmAdmin\)'
         $server | Should -Match 'setup server elevated='
+        # Job status/result writes must not use Move-Item -Force on an existing
+        # Windows PowerShell 5.1 target.
+        $server | Should -Not -Match 'Move-Item -Force \$tmp'
+        $server | Should -Match 'function Write-OmJsonFileAtomic'
+        $server | Should -Match 'function Write-JobFile'
+        $server | Should -Match '\[IO.File\]::Replace'
     }
 }
 

@@ -144,13 +144,42 @@ function Read-OmRequestBody {
     try { return ($body | ConvertFrom-Json) } catch { throw 'invalid json body' }
 }
 
+function Write-OmJsonFileAtomic {
+    param([string]$Path, [string]$Json)
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $attempts = 5
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        $tmp = $Path + '.tmp-' + $PID + '-' + [guid]::NewGuid().ToString('N')
+        try {
+            [IO.File]::WriteAllText($tmp, $Json, $utf8)
+            if ([IO.File]::Exists($Path)) {
+                # Move-Item -Force does not reliably replace a locked/existing
+                # target under Windows PowerShell 5.1; Replace/Copy is atomic
+                # enough for status and result files.
+                try {
+                    [IO.File]::Replace($tmp, $Path, $null)
+                } catch {
+                    [IO.File]::Copy($tmp, $Path, $true)
+                    [IO.File]::Delete($tmp)
+                }
+            } else {
+                [IO.File]::Move($tmp, $Path)
+            }
+            return
+        } catch {
+            try { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } } catch { }
+            if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (100 * $attempt) }
+        }
+    }
+    throw ('could not write ' + $Path)
+}
+
 function Write-OmAtomicJson {
     param([string]$Path, $Value)
     $json = $Value | ConvertTo-Json -Depth 12
-    $tmp = $Path + '.tmp'
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($tmp, $json, $utf8)
-    Move-Item -Force $tmp $Path
+    Write-OmJsonFileAtomic -Path $Path -Json $json
 }
 
 function Set-OmJobStatus {
@@ -182,13 +211,34 @@ function Start-OmWebJob {
     Start-Job -Name ('om-' + $id) -ScriptBlock {
         param($ModulePath, $ActionName, $ParamsPath, $StatusPath, $ResultPath, $StateRootArg, $RepoRootArg, $SetupPortArg, $DryRunArg, $JobIdArg)
         $ErrorActionPreference = 'Stop'
+        $jobUtf8 = New-Object System.Text.UTF8Encoding($false)
+        function Write-JobFile([string]$Path, [string]$Text) {
+            $attempts = 5
+            for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+                $tmp = $Path + '.tmp-' + $PID + '-' + [guid]::NewGuid().ToString('N')
+                try {
+                    [IO.File]::WriteAllText($tmp, $Text, $jobUtf8)
+                    if ([IO.File]::Exists($Path)) {
+                        try {
+                            [IO.File]::Replace($tmp, $Path, $null)
+                        } catch {
+                            [IO.File]::Copy($tmp, $Path, $true)
+                            [IO.File]::Delete($tmp)
+                        }
+                    } else {
+                        [IO.File]::Move($tmp, $Path)
+                    }
+                    return
+                } catch {
+                    try { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } } catch { }
+                    if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (100 * $attempt) }
+                }
+            }
+            throw ('could not write ' + $Path)
+        }
         function Write-JobStatus([string]$s) {
             $payload = [pscustomobject]@{ status = $s; updatedAt = (Get-Date).ToString('o') }
-            $json = $payload | ConvertTo-Json
-            $tmp = $StatusPath + '.tmp'
-            $utf8 = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($tmp, $json, $utf8)
-            Move-Item -Force $tmp $StatusPath
+            Write-JobFile -Path $StatusPath -Text ($payload | ConvertTo-Json)
         }
         try {
             Import-Module $ModulePath -Force -DisableNameChecking
@@ -201,10 +251,7 @@ function Start-OmWebJob {
             $state = Read-OmState
             $result = Invoke-OmWebAction -Action $ActionName -Params $p -Ports $state.ports -ProjectName 'personal-finance-system' -StateRoot $StateRootArg -RepoRoot $RepoRootArg -JobId $JobIdArg
             $payload = $result | ConvertTo-Json -Depth 12
-            $tmp = $ResultPath + '.tmp'
-            $utf8 = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($tmp, $payload, $utf8)
-            Move-Item -Force $tmp $ResultPath
+            Write-JobFile -Path $ResultPath -Text $payload
             Write-JobStatus 'done'
         } catch {
             $message = [string]$_.Exception.Message
@@ -212,10 +259,7 @@ function Start-OmWebJob {
             $message = $message -replace '\b[A-Za-z0-9_-]{40,}\b', '***'
             $errorPayload = [pscustomobject]@{ ok = $false; code = 'JOB_ERROR'; message = $message }
             try {
-                $tmp = $ResultPath + '.tmp'
-                $utf8 = New-Object System.Text.UTF8Encoding($false)
-                [System.IO.File]::WriteAllText($tmp, ($errorPayload | ConvertTo-Json -Depth 6), $utf8)
-                Move-Item -Force $tmp $ResultPath
+                Write-JobFile -Path $ResultPath -Text ($errorPayload | ConvertTo-Json -Depth 6)
             } catch { }
             Write-JobStatus 'failed'
         } finally {

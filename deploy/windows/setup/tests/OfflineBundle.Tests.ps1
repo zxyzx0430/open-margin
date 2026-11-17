@@ -1,4 +1,4 @@
-# System.Formats.Tar is available in PowerShell 7 / .NET 7+. The
+﻿# System.Formats.Tar is available in PowerShell 7 / .NET 7+. The
 # traversal/symlink fixtures use it; skip those two cases on 5.1 while keeping
 # the entry-name validator and all other tests active. This must be evaluated
 # outside BeforeAll because Pester 5 evaluates It -Skip during discovery.
