@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 # Lifecycle, upgrade-safety and ACL tests for the Windows installer.
 # These tests never touch a real install: every live uninstall/stop run uses
 # -SkipWatchdogTask/-SkipUrlAcl plus fake docker/tailscale executables, and

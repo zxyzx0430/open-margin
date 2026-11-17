@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     $script:modulePath = Join-Path $PSScriptRoot '..\OpenMargin.Setup.psd1'
     Import-Module $script:modulePath -Force -DisableNameChecking
     $script:stateRoot = Join-Path $TestDrive 'integration-state'

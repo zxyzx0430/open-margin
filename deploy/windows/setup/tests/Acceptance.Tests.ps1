@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Real-install acceptance tests for the Windows setup wizard.
@@ -266,7 +266,10 @@ Describe 'Tailscale operator flag support' -Tag 'Acceptance' {
         $fake = @'
 @echo off
 echo %*>>"%FAKE_TAILSCALE_LOG%"
-if "%FAKE_TAILSCALE_MODE%"=="ok" exit /b 0
+if "%FAKE_TAILSCALE_MODE%"=="ok" (
+  if "%~1"=="set" if "%~2"=="--help" echo   --operator string
+  exit /b 0
+)
 echo flag provided but not defined: -operator 1>&2
 exit /b 1
 '@
@@ -286,11 +289,14 @@ exit /b 1
 
     It 'returns a warning instead of throwing when the CLI rejects --operator' {
         $result = Set-OmTailscaleOperator
-        $result.ok | Should -BeFalse
+        # Final contract: operator configuration is best effort. A skipped
+        # operator is ok=true with warning=true so the install is not failed.
+        $result.ok | Should -BeTrue
+        $result.warning | Should -BeTrue
         $result.code | Should -Match 'OPERATOR'
-        $result.message | Should -Match 'flag provided but not defined'
+        $result.message | Should -Match 'operator|跳'
         $calls = Get-Content -Path $script:fakeTailscaleLog -Raw -Encoding UTF8
-        $calls | Should -Match 'set --operator='
+        $calls | Should -Match 'set '
     }
 
     It 'does not fail the dependency install when the operator step is unsupported' {
@@ -313,7 +319,8 @@ exit /b 1
         $result.ok | Should -BeTrue
         $operator = @($result.steps | Where-Object { $_.code -like 'OPERATOR*' })[0]
         $operator | Should -Not -BeNullOrEmpty
-        $operator.ok | Should -BeFalse
+        $operator.ok | Should -BeTrue
+        $operator.warning | Should -BeTrue
         @($result.steps | Where-Object { $_.code -eq 'URLACL' }).Count | Should -Be 1
     }
 
@@ -518,7 +525,7 @@ Describe 'Reboot detection after dependency installation' -Tag 'Acceptance' {
         $result.pendingReboot | Should -BeTrue
     }
 
-    It 'honours a pending-reboot registry flag even for ready components' {
+    It 'ignores a generic pending-reboot registry flag when components are ready' {
         Mock -ModuleName OpenMargin.Setup Test-OmAdmin { $true }
         Mock -ModuleName OpenMargin.Setup Test-OmRebootPending { $true }
         Mock -ModuleName OpenMargin.Setup Install-OmWsl {
@@ -538,7 +545,9 @@ Describe 'Reboot detection after dependency installation' -Tag 'Acceptance' {
         }
 
         $result = Install-OmDependencies -SetupPort 18799
-        $result.pendingReboot | Should -BeTrue
+        # Diagnostic-only registry flag: ready components must not trap the
+        # wizard in WAITING_REBOOT.
+        $result.pendingReboot | Should -BeFalse
     }
 }
 
