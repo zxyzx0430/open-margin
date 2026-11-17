@@ -310,6 +310,7 @@ try {
     & icacls.exe $launchUrlPath /inheritance:r /grant:r ($currentUser + ':M') '*S-1-5-32-544:(F)' '*S-1-5-18:(F)' *> $null
 } catch { }
 Write-Output ('Open Margin setup wizard: ' + $url)
+Write-OmLog -Level INFO -Message ('setup server elevated=' + [bool](Test-OmAdmin) + ' port=' + $Port + ' stateRoot=' + $StateRoot)
 if (-not $NoBrowser) {
     # Do not swallow a browser-launch failure: the token URL is the only way
     # into the wizard, so keep setup-web-url.txt and print it for the caller.
@@ -386,6 +387,7 @@ try {
                     Write-OmJson -Context $context -Value @{
                         ok = $true; version = [string]$state.engineVersion; repoRoot = $RepoRoot;
                         ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun;
+                        elevated = [bool](Test-OmAdmin);
                         dockerLicenseAcknowledged = (Test-OmDockerLicenseAcknowledged);
                         offline = (Get-OmOfflineBundleInfo -Version ([string]$state.engineVersion))
                     }

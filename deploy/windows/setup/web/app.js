@@ -751,6 +751,8 @@ function loadConfig() {
       currentConfig = data;
       $('version').textContent = 'v' + data.version;
       if (data.dryRun) $('dry-run-banner').classList.remove('om-hidden');
+      const elevationHint = $('elevation-hint');
+      if (elevationHint) elevationHint.classList.toggle('om-hidden', data.elevated !== false);
       applyDockerLicenseInfo(data.dockerLicenseAcknowledged);
     }
   }).catch(() => {});

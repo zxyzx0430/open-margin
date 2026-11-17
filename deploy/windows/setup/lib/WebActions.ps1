@@ -54,9 +54,21 @@ function Invoke-OmWebAction {
     $dryRunRequested = $DryRun -or ([bool]$Params.dryRun)
     switch ($Action) {
         'check' {
-            $ignorePorts = @()
+            # The running wizard's own setup port is not a conflict. Mirror the
+            # CLI ignore list: configured setup port plus the live port from
+            # setup-web.json (and the setupPort passed by the web job).
+            $ignorePorts = @([int]$Ports.setup)
             if ($Params.PSObject.Properties['setupPort'] -and $Params.setupPort) {
-                $ignorePorts += [int]$Params.setupPort
+                $livePort = [int]$Params.setupPort
+                if ($ignorePorts -notcontains $livePort) { $ignorePorts += $livePort }
+            }
+            $setupWebPath = Join-Path $StateRoot 'setup-web.json'
+            if (Test-Path -LiteralPath $setupWebPath) {
+                try {
+                    $setupWeb = Get-Content -Path $setupWebPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $statePort = [int]$setupWeb.port
+                    if ($statePort -gt 0 -and $ignorePorts -notcontains $statePort) { $ignorePorts += $statePort }
+                } catch { }
             }
             $checks = @(Get-OmEnvironmentChecks -Ports $Ports -RepoRoot $RepoRoot -IgnorePorts $ignorePorts)
             $summary = Get-OmCheckSummary $checks
