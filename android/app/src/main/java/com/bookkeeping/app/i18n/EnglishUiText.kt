@@ -226,6 +226,7 @@ internal object EnglishUiText {
             "Custom rules and learned results are deleted together. This cannot be undone.",
         "已清除" to "Cleared",
         "已保存" to "Saved",
+        "已记录" to "Recorded",
         "已删除" to "Deleted",
         "添加规则" to "Add rule",
         "编辑规则" to "Edit rule",
