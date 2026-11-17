@@ -81,6 +81,12 @@ function Invoke-OmRemoteDeploy {
         [switch]$DryRun
     )
     $state = Read-OmState
+    if (-not $NoBuild -and [bool]$state.offlineImported) {
+        # Images were loaded by Import-OmOfflineBundle. Rebuilding from a
+        # possibly incomplete source tree would defeat the offline import.
+        $NoBuild = $true
+        Write-OmLog -Level INFO -Message 'offline bundle is imported; compose will use --no-build'
+    }
     $state.ports = $Ports
     $state.mode = $(if ($SkipFunnel) { 'local_test' } else { 'remote_sync' })
     $state.dryRun = [bool]$DryRun

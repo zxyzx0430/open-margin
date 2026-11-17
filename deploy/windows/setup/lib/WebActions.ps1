@@ -104,6 +104,10 @@ function Invoke-OmWebAction {
             $ackPublic = [bool]$Params.ackPublic
             $skipFunnel = [bool]$Params.skipFunnel
             $noBuild = [bool]$Params.noBuild
+            # An imported offline bundle must win over the default build path.
+            # The state flag also makes a later CLI deploy without --no-build
+            # reuse the loaded images.
+            if (-not $noBuild -and [bool]$state.offlineImported) { $noBuild = $true }
             if (-not $adminUser -or -not $adminPassword) {
                 return [pscustomobject]@{ ok = $false; code = 'MISSING_ADMIN'; message = '请填写管理员用户名和密码。'; retryable = $true }
             }
@@ -216,6 +220,23 @@ function Invoke-OmWebAction {
         }
         'watchdog-status' {
             return (Invoke-OmWatchdogStatus -StateRoot $StateRoot)
+        }
+        'select-offline-file' {
+            # The wizard server handles this action synchronously so the
+            # OpenFileDialog belongs to the interactive desktop session.
+            if ($dryRunRequested) {
+                return [pscustomobject]@{ ok = $false; code = 'PICKER_UNAVAILABLE'; message = '演练模式不会打开文件选择框。'; retryable = $true }
+            }
+            return (Select-OmOfflineBundleFile)
+        }
+        'import-offline' {
+            $offlinePath = [string]$Params.path
+            if ([string]::IsNullOrWhiteSpace($offlinePath)) {
+                return [pscustomobject]@{ ok = $false; code = 'MISSING_PATH'; message = '请先选择离线镜像包。'; retryable = $true }
+            }
+            $offlineVersion = ''
+            if ($Params.PSObject.Properties['version'] -and $Params.version) { $offlineVersion = [string]$Params.version }
+            return (Import-OmOfflineBundle -Path $offlinePath -Version $offlineVersion -DryRun:$dryRunRequested)
         }
         default {
             return [pscustomobject]@{ ok = $false; code = 'UNKNOWN_ACTION'; message = ('unknown action: ' + $Action); retryable = $false }

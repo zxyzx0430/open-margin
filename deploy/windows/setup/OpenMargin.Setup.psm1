@@ -9,6 +9,7 @@ $script:OmRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 . (Join-Path $PSScriptRoot 'lib\Ports.ps1')
 . (Join-Path $PSScriptRoot 'lib\Probes.ps1')
 . (Join-Path $PSScriptRoot 'lib\Compose.ps1')
+. (Join-Path $PSScriptRoot 'lib\OfflineBundle.ps1')
 . (Join-Path $PSScriptRoot 'lib\Tailscale.ps1')
 . (Join-Path $PSScriptRoot 'lib\Wallos.ps1')
 . (Join-Path $PSScriptRoot 'lib\Pairing.ps1')
