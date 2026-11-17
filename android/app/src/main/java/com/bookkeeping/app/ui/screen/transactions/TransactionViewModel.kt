@@ -80,6 +80,36 @@ internal object LedgerFilter {
             contains(transaction.category) ||
             contains(transaction.source)
     }
+
+    fun matchesDisplayed(
+        transaction: TransactionEntity,
+        query: String,
+        type: TransactionType?,
+        category: TransactionCategory?,
+        startMs: Long?,
+        endMs: Long?,
+    ): Boolean {
+        if (type != null && transaction.type != type.name) return false
+        if (category != null && transaction.category != category.name) return false
+        if (startMs != null && transaction.timestamp < startMs) return false
+        if (endMs != null && transaction.timestamp >= endMs) return false
+        val q = query.trim()
+        if (q.isEmpty()) return true
+        val amount = parseAmountCents(q)
+        if (amount != null) {
+            val decimals = q.substringAfter('.', "").length
+            val amountEnd = when (decimals) {
+                0 -> amount + 99L
+                1 -> amount + 9L
+                else -> amount
+            }
+            if (transaction.amountCents in amount..amountEnd) return true
+        }
+        fun contains(value: String) = value.contains(q, ignoreCase = true)
+        return contains(transaction.merchant) ||
+            contains(transaction.note) ||
+            contains(transaction.category)
+    }
 }
 
 @HiltViewModel
@@ -294,7 +324,28 @@ class TransactionViewModel @Inject constructor(
         _timeFilter.value = LedgerTimeFilter.ALL
     }
 
-    fun addTransaction(
+    fun isVisibleWithCurrentFilters(transaction: TransactionEntity): Boolean {
+        if (transaction.syncDeleted || CaptureMergePolicy.isAutoMergedDuplicate(transaction)) {
+            return false
+        }
+        val range = periodRange(
+            PeriodState(
+                time = _timeFilter.value,
+                month = _selectedMonth.value,
+                year = _selectedYear.value,
+            )
+        )
+        return LedgerFilter.matchesDisplayed(
+            transaction = transaction,
+            query = _searchQuery.value,
+            type = _typeFilter.value,
+            category = _categoryFilter.value,
+            startMs = range?.first,
+            endMs = range?.second,
+        )
+    }
+
+    suspend fun addTransaction(
         amountCents: Long,
         type: TransactionType,
         category: TransactionCategory,
@@ -302,24 +353,23 @@ class TransactionViewModel @Inject constructor(
         note: String,
         timestampMs: Long = System.currentTimeMillis(),
         account: String? = null,
-    ) {
-        viewModelScope.launch {
-            val entity = TransactionEntity(
-                amountCents = amountCents,
-                type = type.name,
-                category = category.name,
-                merchant = merchant,
-                note = note,
-                // 账户是本地字段：空就存 null，不写空串，避免把「没填」当成一个值同步出去。
-                account = account?.trim()?.ifBlank { null },
-                source = TransactionSource.MANUAL.name,
-                timestamp = timestampMs,
-            )
-            repository.insert(entity)
-            if (merchant.isNotBlank()) {
-                settings.recordCategoryLearning(merchant, category)
-            }
+    ): Long {
+        val entity = TransactionEntity(
+            amountCents = amountCents,
+            type = type.name,
+            category = category.name,
+            merchant = merchant,
+            note = note,
+            // 账户是本地字段：空就存 null，不写空串，避免把「没填」当成一个值同步出去。
+            account = account?.trim()?.ifBlank { null },
+            source = TransactionSource.MANUAL.name,
+            timestamp = timestampMs,
+        )
+        val id = repository.insert(entity)
+        if (merchant.isNotBlank()) {
+            settings.recordCategoryLearning(merchant, category)
         }
+        return id
     }
 
     /**

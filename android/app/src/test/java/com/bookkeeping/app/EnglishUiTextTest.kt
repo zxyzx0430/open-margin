@@ -17,6 +17,7 @@ class EnglishUiTextTest {
             "收入" to "Income",
             "餐饮" to "Food",
             "转账" to "Transfer",
+            "已记录" to "Recorded",
             "同步关闭或尚未执行" to "Sync off or not yet run",
             "启用双向同步" to "Enable two-way sync",
             "待更新组件：" to "Update components: ",
