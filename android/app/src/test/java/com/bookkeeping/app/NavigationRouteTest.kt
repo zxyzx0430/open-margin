@@ -26,6 +26,12 @@ class NavigationRouteTest {
     }
 
     @Test
+    fun syncSettingsIsItsOwnPageAndNotABottomTab() {
+        assertEquals("sync-settings", AppRoutes.SYNC_SETTINGS)
+        assertFalse(BottomNavItem.ALL.any { it.route == AppRoutes.SYNC_SETTINGS })
+    }
+
+    @Test
     fun transactionDetailRouteMatchesRegisteredPattern() {
         assertEquals("transaction/{id}", AppRoutes.TRANSACTION_DETAIL)
         assertEquals("transaction/42", AppRoutes.transactionDetail(42))

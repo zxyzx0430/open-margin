@@ -19,11 +19,19 @@ import java.net.URL
 
 /** Optional onboarding. Existing sync settings remain intact until explicit confirmation. */
 @Composable
-internal fun WindowsFirstConnectionWizard(initialPayload: PairingPayload? = null) {
+internal fun WindowsFirstConnectionWizard(
+    initialPayload: PairingPayload? = null,
+    openManualEntry: Boolean = false,
+    onConnected: () -> Unit = {},
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE) }
-    var expanded by remember(initialPayload) { mutableStateOf(initialPayload != null) }
-    var step by remember(initialPayload) { mutableIntStateOf(if (initialPayload != null) 1 else 0) }
+    var expanded by remember(initialPayload, openManualEntry) {
+        mutableStateOf(initialPayload != null || openManualEntry)
+    }
+    var step by remember(initialPayload, openManualEntry) {
+        mutableIntStateOf(if (initialPayload != null || openManualEntry) 1 else 0)
+    }
     var url by remember(initialPayload) {
         mutableStateOf(initialPayload?.url ?: (prefs.getString("url", "") ?: ""))
     }
@@ -228,6 +236,7 @@ internal fun WindowsFirstConnectionWizard(initialPayload: PairingPayload? = null
                                     TransactionSyncWorker.configure(context, url.trim().trimEnd('/'), token.trim(), true)
                                     message = tr("同步已开启，正在请求首次同步。后续可以在双向同步卡片查看状态。")
                                     expanded = false
+                                    onConnected()
                                 } catch (e: IllegalArgumentException) {
                                     message = e.message ?: tr("保存配置失败，请检查服务器地址")
                                 }
