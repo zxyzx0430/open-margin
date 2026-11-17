@@ -383,7 +383,7 @@ fun SettingsScreen(
             item { LanguageCard() }
 
             item { SectionHeader(tr("关于与更新")) }
-            item { AboutUpdateCard() }
+            item { AboutUpdateCard(onOpenAbout = { detailDialog = "about" }) }
 
             item { SectionHeader(tr("国产 ROM 后台白名单")) }
             item {
@@ -478,6 +478,7 @@ fun SettingsScreen(
                     )
                 }
                 "feedback" -> FeedbackDialog(onDismiss = { detailDialog = null })
+                "about" -> AboutDialog(onDismiss = { detailDialog = null })
             }
         }
     }
@@ -1463,7 +1464,7 @@ private fun LanguageCard() {
 
 /** Stable-release check that downloads the APK and hands it to the system installer. */
 @Composable
-private fun AboutUpdateCard() {
+private fun AboutUpdateCard(onOpenAbout: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -1584,6 +1585,13 @@ private fun AboutUpdateCard() {
                 )
             }
         }
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.Info,
+            title = tr("关于清衡"),
+            subtitle = "Open Margin · " + BuildConfig.VERSION_NAME,
+            onClick = onOpenAbout,
+        )
         SettingsRowDivider()
         Column(
             Modifier.fillMaxWidth().padding(vertical = 12.dp),
