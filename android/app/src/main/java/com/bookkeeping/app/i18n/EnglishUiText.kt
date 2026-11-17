@@ -749,6 +749,7 @@ internal object EnglishUiText {
         " 次）" to " times)",
         "待确认重复 " to "Possible duplicate ",
         "扫描" to "Scanned",
+        "通知、页面识别与无障碍回退的开启向导" to "Guided setup for notifications, screen capture and accessibility fallback",
         "可以说：金额 · 时间 · 商户 · 分类 · 账户 · 收入或支出" to "Try: amount, time, merchant, category, account, income or expense",
         "工资 8000 银行卡 收入" to "Salary 8000 bank card income",
         "星巴克 32 支付宝 昨天" to "Starbucks 32 Alipay yesterday",

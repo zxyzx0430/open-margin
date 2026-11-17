@@ -370,6 +370,7 @@ fun AddTransactionDialog(
     EntryPanelLayout(
         title = if (initial == null) tr("新建账单") else tr("编辑账单"),
         onDismiss = { if (!saving) onDismiss() },
+        canDismiss = !saving,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
