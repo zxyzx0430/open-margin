@@ -244,13 +244,14 @@ private fun DetailContent(
     ) {
         AmountHero(entry = entry, category = category)
         FieldCard(
-            rows = listOf(
-                tr("收支类型") to transactionTypeLabel(entry.type),
-                tr("分类") to tr(category.displayName),
-                tr("账户") to (entry.account?.takeIf { it.isNotBlank() } ?: tr("未设置")),
-                tr("来源") to transactionSourceLabel(entry.source),
-                tr("发生时间") to transactionTime(entry.timestamp),
-            ),
+            rows = buildList<Pair<String, String>> {
+                add(tr("收支类型") to transactionTypeLabel(entry.type))
+                add(tr("分类") to tr(category.displayName))
+                // 账户只在有值时出现；空着就不占一行，也不显示「未设置」。
+                entry.account?.takeIf { it.isNotBlank() }?.let { add(tr("账户") to it) }
+                add(tr("来源") to transactionSourceLabel(entry.source))
+                add(tr("发生时间") to transactionTime(entry.timestamp))
+            },
         )
         if (entry.note.isNotBlank()) {
             NoteCard(note = entry.note)

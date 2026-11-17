@@ -36,6 +36,7 @@ data class QuickEntryPrefill(
     val category: TransactionCategory? = null,
     val merchant: String? = null,
     val note: String? = null,
+    val account: String? = null,
     val timestampMs: Long? = null,
     val notice: QuickEntryNotice? = null,
 ) {
@@ -59,6 +60,8 @@ data class QuickEntryPrefill(
                 category = category,
                 merchant = draft.merchant?.takeIf { it.isNotBlank() },
                 note = draft.note?.takeIf { it.isNotBlank() },
+                // 语音只是录入方式：说「微信支付」只填账户，来源仍然是 MANUAL。
+                account = draft.account?.takeIf { it.isNotBlank() }?.let { accountName(it) },
                 timestampMs = draft.occurredAtMs
                     ?.takeIf { draft.dateKnown }
                     ?.let { if (draft.preciseTime) it else keepClockOf(it, nowMs, zone) },
@@ -74,6 +77,17 @@ data class QuickEntryPrefill(
         fun centsToText(cents: Long): String {
             val abs = if (cents < 0L) -cents else cents
             return String.format(Locale.US, "%d.%02d", abs / 100L, abs % 100L)
+        }
+
+        /**
+         * 解析器认出的账户 → 表单账户值。
+         *
+         * 只把和预设同义的微信说法并到「微信」（自动采集写的也是「微信」），
+         * 其余原文保留：花呗、招商银行这类具体账户本身就是有效信息，不做合并。
+         */
+        fun accountName(raw: String): String = when (raw.trim()) {
+            "微信支付", "微信零钱" -> "微信"
+            else -> raw.trim()
         }
 
         /** 只说了哪一天、没说钟点：日期用解析结果，时分秒用「现在」。 */
