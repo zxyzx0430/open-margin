@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -69,6 +70,8 @@ fun VoiceFab(
     fabSize: Dp = 56.dp,
     ringWidth: Dp = 2.5.dp,
     ringGap: Dp = 3.dp,
+    // 录音会话进行中由调用方置 false：按压手势和读屏动作一起失效，避免同一时刻开两个会话。
+    enabled: Boolean = true,
 ) {
     val haptics = rememberUpdatedState(LocalHapticFeedback.current)
     val tapAction = rememberUpdatedState(onTap)
@@ -165,10 +168,13 @@ fun VoiceFab(
             modifier = Modifier
                 .size(fabSize)
                 .scale(pressScale)
+                .alpha(if (enabled) 1f else 0.5f)
                 .shadow(6.dp, CircleShape)
                 .clip(CircleShape)
                 .background(primary)
-                .pointerInput(Unit) {
+                .pointerInput(enabled) {
+                    // 面板开着（会话进行中）时整段手势不装：按住既不录音也不算点击。
+                    if (!enabled) return@pointerInput
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         down.consume()
@@ -209,13 +215,15 @@ fun VoiceFab(
                 .semantics {
                     contentDescription = description
                     role = Role.Button
-                    onClick(label = tapLabel) {
-                        tapAction.value()
-                        true
-                    }
-                    onLongClick(label = voiceLabel) {
-                        voiceAction.value()
-                        true
+                    if (enabled) {
+                        onClick(label = tapLabel) {
+                            tapAction.value()
+                            true
+                        }
+                        onLongClick(label = voiceLabel) {
+                            voiceAction.value()
+                            true
+                        }
                     }
                 },
             contentAlignment = Alignment.Center,
