@@ -255,7 +255,7 @@ function Stop-OmLcScheduledTask {
     if (-not $info.exists) {
         return (New-OmLcAction -Name ('watchdog task ' + $TaskName) -Status 'not_found')
     }
-    if ($info.state -ne 'Running') {
+    if ($info.state -ne 'Running' -and $info.state -ne 'Queued') {
         return (New-OmLcAction -Name ('watchdog task ' + $TaskName) -Status 'skipped' -Detail ('state ' + $info.state))
     }
     if ($DryRun) {
