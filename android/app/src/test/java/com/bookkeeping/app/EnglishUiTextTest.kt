@@ -308,4 +308,29 @@ class EnglishUiTextTest {
             assertEquals(translated, EnglishUiText.translate(source))
         }
     }
+
+    @Test
+    fun duplicateWarningAndAccountLabels() {
+        // 新建账单：账户预设 + 保存前的疑似重复提示。
+        val expected = mapOf(
+            "账户" to "Account",
+            "不填" to "None",
+            "微信" to "WeChat",
+            "支付宝" to "Alipay",
+            "现金" to "Cash",
+            "银行卡" to "Bank card",
+            "可能重复" to "Possible duplicate",
+            "账本里已有一笔相似的账单。" to "There is already a similar record in the ledger.",
+            "仍然记这一笔" to "Record it anyway",
+            "正在检查…" to "Checking…",
+            "时间" to "Time",
+            "商户" to "Merchant",
+            "金额" to "Amount",
+            "来源" to "Source",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
 }

@@ -130,6 +130,31 @@ interface TransactionDao {
         windowEndMs: Long,
     ): TransactionEntity?
 
+    /**
+     * 手工记账保存前的疑似重复候选：同金额、时间在 ±1 天内。
+     *
+     * 只读查询，不动表结构（timestamp 已有索引）。商户相似度、10 分钟窗口这些
+     * 判定放在纯逻辑 [com.bookkeeping.app.ui.screen.transactions.DuplicateRule] 里，
+     * 这里只做粗筛，避免把全库拉进内存。
+     *
+     * 已隐藏的重复副本（duplicateOfId 非空）和不计入统计的记录不参与，
+     * 否则用户会被一条列表里根本看不到的旧记录拦下来。
+     */
+    @Query("""
+        SELECT * FROM transactions
+        WHERE syncDeleted = 0 AND amountCents = :amountCents
+          AND (remoteReviewStatus IS NULL OR remoteReviewStatus <> 'excluded')
+          AND duplicateOfId IS NULL
+          AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
+        ORDER BY timestamp DESC
+        LIMIT 100
+    """)
+    suspend fun findAmountCandidatesAround(
+        amountCents: Long,
+        windowStartMs: Long,
+        windowEndMs: Long,
+    ): List<TransactionEntity>
+
     // 不确定是否重复：同金额/方向/币种、时间接近，但来源或商户可能不同。
     // 命中后只打本地待确认标记，不删除、不阻止入库。
     @Query("""

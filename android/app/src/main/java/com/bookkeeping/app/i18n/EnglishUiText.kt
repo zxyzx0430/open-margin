@@ -852,6 +852,15 @@ internal object EnglishUiText {
         "记录信息" to "Record info",
         "账户（可选）" to "Account (optional)",
         "银行" to "Bank",
+        "现金" to "Cash",
+        "银行卡" to "Bank card",
+        "不填" to "None",
+
+        // === 新建账单：保存前的疑似重复提示 + 检查中的按钮态 ===
+        "可能重复" to "Possible duplicate",
+        "账本里已有一笔相似的账单。" to "There is already a similar record in the ledger.",
+        "仍然记这一笔" to "Record it anyway",
+        "正在检查…" to "Checking…",
         "时间不能晚于当前时间 5 分钟以上" to "Time cannot be more than 5 minutes in the future",
         "请选择有效分类" to "Choose a valid category",
         "请选择有效来源" to "Choose a valid source",
