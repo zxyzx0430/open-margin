@@ -239,7 +239,11 @@ function Invoke-WatchdogPass {
     if ($missing.Count -gt 0) {
         if (Test-RepairAllowed) {
             $null = Invoke-WatchdogAction ('compose up (missing: ' + ($missing -join ', ') + ')') {
-                & docker compose --project-name $projectName --profile windows-public-sync up -d *> $null
+                $composeArgs = @('compose', '--project-name', $projectName, '--profile', 'windows-public-sync', 'up', '-d')
+                # After an offline import, never rebuild missing images from a
+                # possibly incomplete source tree.
+                if ($state -and $state.offlineImported -eq $true) { $composeArgs += '--no-build' }
+                & docker @composeArgs *> $null
                 if ($LASTEXITCODE -ne 0) { throw 'compose up failed' }
             }
             $null = Record-Failure
