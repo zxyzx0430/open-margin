@@ -11,7 +11,6 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -20,15 +19,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,13 +50,16 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
-/** Shared same-window bottom panel chrome for manual and voice transaction entry. */
+/**
+ * Same-window bottom panel chrome, identical to the voice capture panel:
+ * scrim, slide-up Surface, centered handle, title row, then content.
+ * Height wraps the content; it only scrolls once the content exceeds the screen.
+ */
 @Composable
 internal fun EntryPanelLayout(
     title: String,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
-    fillPanelHeight: Boolean = false,
     headerTrailing: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -79,8 +81,7 @@ internal fun EntryPanelLayout(
     )
 
     BackHandler { latestDismiss() }
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val panelMaxHeight = maxHeight * 0.88f
+    Box(modifier = modifier.fillMaxSize()) {
         val interaction = remember { MutableInteractionSource() }
         Box(
             modifier = Modifier
@@ -95,26 +96,23 @@ internal fun EntryPanelLayout(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                // Keep the panel above navigation bars and the IME, like the voice panel.
+                // safeDrawing 的底部 = max(导航栏, 输入法)：键盘弹出时整块面板上推。
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                 .offset { IntOffset(0, dragOffset.roundToInt() + rise.roundToPx()) },
         ) {
             Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = panelMaxHeight),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 3.dp,
                 shadowElevation = 12.dp,
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (fillPanelHeight) Modifier.fillMaxSize()
-                            else Modifier.wrapContentHeight(),
-                        ),
+                        .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Column(
                         modifier = Modifier
@@ -127,10 +125,8 @@ internal fun EntryPanelLayout(
                                 onDragStopped = {
                                     if (dragOffset > dismissThresholdPx) {
                                         latestDismiss()
-                                        dragOffset = 0f
-                                    } else {
-                                        dragOffset = 0f
                                     }
+                                    dragOffset = 0f
                                 },
                             ),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -147,7 +143,7 @@ internal fun EntryPanelLayout(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 10.dp),
+                                .padding(top = 4.dp, bottom = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
