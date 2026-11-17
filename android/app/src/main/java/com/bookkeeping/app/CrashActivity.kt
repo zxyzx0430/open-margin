@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import com.bookkeeping.app.i18n.AppLanguage
 
 /**
  * 崩溃报告页。纯系统控件，不走 Compose / Hilt，
@@ -25,10 +26,11 @@ class CrashActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val report = intent.getStringExtra(EXTRA_REPORT).orEmpty()
+        val appContext = this
         val padding = (16 * resources.displayMetrics.density).toInt()
 
         val title = TextView(this).apply {
-            text = "清衡崩溃了，日志在这里"
+            text = AppLanguage.tr(appContext, "清衡崩溃了，日志在这里")
             textSize = 16f
             setTextColor(Color.BLACK)
             setPadding(padding, padding, padding, padding / 2)
@@ -43,21 +45,25 @@ class CrashActivity : Activity() {
         }
 
         val copyButton = Button(this).apply {
-            text = "复制日志"
+            text = AppLanguage.tr(appContext, "复制日志")
             setOnClickListener {
                 getSystemService(ClipboardManager::class.java)
                     ?.setPrimaryClip(ClipData.newPlainText("crash", report))
-                Toast.makeText(this@CrashActivity, "已复制，粘贴发给 Hermes", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@CrashActivity,
+                    AppLanguage.tr(appContext, "已复制，粘贴发给 Hermes"),
+                    Toast.LENGTH_SHORT,
+                ).show()
             }
         }
 
         val shareButton = Button(this).apply {
-            text = "分享日志"
+            text = AppLanguage.tr(appContext, "分享日志")
             setOnClickListener {
                 val send = Intent(Intent.ACTION_SEND)
                     .setType("text/plain")
                     .putExtra(Intent.EXTRA_TEXT, report)
-                startActivity(Intent.createChooser(send, "分享崩溃日志"))
+                startActivity(Intent.createChooser(send, AppLanguage.tr(appContext, "分享崩溃日志")))
             }
         }
 
