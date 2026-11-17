@@ -1,5 +1,20 @@
 package com.bookkeeping.app.ui.components
 
+/** 一次「按住 +」结束时的动作分类：VoiceFab 只按这个结果回调，判断本身可单测。 */
+enum class HoldRelease {
+    /** 没到 1 秒就松手：普通点击，打开新建账单表单。 */
+    TAP,
+
+    /** 已经开录，正常松手：结束录音并进面板的 Review（不填表）。 */
+    FINISH_RECORDING,
+
+    /** 已经开录，手指滑走：取消本次录音并关面板。 */
+    ABORT_RECORDING,
+
+    /** 还没开录就滑走 / 被系统取消：什么都不做。 */
+    NOTHING,
+}
+
 /**
  * 一句话记账与长按语音的时间常量、判定规则。
  *
@@ -8,7 +23,7 @@ package com.bookkeeping.app.ui.components
  * 不依赖 Android 运行时。
  */
 object QuickEntryRule {
-    /** 按住满 1 秒才算语音记账；不足 1 秒松手仍是普通点击。 */
+    /** 按住满 1 秒就开始录音（不是松手才录）；不足 1 秒松手仍是普通点击。 */
     const val HOLD_TO_RECORD_MS = 1_000L
 
     /** 按住 0.5 秒轻震一次：提示「再坚持一下」。 */
@@ -24,7 +39,7 @@ object QuickEntryRule {
     fun ringProgress(elapsedMs: Long): Float =
         (elapsedMs.coerceAtLeast(0L).toFloat() / HOLD_TO_RECORD_MS).coerceIn(0f, 1f)
 
-    /** 是否已经按够了 1 秒。 */
+    /** 是否已经按够了 1 秒（到达这一帧就开录，不等松手）。 */
     fun isLongEnough(elapsedMs: Long): Boolean = elapsedMs >= HOLD_TO_RECORD_MS
 
     /** 是否该给第一次轻震。 */
@@ -32,4 +47,21 @@ object QuickEntryRule {
 
     /** 空白或只有空格的输入不算一次提交：不回调、也不报错。 */
     fun canSubmit(text: String): Boolean = text.isNotBlank()
+
+    /**
+     * 这一段按压结束时该做什么。
+     *
+     * @param armed 满 1 秒时已经回调过「开始录音」。
+     * @param cancelled 手指滑出阈值或被系统取消。
+     */
+    fun releaseAction(armed: Boolean, cancelled: Boolean): HoldRelease = when {
+        // 开录之后滑走：取消录音 + 关面板，绝不能当成点击去开表单。
+        armed && cancelled -> HoldRelease.ABORT_RECORDING
+        // 开录之后松手：结束录音，面板留在 Review。
+        armed -> HoldRelease.FINISH_RECORDING
+        // 没开录就滑走：既不算点击也不算录音。
+        cancelled -> HoldRelease.NOTHING
+        // 不到 1 秒的普通点击。
+        else -> HoldRelease.TAP
+    }
 }

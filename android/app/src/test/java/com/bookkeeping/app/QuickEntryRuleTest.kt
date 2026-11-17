@@ -1,5 +1,6 @@
 package com.bookkeeping.app
 
+import com.bookkeeping.app.ui.components.HoldRelease
 import com.bookkeeping.app.ui.components.QuickEntryRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -36,6 +37,24 @@ class QuickEntryRuleTest {
         assertTrue(QuickEntryRule.shouldTick(500L))
         // 轻震必须早于真正触发，否则用户感觉不到「快到了」。
         assertTrue(QuickEntryRule.HAPTIC_TICK_MS < QuickEntryRule.HOLD_TO_RECORD_MS)
+    }
+
+    @Test
+    fun releaseDecidesBetweenTapRecordAndAbort() {
+        // 不到 1 秒松手 = 普通点击（开表单，不录音）。
+        assertEquals(HoldRelease.TAP, QuickEntryRule.releaseAction(armed = false, cancelled = false))
+        // 没开录就滑走 = 什么都不做。
+        assertEquals(HoldRelease.NOTHING, QuickEntryRule.releaseAction(armed = false, cancelled = true))
+        // 满 1 秒后松手 = 结束录音；面板留在 Review，不填表。
+        assertEquals(
+            HoldRelease.FINISH_RECORDING,
+            QuickEntryRule.releaseAction(armed = true, cancelled = false),
+        )
+        // 满 1 秒后滑走 = 取消录音并关面板，绝不能退化成点击。
+        assertEquals(
+            HoldRelease.ABORT_RECORDING,
+            QuickEntryRule.releaseAction(armed = true, cancelled = true),
+        )
     }
 
     @Test

@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * 首次进账单页的「长按 + 1 秒」提示只弹一次。
+ * 首次进账单页的「长按 1 秒」提示只弹一次。
  *
  * 单独的 SharedPreferences 文件：不跟同步状态、账本数据混在一起，
  * 清除账本或重新登录同步都不会让它再弹一遍。
