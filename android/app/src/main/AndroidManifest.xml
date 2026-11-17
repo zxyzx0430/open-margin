@@ -52,6 +52,11 @@
 
         <!-- 崩溃报告页：只在未捕获异常时拉起，独立主题避免依赖 Compose -->
         <activity
+            android:name=".sync.PairingQrCaptureActivity"
+            android:exported="false"
+            android:theme="@style/Theme.QrScanner" />
+
+        <activity
             android:name=".CrashActivity"
             android:excludeFromRecents="true"
             android:exported="false"
