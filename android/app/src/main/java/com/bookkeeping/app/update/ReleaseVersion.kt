@@ -23,14 +23,14 @@ data class ReleaseVersion(
     }
 
     companion object {
-        private val TAG = Regex("^v(\\d+)\\.(\\d+)\\.(\\d+)(?:-rc\\.(\\d+))?$")
+        private val TAG = Regex("^v(\\d+)\\.(\\d+)(?:\\.(\\d+))?(?:-rc\\.(\\d+))?$")
 
         fun parse(tag: String): ReleaseVersion? {
             val groups = TAG.matchEntire(tag)?.groupValues ?: return null
             return ReleaseVersion(
                 groups[1].toIntOrNull() ?: return null,
                 groups[2].toIntOrNull() ?: return null,
-                groups[3].toIntOrNull() ?: return null,
+                groups.getOrNull(3)?.takeIf { it.isNotEmpty() }?.toIntOrNull() ?: 0,
                 if (groups[4].isNotEmpty()) (groups[4].toIntOrNull() ?: return null) else null,
             )
         }
@@ -73,10 +73,8 @@ data class PublishedRelease(
 )
 
 object UpdateVersionPolicy {
-    // Stable v1.3.0: Windows one-click setup (installer, web wizard, Funnel
-    // public gateway, hidden watchdog) and Android QR pairing.
-    // Keep both release tag and Android versionCode in sync.
-    const val CURRENT_TAG = "v1.3.1"
+    // 发布标识直接取安装包的 versionName，避免再出现「装的是 1.38、显示 v1.3.1」。
+    val CURRENT_TAG: String = "v" + com.bookkeeping.app.BuildConfig.VERSION_NAME
 
     fun latestNewer(
         releases: List<PublishedRelease>,
