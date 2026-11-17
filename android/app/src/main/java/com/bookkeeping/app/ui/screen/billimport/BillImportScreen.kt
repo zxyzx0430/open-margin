@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -181,6 +183,131 @@ fun BillImportScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+internal fun BillImportExportSheet(
+    onClose: () -> Unit,
+    onExportBills: () -> Unit,
+    exportFeedback: String?,
+    exportInProgress: Boolean,
+    viewModel: BillImportViewModel,
+) {
+    val state by viewModel.state.collectAsState()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(viewModel::load)
+    }
+
+    BackHandler(enabled = state.importing) { }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 720.dp)
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = tr("导入 / 导出账单"),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(onClick = onClose, enabled = !state.importing) {
+                Icon(Icons.Filled.Close, contentDescription = tr("关闭"))
+            }
+        }
+        Text(
+            text = tr("支持微信/支付宝 CSV、XLSX 或文本；确认前不写入账本"),
+            style = MaterialTheme.typography.bodyMedium,
+            color = QingTextSecondary,
+        )
+        Button(
+            onClick = {
+                launcher.launch(
+                    arrayOf(
+                        "text/*",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "application/vnd.ms-excel",
+                    ),
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.loading && !state.importing && !exportInProgress,
+        ) {
+            Text(tr("选择账单文件"))
+        }
+        OutlinedButton(
+            onClick = onExportBills,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.loading && !state.importing && !exportInProgress,
+        ) {
+            Text(tr("导出全部账单"))
+        }
+        exportFeedback?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (state.loading || exportInProgress) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        state.error?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        state.preview?.let { preview ->
+            ImportSummary(preview = preview)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(preview.rows) { row -> ImportPreviewRow(row) }
+            }
+            HorizontalDivider()
+            if (state.done) {
+                Text(
+                    text = tr("已导入") + " ${state.importedCount ?: 0} " + tr("笔") +
+                        " · " + tr("已补齐") + " ${state.enrichedCount ?: 0} " + tr("笔"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = QingPrimary,
+                )
+                Button(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
+                    Text(tr("完成"))
+                }
+            } else {
+                val count = preview.importableRows.size
+                Button(
+                    onClick = viewModel::confirm,
+                    enabled = count > 0 && !state.importing,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (state.importing) tr("导入中…")
+                        else tr("确认导入") + " $count " + tr("笔"),
+                    )
+                }
+            }
+        }
     }
 }
 

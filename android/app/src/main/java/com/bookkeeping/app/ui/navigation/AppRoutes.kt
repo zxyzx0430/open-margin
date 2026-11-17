@@ -8,7 +8,7 @@ package com.bookkeeping.app.ui.navigation
  * 谁能跳、跳到哪，一眼能查；[BottomNavItem.ALL] 之外的路由一律不进底部导航。
  */
 object AppRoutes {
-    /** 账单导入是独立页面：从哪个 tab 进来，关掉后就回到那个 tab。 */
+    /** 账单页保留独立导入页面；设置页使用导入 / 导出面板。 */
     const val BILL_IMPORT = "bill-import"
 
     /** 商户分类记忆是全屏子页：从设置进入，返回回设置。 */
