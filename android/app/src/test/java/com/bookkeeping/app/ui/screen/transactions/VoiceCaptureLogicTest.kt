@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.HoldRelease
+import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.i18n.EnglishUiText
 import com.bookkeeping.app.voice.asr.AsrErrorCode
 import org.junit.Assert.assertEquals
@@ -11,7 +13,7 @@ import org.junit.Test
 
 /**
  * 录音面板的判定逻辑必须是纯 JVM 可测的：CI 里没有麦克风，真机才能验证识别质量，
- * 但「编辑后 Partial 不能覆盖」「松手不能直接填表」「Final 不能静默替换用户改的字」
+ * 但「编辑后 Partial 不能覆盖」「录音中不能提交」「Final 不能静默替换用户改的字」
  * 这些一旦写错就会把半句话或用户没确认的文本记进账本，必须在这里钉住。
  */
 class VoiceCaptureLogicTest {
@@ -50,7 +52,7 @@ class VoiceCaptureLogicTest {
             VoiceCaptureLogic.withPartial(listening, " 今天中午吃饭花了三十 "),
         )
 
-        // 松手后 / 失败 / 已交付 / 已取消：旧会话的 Partial 不能改写任何东西。
+        // 用户点「停止」后 / 失败 / 已交付 / 已取消：旧会话的 Partial 不能改写任何东西。
         val review = VoiceCaptureState.Review("今天中午")
         assertEquals(review, VoiceCaptureLogic.withPartial(review, "今天中午吃饭"))
         val failed = VoiceCaptureState.Failed(AsrErrorCode.AUDIO_INIT_FAILED, "麦克风被占用")
@@ -86,12 +88,12 @@ class VoiceCaptureLogicTest {
         )
     }
 
-    // ---------------------------------------------------------------- 松手 → Review
+    // ---------------------------------------------------------------- 手动停止 → Review
 
     @Test
-    fun releaseKeepsTextAndIgnoresRepeats() {
+    fun stopKeepsTextAndIgnoresRepeats() {
         val listening = VoiceCaptureState.Listening("打车花了二十六块五")
-        val review = VoiceCaptureLogic.release(listening)
+        val review = VoiceCaptureLogic.stop(listening)
         assertEquals(
             VoiceCaptureState.Review(
                 text = "打车花了二十六块五",
@@ -100,45 +102,86 @@ class VoiceCaptureLogicTest {
             ),
             review,
         )
-        // 连点两次「停止」/ 手指抖动：还停在 Review，最后一版文本不丢，也不会掉进失败态。
-        assertEquals(review, VoiceCaptureLogic.release(review))
-        // 准备阶段收不到松手（还没开录），状态不变。
+        // 连点两次「停止」：还停在 Review，最后一版文本不丢，也不会掉进失败态。
+        assertEquals(review, VoiceCaptureLogic.stop(review))
+        // 准备阶段没有「停止」操作，状态不变。
         val preparing = VoiceCaptureState.Preparing("正在请求麦克风权限…")
-        assertEquals(preparing, VoiceCaptureLogic.release(preparing))
+        assertEquals(preparing, VoiceCaptureLogic.stop(preparing))
     }
 
     @Test
-    fun releaseNeverDeliversAnything() {
-        // 松手只迁移状态：submit 只认 Review，而松手本身不产生任何请求。
-        val review = VoiceCaptureLogic.release(VoiceCaptureState.Listening("吃饭三十块"))
+    fun stopNeverDeliversAnything() {
+        // 点「停止」只迁移状态：submit 只认 Review，停止本身不产生交付请求。
+        val review = VoiceCaptureLogic.stop(VoiceCaptureState.Listening("吃饭三十块"))
         assertTrue(review is VoiceCaptureState.Review)
         assertNull(VoiceCaptureLogic.submit(VoiceCaptureState.Listening("吃饭三十块")))
     }
 
     @Test
-    fun releaseBeforeSessionStartsFinishesOnStart() {
-        // 面板刚弹、模型还在准备就松手：标志留着，会话一开就收尾。
-        val preparing = VoiceCaptureState.Preparing("正在准备语音模型…")
-        assertFalse(VoiceCaptureLogic.shouldFinishImmediately(preparing, releaseRequested = true))
-        assertTrue(
-            VoiceCaptureLogic.shouldFinishImmediately(
-                VoiceCaptureState.Listening(""),
-                releaseRequested = true,
-            ),
+    fun fabReleaseDoesNotEndRecordingButStopButtonDoes() {
+        val listening = VoiceCaptureState.Listening("")
+        val afterSpeech = VoiceCaptureLogic.withPartial(listening, "打车花了二十六块五")
+        assertEquals(VoiceCaptureState.Listening("打车花了二十六块五"), afterSpeech)
+
+        // VoiceFab maps an ordinary post-start release to NOTHING, so no stop transition runs.
+        val afterRelease = when (QuickEntryRule.releaseAction(armed = true, cancelled = false)) {
+            HoldRelease.TAP -> error("An armed hold cannot become a tap")
+            HoldRelease.ABORT_RECORDING -> VoiceCaptureLogic.cancel()
+            HoldRelease.NOTHING -> afterSpeech
+        }
+        assertEquals(afterSpeech, afterRelease)
+        assertNull(VoiceCaptureLogic.submit(afterRelease))
+        assertEquals(
+            VoiceCaptureState.Review("打车花了二十六块五", waitingFinal = true),
+            VoiceCaptureLogic.stop(afterRelease),
         )
-        assertFalse(
-            VoiceCaptureLogic.shouldFinishImmediately(
-                VoiceCaptureState.Listening(""),
-                releaseRequested = false,
-            ),
+    }
+
+    @Test
+    fun restartClearsPreviousTextAndErrorWithoutPassingThroughFailed() {
+        val oldReview = VoiceCaptureState.Review(
+            text = "上次识别的旧文本",
+            autoFollow = false,
+            suggestedReplacement = "旧候选文本",
         )
+        val clean = VoiceCaptureLogic.restart(oldReview)
+        assertEquals(VoiceCaptureState.Listening(""), clean)
+
+        val retryFromFailure = VoiceCaptureLogic.restart(
+            VoiceCaptureState.Failed(AsrErrorCode.AUDIO_INIT_FAILED, "上次错误"),
+        )
+        assertEquals(VoiceCaptureState.Listening(""), retryFromFailure)
+        assertFalse(VoiceCaptureLogic.isCurrentSession(4L, 5L))
+        assertTrue(VoiceCaptureLogic.isCurrentSession(5L, 5L))
+        assertTrue(VoiceCaptureLogic.isCurrentSession(null, null))
+        assertFalse(VoiceCaptureLogic.isCurrentSession(null, 5L))
+    }
+
+    @Test
+    fun repeatedRestartRequestsDoNotStartOverlappingCycles() {
+        var state: VoiceCaptureState = VoiceCaptureState.Review("旧文本")
+        var cyclesStarted = 0
+        repeat(5) {
+            val next = VoiceCaptureLogic.restart(state)
+            if (next != null) {
+                cyclesStarted++
+                state = next
+            }
+        }
+        assertEquals(1, cyclesStarted)
+        assertEquals(VoiceCaptureState.Listening(""), state)
+        assertNull(VoiceCaptureLogic.restart(state))
+
+        // 新周期明确停止后，下一轮重说可以开始，但仍从干净输入框开始。
+        state = VoiceCaptureLogic.stop(state)
+        assertEquals(VoiceCaptureState.Listening(""), VoiceCaptureLogic.restart(state))
     }
 
     // ---------------------------------------------------------------- Final / 冻结
 
     @Test
     fun finalWithoutEditsReplacesText() {
-        val review = VoiceCaptureLogic.release(VoiceCaptureState.Listening("今天中午吃饭"))
+        val review = VoiceCaptureLogic.stop(VoiceCaptureState.Listening("今天中午吃饭"))
         val settled = VoiceCaptureLogic.onFinal(review, " 今天中午吃饭花了三十块钱 ")
         assertEquals(
             VoiceCaptureState.Review(
@@ -153,12 +196,12 @@ class VoiceCaptureLogicTest {
     @Test
     fun emptyFinalKeepsTextAndDeliversNothing() {
         // 空 Final：保留已经看到的文本（不是把它清空），也不产生交付。
-        val review = VoiceCaptureLogic.release(VoiceCaptureState.Listening("今天中午"))
+        val review = VoiceCaptureLogic.stop(VoiceCaptureState.Listening("今天中午"))
         val settled = VoiceCaptureLogic.onFinal(review, "   ")
         assertEquals("今天中午", (settled as VoiceCaptureState.Review).text)
         assertFalse(settled.waitingFinal)
         // 一个字都没有时仍然是空文本：submit 被挡，UI 把主按钮换成「重说」。
-        val blank = VoiceCaptureLogic.onFinal(VoiceCaptureLogic.release(VoiceCaptureState.Listening("")), "")
+        val blank = VoiceCaptureLogic.onFinal(VoiceCaptureLogic.stop(VoiceCaptureState.Listening("")), "")
         assertEquals("", (blank as VoiceCaptureState.Review).text)
         assertNull(VoiceCaptureLogic.submit(blank))
     }
@@ -236,7 +279,7 @@ class VoiceCaptureLogicTest {
             VoiceCaptureState.Delivered(VoiceEntryRequest("今天中午吃饭花了三十块钱")),
             VoiceCaptureLogic.submit(review),
         )
-        // 录音中（手指还按着）不能交付：必须经过松手进 Review。
+        // 录音中不能交付：必须先点面板「停止」进入 Review。
         assertNull(VoiceCaptureLogic.submit(VoiceCaptureState.Listening("吃饭三十块")))
         // 准备 / 失败 / 取消 都不交付。
         assertNull(VoiceCaptureLogic.submit(VoiceCaptureState.Preparing("正在准备语音模型…")))
@@ -260,7 +303,7 @@ class VoiceCaptureLogicTest {
         assertNull(VoiceCaptureLogic.submit(cancelled))
         assertEquals(cancelled, VoiceCaptureLogic.withPartial(cancelled, "还在说话"))
         assertEquals(cancelled, VoiceCaptureLogic.onFinal(cancelled, "说完了"))
-        assertEquals(cancelled, VoiceCaptureLogic.release(cancelled))
+        assertEquals(cancelled, VoiceCaptureLogic.stop(cancelled))
         assertEquals(cancelled, VoiceCaptureLogic.edit(cancelled, "改字"))
     }
 
