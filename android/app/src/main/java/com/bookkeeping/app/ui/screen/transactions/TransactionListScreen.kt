@@ -827,23 +827,6 @@ private fun DayCard(
     }
 }
 
-/** Shared ledger row used by the calendar's selected-day list. */
-@Composable
-internal fun CalendarLedgerTransactionRow(
-    transaction: TransactionEntity,
-    onClick: () -> Unit,
-) {
-    LedgerTransactionRow(
-        transaction = transaction,
-        timeText = timeOnlyFormat.format(Date(transaction.timestamp)),
-        scrollTargetTransactionId = null,
-        highlightedTransactionId = null,
-        onScrollTargetReached = {},
-        onHighlightFinished = {},
-        onClick = onClick,
-    )
-}
-
 /**
  * 账单列表行：整行点击进详情页，行内不再有展开箭头和动作栏。
  *
