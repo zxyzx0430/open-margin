@@ -21,9 +21,13 @@ set -euo pipefail
 MODEL_ID="zipformer-medium-ctc"
 MODEL_REPO="https://huggingface.co/pkufool/zipformer-medium-streaming/resolve/main"
 
-# 只打包一个变体：chunk-16 首字最快（VPS 单核实测 ~1.2s vs chunk-32 ~1.5s / chunk-64 ~1.7s），
-# 代价是算力最高（RTF 0.42 vs 0.25 / 0.21）。三个变体体积几乎一样（71 MiB），
-# 换档只需改这里的 MODEL_NAME 与哈希。详见 docs/VOICE_ASR_ENGINE.md。
+# 只打包一个变体：chunk-16（首字延迟最低、数字最准）。
+# VPS 单核实测（100ms 一批流式喂入、单线程）：首个 Partial 落在 1.2s 音频处，
+# chunk-32/chunk-64 都要到 1.5s；实时节奏下算力 chunk-16 RTF 0.36~0.39，
+# chunk-64 只要 0.15~0.26，但 chunk-64 会吞字（“三十块钱”→“三十”、
+# “怎么”→“琢么”）。记账短句里 0.3s 的延迟换准确率是划算的。
+# 三个变体体积几乎一样（71 MiB），换档只需改这里的 MODEL_NAME 与哈希。
+# 详见 docs/VOICE_ASR_ENGINE.md。
 MODEL_NAME="ctc-chunk-16-left-64.int8.onnx"
 MODEL_URL="${MODEL_REPO}/${MODEL_NAME}"
 MODEL_BYTES=74410051

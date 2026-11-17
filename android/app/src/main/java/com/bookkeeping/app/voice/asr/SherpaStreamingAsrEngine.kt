@@ -36,6 +36,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.coroutineContext
 
 /**
+ * 解码线程数：手机上 2 条线程能明显缩短单次 decode（多核并行），但 1 核设备开 2 条
+ * 只会互相抢占。VPS 单核实测 2 线程反而更慢（RTF 0.66 vs 0.39），所以按核数夹到 1~2。
+ */
+internal fun defaultDecodeThreads(): Int =
+    Runtime.getRuntime().availableProcessors().coerceIn(1, 2)
+
+/**
  * sherpa-onnx 的本地流式 CTC 实现：pkufool/zipformer-medium-streaming INT8。
  *
  * 线程模型（很重要）：
@@ -52,7 +59,7 @@ class SherpaStreamingAsrEngine(
     context: Context,
     private val spec: AsrModelSpec = AsrModelSpec.DEFAULT,
     private val captureFromMicrophone: Boolean = true,
-    private val numThreads: Int = 2,
+    private val numThreads: Int = defaultDecodeThreads(),
 ) : StreamingAsrEngine {
 
     private val appContext = context.applicationContext
@@ -97,7 +104,9 @@ class SherpaStreamingAsrEngine(
             AsrState.CLOSED -> return@withLock Result.failure(
                 AsrModelException(AsrErrorCode.ENGINE_CLOSED, "语音引擎已关闭"),
             )
-            AsrState.READY -> return@withLock Result.success(Unit)
+            // 识别器已经在内存里（可能正在录音）：重复 prepare() 直接成功，
+            // 不能把 RECORDING 打回 PREPARING，否则当前会话的 Final 会被丢掉。
+            AsrState.READY, AsrState.RECORDING -> return@withLock Result.success(Unit)
             else -> Unit
         }
         state.beginPrepare()
@@ -167,9 +176,9 @@ class SherpaStreamingAsrEngine(
 
         val queue = Channel<AudioCommand>(capacity = AUDIO_QUEUE_CAPACITY, onBufferOverflow = BufferOverflow.DROP_OLDEST)
         audioQueue = queue
-        state.beginSession()
+        val generation = state.beginSession()
 
-        decodeJob = scope.launch { decodeLoop(active, queue) }
+        decodeJob = scope.launch { decodeLoop(active, queue, generation) }
         if (captureFromMicrophone) {
             captureJob = scope.launch(captureDispatcher) { captureLoop(queue) }
         }
@@ -240,7 +249,13 @@ class SherpaStreamingAsrEngine(
         val config = OnlineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = FEATURE_DIM, dither = 0f),
             modelConfig = OnlineModelConfig(
-                // 单文件流式 CTC：zipformer2_ctc，不是 transducer 的 encoder/decoder/joiner。
+                // 单文件流式 CTC：模型自带 encoder + CTC head，sherpa-onnx 侧走
+                // zipformer2Ctc 分支（对应 C++ 的 OnlineModelConfig::zipformer2_ctc）。
+                // 1.13.5 的 Kotlin API 并没有 OnlineCtcModelConfig 这个类：javap 只有
+                // zipformer2Ctc / neMoCtc / toneCtc 三个 CTC 分支，其中 icefall 导出的
+                // 单文件 zipformer2 CTC 必须用 zipformer2Ctc（上游 getModelConfig(15..19)
+                // 的流式 zipformer CTC 也是这么配的）。绝不能用 transducer 的
+                // encoder/decoder/joiner 三件套——这个模型只有一个 onnx，没有那三段。
                 zipformer2Ctc = OnlineZipformer2CtcModelConfig(model = spec.modelFile(modelDir).absolutePath),
                 tokens = spec.tokensFile(modelDir).absolutePath,
                 numThreads = numThreads,
@@ -254,7 +269,7 @@ class SherpaStreamingAsrEngine(
         return OnlineRecognizer(assetManager = null, config = config)
     }
 
-    private suspend fun decodeLoop(active: OnlineRecognizer, queue: Channel<AudioCommand>) {
+    private suspend fun decodeLoop(active: OnlineRecognizer, queue: Channel<AudioCommand>, generation: Long) {
         val stream = active.createStream()
         synchronized(nativeLock) { sessionStream = stream }
         var lastPartial = ""
@@ -290,7 +305,9 @@ class SherpaStreamingAsrEngine(
                 runCatching { stream.release() }
                 if (sessionStream === stream) sessionStream = null
             }
-            state.endSession()
+            // 带上本次会话代号：如果是被新一轮 startSession 取消的旧会话，
+            // 这里不会把新会话的状态打回 READY。
+            state.endSession(generation)
         }
     }
 
@@ -346,7 +363,7 @@ class SherpaStreamingAsrEngine(
         decodeJob = null
         audioQueue?.close()
         audioQueue = null
-        state.endSession()
+        state.endSession(state.currentGeneration())
     }
 
     private fun hasRecordPermission(): Boolean =
