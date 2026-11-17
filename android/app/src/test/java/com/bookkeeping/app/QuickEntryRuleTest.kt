@@ -45,12 +45,12 @@ class QuickEntryRuleTest {
         assertEquals(HoldRelease.TAP, QuickEntryRule.releaseAction(armed = false, cancelled = false))
         // 没开录就滑走 = 什么都不做。
         assertEquals(HoldRelease.NOTHING, QuickEntryRule.releaseAction(armed = false, cancelled = true))
-        // 满 1 秒后松手 = 结束录音；面板留在 Review，不填表。
+        // 满 1 秒后正常松手 = 什么也不做，录音继续，不能结束会话。
         assertEquals(
-            HoldRelease.FINISH_RECORDING,
+            HoldRelease.NOTHING,
             QuickEntryRule.releaseAction(armed = true, cancelled = false),
         )
-        // 满 1 秒后滑走 = 取消录音并关面板，绝不能退化成点击。
+        // 满 1 秒后仍按住并滑走 = 取消录音并关面板，绝不能退化成点击。
         assertEquals(
             HoldRelease.ABORT_RECORDING,
             QuickEntryRule.releaseAction(armed = true, cancelled = true),

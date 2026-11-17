@@ -10,7 +10,9 @@ import kotlinx.coroutines.flow.Flow
  * 2. [startSession] 之前必须 [prepare] 成功，否则抛 [IllegalStateException]。
  * 3. [acceptAudio] 只接受 16kHz 单声道 PCM16；内部排队，不阻塞调用线程（通常是采集线程）。
  * 4. [finishInput] 之后引擎把尾部静音送进解码器，然后发且只发一个 [AsrEvent.Final]。
- * 5. [close] 释放识别器与 AudioRecord，可重复调用。
+ * 5. 成功的 [startSession] 返回递增会话代号；会话相关的 Partial / Final / Error 携带该代号，
+ *    调用方可以丢弃上一轮结束后迟到的事件。
+ * 6. [close] 释放识别器与 AudioRecord，可重复调用。
  *
  * 线程：所有方法都可以从主线程调用；重活（解码、写文件）在内部协程里做。
  */
@@ -30,8 +32,8 @@ interface StreamingAsrEngine {
      */
     suspend fun warmUp() {}
 
-    /** 开一次识别会话。language 为 "zh" / "en"（当前模型中英双语，仅作提示）。 */
-    fun startSession(language: String)
+    /** 开一次识别会话。language 为 "zh" / "en"（当前模型中英双语，仅作提示）；返回会话代号。启动被拒并已发 Error 时返回 null。 */
+    fun startSession(language: String): Long?
 
     /** 送入一段 16kHz 单声道 PCM16。 */
     fun acceptAudio(pcm16: ShortArray, sampleRate: Int)

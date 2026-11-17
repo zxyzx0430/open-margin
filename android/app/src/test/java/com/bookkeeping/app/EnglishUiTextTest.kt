@@ -220,7 +220,7 @@ class EnglishUiTextTest {
                 "Describe the expense or income and the form fills itself",
             "语音记账" to "Voice entry",
             "新建账单，长按说话记账" to "New transaction; press and hold to speak",
-            "长按 1 秒说话，松手结束" to "Hold for 1 second and speak; release to stop",
+            "长按 1 秒说话，点停止结束" to "Hold for 1 second and speak; tap Stop to finish",
             "没看出金额，请手动补上" to "No amount found; please fill it in",
             "已按这句话填好，请核对金额、分类和时间" to
                 "Filled from your sentence; check the amount, category and time",
@@ -241,8 +241,8 @@ class EnglishUiTextTest {
             "停止" to "Stop",
             "录音中…" to "Recording…",
             "已停止录音" to "Recording stopped",
-            "松手结束，说话时可以直接改" to
-                "Release to stop; you can edit the text while speaking",
+            "点停止结束，说话时可以直接改" to
+                "Tap Stop to finish; you can edit the text while speaking",
             "已暂停自动更新" to "Auto-update paused",
             "恢复" to "Resume",
             "识别更新了，点此替换" to "Recognition updated; tap to replace",

@@ -133,8 +133,7 @@ fun TransactionListScreen(
     // 长按 FAB 满 1 秒的落点由外部注入：RootNavigation 立刻打开录音面板并开始录音。
     // 账单页本身不碰麦克风、不写库；新建账单的点按走页面自己的对话框。
     onVoiceEntry: () -> Unit = {},
-    // 松手（录音结束）与开录后滑走（取消）也交给外部：面板和引擎都在 RootNavigation 那层。
-    onVoiceStopped: () -> Unit = {},
+    // 开录后按住时滑走取消：面板和引擎都在 RootNavigation 那层。
     onVoiceCancelled: () -> Unit = {},
     // 录音会话进行中：把 FAB 按住动作禁用，避免同一时刻开两个会话。
     voiceBusy: Boolean = false,
@@ -331,20 +330,18 @@ fun TransactionListScreen(
                             showAddDialog = true
                         },
                         // 满 1 秒：立刻打开面板并开始录音（不等松手）。
-                        onHoldStart = {
+                        onLongPressStart = {
                             dismissVoiceHint()
                             onVoiceEntry()
                         },
-                        // 松手：结束录音，面板留在 Review 等确认/改字。
-                        onHoldRelease = onVoiceStopped,
-                        // 开录后滑走：取消本次并关面板，不填表。
-                        onHoldAbort = onVoiceCancelled,
+                        // 开录后仍按住时滑走：取消本次并关面板，不填表。
+                        onAbort = onVoiceCancelled,
                         // 录音会话进行中（面板开着）禁用新的按压：不能开第二个会话。
                         enabled = !voiceBusy,
                     )
                     if (showVoiceHint) {
                         VoiceHintBubble(
-                            text = tr("长按 1 秒说话，松手结束"),
+                            text = tr("长按 1 秒说话，点停止结束"),
                             onDismiss = dismissVoiceHint,
                         )
                     }

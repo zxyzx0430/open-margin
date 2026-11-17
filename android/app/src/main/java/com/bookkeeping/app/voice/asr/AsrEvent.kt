@@ -39,22 +39,24 @@ enum class AsrErrorCode {
  * 流式识别事件。
  *
  * [Partial] 与 [Final] 在接口层就分开：Partial 只用于实时预览（会被后续结果覆盖），
- * 只有 Final 才允许进入账单解析，避免半截句子被记成一笔账。
+ * 只有 Final 才允许进入账单解析，避免半截句子被记成一笔账。会话事件携带 sessionId，
+ * 防止重说后迟到的旧结果改写新一轮界面。
  */
 sealed interface AsrEvent {
     /** 模型已加载，可以 startSession()。 */
     data object Ready : AsrEvent
 
-    /** 临时结果，随时可能被更长的临时结果替换。 */
-    data class Partial(val text: String) : AsrEvent
+    /** 临时结果，随时可能被更长的临时结果替换；[sessionId] 用于丢弃上一轮迟到事件。 */
+    data class Partial(val text: String, val sessionId: Long? = null) : AsrEvent
 
     /** 一句话的最终结果；每次 finishInput() 只会发一次（可能是空串）。 */
-    data class Final(val text: String) : AsrEvent
+    data class Final(val text: String, val sessionId: Long? = null) : AsrEvent
 
     /** 失败。message 是给开发者看的中文提示，UI 应按 code 本地化。 */
     data class Error(
         val code: AsrErrorCode,
         val message: String,
         val cause: Throwable? = null,
+        val sessionId: Long? = null,
     ) : AsrEvent
 }

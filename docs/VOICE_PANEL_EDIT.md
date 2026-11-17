@@ -1,4 +1,4 @@
-# 语音面板：按住即录、松手结束、面板内编辑
+# 语音面板：按住即录、手动停止、面板内编辑
 
 本文是「长按 + 说话记账」的交互约定，配合 `docs/VOICE_ASR_ENGINE.md` 读：
 
@@ -9,11 +9,11 @@
 
 | 文件 | 职责 |
 | --- | --- |
-| `ui/components/VoiceFab.kt` | 按压手势、进度弧、震动、松手/滑走的判定 |
+| `ui/components/VoiceFab.kt` | 按压手势、进度弧、震动、松手继续 / 按住滑走取消的判定 |
 | `ui/components/QuickEntryRule.kt` | 时间常量 + `releaseAction()`（纯函数，单测覆盖） |
 | `ui/screen/transactions/VoiceCapturePanel.kt` | 同窗口覆盖层面板、引擎会话、权限、键盘 |
 | `ui/screen/transactions/VoiceCaptureLogic.kt` | 状态机 + 冻结/替换/交付判定（纯 JVM） |
-| `ui/navigation/RootNavigation.kt` | 面板开合、松手信号、把确认后的文本交给账单页 |
+| `ui/navigation/RootNavigation.kt` | 面板开合、把确认后的文本交给账单页 |
 
 ---
 
@@ -23,41 +23,41 @@
 | --- | --- | --- | --- | --- | --- |
 | 按下 | — | 从 0 开始扫，图标换成麦克风 | 关 | 空闲 | — |
 | 500ms | 轻震（TextHandleMove） | 半圈 | 关 | 空闲 | — |
-| **1000ms** | **重震（LongPress）** | 满格 | **立即打开** | **`startSession()` 开始录音** | `onHoldStart` |
-| 1000ms 之后 | — | 保持满格 | 开着，Partial 实时上屏、可编辑 | 录音中 | — |
-| 松手（已开录） | — | 140ms 回弹 | 留在 Review（同一输入框） | `finishInput()`：补 0.6s 静音 → Final | `onHoldRelease` |
+| **1000ms** | **重震（LongPress）** | 满格 | **立即打开** | **`startSession()` 开始录音** | `onLongPressStart` |
+| 松手（已开录） | — | 140ms 回弹 | 保持打开 | **继续录音** | 无 |
 | 松手（<1s） | — | 回弹 | 不开 | 不动 | `onTap` → 新建账单表单 |
-| 已开录 + 手指滑出两倍触摸阈值 | — | 回弹 | 关闭 | `cancelSession()` | `onHoldAbort` |
+| 已开录 + 手指仍按住时滑出两倍触摸阈值 | — | 回弹 | 关闭 | `cancelSession()` | `onAbort` |
 | 未开录 + 滑出 / 系统取消 | — | 回弹 | 不开 | 不动 | 无 |
+| 面板内点「停止」 | — | FAB 已收弧 | 留在 Review | `finishInput()`：补 0.6s 静音 → Final | 面板按钮 |
 
 ```
-按下 ──0.5s(轻震)──1.0s(重震/弧满/开面板/开始录音)──────────松手──> Review（面板不关）
-  │                    │                                        │
-  │                    └─ 滑出阈值 ──> 取消录音 + 关面板（不填表） │
-  └─ <1s 松手 ──> 普通点击：打开新建账单表单，不录音              │
-                                                             用户点「填入账单」──> Delivered（解析+表单）
-                                                             用户点「取消/下滑/返回」──> Cancelled（不填表）
+按下 ──0.5s(轻震)──1.0s(重震/弧满/开面板/开始录音)──松手──> 继续录音（面板开）
+  │                    │                                           │
+  │                    └─ 按住时滑出阈值 ──> 取消录音 + 关面板（不填表）
+  └─ <1s 松手 ──> 普通点击：打开新建账单表单，不录音
+  用户点面板「停止」──> Review（麦克风停止，面板不关）
+  用户点「填入账单」──> Delivered（解析+表单）
+  用户点「取消/下滑/返回」──> Cancelled（不填表）
 ```
 
 要点：
 
-1. **开录不是松手触发的**。`VoiceFab` 的计时循环跑到 `HOLD_TO_RECORD_MS` 这一帧就回调
-   `onHoldStart`，同步把面板挂上、把 `startSession()` 打出去。
-2. **松手只结束录音**。`onHoldRelease` 里只做 `finishInput()` + 状态迁移到 Review，
-   不交付、不关面板。
-3. **滑走 = 整段作废**。开录之后滑出阈值走 `ABORT_RECORDING`（取消 + 关面板）；
+1. **开录不是抬手触发的**。`VoiceFab` 的计时循环跑到 `HOLD_TO_RECORD_MS` 这一帧就回调
+   `onLongPressStart`，同步把面板挂上、把 `startSession()` 打出去。
+2. **抬手不结束录音**。FAB 松手后不调用任何结束回调，录音继续；用户点面板「停止」才执行
+   `finishInput()` + 状态迁移到 Review，不交付、不关面板。
+3. **按住滑走 = 整段作废**。开录之后在仍按住时滑出阈值走 `ABORT_RECORDING`（取消 + 关面板）；
    没开录就滑走走 `NOTHING`（既不算点击也不算录音）。判定在
-   `QuickEntryRule.releaseAction(armed, cancelled)`，四条分支都有单测。
+   `QuickEntryRule.releaseAction(armed, cancelled)`，三种结果都由单测覆盖。
 
 ---
 
 ## 2. 为什么面板不是 `ModalBottomSheet`
 
-`ModalBottomSheet` 是 `Dialog`：满 1 秒打开面板的瞬间，新窗口拿到焦点，正在按着 FAB 的那一段
-触摸会被系统 `ACTION_CANCEL`，`UP` 永远收不到——「松手结束录音」直接失效（而且看起来像
-随机不结束）。
+`ModalBottomSheet` 是 `Dialog`：满 1 秒打开面板时，新窗口可能让正在进行的 FAB 手势收到系统
+`ACTION_CANCEL`，滑出取消事件就可能送不到。
 
-所以面板改成**同一个窗口里的覆盖层**：
+所以这里画在**同一个窗口里的覆盖层**：
 
 ```kotlin
 Box(Modifier.fillMaxSize()) {
@@ -81,8 +81,8 @@ Box(Modifier.fillMaxSize()) {
 | 状态 | 含义 | 面板 |
 | --- | --- | --- |
 | `Preparing(detail)` | 装模型 / 等权限 | 进度 + 「取消」 |
-| `Listening(text, autoFollow, suggestedReplacement)` | 手指还按着，麦克风开着 | 可编辑输入框 + 「停止」「取消」 |
-| `Review(text, autoFollow, waitingFinal, suggestedReplacement)` | 已松手，麦克风已停 | 同一输入框 + 「填入账单 / 重说 / 取消」 |
+| `Listening(text, autoFollow, suggestedReplacement)` | 麦克风开着；抬手后继续录音 | 可编辑输入框 + 「停止」「取消」 |
+| `Review(text, autoFollow, waitingFinal, suggestedReplacement)` | 用户点「停止」后，麦克风已停 | 同一输入框 + 「填入账单 / 重说 / 取消」 |
 | `Failed(code, message)` | 可重试失败 | 「重试」「取消」，权限被拒多一个「去设置」 |
 | `Delivered(request)` | 文本已交给上层 | 面板收起（过渡帧） |
 | `Cancelled` | 用户取消 | 面板收起，之后的事件全部丢弃 |
@@ -90,10 +90,11 @@ Box(Modifier.fillMaxSize()) {
 迁移（除 `Delivered`/`Cancelled` 外都可逆）：
 
 ```
-Preparing ──startSession 成功──> Listening ──release()──> Review ──submit()──> Delivered
+Preparing ──startSession 成功──> Listening ──点「停止」──> Review ──submit()──> Delivered
     │                              │                       │
     └── acquire 失败 ──> Failed <──┴── Error ───────────────┘（Review 有文本时保留文本）
-任何状态 ──cancel()（按钮/下滑/返回/切后台/滑走）──> Cancelled
+                                      Review/Failed ──重说──> Listening("")
+任何状态 ──cancel()（按钮/下滑/返回/切后台/按住滑走）──> Cancelled
 ```
 
 ---
@@ -122,7 +123,7 @@ Preparing ──startSession 成功──> Listening ──release()──> Revi
 
 界面上的三个提示（都有英文）：
 
-- Listening + 跟随中：「松手结束，说话时可以直接改」
+- Listening + 跟随中：「点停止结束，说话时可以直接改」
 - Listening + 冻结：「已暂停自动更新」+「恢复」按钮
 - 冻结期间收到不同的 Final：chip「识别更新了，点此替换」
 
@@ -142,7 +143,7 @@ fun submit(state: VoiceCaptureState): VoiceCaptureState.Delivered? {
 
 | 情况 | 结果 |
 | --- | --- |
-| 松手（Listening → Review） | 不交付，面板留着 |
+| 点面板「停止」（Listening → Review） | 不交付，面板留着 |
 | 文本为空 / 只有标点 | 主按钮变「重说」，提示「没有听清，请再说一次」 |
 | 点「填入账单」 | `Delivered(VoiceEntryRequest(trim(text)))` → 上层解析 + 开表单 |
 | 点「取消」/ 遮罩 / 下滑 / 返回键 / 切后台 | `Cancelled`，不填表、不写库 |
@@ -169,8 +170,11 @@ fun submit(state: VoiceCaptureState): VoiceCaptureState.Delivered? {
 
 面板只调 `startSession()` / `finishInput()` / `cancelSession()`：
 
-- 松手 → `finishInput()`（补 0.6s 静音，等 Final）；
-- 取消 / 下滑 / 返回 / 切后台 / 组合销毁 → `cancelSession()`（放掉麦克风，识别器留在 READY）；
+- 用户点「停止」→ `finishInput()`（补 0.6s 静音，等 Final）；
+- 取消 / 下滑 / 返回 / 切后台 / 组合销毁 / 按住滑出 → `cancelSession()`（放掉麦克风，识别器留在 READY）；
+- 重说时先同步清空输入与旧会话代号；常驻且就绪的引擎直接 `startSession()`，只有引擎不可用或权限缺失时才重新 acquire；
+- Partial / Final / 会话内 Error 都携带递增 sessionId，面板只接纳当前代号，重说后上一轮迟到事件不会改写新周期；
+- 旧实现每次重说都先转 Preparing 再 acquire，且事件没有会话代号；重置帧可能露出旧状态，旧 Partial / Error 到达时还能重新显示旧文本 / Failed；
 - **任何路径都不 `close()` 引擎**。模型常驻在 `VoiceAsrHolder`，下一次长按直接开口说话。
 
 ---
@@ -187,9 +191,11 @@ fun submit(state: VoiceCaptureState): VoiceCaptureState.Delivered? {
 | `partialOnlyRefreshesPreviewWhileListening` | Partial 只在 Listening 生效；Review/Failed/Delivered/Cancelled 丢弃 |
 | `editingFreezesPartialRefresh` | **编辑后 Partial 不覆盖** |
 | `resumeAutoFollowFollowsNewPartialsAgain` | 点「恢复」后重新跟随 |
-| `releaseKeepsTextAndIgnoresRepeats` | 松手保留文本、连点停止幂等、准备阶段收不到 |
-| `releaseNeverDeliversAnything` | **松手不交付**（提交只认 Review） |
-| `releaseBeforeSessionStartsFinishesOnStart` | 松手早于会话就绪 → 会话一开就收尾 |
+| `stopKeepsTextAndIgnoresRepeats` | 点停止保留文本、重复停止幂等、准备阶段不变 |
+| `stopNeverDeliversAnything` | **点停止不交付**（提交只认 Review） |
+| `fabReleaseDoesNotEndRecordingButStopButtonDoes` | FAB 抬手后继续 Listening；只有面板「停止」才进 Review |
+| `restartClearsPreviousTextAndErrorWithoutPassingThroughFailed` | 重说清空上轮文本/候选/错误，并拒绝旧会话迟到事件 |
+| `repeatedRestartRequestsDoNotStartOverlappingCycles` | 连点五次只接受一次重说；下一轮重说仍从空文本开始 |
 | `finalWithoutEditsReplacesText` | 没编辑时 Final 直接采用 |
 | `emptyFinalKeepsTextAndDeliversNothing` | 空 Final 保留文本、不交付 |
 | `finalThatDiffersFromEditedTextIsSuggestedNotApplied` | **Final 不同不静默替换**，只给 chip |
@@ -206,7 +212,7 @@ fun submit(state: VoiceCaptureState): VoiceCaptureState.Delivered? {
 | `permissionFailureKeepsTheSettingsEscapeHatch` | 权限被拒保留「去设置」 |
 
 手势判定在 `QuickEntryRuleTest.releaseDecidesBetweenTapRecordAndAbort`：
-`TAP / NOTHING / FINISH_RECORDING / ABORT_RECORDING` 四条分支。
+`TAP / NOTHING（松手后继续录音）/ ABORT_RECORDING` 三种结果。
 
 ---
 
@@ -216,28 +222,30 @@ CI 只能证明「能编译、能打包、纯逻辑单测过」。下面这些�
 
 1. **按住即录**：按住 + 满 1 秒 → 一次重震、面板立刻出现、开始说话；**不要**松手才开始。
    说 3~4 个字时面板里已经能看到 Partial。
-2. **松手即停**：说话中途松手 → 面板不关，立刻出现「已停止录音」，半秒内 Final 把最后几个字补齐。
+2. **松手继续，点停止才结束**：说话中途松手 → 面板不关、Partial 继续更新、麦克风仍在采集；
+   点面板「停止」后才出现「已停止录音」，Final 补齐最后几个字。
 3. **不到 1 秒**：轻点 → 只弹新建账单表单，不出现面板、不亮麦克风指示。
-4. **滑走取消**：满 1 秒后把手指拖出 FAB 再松手 → 面板关闭、无表单、系统麦克风指示消失。
+4. **滑走取消**：满 1 秒后仍按住，把手指拖出 FAB 再松手 → 面板关闭、无表单、系统麦克风指示消失；
+   先松手后再移动不取消，只有仍按住时滑出才生效。
 5. **说话中改字**（两只手）：一只手指按住 FAB，另一只点输入框改字 → 改完继续说话，
    文本**不被 Partial 冲掉**，出现「已暂停自动更新」+「恢复」。
 6. **恢复跟随**：点「恢复」→ 提示消失，下一段 Partial 重新上屏。
 7. **Final 替换 chip**：改过字之后等 Final 到达 → 文本不变，出现「识别更新了，点此替换」；
    点一下才变成识别结果。若 Final 与改后的字相同，不出现 chip。
-8. **空/纯标点**：捂着麦克风说一句 → 松手 → 主按钮是「重说」+「没有听清，请再说一次」；
-   点「重说」重新开录（不需要重新长按 FAB）。
+8. **空/纯标点**：录音中松手后仍继续采集；点「停止」后主按钮是「重说」+「没有听清，请再说一次」；
+   点「重说」同步清空旧文本并直接重录（引擎常驻时不闪准备/失败态，不需要重新长按 FAB）。
 9. **键盘遮挡**：Review 里点输入框 → 键盘弹出，面板整体上推，输入框和「填入账单」都在
    键盘上方；长按键盘上的回车换行，面板不被顶穿。
 10. **取消路径**：「取消」按钮、点遮罩、下滑面板、返回键、切后台/锁屏 —— 五种都不填表、
     不新增账单，麦克风指示消失。
 11. **填入账单**：改完点「填入账单」→ 面板收起 → 新建表单已打开、顶部一句话输入框是
     面板里的最终文本（不是 Partial，也不是被覆盖掉的旧值）。
-12. **面板重开不残留**：填入 → 再长按 → 面板从「准备/聆听」重新开始，不会一开就自我收尾
-    （`voiceStopRequested` 已消费）。
-13. **连按**：面板开着时连点 FAB 数次 → 只有一个会话、不会叠面板。
+12. **重说不闪旧状态**：从有 Partial / 候选文本的 Review 点「重说」→ 同一操作里清空输入框和候选，立刻进入新 Listening；
+    不出现旧文本、旧失败态或常驻引擎情况下的 Preparing。
+13. **连点重说 / FAB**：快速连点「重说」5 次只开一个新会话；面板开着时连点 FAB 数次也只有一个会话，不叠面板。
 14. **引擎常驻**：连续 20 次「长按→取消」，`adb shell dumpsys meminfo <pkg> | grep -i native`
     不应持续增长；每次重开面板应在 1 秒内出字（模型没被卸载）。
 15. **英文界面**：切 English → 面板所有新文案（录音中/已停止录音/已暂停自动更新/恢复/
-    识别更新了，点此替换/填入账单/重说/松手结束…）都是英文。
+    识别更新了，点此替换/填入账单/重说/点停止结束…）都是英文。
 16. **TalkBack**：FAB 长按动作能开录（不必一直按住），面板里的「停止」结束录音，
     输入框可读写，按钮都能聚焦。
