@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,17 +16,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
@@ -42,19 +37,18 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -73,7 +67,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -89,11 +82,10 @@ import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
+import com.bookkeeping.app.ui.screen.transactions.CalendarLedgerTransactionRow
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
-import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.floor
@@ -140,6 +132,9 @@ fun CalendarScreen(
     var today by rememberSaveable(stateSaver = CalendarDateSaver) {
         mutableStateOf(currentCalendarDate())
     }
+    var selectedDate by rememberSaveable(stateSaver = CalendarDateSaver) {
+        mutableStateOf(currentCalendarDate())
+    }
     var rangeStart by rememberSaveable(stateSaver = NullableCalendarDateSaver) {
         mutableStateOf<CalendarDate?>(null)
     }
@@ -148,9 +143,12 @@ fun CalendarScreen(
     }
     var hasManuallyNavigatedMonth by rememberSaveable { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestToday = rememberUpdatedState(today)
+    val latestSelectedDate = rememberUpdatedState(selectedDate)
     val latestMonthKey = rememberUpdatedState(monthKey)
     val latestManualNavigation = rememberUpdatedState(hasManuallyNavigatedMonth)
     DisposableEffect(lifecycleOwner) {
@@ -158,6 +156,9 @@ fun CalendarScreen(
             val previousToday = latestToday.value
             val refreshedToday = currentCalendarDate()
             if (refreshedToday != previousToday) {
+                if (latestSelectedDate.value == previousToday) {
+                    selectedDate = refreshedToday
+                }
                 today = refreshedToday
                 val previousTodayMonth = BudgetMonth.keyOf(previousToday.year, previousToday.month)
                 val refreshedTodayMonth = BudgetMonth.keyOf(refreshedToday.year, refreshedToday.month)
@@ -191,6 +192,23 @@ fun CalendarScreen(
         }
     }
 
+    fun navigateFromMonthHeader(delta: Int) {
+        val nextKey = shiftMonth(monthKey, delta)
+        val target = BudgetMonth.parse(nextKey) ?: return
+        if (nextKey == monthKey) return
+        selectedDate = CalendarDayPolicy.inMonth(selectedDate, target.year, target.month)
+        navigateMonth(nextKey)
+        val message = if (nextKey == BudgetMonth.currentKey()) {
+            tr("已回到本月")
+        } else {
+            CalendarDateText.switchedMonth(target.year, target.month)
+        }
+        coroutineScope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
     val parts = BudgetMonth.parse(monthKey) ?: BudgetMonth.parse(BudgetMonth.currentKey())!!
     val (monthStart, monthEnd) = remember(monthKey) { BudgetMonth.range(monthKey) }
     val monthTransactions = remember(transactions, monthKey) {
@@ -204,6 +222,12 @@ fun CalendarScreen(
             !it.syncDeleted && dateOf(it.timestamp) in start..end
         }.sortedByDescending { it.timestamp }
     }
+    val dailyTransactions = remember(transactions, selectedDate) {
+        CalendarDayPolicy.transactionsOn(transactions, selectedDate)
+    }
+    val dailySummary = remember(dailyTransactions) {
+        CalendarDayPolicy.summarize(dailyTransactions)
+    }
 
     fun save() {
         prefs.edit()
@@ -213,154 +237,187 @@ fun CalendarScreen(
             .apply()
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            // 顶部状态栏留白由外层 Scaffold 的 innerPadding 负责，这里再加会翻倍
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-    ) {
-        Row(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 56.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .fillMaxSize()
+                // 顶部状态栏留白由外层 Scaffold 的 innerPadding 负责，这里再加会翻倍
+                .padding(horizontal = 16.dp, vertical = 4.dp),
         ) {
-            Text(
-                text = tr("日历"),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-        }
-        MonthHeader(
-            monthKey = monthKey,
-            onPrevious = { navigateMonth(shiftMonth(monthKey, -1)) },
-            onNext = { navigateMonth(shiftMonth(monthKey, 1)) },
-            menu = {
-                Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = tr("日历设置"))
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                    ) {
-                        HeatmapMode.entries.forEach { mode ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 56.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = tr("日历"),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+            MonthHeader(
+                monthKey = monthKey,
+                onPrevious = { navigateFromMonthHeader(-1) },
+                onNext = { navigateFromMonthHeader(1) },
+                menu = {
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = tr("日历设置"))
+                        }
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false },
+                        ) {
+                            HeatmapMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text((if (mode == heatmap) "✓ " else "") + tr("日期高亮：") + tr(mode.label))
+                                    },
+                                    onClick = {
+                                        heatmap = mode
+                                        save()
+                                        menuExpanded = false
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = {
-                                    Text((if (mode == heatmap) "✓ " else "") + tr("日期高亮：") + tr(mode.label))
+                                    Text(
+                                        tr("周起始日：") +
+                                            if (weekStartsMonday) tr("周一") else tr("周日"),
+                                    )
                                 },
                                 onClick = {
-                                    heatmap = mode
+                                    weekStartsMonday = !weekStartsMonday
                                     save()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(tr("农历：") + if (showLunar) tr("显示") else tr("隐藏")) },
+                                onClick = {
+                                    showLunar = !showLunar
+                                    save()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(tr("清除选择")) },
+                                onClick = {
+                                    rangeStart = null
+                                    rangeEnd = null
                                     menuExpanded = false
                                 },
                             )
                         }
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    tr("周起始日：") +
-                                        if (weekStartsMonday) tr("周一") else tr("周日"),
-                                )
-                            },
-                            onClick = {
-                                weekStartsMonday = !weekStartsMonday
-                                save()
-                            },
+                    }
+                },
+            )
+            MonthTotalsRow(monthTransactions)
+            CalendarMonthGrid(
+                year = parts.year,
+                month = parts.month,
+                transactions = monthTransactions,
+                weekStartsMonday = weekStartsMonday,
+                showLunar = showLunar,
+                heatmap = heatmap,
+                selectedDate = selectedDate,
+                rangeStart = rangeStart,
+                rangeEnd = rangeEnd,
+                onSelect = { start, end ->
+                    selectedDate = end
+                    if (start == end) {
+                        rangeStart = null
+                        rangeEnd = null
+                    } else {
+                        rangeStart = start
+                        rangeEnd = end
+                    }
+                },
+                onSwipeDate = { delta ->
+                    selectedDate = CalendarDayPolicy.shift(selectedDate, delta)
+                    rangeStart = null
+                    rangeEnd = null
+                    val targetMonth = BudgetMonth.keyOf(selectedDate.year, selectedDate.month)
+                    if (targetMonth != monthKey) navigateMonth(targetMonth)
+                },
+                onCrossMonth = { targetKey, anchor ->
+                    // 跨月拖动不调用 navigateMonth：它会把区间清空，而这里必须保留
+                    // 长按的那个起点，只把终点落到目标月最靠近起点的一天。
+                    val target = BudgetMonth.parse(targetKey)
+                    if (target != null) {
+                        monthKey = targetKey
+                        hasManuallyNavigatedMonth = true
+                        val boundary = CalendarDate(
+                            target.year,
+                            target.month,
+                            rangeEndDayIn(anchor, target.year, target.month),
                         )
-                        DropdownMenuItem(
-                            text = { Text(tr("农历：") + if (showLunar) tr("显示") else tr("隐藏")) },
-                            onClick = {
-                                showLunar = !showLunar
-                                save()
+                        selectedDate = boundary
+                        rangeStart = minOf(anchor, boundary)
+                        rangeEnd = maxOf(anchor, boundary)
+                    }
+                },
+            )
+            if (rangeStart != null && rangeEnd != null) {
+                Spacer(Modifier.height(4.dp))
+                SelectionSummary(
+                    start = rangeStart,
+                    end = rangeEnd,
+                    transactions = selectedTransactions,
+                    onClear = {
+                        rangeStart = null
+                        rangeEnd = null
+                    },
+                )
+                if (selectedTransactions.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(top = 8.dp),
+                    ) {
+                        items(selectedTransactions, key = { it.id }) { transaction ->
+                            CalendarLedgerTransactionRow(transaction) { onOpenDetail(transaction.id) }
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = if (rangeStart == rangeEnd) {
+                                tr("这一天你还没有任何记账")
+                            } else {
+                                tr("这段时间你还没有任何记账")
                             },
-                        )
-                        DropdownMenuItem(
-                            text = { Text(tr("清除选择")) },
-                            onClick = {
-                                rangeStart = null
-                                rangeEnd = null
-                                menuExpanded = false
-                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
-            },
-        )
-        MonthTotalsRow(monthTransactions)
-        CalendarMonthGrid(
-            year = parts.year,
-            month = parts.month,
-            transactions = monthTransactions,
-            weekStartsMonday = weekStartsMonday,
-            showLunar = showLunar,
-            heatmap = heatmap,
-            rangeStart = rangeStart,
-            rangeEnd = rangeEnd,
-            onSelect = { start, end ->
-                rangeStart = start
-                rangeEnd = end
-            },
-            onCrossMonth = { targetKey, anchor ->
-                // 跨月拖动不调用 navigateMonth：它会把区间清空，而这里必须保留
-                // 长按的那个起点，只把终点落到目标月最靠近起点的一天。
-                val target = BudgetMonth.parse(targetKey)
-                if (target != null) {
-                    monthKey = targetKey
-                    hasManuallyNavigatedMonth = true
-                    val boundary = CalendarDate(
-                        target.year,
-                        target.month,
-                        rangeEndDayIn(anchor, target.year, target.month),
-                    )
-                    rangeStart = minOf(anchor, boundary)
-                    rangeEnd = maxOf(anchor, boundary)
-                }
-            },
-        )
-        Spacer(Modifier.height(4.dp))
-        SelectionSummary(
-            start = rangeStart,
-            end = rangeEnd,
-            transactions = selectedTransactions,
-            monthFallback = monthTransactions,
-            onClear = {
-                rangeStart = null
-                rangeEnd = null
-            },
-        )
-        if (selectedTransactions.isNotEmpty()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = 8.dp),
-            ) {
-                items(selectedTransactions, key = { it.id }) { transaction ->
-                    CalendarTransactionRow(transaction) { onOpenDetail(transaction.id) }
-                }
-            }
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (rangeStart != null && rangeEnd != null) {
-                    Text(
-                        text = if (rangeStart == rangeEnd) {
-                            tr("这一天你还没有任何记账")
-                        } else {
-                            tr("这段时间你还没有任何记账")
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            } else {
+                DailyDetailPanel(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(top = 8.dp),
+                    date = selectedDate,
+                    transactions = dailyTransactions,
+                    summary = dailySummary,
+                    onOpenDetail = onOpenDetail,
+                )
             }
         }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }
 
@@ -482,9 +539,11 @@ private fun CalendarMonthGrid(
     weekStartsMonday: Boolean,
     showLunar: Boolean,
     heatmap: HeatmapMode,
+    selectedDate: CalendarDate,
     rangeStart: CalendarDate?,
     rangeEnd: CalendarDate?,
     onSelect: (CalendarDate, CalendarDate) -> Unit,
+    onSwipeDate: (Int) -> Unit,
     onCrossMonth: (targetMonthKey: String, anchor: CalendarDate) -> Unit,
 ) {
     val daysInMonth = daysInMonth(year, month)
@@ -492,6 +551,7 @@ private fun CalendarMonthGrid(
     val density = LocalDensity.current
     val rowHeightPx = with(density) { 44.dp.toPx() }
     val reverseCrossDragPx = with(density) { 24.dp.toPx() }
+    val swipeDateThresholdPx = with(density) { 60.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
     // 手势协程的 key 只有尺寸：跨月会重组，但手指还没松，协程不能重启。
     // 因此月份、日偏移这些易变值统一从最新状态里读。
@@ -501,6 +561,7 @@ private fun CalendarMonthGrid(
     val latestDays = rememberUpdatedState(daysInMonth)
     val latestWeekStartsMonday = rememberUpdatedState(weekStartsMonday)
     val latestOnSelect = rememberUpdatedState(onSelect)
+    val latestOnSwipeDate = rememberUpdatedState(onSwipeDate)
     val latestOnCrossMonth = rememberUpdatedState(onCrossMonth)
     val latestHaptics = rememberUpdatedState(LocalHapticFeedback.current)
     val byDay = remember(transactions) { transactions.groupBy { dayOf(it.timestamp) } }
@@ -565,7 +626,7 @@ private fun CalendarMonthGrid(
                         ) ?: return@awaitEachGesture
                         val anchor = CalendarDate(anchorYear, anchorMonth, anchorDay)
                         // 跨月只属于「长按进入区间选择后拖到空白处」：
-                        // 普通点按选单日，普通横滑不切月也不改选中。
+                        // 点按选单日，水平滑动前后一天；垂直移动不由横滑识别器消费。
                         val longPress = awaitLongPressOrCancellation(down.id)
                         if (longPress == null) {
                             if (currentEvent.changes.all { !it.pressed }) {
@@ -736,6 +797,23 @@ private fun CalendarMonthGrid(
                             change.consume()
                         }
                     }
+                }
+                .pointerInput(swipeDateThresholdPx) {
+                    var horizontalTravel = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { horizontalTravel = 0f },
+                        onDragEnd = {
+                            when {
+                                horizontalTravel <= -swipeDateThresholdPx -> latestOnSwipeDate.value(1)
+                                horizontalTravel >= swipeDateThresholdPx -> latestOnSwipeDate.value(-1)
+                            }
+                        },
+                        onDragCancel = { horizontalTravel = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            horizontalTravel += dragAmount
+                            change.consume()
+                        },
+                    )
                 },
         ) {
             Column(Modifier.fillMaxSize()) {
@@ -751,6 +829,7 @@ private fun CalendarMonthGrid(
                             val date = if (inMonth) CalendarDate(year, month, day) else null
                             val inRange = date != null && rangeStart != null && rangeEnd != null &&
                                 date >= rangeStart && date <= rangeEnd
+                            val isSelected = date != null && date == selectedDate
                             val isEdge = date != null &&
                                 (date == rangeStart || date == rangeEnd)
                             val heat = if (inMonth && heatMax > 0) {
@@ -772,7 +851,7 @@ private fun CalendarMonthGrid(
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(
                                         when {
-                                            isEdge -> MaterialTheme.colorScheme.primary
+                                            isEdge || isSelected -> MaterialTheme.colorScheme.primary
                                             inRange -> MaterialTheme.colorScheme.primaryContainer
                                             // 有支出/收入的日子直接把整格底色染上，不再用底部小条
                                             heat > 0f -> base.copy(alpha = 0.06f + 0.16f * heat)
@@ -786,9 +865,9 @@ private fun CalendarMonthGrid(
                                         Text(
                                             text = "$day",
                                             style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
-                                            fontWeight = if (isEdge || inRange) FontWeight.Bold else FontWeight.Normal,
+                                            fontWeight = if (isEdge || isSelected || inRange) FontWeight.Bold else FontWeight.Normal,
                                             color = when {
-                                                isEdge -> MaterialTheme.colorScheme.onPrimary
+                                                isEdge || isSelected -> MaterialTheme.colorScheme.onPrimary
                                                 inRange -> MaterialTheme.colorScheme.onPrimaryContainer
                                                 else -> MaterialTheme.colorScheme.onSurface
                                             },
@@ -801,7 +880,7 @@ private fun CalendarMonthGrid(
                                                     lineHeight = 10.sp,
                                                 ),
                                                 color = when {
-                                                    isEdge -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                                    isEdge || isSelected -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
                                                     inRange -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
                                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                                 },
@@ -824,12 +903,11 @@ private fun SelectionSummary(
     start: CalendarDate?,
     end: CalendarDate?,
     transactions: List<TransactionEntity>,
-    monthFallback: List<TransactionEntity>,
     onClear: () -> Unit,
 ) {
     val semantic = LocalQingSemanticColors.current
     val hasSelection = start != null && end != null
-    val source = if (hasSelection) transactions else monthFallback
+    val source = transactions
     val includedExpenses = source.filter {
         StatsTransactionPolicy.matches(it, TransactionType.EXPENSE)
     }
@@ -914,78 +992,90 @@ private fun SelectionSummary(
 }
 
 @Composable
-private fun CalendarTransactionRow(transaction: TransactionEntity, onClick: () -> Unit) {
-    val expense = transaction.type == TransactionType.EXPENSE.name
-    val type = when (transaction.type) {
-        TransactionType.EXPENSE.name -> TransactionType.EXPENSE
-        TransactionType.INCOME.name -> TransactionType.INCOME
-        else -> null
-    }
-    val includedInStats = type?.let { StatsTransactionPolicy.matches(transaction, it) } == true
-    val excludedReason = if (includedInStats) {
-        null
-    } else {
-        when {
-            transaction.remoteReviewStatus == "refund" -> tr("退款")
-            transaction.remoteReviewStatus == "possible_duplicate" ||
-                transaction.duplicateOfId != null -> tr("待确认重复")
-            transaction.remoteReviewStatus == "transfer" ||
-                (expense && transaction.category == "TRANSFER") -> tr("转账")
-            else -> tr("不计入")
-        }
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+private fun DailyDetailPanel(
+    modifier: Modifier = Modifier,
+    date: CalendarDate,
+    transactions: List<TransactionEntity>,
+    summary: CalendarDaySummary,
+    onOpenDetail: (Long) -> Unit,
+) {
+    val semantic = LocalQingSemanticColors.current
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Text(
-            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(transaction.timestamp)),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = transaction.merchant.ifBlank { tr("未知商户") },
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = transaction.note,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            excludedReason?.let { reason ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = reason,
-                    modifier = Modifier
-                        .padding(top = 2.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
+                    text = CalendarDateText.dayWithWeekday(date.year, date.month, date.day),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${transactions.size} ${tr("笔")}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Text(
-            text = (if (expense) "−" else "+") + formatCny(transaction.amountCents),
-            style = MaterialTheme.typography.titleSmall,
-            color = if (expense) {
-                LocalQingSemanticColors.current.expenseText
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CalendarMetric(
+                    tr("支出"),
+                    formatCny(summary.expenseCents),
+                    semantic.expenseText,
+                    Modifier.weight(1f),
+                )
+                CalendarMetric(
+                    tr("收入"),
+                    formatCny(summary.incomeCents),
+                    semantic.income,
+                    Modifier.weight(1f),
+                )
+                val balance = summary.balanceCents
+                CalendarMetric(
+                    tr("结余"),
+                    (if (balance >= 0) "+" else "−") + formatCny(kotlin.math.abs(balance)),
+                    if (balance >= 0) semantic.income else semantic.expenseText,
+                    Modifier.weight(1f),
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            if (transactions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = tr("这天没有记账"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             } else {
-                LocalQingSemanticColors.current.income
-            },
-            fontWeight = FontWeight.SemiBold,
-        )
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(top = 2.dp, bottom = 4.dp),
+                ) {
+                    items(transactions, key = { it.id }) { transaction ->
+                        CalendarLedgerTransactionRow(transaction) { onOpenDetail(transaction.id) }
+                    }
+                }
+            }
+        }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 private fun dayAt(
@@ -1055,15 +1145,6 @@ private fun firstDayOffset(year: Int, month: Int, weekStartsMonday: Boolean): In
     }.get(Calendar.DAY_OF_WEEK)
     val first = if (weekStartsMonday) Calendar.MONDAY else Calendar.SUNDAY
     return (dayOfWeek - first + 7) % 7
-}
-
-private data class CalendarDate(
-    val year: Int,
-    val month: Int,
-    val day: Int,
-) : Comparable<CalendarDate> {
-    override fun compareTo(other: CalendarDate): Int =
-        compareValuesBy(this, other, { it.year }, { it.month }, { it.day })
 }
 
 private val CalendarDateSaver = Saver<CalendarDate, String>(

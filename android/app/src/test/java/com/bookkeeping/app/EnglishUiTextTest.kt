@@ -212,6 +212,7 @@ class EnglishUiTextTest {
             "长按日期拖动选择区间，或点选单日" to
                 "Press and drag on a day to select a range, or tap a single day",
             "这一天你还没有任何记账" to "No transactions recorded on this day",
+            "这天没有记账" to "No transactions recorded on this day",
             "这段时间你还没有任何记账" to "No transactions recorded during this period",
             "滑动日期选择区间，或点选单日" to "Swipe to select a date range, or tap a single day",
             "未知商户" to "Unknown merchant",
@@ -230,6 +231,7 @@ class EnglishUiTextTest {
     fun monthPickerLabelsTranslate() {
         assertEquals("Select month", EnglishUiText.translate("选择月份"))
         assertEquals("Back to this month", EnglishUiText.translate("回到本月"))
+        assertEquals("Back to this month", EnglishUiText.translate("已回到本月"))
         assertEquals("Previous year", EnglishUiText.translate("上一年"))
         assertEquals("Next year", EnglishUiText.translate("下一年"))
         assertEquals("Cancel", EnglishUiText.translate("取消"))
