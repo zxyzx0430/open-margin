@@ -411,7 +411,7 @@ fun AddTransactionDialog(
                     OutlinedTextField(
                         value = merchant,
                         onValueChange = { merchant = it },
-                        label = { Text(tr("商户/对方")) },
+                        label = { Text(tr("商户/对方（可选）")) },
                         singleLine = true,
                         modifier = Modifier.weight(1.15f),
                     )

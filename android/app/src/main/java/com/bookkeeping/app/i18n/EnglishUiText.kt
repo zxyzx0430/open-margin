@@ -1048,6 +1048,8 @@ internal object EnglishUiText {
         "比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐" to
             "e.g. Nov 16, 12:00 PM at McDonald's, 36.50, food, WeChat Pay, note: overtime meal",
         "一句话记账" to "Quick entry",
+        "例：午餐 36 元，微信支付" to "e.g. Lunch, ¥36, paid with WeChat",
+        "可留空；识别后自动填表" to "Optional; recognized text fills the form",
         "写下消费或收入，自动帮你填好账单" to
             "Describe the expense or income and the form fills itself",
         "语音记账" to "Voice entry",
