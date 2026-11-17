@@ -169,7 +169,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 {"wizard":{"running":true,"pids":[1234],"statePid":1234,"stateMatches":true,"url":"http://127.0.0.1:18770/"}}
 ```
 
-`Launch-Setup.ps1` 在选择新端口前先调用它：`running=true` 时直接打开已有 URL；`statePid` 存活但 `stateMatches=false` 时先调用 `Stop-OpenMargin.ps1 -WizardOnly` 清理过期状态，不会静默在 18771 再起一个向导。`Stop-OpenMargin.ps1 -WizardOnly` 也用于明确停止旧向导。
+`Launch-Setup.ps1` 在选择新端口前先调用它：`running=true` 时直接打开已有 URL；`statePid` 存活但 `stateMatches=false` 时先调用 `Stop-OpenMargin.ps1 -WizardOnly` 清理过期状态，不会静默在 18771 再起一个向导。`Stop-OpenMargin.ps1 -WizardOnly` 也用于明确停止旧向导。从开始菜单启动时，`Launch-Setup.ps1` 默认请求一次 UAC 以管理员运行（与安装器的“一次 UAC”设计一致），`/NOELEVATE` 可强制普通用户运行；浏览器 token 文件 `setup-web-url.txt` 在向导运行期间保留，向导退出时删除。
 
 **本地权限（`Set-AppAcl.ps1` / `Install-UrlAcl.ps1`）：**
 
@@ -214,8 +214,8 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 - **Docker Desktop 许可/同意**：安装器在安装任何文件前显示自定义“Docker Desktop 许可与依赖说明”页，内容来自 `DockerDesktopNotice.txt`；必须勾选“我已阅读并理解上述说明”才能继续。文案说明 Docker Subscription Service Agreement、个人/教育/非商业开源/小企业免费条件（员工 <250 且年收入 <$10M）、商业订阅链接，以及向导的 `--accept-license` 会代表用户接受 Docker 条款。勾选后在 `{app}\docker-license-ack.txt` 写确认标记（时间、安装器版本、说明文件名；不含账号、密码或订阅密钥）。
   - **集成结果**：向导的 `install-deps` 卡片现在显示 Docker 许可同意复选框；`lib/Dependencies.ps1` 的 `Install-OmDockerDesktop` 只有在 `{app}\docker-license-ack.txt` 存在（安装器已确认）或本次请求携带 `licenseAcknowledged=true`（网页复选框）时才传 `--accept-license`，否则返回 `DOCKER_LICENSE_REQUIRED` 并提示用户确认许可。
 - **安装前要求页**：`REQUIREMENTS.txt` 通过 `InfoBeforeFile` 在 Ready 页前显示；涵盖 Windows 22H2+/19044、虚拟化、15 GB 磁盘、UAC、Docker/Tailscale、SmartScreen、SHA256、自定义路径、浏览器兜底和离线包位置。`README-INSTALL.txt` 是开始菜单“安装说明”和同目录文本说明。
-- **浏览器兜底与单实例**：安装完成后 `[Run]` 启动 `Launch-Setup.ps1`，且已去掉 `skipifsilent`，静默安装也会拉起向导。向导在 18770–18779 选空闲端口并打开浏览器。README-INSTALL 说明浏览器未打开时查看 `%LOCALAPPDATA%\OpenMargin\setup-web.json` 的端口、结束旧隐藏 `powershell.exe` 后重新打开“清衡设置”，并明确只允许同时运行一个向导。
-  - **集成结果**：`Start-OpenMarginSetupWeb.ps1` 不再吞掉 `Start-Process $url` 失败，会把 URL 写入仅当前用户可读的 `setup-web-url.txt`；`Launch-Setup.ps1` 启动前调用 `Stop-OpenMargin.ps1 -Status` 复用存活向导，清理 PID 已失效的残留 `setup-web.json`，浏览器打不开时用 MessageBox 显示完整 URL（含 token）。
+- **浏览器兜底与单实例**：安装完成后 `[Run]` 启动 `Launch-Setup.ps1`，且已去掉 `skipifsilent`，静默安装也会拉起向导。向导在 18770–18779 选空闲端口并打开浏览器。README-INSTALL 说明浏览器未打开时查看 `%LOCALAPPDATA%\OpenMargin\setup-web.json` 的端口、结束旧隐藏 `powershell.exe` 后重新打开“清衡设置”，并明确只允许同时运行一个向导。`Launch-Setup.ps1` 会用 `explorer.exe` 把 URL 交给原用户 shell，等待浏览器进程出现；若没有出现则退回 `Start-Process`，仍失败时弹出包含完整 token URL 的 MessageBox。token 文件在向导运行期间保留，避免 handoff 失败后无法恢复。
+  - **集成结果**：`Start-OpenMarginSetupWeb.ps1` 不再吞掉 `Start-Process $url` 失败，会把 URL 写入仅当前用户可读的 `setup-web-url.txt`；`/api/config` 同时返回 `elevated`，非管理员向导（`/NOELEVATE`）会在环境页显示说明。`open-margin-setup.ps1 check`/`status` 与网页 `check` 都会忽略向导自身的 setup 端口（含 `setup-web.json` 记录的实时端口），不会再误报 `PORT_CONFLICT`。
 - **自定义路径迁移**：`UsePreviousAppDir=yes` 会优先沿用注册表里的 `InstallLocation`（本机现有安装即 `D:\OpenMargin\app`）；`DirExistsWarning=no` 保留 Inno 的升级/修复行为。`[Code]` 在选择目录页检测“上一安装目录 ≠ 新目录”或“默认目录（D:\OpenMargin\app，无 D: 时 E:\OpenMargin\app，再退回系统盘）已存在”，用中文警告说明继续会留下两套程序目录/secrets/看门狗，旧容器和命名卷不会自动迁移或删除。
   - `Migrate-OpenMargin.ps1`（新增，安装后在 `{app}\deploy\windows\setup\installer\`）默认只读：扫描 Inno 卸载注册表（AppId `{9D2D6B5A-...}`）和常见路径，报告容器/命名卷/看门狗状态；`-Backup -Yes` 把 `secrets/`、`.env`、`compose.yaml` 复制到 `%LOCALAPPDATA%\OpenMargin\migration-backups\<timestamp>` 并写 `MIGRATION.json`（含 SHA256）；`-StopOld -Yes` 执行 `docker compose ... stop` 并结束旧看门狗任务（保留计划任务、容器和卷）；`-CopySecrets -Yes` 把旧 `secrets/` 复制到新根且不覆盖已有文件。脚本不删除文件、不卸载、不执行 `docker compose down -v`。
 - **离线包位置**：仍是 GitHub Release 的独立资产 `OpenMargin-Offline-<version>.tar.gz` + `.sha256`；安装器和 `REQUIREMENTS.txt` 不承诺“完全离线可装”。
