@@ -1,0 +1,43 @@
+﻿清衡 Open Margin｜Docker Desktop 许可与依赖说明
+=================================================
+
+请先阅读本页，再决定是否继续安装。
+
+一、安装器会做什么
+------------------
+Open Margin 安装器本身不安装 Docker Desktop。安装完成后，向导中的
+“一键安装依赖”可能会为你安装 Docker Desktop（以及 WSL2 和 Tailscale）。
+为免交互，向导会调用 Docker 官方安装程序并传入 --accept-license 参数；
+这个参数会让 Docker 安装程序代表你接受 Docker 的许可条款。
+
+二、Docker Desktop 的许可
+-------------------------
+Docker Desktop 是 Docker, Inc. 的产品，受 Docker Subscription Service Agreement（Docker 订阅服务协议）约束，不属于 Open Margin。
+Docker Desktop 通常对个人使用、教育、非商业开源项目，以及员工少于
+250 人且年收入低于 1000 万美元的小型企业免费；其他商业使用需要付费
+订阅。具体条件、规模和价格以 Docker 官方页面为准，并可能随时间变化。
+
+Docker 官方条款与价格：
+- 订阅服务协议：https://www.docker.com/legal/docker-subscription-service-agreement/
+- 价格与订阅说明：https://www.docker.com/pricing/
+- Desktop 许可说明：https://docs.docker.com/subscription/desktop-license/
+
+三、你的确认
+------------
+- 你有责任在安装前确认自己的使用场景是否符合 Docker 的免费条件。
+  如果所在商业组织超过上述规模，请先购买 Docker 订阅，或改用你已获得
+  授权的 Docker 安装方式。
+- 勾选“我已阅读并理解上述说明”并继续，表示你授权本次安装使用 Docker
+  官方安装程序，并已知晓 --accept-license 会代表你接受 Docker 条款。
+  Open Margin 不会替你判断许可类型，也不会代你购买订阅。
+- 如果你不同意，请不要勾选并退出安装器。你可以自行安装并登录 Docker
+  Desktop，或在已安装 Docker 的电脑上直接使用 Open Margin。
+
+四、其他
+--------
+- Open Margin 与 Docker, Inc. 没有隶属或赞助关系；Docker 是 Docker, Inc.
+  的商标。
+- 你的确认会记录在安装目录的 docker-license-ack.txt，供本机向导和排障
+  使用；其中不包含 Docker 账号、密码或订阅密钥。
+
+继续之前，请确认你已阅读并理解上述内容。
