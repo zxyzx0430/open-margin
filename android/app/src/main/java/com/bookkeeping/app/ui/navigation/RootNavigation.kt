@@ -63,7 +63,6 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceCapturePanel
 import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
-@Composable
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun RootNavigation() {
