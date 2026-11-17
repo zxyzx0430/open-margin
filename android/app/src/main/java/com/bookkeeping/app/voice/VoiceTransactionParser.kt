@@ -82,6 +82,13 @@ object VoiceTransactionParser {
         merchantRule: (String) -> TransactionCategory? = { null },
     ): VoiceDraft {
         val original = raw.trim()
+        // 语言分流：没有汉字、又有拉丁字母/美元符号的口述交给英文解析器；
+        // 含汉字（包括 "starbucks 花了 36" 这种中英混合）继续走下面的中文路径，
+        // 英文片段由商户名提取逻辑当作店名处理。纯数字输入也留在中文路径，
+        // 保证既有行为一字不改。
+        if (VoiceEnglishParser.looksEnglish(original)) {
+            return VoiceEnglishParser.parse(original, nowMs, zone, merchantRule)
+        }
         val text = normalize(original)
         if (text.isBlank()) {
             return VoiceDraft(
@@ -901,7 +908,7 @@ object VoiceTransactionParser {
         val masked = String(chars)
         var offset = 0
         for (chunk in masked.split(Regex("[·\\s，,。.、！!？?；;：:]+"))) {
-            if (chunk.length !in 2..8) continue
+            if (!isResidualMerchantChunk(chunk)) continue
             val idx = masked.indexOf(chunk, offset)
             if (idx < 0) continue
             offset = idx + chunk.length
@@ -909,6 +916,17 @@ object VoiceTransactionParser {
             return cleaned to Span(idx, idx + chunk.length)
         }
         return null
+    }
+
+    /**
+     * 残余片段能不能当店名：中文片段沿用原来的 2~8 字；
+     * 纯拉丁片段放宽到 24 字，因为中英混合里 "starbucks" 这种店名本来就长。
+     * 只放行纯拉丁，避免把一长串中文语气词误当店名。
+     */
+    private fun isResidualMerchantChunk(chunk: String): Boolean {
+        if (chunk.length in 2..8) return true
+        return chunk.length in 9..24 &&
+            chunk.all { it in 'a'..'z' || it in 'A'..'Z' || it == '\'' || it == '-' || it == '&' }
     }
 
     private fun cleanMerchant(
@@ -1015,6 +1033,8 @@ object VoiceTransactionParser {
         for ((keywords, category) in CATEGORY_KEYWORDS) {
             if (keywords.any { text.contains(it, ignoreCase = true) }) return category
         }
+        // 中英混合：英文片段当商户名时，中文关键词表认不出，交给英文侧的品牌表。
+        VoiceEnglishParser.categoryFor(merchant, text)?.let { return it }
         return null
     }
 
