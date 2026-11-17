@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.CaptureHealthWorker
 import com.bookkeeping.app.notification.CategoryLearning
 import com.bookkeeping.app.voice.asr.AsrMemoryAction
@@ -36,6 +37,8 @@ class BookkeepingApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Restore the saved per-app locale before any Activity creates resources.
+        AppLanguage.restoreApplicationLocale(this)
         // 最先安装：后面任何初始化出错都能留下堆栈
         CrashCatcher.install(this)
         installVoiceAsr()
