@@ -142,6 +142,40 @@ Base images declared by Dockerfiles, `compose.yaml` image-only services and the
 explicit nginx/python/Wallos defaults are pulled if missing; a failed pull stops
 with a clear error before `docker save`.
 
+### Importing the bundle in the web wizard
+
+The environment screen shows a “Docker 下载失败？使用离线镜像包” card. It links the
+version-matched Release asset, prints the expected SHA256, and offers “我已下载，导入”.
+
+- `select-offline-file` is handled synchronously by `Start-OpenMarginSetupWeb.ps1`
+  so `System.Windows.Forms.OpenFileDialog` runs on the interactive desktop. It is
+  loopback-only, behind the one-time setup token, and returns only the selected path.
+  If the picker cannot open (for example `-DryRun`), the UI exposes a manual path input.
+- `import-offline` is a normal background job because `docker load` can take minutes.
+  `lib/OfflineBundle.ps1` verifies the `.tar.gz` SHA256 (sibling `.sha256` first, then
+  the known release value for v1.3.0), lists the archive with `tar -tvzf` and rejects
+  absolute/traversal/ADS names plus symlink and hardlink entries before extracting to
+  a private temp directory. It then validates `manifest.json` (`kind`, `schema`,
+  `version`, non-empty `images`) and `images.tar`, runs `docker load -i images.tar`,
+  and records `offlineImported=true`. The next `deploy` automatically passes
+  `--no-build`; the downloaded archive is never deleted.
+- A failed import returns `action_required` with a specific code (`DOCKER_MISSING`,
+  `DOCKER_NOT_RUNNING`, `SHA256_MISMATCH`, `ARCHIVE_UNSAFE`, `MANIFEST_INVALID`,
+  `VERSION_MISMATCH`, `DOCKER_LOAD_FAILED`, ...). No file contents are logged.
+
+Example CLI-style check without touching the real bundle:
+
+```powershell
+Import-Module .\OpenMargin.Setup.psd1 -Force -DisableNameChecking
+Initialize-OmPaths -StateRoot $env:TEMP\om-offline-state -RepoRoot (Get-Location).Path
+Get-OmOfflineBundleInfo -Version 1.3.0 | Format-List
+Import-OmOfflineBundle -Path D:\Downloads\OpenMargin-Offline-1.3.0.tar.gz -Version 1.3.0 -DryRun
+```
+
+Tests: `tests/OfflineBundle.Tests.ps1` covers SHA verification, safe extraction
+(including a real traversal and symlink tar), manifest/asset validation, fake
+`docker load` command construction, and the web action contract.
+
 ## 测试 / Tests
 
 ```powershell

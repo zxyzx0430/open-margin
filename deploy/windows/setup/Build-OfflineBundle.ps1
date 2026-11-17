@@ -33,10 +33,10 @@
     temporary .env / secrets/backend.env / secrets/wallos-ledger.env placeholders
     before any compose call and removes only the files it created in finally.
 
-    Note: the setup CLI supports `open-margin-setup.ps1 deploy --no-build`, so
-    a loaded bundle can be used without rebuilding. The web wizard still runs
-    `docker compose up --build` by default; fully offline web-wizard installs
-    are not verified in v1.
+    Note: the setup wizard can import this bundle from the environment screen
+    (`select-offline-file` / `import-offline`). A successful import records
+    `offlineImported=true`, and the next compose start uses `--no-build`.
+    The setup CLI still supports an explicit `deploy --no-build`.
 #>
 param(
     [string]$Version = '',
@@ -488,11 +488,13 @@ try {
         '   tar -xzf ./OpenMargin-Offline-' + $Version + '.tar.gz',
         '   docker load -i ./images.tar',
         '',
-        '3. Start the setup wizard from the Start Menu ("清衡设置") and continue.',
+        '3. Open the setup wizard ("清衡设置"), go to the environment screen,',
+        '   and use "我已下载，导入" to select this .tar.gz. The wizard verifies',
+        '   the SHA256, extracts it safely and runs docker load for you.',
         '',
-        'v1 caveat: the web wizard currently runs `docker compose up --build`;',
-        'the setup CLI supports `deploy --no-build` to use these loaded images.',
-        'Fully offline web-wizard installation is not verified in v1.',
+        '   Manual alternative: tar -xzf the archive, docker load -i ./images.tar,',
+        '   then start the wizard. A successful wizard import records',
+        '   offlineImported=true and the next deploy uses --no-build.',
         ''
     ) -join "`r`n"
     [IO.File]::WriteAllText((Join-Path $staging 'RESTORE.md'), $restore, $utf8)
