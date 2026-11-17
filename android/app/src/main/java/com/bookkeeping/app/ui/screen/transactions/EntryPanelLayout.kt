@@ -1,60 +1,39 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 
 /**
- * Same-window bottom panel chrome, identical to the voice capture panel:
- * scrim, slide-up Surface, centered handle, title row, then content.
- * Height wraps the content; it only scrolls once the content exceeds the screen.
+ * 手动记账面板：和「导入 / 导出账单」用同一个 Material3 ModalBottomSheet。
+ *
+ * 不用自绘覆盖层的原因：自绘层画在页面内容区里，遮罩和面板都只盖住内容区，
+ * 底栏仍然露在外面，看起来就是页面内弹窗；ModalBottomSheet 是窗口级底部面板，
+ * 遮罩盖住整个界面、可下滑关闭、高度跟随内容。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun EntryPanelLayout(
     title: String,
@@ -63,104 +42,38 @@ internal fun EntryPanelLayout(
     headerTrailing: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val density = LocalDensity.current
-    val latestDismiss by rememberUpdatedState(onDismiss)
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    val dismissThresholdPx = with(density) { 72.dp.toPx() }
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    val fade by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(160),
-        label = "entryPanelFade",
-    )
-    val rise by animateDpAsState(
-        targetValue = if (visible) 0.dp else 56.dp,
-        animationSpec = tween(180),
-        label = "entryPanelRise",
-    )
-
-    BackHandler { latestDismiss() }
-    Box(modifier = modifier.fillMaxSize()) {
-        val interaction = remember { MutableInteractionSource() }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .alpha(fade)
-                .background(Color.Black.copy(alpha = 0.45f))
-                .clickable(interactionSource = interaction, indication = null) {
-                    latestDismiss()
-                },
-        )
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
+            modifier = modifier
                 .fillMaxWidth()
-                // safeDrawing 的底部 = max(导航栏, 输入法)：键盘弹出时整块面板上推。
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                .offset { IntOffset(0, dragOffset.roundToInt() + rise.roundToPx()) },
+                .heightIn(max = 720.dp)
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Surface(
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 12.dp,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .draggable(
-                                state = rememberDraggableState { delta ->
-                                    dragOffset = (dragOffset + delta).coerceAtLeast(0f)
-                                },
-                                orientation = Orientation.Vertical,
-                                onDragStopped = {
-                                    if (dragOffset > dismissThresholdPx) {
-                                        latestDismiss()
-                                    }
-                                    dragOffset = 0f
-                                },
-                            ),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 10.dp, bottom = 6.dp)
-                                .size(width = 36.dp, height = 4.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                    RoundedCornerShape(2.dp),
-                                ),
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp, bottom = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = title,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            headerTrailing()
-                        }
-                    }
-                    content()
+                Text(
+                    text = title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                headerTrailing()
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = null)
                 }
             }
+            content()
         }
     }
 }
