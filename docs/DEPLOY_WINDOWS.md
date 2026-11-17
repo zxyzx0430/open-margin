@@ -118,12 +118,12 @@ docker load -i .\images.tar
 - `docker compose --profile windows-private-sync config -q` 与 `--profile windows-public-sync config -q`（使用临时占位 secrets）。
 - 新增 GitHub Actions YAML 通过 Python YAML 解析。
 - `python scripts/check-public-ready.py` 通过（若本机依赖可用）。
-- 安装器已用 **Inno Setup 6.7.4** 在本机实际编译通过：`Build-Installer.ps1 -OutputDir ... -NoAutoInstall` 产出 `OpenMargin-Setup.exe`（2.22 MiB，SHA256 `9d425492...c206f4a`）。编译覆盖中文语言文件、`MinVersion`、Docker 许可自定义页、`REQUIREMENTS.txt` 的 `InfoBeforeFile` 和自定义目录警告。编译有两条既有警告（`[UninstallRun]` 缺 `RunOnceId`；`PrivilegesRequired=admin` 但 `[Run]` 使用 `{username}`），不影响产物。
+- 安装器已用 **Inno Setup 6.7.4** 和 **6.3.3** 在本机实际编译通过：`Build-Installer.ps1 -OutputDir ... -NoAutoInstall` 分别产出 `OpenMargin-Setup.exe`（6.7.4：2.22 MiB，SHA256 `9d425492...c206f4a`；6.3.3：1.94 MiB，SHA256 `c476c5a9...7879ecc3`）。编译覆盖中文语言文件、`MinVersion`、Docker 许可自定义页、`REQUIREMENTS.txt` 的 `InfoBeforeFile` 和自定义目录警告。6.3.3 会忽略 6.5 新增的下载/校验消息并把 3 条旧消息回退为英文（仅下载/哈希错误路径），不影响安装主流程。编译有两条既有警告（`[UninstallRun]` 缺 `RunOnceId`；`PrivilegesRequired=admin` 但 `[Run]` 使用 `{username}`），不影响产物。
 - `Migrate-OpenMargin.ps1` 在 Windows PowerShell 5.1 下以只读模式识别到本机现有安装 `D:\OpenMargin\app`（未修改/卸载该目录）；在 `E:\DevCaches` 合成目录完成 `-Backup -Yes` 与 `-CopySecrets -Yes`，验证备份清单、SHA256 与不覆盖行为。未对真实安装执行 `-StopOld`/`-CopySecrets`。
 
 未验证（发布前必须做）：
 
-- CI（`windows-setup-installer.yml`，choco 安装最新 Inno）尚未在本线程运行；本机只验证了 Inno 6.7.4，Inno 6.3.3/6.4 未单独编译。
+- CI（`windows-setup-installer.yml`，choco 安装最新 Inno）尚未在本线程运行；本机只验证了 Inno 6.7.4 与 6.3.3，Inno 6.4 未单独编译。
 - 安装器 UI 在干净 Windows 10/11 上的实际点击、中文渲染、Docker 许可页勾选和目录迁移警告未做人工走查。
 - 当前分支的 `compose.yaml` 还没有 `windows-public-sync` service；运行时/compose 线程补齐前，远程同步 profile 不完整。
 - 干净 Windows 10 Home 22H2 / Windows 11 虚拟机从零安装。
