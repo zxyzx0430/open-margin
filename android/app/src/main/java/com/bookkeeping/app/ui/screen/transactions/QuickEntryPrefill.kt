@@ -28,7 +28,9 @@ enum class QuickEntryNotice(val message: String) {
  * 只做预填，不做保存：
  * - 解析不出的字段一律返回 null，调用方保持用户原来的输入不动，绝不拿猜的值覆盖；
  * - 金额用「分」转字符串，不经过浮点，不会出现 36.499999；
- * - 时间只说了「哪一天」时，保留「现在」的时分秒，避免把用户没说的钟点写成 00:00。
+ * - 时间只说了「哪一天」时，保留「现在」的时分秒，避免把用户没说的钟点写成 00:00；
+ * - 分类可以先经过一个 [categoryResolver]（商户记忆），但方向性的分类（转账/退款）
+ *   永远不听商户记忆。
  */
 data class QuickEntryPrefill(
     val amountText: String? = null,
@@ -38,15 +40,23 @@ data class QuickEntryPrefill(
     val note: String? = null,
     val account: String? = null,
     val timestampMs: Long? = null,
+    /** 这句话对时间的精确程度；保存前查疑似重复时按它分档。 */
+    val timePrecision: TimePrecision = TimePrecision.NONE,
     val notice: QuickEntryNotice? = null,
 ) {
     companion object {
+        /**
+         * @param categoryResolver 商户记忆：`(商户, 解析器猜的分类) -> 分类?`。
+         *   返回 null 表示「记忆里没有」，保留解析器结果。传 null 则完全跳过记忆
+         *   （单测/其他调用方默认行为不变）。
+         */
         fun from(
             draft: VoiceDraft,
             nowMs: Long,
             zone: TimeZone = TimeZone.getDefault(),
+            categoryResolver: ((merchant: String, parsed: TransactionCategory?) -> TransactionCategory?)? = null,
         ): QuickEntryPrefill {
-            val (type, category) = when (draft.type) {
+            val (type, parsedCategory) = when (draft.type) {
                 VoiceType.EXPENSE -> TransactionType.EXPENSE to draft.category
                 VoiceType.INCOME -> TransactionType.INCOME to draft.category
                 // 账本里没有独立的「转账」收支类型：按支出 + 转账分类记。
@@ -57,7 +67,7 @@ data class QuickEntryPrefill(
             return QuickEntryPrefill(
                 amountText = draft.amountCents?.let { centsToText(it) },
                 type = type,
-                category = category,
+                category = applyCategoryMemory(draft, parsedCategory, categoryResolver),
                 merchant = draft.merchant?.takeIf { it.isNotBlank() },
                 note = draft.note?.takeIf { it.isNotBlank() },
                 // 语音只是录入方式：说「微信支付」只填账户，来源仍然是 MANUAL。
@@ -65,12 +75,40 @@ data class QuickEntryPrefill(
                 timestampMs = draft.occurredAtMs
                     ?.takeIf { draft.dateKnown }
                     ?.let { if (draft.preciseTime) it else keepClockOf(it, nowMs, zone) },
+                timePrecision = precisionOf(draft),
                 notice = when {
                     draft.amountCents == null -> QuickEntryNotice.AMOUNT_MISSING
                     draft.warnings.isNotEmpty() -> QuickEntryNotice.NEEDS_REVIEW
                     else -> null
                 },
             )
+        }
+
+        /**
+         * 商户记忆只改「消费分类」，不改由交易方向决定的分类：
+         * - 转账：账本里固定记 TRANSFER，商户记忆说什么都不算；
+         * - 退款：钱回到手上，分类沿用解析结果，避免被「上次这家记成餐饮」改写；
+         * - 商户为空（「吃饭 30」）：没有可查的键，保留解析器猜的分类。
+         *
+         * resolver 返回 null 也保留解析器结果——「记忆里没有」不等于「记成其他」。
+         */
+        private fun applyCategoryMemory(
+            draft: VoiceDraft,
+            parsed: TransactionCategory?,
+            resolver: ((String, TransactionCategory?) -> TransactionCategory?)?,
+        ): TransactionCategory? {
+            if (resolver == null) return parsed
+            if (draft.type == VoiceType.TRANSFER || draft.type == VoiceType.REFUND) return parsed
+            val merchant = draft.merchant?.trim().orEmpty()
+            if (merchant.isEmpty()) return parsed
+            return resolver(merchant, parsed) ?: parsed
+        }
+
+        /** 说了钟点 = 精确；只说了哪天 = 当天；什么都没说 = 按现在，保守当精确。 */
+        private fun precisionOf(draft: VoiceDraft): TimePrecision = when {
+            !draft.dateKnown -> TimePrecision.NONE
+            draft.preciseTime -> TimePrecision.PRECISE
+            else -> TimePrecision.DATE_ONLY
         }
 
         /** 分 → 表单里的「元」文本，固定两位小数。 */

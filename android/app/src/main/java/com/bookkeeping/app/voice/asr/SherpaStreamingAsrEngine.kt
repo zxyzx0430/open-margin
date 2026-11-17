@@ -99,6 +99,10 @@ class SherpaStreamingAsrEngine(
     @Volatile
     private var currentLanguage: String = LANGUAGE_ZH
 
+    /** warm-up 只做一次；close()/重新加载识别器时复位。 */
+    @Volatile
+    private var warmedUp: Boolean = false
+
     override suspend fun prepare(onProgress: (String) -> Unit): Result<Unit> = prepareMutex.withLock {
         when (state.state) {
             AsrState.CLOSED -> return@withLock Result.failure(
@@ -145,9 +149,45 @@ class SherpaStreamingAsrEngine(
         }
 
         synchronized(nativeLock) { recognizer = readyRecognizer }
+        warmedUp = false
         state.finishPrepare(true)
         eventFlow.tryEmit(AsrEvent.Ready)
         Result.success(Unit)
+    }
+
+    /**
+     * 静音 warm-up：建一条临时流，喂 0.6s 静音后 inputFinished + 把可解的帧全解完，
+     * 再 release 掉这条流。ORT 的图执行器/内存池因此提前热起来，第一次真实录音的
+     * 首字延迟更短。全程不发任何事件（Final 只属于用户会话）。
+     */
+    override suspend fun warmUp() {
+        if (warmedUp) return
+        if (state.state != AsrState.READY) return
+        val active = synchronized(nativeLock) { recognizer } ?: return
+        withContext(Dispatchers.Default) {
+            synchronized(nativeLock) {
+                // 排到锁时可能已经开始录音 / 已经热身过了，再确认一次。
+                if (warmedUp || state.state != AsrState.READY) return@synchronized
+                val stream = try {
+                    active.createStream()
+                } catch (failure: Throwable) {
+                    Log.w(TAG, "warm-up 建流失败，忽略", failure)
+                    return@synchronized
+                }
+                val startedAt = System.currentTimeMillis()
+                try {
+                    stream.acceptWaveform(FloatArray(WARMUP_SILENCE_SAMPLES), SAMPLE_RATE)
+                    stream.inputFinished()
+                    drain(active, stream)
+                    warmedUp = true
+                    Log.d(TAG, "warm-up 完成：0.6s 静音，耗时 ${System.currentTimeMillis() - startedAt}ms")
+                } catch (failure: Throwable) {
+                    Log.w(TAG, "warm-up 失败，忽略（不影响识别）", failure)
+                } finally {
+                    runCatching { stream.release() }
+                }
+            }
+        }
     }
 
     override fun startSession(language: String) {
@@ -214,9 +254,20 @@ class SherpaStreamingAsrEngine(
         }
     }
 
+    /**
+     * 中止会话：麦克风立刻放掉，半句话丢弃，识别器继续留在内存里（进程级常驻）。
+     * 面板关闭 / 切后台 / Activity 销毁都走这里，绝不 close() 引擎。
+     */
+    override fun cancelSession() {
+        if (state.state != AsrState.RECORDING) return
+        Log.d(TAG, "会话被放弃，麦克风释放；识别器保持常驻")
+        closeActiveSession()
+    }
+
     override fun close() {
         // 幂等：第二次调用直接返回。
         if (!state.close()) return
+        warmedUp = false
         finishRequested.set(true)
         runCatching { microphone?.stop() }
         runCatching { microphone?.release() }
@@ -389,6 +440,7 @@ class SherpaStreamingAsrEngine(
         const val FEATURE_DIM = 80
         const val SAMPLES_PER_BATCH = 1_600 // 100ms
         const val TAIL_SILENCE_SAMPLES = 9_600 // 0.6s，保证最后一个字的帧被送进解码器
+        const val WARMUP_SILENCE_SAMPLES = 9_600 // 0.6s，静音热身，不产生任何事件
         const val AUDIO_QUEUE_CAPACITY = 32
         const val MAX_DECODE_STEPS = 512
         const val RELEASE_TIMEOUT_MS = 2_000L

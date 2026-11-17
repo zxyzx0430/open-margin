@@ -4,6 +4,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.merchant.MerchantRules
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -173,5 +174,45 @@ class CategoryClassifierTest {
         assertEquals("星巴克", MerchantNormalizer.normalize("支付宝-星巴克(万象城店)-1234"))
         assertEquals("美团买药", MerchantNormalizer.normalize("微信支付-美团买药"))
         assertEquals("五邑大学", MerchantNormalizer.normalize("五邑大学"))
+    }
+
+    // ================================================================ 表单预填用的商户记忆
+
+    @Test
+    fun rememberedCategoryPrefersExplicitUserRuleOverKeywords() {
+        // 内置关键词说「瑞幸 = 餐饮」，但用户显式规则说购物：规则优先。
+        MerchantRules.put("瑞幸", TransactionCategory.SHOPPING)
+        assertEquals(TransactionCategory.SHOPPING, CategoryClassifier.rememberedCategory("瑞幸"))
+    }
+
+    @Test
+    fun rememberedCategoryUsesLearnedCorrectionOverKeywords() {
+        // 同商户连续两次改成购物 → 学习成立，压过内置的「餐饮」。
+        CategoryLearning.record("麦当劳", TransactionCategory.SHOPPING)
+        CategoryLearning.record("麦当劳", TransactionCategory.SHOPPING)
+        assertEquals(TransactionCategory.SHOPPING, CategoryClassifier.rememberedCategory("麦当劳"))
+    }
+
+    @Test
+    fun rememberedCategoryFallsBackToBuiltInKeywords() {
+        assertEquals(TransactionCategory.FOOD, CategoryClassifier.rememberedCategory("瑞幸"))
+        assertEquals(TransactionCategory.HEALTH, CategoryClassifier.rememberedCategory("美团买药"))
+    }
+
+    @Test
+    fun rememberedCategoryReturnsNullWhenNothingIsRemembered() {
+        // 没有规则、没有学习、没有关键词：返回 null，调用方保留解析器自己的分类，
+        // 而不是被兜底成 OTHER。
+        assertNull(CategoryClassifier.rememberedCategory("楼下小卖部"))
+        assertNull(CategoryClassifier.rememberedCategory(""))
+        assertNull(CategoryClassifier.rememberedCategory("   "))
+    }
+
+    @Test
+    fun rememberedCategoryPrefersExplicitRuleOverLearnedCorrection() {
+        MerchantRules.put("瑞幸", TransactionCategory.EDUCATION)
+        CategoryLearning.record("瑞幸", TransactionCategory.SHOPPING)
+        CategoryLearning.record("瑞幸", TransactionCategory.SHOPPING)
+        assertEquals(TransactionCategory.EDUCATION, CategoryClassifier.rememberedCategory("瑞幸"))
     }
 }

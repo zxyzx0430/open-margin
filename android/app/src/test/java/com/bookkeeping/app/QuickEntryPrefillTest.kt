@@ -4,11 +4,13 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.ui.screen.transactions.QuickEntryNotice
 import com.bookkeeping.app.ui.screen.transactions.QuickEntryPrefill
+import com.bookkeeping.app.ui.screen.transactions.TimePrecision
 import com.bookkeeping.app.voice.VoiceDraft
 import com.bookkeeping.app.voice.VoiceTransactionParser
 import com.bookkeeping.app.voice.VoiceType
 import com.bookkeeping.app.voice.VoiceWarning
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -190,6 +192,142 @@ class QuickEntryPrefillTest {
         // 空白商户当没解析出来，不要用空格覆盖输入框。
         assertNull(prefill.merchant)
         assertEquals("补发", prefill.note)
+    }
+
+    // ================================================================ 商户记忆（分类优先级）
+
+    /** 假的商户记忆：瑞幸→购物、麦当劳→餐饮；其余返回 null（记忆里没有）。 */
+    private val memory: (String, TransactionCategory?) -> TransactionCategory? = { merchant, _ ->
+        when (merchant) {
+            "瑞幸" -> TransactionCategory.SHOPPING
+            "麦当劳" -> TransactionCategory.FOOD
+            else -> null
+        }
+    }
+
+    @Test
+    fun merchantMemoryOverridesParsedCategoryWhenItHasAnEntry() {
+        // 解析器猜餐饮（「咖啡」关键词），但用户之前把瑞幸改成了购物：记忆优先。
+        val prefill = QuickEntryPrefill.from(
+            draft(merchant = "瑞幸", category = TransactionCategory.FOOD),
+            now,
+            zone,
+            categoryResolver = memory,
+        )
+        assertEquals(TransactionCategory.SHOPPING, prefill.category)
+    }
+
+    @Test
+    fun merchantMemoryCanFillACategoryTheParserMissed() {
+        val prefill = QuickEntryPrefill.from(
+            draft(merchant = "麦当劳", category = TransactionCategory.OTHER),
+            now,
+            zone,
+            categoryResolver = memory,
+        )
+        assertEquals(TransactionCategory.FOOD, prefill.category)
+    }
+
+    @Test
+    fun resolverReturningNullKeepsTheParsedCategory() {
+        val prefill = QuickEntryPrefill.from(
+            draft(merchant = "楼下小卖部", category = TransactionCategory.SHOPPING),
+            now,
+            zone,
+            categoryResolver = memory,
+        )
+        assertEquals(TransactionCategory.SHOPPING, prefill.category)
+    }
+
+    @Test
+    fun blankMerchantNeverTouchesMerchantMemory() {
+        var called = false
+        val resolver: (String, TransactionCategory?) -> TransactionCategory? = { _, _ ->
+            called = true
+            TransactionCategory.SHOPPING
+        }
+        val prefill = QuickEntryPrefill.from(
+            draft(merchant = "   ", category = TransactionCategory.FOOD),
+            now,
+            zone,
+            categoryResolver = resolver,
+        )
+        assertFalse("商户为空时不该查商户记忆", called)
+        assertEquals(TransactionCategory.FOOD, prefill.category)
+    }
+
+    @Test
+    fun transferIsDecidedByDirectionAndIgnoresMerchantMemory() {
+        val prefill = QuickEntryPrefill.from(
+            draft(type = VoiceType.TRANSFER, merchant = "瑞幸", category = TransactionCategory.OTHER),
+            now,
+            zone,
+            categoryResolver = memory,
+        )
+        assertEquals(TransactionType.EXPENSE, prefill.type)
+        assertEquals(TransactionCategory.TRANSFER, prefill.category)
+    }
+
+    @Test
+    fun refundKeepsItsParsedCategoryAndIgnoresMerchantMemory() {
+        // 退款由钱的方向决定：不能被「这家店上次记成了购物」改写。
+        val prefill = QuickEntryPrefill.from(
+            draft(type = VoiceType.REFUND, merchant = "瑞幸", category = TransactionCategory.OTHER),
+            now,
+            zone,
+            categoryResolver = memory,
+        )
+        assertEquals(TransactionType.INCOME, prefill.type)
+        assertEquals(TransactionCategory.OTHER, prefill.category)
+    }
+
+    @Test
+    fun resolverCanUseParsedCategoryAsItsOwnFallback() {
+        // 解析参数允许 resolver 自己决定怎么用解析结果；这里确认签名真的把它传进去了。
+        var seen: TransactionCategory? = null
+        val resolver: (String, TransactionCategory?) -> TransactionCategory? = { _, parsed ->
+            seen = parsed
+            null
+        }
+        QuickEntryPrefill.from(
+            draft(merchant = "瑞幸", category = TransactionCategory.FOOD),
+            now,
+            zone,
+            categoryResolver = resolver,
+        )
+        assertEquals(TransactionCategory.FOOD, seen)
+    }
+
+    // ================================================================ 时间精度 → 重复检查窗口
+
+    @Test
+    fun spokeAClockMeansPrecise() {
+        val prefill = QuickEntryPrefill.from(
+            draft(occurredAtMs = at(2026, 11, 16, 21, 30), dateKnown = true, preciseTime = true),
+            now,
+            zone,
+        )
+        assertEquals(TimePrecision.PRECISE, prefill.timePrecision)
+    }
+
+    @Test
+    fun onlyADayMeansDateOnly() {
+        val prefill = QuickEntryPrefill.from(
+            draft(occurredAtMs = at(2026, 11, 16), dateKnown = true, preciseTime = false),
+            now,
+            zone,
+        )
+        assertEquals(TimePrecision.DATE_ONLY, prefill.timePrecision)
+    }
+
+    @Test
+    fun noDateAtAllMeansNoPrecisionClaim() {
+        val prefill = QuickEntryPrefill.from(
+            draft(occurredAtMs = now, dateKnown = false),
+            now,
+            zone,
+        )
+        assertEquals(TimePrecision.NONE, prefill.timePrecision)
     }
 
     // ================================================================ 账户

@@ -48,6 +48,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.MoneyAmount
+import com.bookkeeping.app.notification.CategoryClassifier
 import com.bookkeeping.app.ui.components.QuickEntryBar
 import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.voice.VoiceTransactionParser
@@ -66,11 +67,14 @@ private val ACCOUNT_PRESETS = listOf("微信", "支付宝", "现金", "银行卡
 private data class PendingSave(
     val amountCents: Long,
     val type: TransactionType,
+    val currency: String,
     val category: TransactionCategory,
     val merchant: String,
     val note: String,
     val timestamp: Long,
     val account: String,
+    /** 这句话对时间的精确程度，决定疑似重复检查的同商户窗口。 */
+    val timePrecision: TimePrecision,
 )
 
 // "新建账单"对话框
@@ -95,7 +99,14 @@ fun AddTransactionDialog(
     initialQuickEntry: String = "",
     // 保存前的疑似重复检查。由调用方接到 DAO 的只读查询上；
     // 为 null 表示不检查（例如预留给编辑路径）。命中只会多问一句，不阻止保存。
-    checkDuplicate: (suspend (amountCents: Long, merchant: String, timestampMs: Long) -> DuplicateCandidate?)? = null,
+    checkDuplicate: (suspend (
+        amountCents: Long,
+        type: TransactionType,
+        currency: String,
+        merchant: String,
+        timestampMs: Long,
+        precision: TimePrecision,
+    ) -> DuplicateCandidate?)? = null,
 ) {
     val scope = rememberCoroutineScope()
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
@@ -119,6 +130,8 @@ fun AddTransactionDialog(
     // 账户：空串 = 「不填」，写库时转成 null。编辑已有账单时回填原值。
     var account by remember(initial?.id) { mutableStateOf(initial?.account.orEmpty()) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
+    // 用户是否亲手改过分类：改过之后重新解析一句话也不许覆盖他的选择（「只预填不覆盖」）。
+    var categoryTouched by remember(initial?.id) { mutableStateOf(false) }
     var timestamp by remember(initial?.id) {
         mutableLongStateOf(initial?.timestamp ?: System.currentTimeMillis())
     }
@@ -133,17 +146,21 @@ fun AddTransactionDialog(
     var pendingSave by remember { mutableStateOf<PendingSave?>(null) }
 
     // 解析一句话 → 回填字段。只写解析出来的那一部分，解析不出的保持原值。
+    // 分类额外走一次「商户记忆」：用户显式规则 > 学到的纠正 > 内置关键词（复用
+    // CategoryClassifier 的现成管道），都没有命中才保留解析器猜的分类。
     val applyQuickEntry: (String) -> QuickEntryPrefill = { raw ->
         val prefill = QuickEntryPrefill.from(
             VoiceTransactionParser.parse(raw, System.currentTimeMillis()),
             System.currentTimeMillis(),
+            categoryResolver = { merchant, _ -> CategoryClassifier.rememberedCategory(merchant) },
         )
         prefill.amountText?.let {
             amountText = it
             amountInputError = null
         }
         prefill.type?.let { selectedType = it }
-        prefill.category?.let { selectedCategory = it }
+        // 用户自己选过分类就不再覆盖；没选过才用解析 + 记忆的结果。
+        if (!categoryTouched) prefill.category?.let { selectedCategory = it }
         prefill.merchant?.let { merchant = it }
         prefill.note?.let { note = it }
         prefill.account?.let { account = it }
@@ -168,10 +185,23 @@ fun AddTransactionDialog(
     }
 
     // 手填了金额就用表单值；只写了一句话就解析一次。解析不出金额返回 null，绝不猜。
+    // 手填没有「说了哪天/几点」这句话：时间取「现在」或用户改的日期，保守按精确档查重
+    // （表单只有日期选择器，没有改时分的入口，判断不了就默认精确）。
+    val entryCurrency = initial?.currency?.trim()?.takeIf { it.isNotEmpty() } ?: "CNY"
     val buildPayload: () -> PendingSave? = {
         val typed = MoneyAmount.cents(amountText)
         if (typed != null) {
-            PendingSave(typed, selectedType, selectedCategory, merchant, note, timestamp, account)
+            PendingSave(
+                amountCents = typed,
+                type = selectedType,
+                currency = entryCurrency,
+                category = selectedCategory,
+                merchant = merchant,
+                note = note,
+                timestamp = timestamp,
+                account = account,
+                timePrecision = TimePrecision.PRECISE,
+            )
         } else if (QuickEntryRule.canSubmit(quickEntry)) {
             val prefill = applyQuickEntry(quickEntry)
             val parsed = prefill.amountText?.let { MoneyAmount.cents(it) }
@@ -179,13 +209,15 @@ fun AddTransactionDialog(
                 null
             } else {
                 PendingSave(
-                    parsed,
-                    prefill.type ?: selectedType,
-                    prefill.category ?: selectedCategory,
-                    prefill.merchant ?: merchant,
-                    prefill.note ?: note,
-                    prefill.timestampMs ?: timestamp,
-                    prefill.account ?: account,
+                    amountCents = parsed,
+                    type = prefill.type ?: selectedType,
+                    currency = entryCurrency,
+                    category = prefill.category ?: selectedCategory,
+                    merchant = prefill.merchant ?: merchant,
+                    note = prefill.note ?: note,
+                    timestamp = prefill.timestampMs ?: timestamp,
+                    account = prefill.account ?: account,
+                    timePrecision = prefill.timePrecision,
                 )
             }
         } else {
@@ -207,7 +239,14 @@ fun AddTransactionDialog(
                     checking = true
                     // 读库失败按「没命中」处理；协程取消原样抛出，避免弹窗已关还继续保存。
                     val hit = try {
-                        checker(payload.amountCents, payload.merchant, payload.timestamp)
+                        checker(
+                            payload.amountCents,
+                            payload.type,
+                            payload.currency,
+                            payload.merchant,
+                            payload.timestamp,
+                            payload.timePrecision,
+                        )
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (_: Exception) {
@@ -353,6 +392,8 @@ fun AddTransactionDialog(
                                 text = { Text(tr(cat.displayName)) },
                                 onClick = {
                                     selectedCategory = cat
+                                    // 手工选过就锁定：后面再解析一句话也不覆盖。
+                                    categoryTouched = true
                                     categoryMenuExpanded = false
                                 }
                             )
