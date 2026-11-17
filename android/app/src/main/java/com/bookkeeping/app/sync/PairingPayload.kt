@@ -18,7 +18,7 @@ internal enum class PairingRejectReason {
     INVALID_SERVER_ID,
 }
 
-sealed interface PairingParseResult {
+internal sealed interface PairingParseResult {
     data class Success(val payload: PairingPayload) : PairingParseResult
     data class Rejected(val reason: PairingRejectReason) : PairingParseResult
 }
@@ -33,7 +33,7 @@ sealed interface PairingParseResult {
  * payload only prefills the wizard. Nothing is saved or enabled until the
  * existing read-only probe verifies the ledger and the user confirms.
  */
-data class PairingPayload(
+internal data class PairingPayload(
     val url: String,
     val token: String,
     val serverId: String,

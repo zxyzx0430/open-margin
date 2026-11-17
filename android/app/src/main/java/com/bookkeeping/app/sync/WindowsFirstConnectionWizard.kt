@@ -19,7 +19,7 @@ import java.net.URL
 
 /** Optional onboarding. Existing sync settings remain intact until explicit confirmation. */
 @Composable
-fun WindowsFirstConnectionWizard(initialPayload: PairingPayload? = null) {
+internal fun WindowsFirstConnectionWizard(initialPayload: PairingPayload? = null) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE) }
     var expanded by remember(initialPayload) { mutableStateOf(initialPayload != null) }
