@@ -28,8 +28,8 @@ class EnglishUiTextTest {
             "GitHub 仓库" to "GitHub repository",
             "开源许可" to "Open-source license",
             "源代码以 GNU GPL v3 发布" to "Source code is released under GNU GPL v3",
-            "账本默认本地，语音转写在本机完成；反馈只带版本与机型，不含账本内容" to
-                "Ledger data stays local by default, voice transcription runs on this device, and feedback includes only the app version and device model — never ledger contents.",
+            "所有数据不上传到开发者服务器：账本存储在本机，开启同步后保存在你自己的服务器；语音转写在本机完成；反馈只带版本与机型，不含账本内容" to
+                "No data is uploaded to the developer's servers: the ledger stays on this device and, with sync enabled, on your own server. Voice transcription runs locally; feedback includes only the app version and device model — never ledger contents.",
             "检查更新" to "Check for updates",
             "浏览全部发布版本" to "Browse all releases",
             "仅 Android APP 更新" to "Android app only",
