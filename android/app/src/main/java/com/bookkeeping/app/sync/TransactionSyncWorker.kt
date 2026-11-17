@@ -344,8 +344,8 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         /** 服务器上已经找不到对应记录的 event id；文案要和普通冲突分开讲。 */
         const val PENDING_CONFLICT_MISSING_IDS = "pending_conflict_missing_ids"
 
-        private const val PERIODIC = "finance_periodic_sync"
-        private const val IMMEDIATE = "finance_immediate_sync"
+        internal const val PERIODIC_WORK_NAME = "finance_periodic_sync"
+        internal const val IMMEDIATE_WORK_NAME = "finance_immediate_sync"
         private val mutex = Mutex()
 
         /** Called after the Room insert has completed. */
@@ -356,7 +356,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE, ExistingWorkPolicy.APPEND_OR_REPLACE, job)
+            WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE_WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, job)
         }
 
         fun configure(context: Context, url: String, token: String, enabled: Boolean) {
@@ -385,15 +385,28 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
             edit.apply()
             val wm = WorkManager.getInstance(context)
             if (!enabled) {
-                wm.cancelUniqueWork(PERIODIC)
-                wm.cancelUniqueWork(IMMEDIATE)
+                wm.cancelUniqueWork(PERIODIC_WORK_NAME)
+                wm.cancelUniqueWork(IMMEDIATE_WORK_NAME)
                 return
             }
             val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
             val periodic = PeriodicWorkRequestBuilder<TransactionSyncWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(constraints).build()
-            wm.enqueueUniquePeriodicWork(PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, periodic)
+            wm.enqueueUniquePeriodicWork(PERIODIC_WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, periodic)
             requestImmediate(context)
+        }
+
+        /** Clear credentials while retaining ledger identity, cursors and local transactions. */
+        fun resetConnection(context: Context) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove("url")
+                .remove("token")
+                .putBoolean("enabled", false)
+                .apply()
+            val workManager = WorkManager.getInstance(context)
+            workManager.cancelUniqueWork(PERIODIC_WORK_NAME)
+            workManager.cancelUniqueWork(IMMEDIATE_WORK_NAME)
         }
     }
 }
