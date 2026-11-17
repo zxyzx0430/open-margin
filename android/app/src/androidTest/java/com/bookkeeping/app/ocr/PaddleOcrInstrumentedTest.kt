@@ -20,7 +20,10 @@ import org.junit.runner.RunWith
 class PaddleOcrInstrumentedTest {
     @Test
     fun bundledPaddleEngineLoadsAndRecognizesText() = runBlocking {
-        assumeTrue(Build.SUPPORTED_ABIS.contains("arm64-v8a"))
+        // x86_64 模拟器的 SUPPORTED_ABIS 里也会列出 arm64-v8a（native bridge），
+        // 但打包进来的 OpenCV 原生库在 x86_64 上初始化不了，会返回 opencv_init_failed。
+        // 只在主 ABI 就是 arm64-v8a 的真机上跑，模拟器上跳过。
+        assumeTrue(Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val bitmap = Bitmap.createBitmap(900, 420, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

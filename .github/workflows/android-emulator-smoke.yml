@@ -9,6 +9,7 @@ on:
       - integration/v1.2.0-final-20261013
       - feat/v1.2.0-android-languages-20261013
       - feat/v1.2.0-update-component-scope-20261013
+      - feat/voice-asr-engine
     paths:
       - 'android/app/src/main/**'
       - 'android/app/build.gradle.kts'
@@ -38,6 +39,24 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # 这个 job 也会走到 :app 的 Gradle 配置：缺模型资产/缺 AAR 时配置阶段就失败，
+      # 跟是否真的跑语音无关。缓存键与 android-build.yml 同一套（模型名 + sha256）。
+      - name: Restore on-device ASR model cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/app/src/main/assets/asr
+            android/app/libs
+            ~/.cache/open-margin-asr
+          key: asr-zipformer-medium-ctc-chunk16-7cb84949b8d4f40d72df137e2e3529a1aadfc897e5257460f720bb73c99f10f1-e2f16836a4c712a9a01a1656f4610f66093fe283159883ee66b73ebb6e80364b
+          restore-keys: |
+            asr-zipformer-medium-ctc-chunk16-
+      - name: Prepare on-device ASR model
+        working-directory: android
+        run: |
+          chmod +x app/download-asr-model.sh
+          bash app/download-asr-model.sh
+          bash app/download-asr-model.sh --check
       - name: Emulator instrumentation and application startup
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -64,15 +83,9 @@ jobs:
             adb logcat -c
             adb shell settings put secure enabled_accessibility_services "com.bookkeeping.app.sync2/com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService"
             adb shell settings put secure accessibility_enabled 1
-            success=0
-            for i in $(seq 1 15); do
-              if adb logcat -d -s BkAccessibility:D | grep -q "AccessibilityCaptureService connected"; then
-                success=1
-                break
-              fi
-              sleep 2
-            done
-            test "$success" -eq 1
+            # android-emulator-runner 是一行一个 sh -c 执行的，循环和变量判断必须写成一行；
+            # 拆成多行会报 "Syntax error: end of file unexpected (expecting done)"。
+            success=0; for i in $(seq 1 15); do if adb logcat -d -s BkAccessibility:D | grep -q "AccessibilityCaptureService connected"; then success=1; break; fi; sleep 2; done; test "$success" -eq 1
             adb shell pidof com.bookkeeping.app.sync2
             mkdir -p emulator-proof
             adb shell dumpsys accessibility > "emulator-proof/accessibility-api-${{ matrix.api-level }}.txt"

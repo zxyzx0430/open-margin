@@ -21,6 +21,15 @@ android {
         versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // 只打 arm64-v8a。真机只有 arm64；paddle-ocr/opencv 的预编译库也只有 arm64。
+        // 语音的 sherpa-onnx AAR 自带 x86/x86_64 .so，如果不在这里收敛，debug 包会
+        // 被系统当成 x86_64 原生应用，反而加载不了只有 arm64 的 OCR 库；
+        // 模拟器继续走系统的 arm64 翻译层，和加语音之前的行为一致。
+        ndk {
+            abiFilters.clear()
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -34,12 +43,7 @@ android {
         }
         release {
             isMinifyEnabled = false
-            // 真机只有 arm64：把 x86/x86_64/armeabi-v7a 的 OCR 与 onnx 库去掉，
-            // 包体从 ~77MB 降到 ~45MB。模拟器请用 debug 变体。
-            ndk {
-                abiFilters.clear()
-                abiFilters += "arm64-v8a"
-            }
+            // ABI 已在 defaultConfig 里收敛到 arm64-v8a（release 与 debug 一致）。
         }
     }
     compileOptions {
@@ -55,7 +59,23 @@ android {
     }
 }
 
+// 语音记账的本地 ASR：模型与原生库由 android/app/download-asr-model.sh 准备。
+// 缺文件时在配置阶段直接失败，给出可执行的修复命令——否则会在 Kotlin 编译阶段
+// 抛几十条 “Unresolved reference: k2fsa”，很难看出是模型没下载。
+val asrNativeAar = rootProject.file("app/libs/sherpa-onnx-static-link-onnxruntime-1.13.5.aar")
+if (!asrNativeAar.isFile) {
+    throw GradleException(
+        "缺少 ${asrNativeAar.name}。请先运行：bash android/app/download-asr-model.sh " +
+            "（下载 ~71MB 模型 + ~36MB sherpa-onnx 原生库，带 sha256 校验，可重复执行）",
+    )
+}
+
 dependencies {
+    // 语音记账：本地流式 ASR 原生库（sherpa-onnx 1.13.5，静态链接 onnxruntime）。
+    // 用文件依赖而不是 JitPack 坐标的原因见 download-asr-model.sh 顶部注释：
+    // 带 libonnxruntime.so 的普通 AAR 会和 paddle-ocr 的 ONNX Runtime 撞名。
+    implementation(files(asrNativeAar))
+
     // Compose & 核心
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

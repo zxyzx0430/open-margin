@@ -3,6 +3,8 @@ package com.bookkeeping.app.ui.screen.transactions
 import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,28 +33,50 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.MoneyAmount
+import com.bookkeeping.app.ui.components.QuickEntryBar
+import com.bookkeeping.app.ui.components.QuickEntryRule
+import com.bookkeeping.app.voice.VoiceTransactionParser
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+/** 新建账单里账户一栏的常用值；account 本身是自由文本，存进库里的就是这里的中文。 */
+private val ACCOUNT_PRESETS = listOf("微信", "支付宝", "现金", "银行卡")
+
+/** 点「保存」时算好的待写入内容；重复检查是异步的，命中后还要拿它继续记账。 */
+private data class PendingSave(
+    val amountCents: Long,
+    val type: TransactionType,
+    val category: TransactionCategory,
+    val merchant: String,
+    val note: String,
+    val timestamp: Long,
+    val account: String,
+)
+
 // "新建账单"对话框
-// 这是个无状态 Composable：所有数据从外部传入，所有事件通过回调传出。
-// 嵌入式类比：组合逻辑电路，输入决定输出，没有内部状态。
-@OptIn(ExperimentalMaterial3Api::class)
+// 所有数据从外部传入、所有事件通过回调传出；表单状态只在对话框存活期间存在。
+// 顶部那句「一句话记账」只做预填（解析结果写进表单），保存仍然走 onConfirm。
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddTransactionDialog(
     onDismiss: () -> Unit,
@@ -64,8 +88,16 @@ fun AddTransactionDialog(
         merchant: String,
         note: String,
         timestamp: Long,
+        account: String,
     ) -> Unit,
+    // 语音识别结果带进来的原文：为空就是普通新建。填了就在打开时先解析一次，
+    // 让 ASR 那边只管把文本传进来，不用重复写「填哪个字段」的逻辑。
+    initialQuickEntry: String = "",
+    // 保存前的疑似重复检查。由调用方接到 DAO 的只读查询上；
+    // 为 null 表示不检查（例如预留给编辑路径）。命中只会多问一句，不阻止保存。
+    checkDuplicate: (suspend (amountCents: Long, merchant: String, timestampMs: Long) -> DuplicateCandidate?)? = null,
 ) {
+    val scope = rememberCoroutineScope()
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
     var amountText by remember(initial?.id) {
         mutableStateOf(initial?.let {
@@ -84,11 +116,114 @@ fun AddTransactionDialog(
     }
     var merchant by remember(initial?.id) { mutableStateOf(initial?.merchant ?: "") }
     var note by remember(initial?.id) { mutableStateOf(initial?.note ?: "") }
+    // 账户：空串 = 「不填」，写库时转成 null。编辑已有账单时回填原值。
+    var account by remember(initial?.id) { mutableStateOf(initial?.account.orEmpty()) }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var timestamp by remember(initial?.id) {
         mutableLongStateOf(initial?.timestamp ?: System.currentTimeMillis())
     }
     var showDatePicker by remember { mutableStateOf(false) }
+    // 一句话记账的原文：解析失败要能改两个字重提，所以提交后不清空。
+    var quickEntry by remember(initial?.id, initialQuickEntry) { mutableStateOf(initialQuickEntry) }
+    var quickEntryFocused by remember { mutableStateOf(false) }
+    var quickEntryNotice by remember(initial?.id) { mutableStateOf<QuickEntryNotice?>(null) }
+    // 保存路径的三个状态：正在查 / 查到的疑似重复 / 待写入内容（命中后还要用它继续记账）。
+    var checking by remember { mutableStateOf(false) }
+    var duplicateHit by remember { mutableStateOf<DuplicateCandidate?>(null) }
+    var pendingSave by remember { mutableStateOf<PendingSave?>(null) }
+
+    // 解析一句话 → 回填字段。只写解析出来的那一部分，解析不出的保持原值。
+    val applyQuickEntry: (String) -> QuickEntryPrefill = { raw ->
+        val prefill = QuickEntryPrefill.from(
+            VoiceTransactionParser.parse(raw, System.currentTimeMillis()),
+            System.currentTimeMillis(),
+        )
+        prefill.amountText?.let {
+            amountText = it
+            amountInputError = null
+        }
+        prefill.type?.let { selectedType = it }
+        prefill.category?.let { selectedCategory = it }
+        prefill.merchant?.let { merchant = it }
+        prefill.note?.let { note = it }
+        prefill.account?.let { account = it }
+        prefill.timestampMs?.let { timestamp = it }
+        quickEntryNotice = prefill.notice
+        prefill
+    }
+
+    // 真正写入：把算好的内容原样交回调用方，并清掉本地弹框状态。
+    val submitSave: (PendingSave) -> Unit = { payload ->
+        duplicateHit = null
+        pendingSave = null
+        onConfirm(
+            payload.amountCents,
+            payload.type,
+            payload.category,
+            payload.merchant,
+            payload.note,
+            payload.timestamp,
+            payload.account,
+        )
+    }
+
+    // 手填了金额就用表单值；只写了一句话就解析一次。解析不出金额返回 null，绝不猜。
+    val buildPayload: () -> PendingSave? = {
+        val typed = MoneyAmount.cents(amountText)
+        if (typed != null) {
+            PendingSave(typed, selectedType, selectedCategory, merchant, note, timestamp, account)
+        } else if (QuickEntryRule.canSubmit(quickEntry)) {
+            val prefill = applyQuickEntry(quickEntry)
+            val parsed = prefill.amountText?.let { MoneyAmount.cents(it) }
+            if (parsed == null) {
+                null
+            } else {
+                PendingSave(
+                    parsed,
+                    prefill.type ?: selectedType,
+                    prefill.category ?: selectedCategory,
+                    prefill.merchant ?: merchant,
+                    prefill.note ?: note,
+                    prefill.timestampMs ?: timestamp,
+                    prefill.account ?: account,
+                )
+            }
+        } else {
+            null
+        }
+    }
+
+    // 「确认记账」：先查疑似重复。手动新建和语音（同一句话预填）都走这一条路径。
+    val requestSave: () -> Unit = {
+        // 先落到本地 val：suspend lambda 里不再依赖对可空参数的智能转换。
+        val checker = checkDuplicate
+        val payload = if (checking) null else buildPayload()
+        when {
+            payload == null -> Unit
+            checker == null -> submitSave(payload)
+            else -> {
+                pendingSave = payload
+                scope.launch {
+                    checking = true
+                    // 读库失败按「没命中」处理；协程取消原样抛出，避免弹窗已关还继续保存。
+                    val hit = try {
+                        checker(payload.amountCents, payload.merchant, payload.timestamp)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        null
+                    }
+                    checking = false
+                    if (hit == null) submitSave(payload) else duplicateHit = hit
+                }
+            }
+        }
+    }
+
+    // 语音/上一轮结果直接带进来的原文：打开就填好，用户只需核对。
+    LaunchedEffect(initial?.id, initialQuickEntry) {
+        if (QuickEntryRule.canSubmit(initialQuickEntry)) applyQuickEntry(initialQuickEntry)
+    }
 
     val amountIsNegative = amountText.contains('-') || amountText.contains('−') ||
         (amountText.toDoubleOrNull()?.let { it < 0.0 } == true)
@@ -108,6 +243,28 @@ fun AddTransactionDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // 一句话记账：可以不填；填了就在回车（键盘「完成」）或离开输入框时解析成下面的字段。
+                // 失焦补解析只在表单还没被手工填过时做，免得把用户刚改的金额/商户冲掉。
+                QuickEntryBar(
+                    value = quickEntry,
+                    onValueChange = {
+                        quickEntry = it
+                        if (quickEntryNotice != null) quickEntryNotice = null
+                    },
+                    onSubmit = { raw -> applyQuickEntry(raw) },
+                    warning = quickEntryNotice?.let { tr(it.message) },
+                    fieldModifier = Modifier.onFocusChanged { state ->
+                        if (quickEntryFocused && !state.isFocused) {
+                            val formUntouched =
+                                amountText.isBlank() && merchant.isBlank() && note.isBlank()
+                            if (formUntouched && QuickEntryRule.canSubmit(quickEntry)) {
+                                applyQuickEntry(quickEntry)
+                            }
+                        }
+                        quickEntryFocused = state.isFocused
+                    },
+                )
+
                 // 收入 / 支出 切换
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
@@ -211,6 +368,42 @@ fun AddTransactionDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                // 账户：默认「不填」；选中的就是写进库里的中文值（与自动采集口径一致）。
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = tr("账户"),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = account.isBlank(),
+                            onClick = { account = "" },
+                            label = { Text(tr("不填")) },
+                        )
+                        ACCOUNT_PRESETS.forEach { preset ->
+                            FilterChip(
+                                selected = account == preset,
+                                onClick = { account = if (account == preset) "" else preset },
+                                label = { Text(tr(preset)) },
+                            )
+                        }
+                        // 编辑自动采集的账单时账户可能是「招商银行 (1234)」这类自由文本，
+                        // 不在常用值里也要能看到并保持选中，否则一打开就被改成「不填」。
+                        val custom = account.trim()
+                        if (custom.isNotEmpty() && custom !in ACCOUNT_PRESETS) {
+                            FilterChip(
+                                selected = true,
+                                onClick = { account = "" },
+                                label = { Text(custom) },
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
@@ -222,17 +415,48 @@ fun AddTransactionDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = {
-                    val amount = MoneyAmount.cents(amountText) ?: return@TextButton
-                    onConfirm(amount, selectedType, selectedCategory, merchant, note, timestamp)
-                },
-                enabled = amountValid
-            ) { Text(tr("保存")) }
+                onClick = requestSave,
+                // 只写了一句话时也要能点：金额由解析结果决定。
+                enabled = !checking && (amountValid || QuickEntryRule.canSubmit(quickEntry)),
+            ) {
+                Text(if (checking) tr("正在检查…") else tr("保存"))
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(tr("取消")) }
         }
     )
+
+    // 疑似重复：只提示，不合并、不静默去重。取消回到表单，数据一个都不丢。
+    duplicateHit?.let { hit ->
+        AlertDialog(
+            onDismissRequest = {
+                duplicateHit = null
+                pendingSave = null
+            },
+            title = { Text(tr("可能重复")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(tr("账本里已有一笔相似的账单。"))
+                    Text("${tr("时间")}：${formatDateTime(hit.timestampMs)}")
+                    Text("${tr("商户")}：${hit.merchant.ifBlank { "—" }}")
+                    Text("${tr("金额")}：¥${QuickEntryPrefill.centsToText(hit.amountCents)}")
+                    Text("${tr("来源")}：${saveDuplicateSourceLabel(hit.source)}")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { pendingSave?.let(submitSave) }) {
+                    Text(tr("仍然记这一笔"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    duplicateHit = null
+                    pendingSave = null
+                }) { Text(tr("取消")) }
+            },
+        )
+    }
 
     if (showDatePicker) {
         val datePickerState = rememberDatePickerState(
@@ -259,6 +483,19 @@ fun AddTransactionDialog(
 
 private fun formatDate(timestampMs: Long): String =
     SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestampMs))
+
+/** 疑似重复弹框里的对方时间：日期 + 时分，够用来判断是不是同一笔。 */
+private fun formatDateTime(timestampMs: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestampMs))
+
+/** 对方记录的来源；口径与详情页一致（自动采集 / 手动）。 */
+private fun saveDuplicateSourceLabel(source: String): String = when (source) {
+    "ALIPAY" -> tr("支付宝")
+    "WECHAT" -> tr("微信")
+    "BANK_SMS" -> tr("银行短信")
+    "MANUAL" -> tr("手动")
+    else -> tr("其他来源")
+}
 
 private fun String.hasMoreThanTwoFractionDigits(): Boolean =
     contains('.') && substringAfter('.').count { it.isDigit() } > 2
