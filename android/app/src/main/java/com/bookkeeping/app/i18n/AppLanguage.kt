@@ -1,6 +1,8 @@
 package com.bookkeeping.app.i18n
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.bookkeeping.app.notification.CaptureNotifier
@@ -35,6 +37,12 @@ object AppLanguage {
         if (ok) {
             active = selected
             applyApplicationLocale(selected)
+            // setApplicationLocales recreates the Activity. Suppress its default
+            // window transition so the background is never exposed as a black flash.
+            context.findActivity()?.let { activity ->
+                @Suppress("DEPRECATION")
+                activity.overridePendingTransition(0, 0)
+            }
             // Channel names are user-visible; rebuild them in the new language.
             KeepAliveService.ensureChannel(context)
             CaptureNotifier.ensureChannel(context)
@@ -61,6 +69,15 @@ object AppLanguage {
 
     fun tr(chinese: String): String =
         if (active == ENGLISH) EnglishUiText.translate(chinese) else chinese
+
+    private fun Context.findActivity(): Activity? {
+        var current: Context? = this
+        while (current != null) {
+            if (current is Activity) return current
+            current = (current as? ContextWrapper)?.baseContext
+        }
+        return null
+    }
 }
 
 /** English UI strings are presentation-only; never translate parser keywords. */
