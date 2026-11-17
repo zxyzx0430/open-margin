@@ -41,27 +41,6 @@ object CalendarDateText {
     fun date(year: Int, month: Int, day: Int, english: Boolean = isEnglish()): String =
         format(year, month, day, if (english) EN_DATE else ZH_DATE, english)
 
-    /** A selected day with its weekday: 11月17日 周二 / Nov 17 Tue. */
-    fun dayWithWeekday(year: Int, month: Int, day: Int, english: Boolean = isEnglish()): String {
-        val calendar = Calendar.getInstance().apply {
-            clear()
-            set(year, month - 1, day)
-        }
-        val weekday = if (english) {
-            SimpleDateFormat("EEE", Locale.ENGLISH).format(calendar.time)
-        } else {
-            listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[
-                calendar.get(Calendar.DAY_OF_WEEK) - 1
-            ]
-        }
-        return day(year, month, day, english) + " " + weekday
-    }
-
-    /** Snackbar text after selecting a month: 2026 年 12 月 / December 2026. */
-    fun switchedMonth(year: Int, month: Int, english: Boolean = isEnglish()): String =
-        if (english) "Switched to " + monthHeading(year, month, english = true)
-        else "已切换到 $year 年 $month 月"
-
     /** Range inside one month: 11月21日–23日 / Nov 21–23. */
     fun sameMonthRange(
         year: Int,

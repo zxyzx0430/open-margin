@@ -27,14 +27,6 @@ class CalendarDateTextTest {
     }
 
     @Test
-    fun selectedDayIncludesLocalizedWeekdayAndMonthSwitchText() {
-        assertEquals("11月17日 周二", CalendarDateText.dayWithWeekday(2026, 11, 17, english = false))
-        assertEquals("Nov 17 Tue", CalendarDateText.dayWithWeekday(2026, 11, 17, english = true))
-        assertEquals("已切换到 2026 年 12 月", CalendarDateText.switchedMonth(2026, 12, english = false))
-        assertEquals("Switched to December 2026", CalendarDateText.switchedMonth(2026, 12, english = true))
-    }
-
-    @Test
     fun rangesKeepOneMonthOrNameBoth() {
         assertEquals("11月21日–23日", CalendarDateText.sameMonthRange(2026, 11, 21, 23, english = false))
         assertEquals("Nov 21–23", CalendarDateText.sameMonthRange(2026, 11, 21, 23, english = true))
