@@ -92,6 +92,7 @@ import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import java.math.BigInteger
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -108,12 +109,97 @@ private const val CALENDAR_PREFS = "calendar_view_prefs"
 private const val KEY_HEATMAP = "heatmap"
 private const val KEY_WEEK_START_MONDAY = "week_start_monday"
 private const val KEY_LUNAR = "lunar"
+private const val KEY_CALENDAR_NUMBERS = "calendar_numbers"
 
 private enum class HeatmapMode(val label: String) {
     EXPENSE("支出"),
     INCOME("收入"),
     NET("结余"),
     OFF("关闭"),
+}
+
+internal enum class CalendarNumberMode(val label: String) {
+    EXPENSE("支出"),
+    INCOME("收入"),
+    NET("结余"),
+    OFF("不显示"),
+}
+
+internal data class CalendarNumberTotals(
+    val expenseCents: Long = 0L,
+    val incomeCents: Long = 0L,
+    val expenseCount: Int = 0,
+    val incomeCount: Int = 0,
+)
+
+internal fun calendarNumberTotals(transactions: List<TransactionEntity>): CalendarNumberTotals {
+    val expenses = StatsTransactionPolicy.filter(transactions, TransactionType.EXPENSE)
+    val incomes = StatsTransactionPolicy.filter(transactions, TransactionType.INCOME)
+    return CalendarNumberTotals(
+        expenseCents = expenses.sumOf { it.amountCents },
+        incomeCents = incomes.sumOf { it.amountCents },
+        expenseCount = expenses.size,
+        incomeCount = incomes.size,
+    )
+}
+
+internal fun calendarNumberAmount(
+    mode: CalendarNumberMode,
+    totals: CalendarNumberTotals,
+): Long? = when (mode) {
+    CalendarNumberMode.EXPENSE -> totals.expenseCents.takeIf { totals.expenseCount > 0 }
+    CalendarNumberMode.INCOME -> totals.incomeCents.takeIf { totals.incomeCount > 0 }
+    CalendarNumberMode.NET -> (totals.incomeCents - totals.expenseCents).takeIf {
+        totals.expenseCount + totals.incomeCount > 0
+    }
+    CalendarNumberMode.OFF -> null
+}
+
+internal fun shouldShowCalendarLunar(showLunar: Boolean, english: Boolean): Boolean =
+    showLunar && !english
+
+internal fun calendarNumbersMenuPrefix(english: Boolean): String =
+    if (english) "Calendar numbers: " else "日历数字："
+
+internal fun calendarNumberModeLabel(mode: CalendarNumberMode, english: Boolean): String =
+    if (!english) mode.label else when (mode) {
+        CalendarNumberMode.EXPENSE -> "Expense"
+        CalendarNumberMode.INCOME -> "Income"
+        CalendarNumberMode.NET -> "Balance"
+        CalendarNumberMode.OFF -> "Off"
+    }
+
+/** Small, exact-from-cents text for the calendar's narrow day cells. */
+internal fun compactCalendarAmount(amountCents: Long, english: Boolean): String {
+    val value = BigInteger.valueOf(amountCents).abs()
+    val sign = if (amountCents < 0L) "−" else ""
+    val body = if (value < BigInteger.valueOf(1_000_000L)) {
+        val yuan = value.divide(BigInteger.valueOf(100L))
+        val fen = value.remainder(BigInteger.valueOf(100L)).toInt()
+        "¥$yuan" + if (fen == 0) "" else "." + fen.toString().padStart(2, '0')
+    } else {
+        val (unitCents, suffix) = when {
+            english && value < BigInteger.valueOf(100_000_000L) -> BigInteger.valueOf(100_000L) to "k"
+            english && value < BigInteger.valueOf(100_000_000_000L) -> BigInteger.valueOf(100_000_000L) to "M"
+            english && value < BigInteger.valueOf(100_000_000_000_000L) -> BigInteger.valueOf(100_000_000_000L) to "B"
+            english -> BigInteger.valueOf(100_000_000_000_000L) to "T"
+            value < BigInteger.valueOf(10_000_000_000L) -> BigInteger.valueOf(1_000_000L) to "万"
+            value < BigInteger.valueOf(100_000_000_000_000L) -> BigInteger.valueOf(10_000_000_000L) to "亿"
+            else -> BigInteger.valueOf(100_000_000_000_000L) to "万亿"
+        }
+        if (suffix == "万亿") {
+            val wholeUnits = value.add(unitCents.divide(BigInteger.valueOf(2L))).divide(unitCents)
+            "¥$wholeUnits$suffix"
+        } else {
+            val tenths = value.multiply(BigInteger.TEN)
+                .add(unitCents.divide(BigInteger.valueOf(2L)))
+                .divide(unitCents)
+            val whole = tenths.divide(BigInteger.TEN)
+            val decimal = tenths.remainder(BigInteger.TEN).toInt()
+            "¥$whole" + (if (decimal == 0) "" else ".$decimal") + suffix
+        }
+    }
+    return sign + body
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +224,15 @@ fun CalendarScreen(
         mutableStateOf(prefs.getBoolean(KEY_WEEK_START_MONDAY, false))
     }
     var showLunar by remember { mutableStateOf(prefs.getBoolean(KEY_LUNAR, true)) }
+    var calendarNumberMode by remember {
+        mutableStateOf(
+            runCatching {
+                CalendarNumberMode.valueOf(
+                    prefs.getString(KEY_CALENDAR_NUMBERS, CalendarNumberMode.OFF.name)!!,
+                )
+            }.getOrDefault(CalendarNumberMode.OFF),
+        )
+    }
     var monthKey by rememberSaveable { mutableStateOf(BudgetMonth.currentKey()) }
     var today by rememberSaveable(stateSaver = CalendarDateSaver) {
         mutableStateOf(currentCalendarDate())
@@ -213,6 +308,7 @@ fun CalendarScreen(
             .putString(KEY_HEATMAP, heatmap.name)
             .putBoolean(KEY_WEEK_START_MONDAY, weekStartsMonday)
             .putBoolean(KEY_LUNAR, showLunar)
+            .putString(KEY_CALENDAR_NUMBERS, calendarNumberMode.name)
             .apply()
     }
 
@@ -252,10 +348,34 @@ fun CalendarScreen(
                         HeatmapMode.entries.forEach { mode ->
                             DropdownMenuItem(
                                 text = {
-                                    Text((if (mode == heatmap) "✓ " else "") + tr("日期高亮：") + tr(mode.label))
+                                    Text(
+                                        (if (mode == heatmap) "✓ " else "") +
+                                            tr("日期高亮：") + tr(mode.label),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 },
                                 onClick = {
                                     heatmap = mode
+                                    save()
+                                    menuExpanded = false
+                                },
+                            )
+                        }
+                        CalendarNumberMode.entries.forEach { mode ->
+                            val english = AppLanguage.current() == AppLanguage.ENGLISH
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        (if (mode == calendarNumberMode) "✓ " else "") +
+                                            calendarNumbersMenuPrefix(english) +
+                                            calendarNumberModeLabel(mode, english),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
+                                onClick = {
+                                    calendarNumberMode = mode
                                     save()
                                     menuExpanded = false
                                 },
@@ -266,6 +386,8 @@ fun CalendarScreen(
                                 Text(
                                     tr("周起始日：") +
                                         if (weekStartsMonday) tr("周一") else tr("周日"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             },
                             onClick = {
@@ -274,14 +396,26 @@ fun CalendarScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text(tr("农历：") + if (showLunar) tr("显示") else tr("隐藏")) },
+                            text = {
+                                Text(
+                                    tr("农历：") + if (showLunar) tr("显示") else tr("隐藏"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
                             onClick = {
                                 showLunar = !showLunar
                                 save()
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text(tr("清除选择")) },
+                            text = {
+                                Text(
+                                    tr("清除选择"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
                             onClick = {
                                 rangeStart = null
                                 rangeEnd = null
@@ -310,6 +444,7 @@ fun CalendarScreen(
             transactions = monthTransactions,
             weekStartsMonday = weekStartsMonday,
             showLunar = showLunar,
+            calendarNumberMode = calendarNumberMode,
             heatmap = heatmap,
             rangeStart = rangeStart,
             rangeEnd = rangeEnd,
@@ -434,6 +569,8 @@ private fun MonthHeader(
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         IconButton(onClick = onNext) {
             Icon(Icons.Filled.KeyboardArrowRight, contentDescription = tr("下个月"))
@@ -481,6 +618,8 @@ private fun CalendarMetric(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         AutoSizeAmountText(
             text = value,
@@ -498,6 +637,7 @@ private fun CalendarMonthGrid(
     transactions: List<TransactionEntity>,
     weekStartsMonday: Boolean,
     showLunar: Boolean,
+    calendarNumberMode: CalendarNumberMode,
     heatmap: HeatmapMode,
     rangeStart: CalendarDate?,
     rangeEnd: CalendarDate?,
@@ -521,6 +661,9 @@ private fun CalendarMonthGrid(
     val latestOnCrossMonth = rememberUpdatedState(onCrossMonth)
     val latestHaptics = rememberUpdatedState(LocalHapticFeedback.current)
     val byDay = remember(transactions) { transactions.groupBy { dayOf(it.timestamp) } }
+    val numberTotalsByDay = remember(byDay) {
+        byDay.mapValues { (_, list) -> calendarNumberTotals(list) }
+    }
     val heatValues = remember(byDay, heatmap) {
         byDay.mapValues { (_, list) ->
             when (heatmap) {
@@ -770,6 +913,38 @@ private fun CalendarMonthGrid(
                                 date >= rangeStart && date <= rangeEnd
                             val isEdge = date != null &&
                                 (date == rangeStart || date == rangeEnd)
+                            val english = AppLanguage.current() == AppLanguage.ENGLISH
+                            val selectedAmount = if (inMonth) {
+                                numberTotalsByDay[day]?.let {
+                                    calendarNumberAmount(calendarNumberMode, it)
+                                }
+                            } else {
+                                null
+                            }
+                            val amountText = selectedAmount?.let {
+                                compactCalendarAmount(it, english)
+                            }.orEmpty()
+                            val lunarText = if (
+                                inMonth && shouldShowCalendarLunar(showLunar, english)
+                            ) {
+                                lunarLabel(year, month, day)
+                            } else {
+                                ""
+                            }
+                            val showBoth = lunarText.isNotEmpty() && amountText.isNotEmpty()
+                            val semantic = LocalQingSemanticColors.current
+                            val numberColor = when {
+                                isEdge -> MaterialTheme.colorScheme.onPrimary
+                                inRange -> MaterialTheme.colorScheme.onPrimaryContainer
+                                calendarNumberMode == CalendarNumberMode.EXPENSE -> semantic.expenseText
+                                calendarNumberMode == CalendarNumberMode.INCOME -> semantic.income
+                                calendarNumberMode == CalendarNumberMode.NET -> if ((selectedAmount ?: 0L) >= 0L) {
+                                    semantic.income
+                                } else {
+                                    semantic.expenseText
+                                }
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                             val heat = if (inMonth && heatMax > 0) {
                                 heatmapLevel(heatValues[day] ?: 0L, heatMax)
                             } else {
@@ -802,20 +977,24 @@ private fun CalendarMonthGrid(
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Text(
                                             text = "$day",
-                                            style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 20.sp),
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontSize = if (showBoth) 13.sp else 14.sp,
+                                                lineHeight = if (showBoth) 14.sp else 17.sp,
+                                            ),
                                             fontWeight = if (isEdge || inRange) FontWeight.Bold else FontWeight.Normal,
                                             color = when {
                                                 isEdge -> MaterialTheme.colorScheme.onPrimary
                                                 inRange -> MaterialTheme.colorScheme.onPrimaryContainer
                                                 else -> MaterialTheme.colorScheme.onSurface
                                             },
+                                            maxLines = 1,
                                         )
-                                        if (showLunar) {
+                                        if (lunarText.isNotEmpty()) {
                                             Text(
-                                                text = lunarLabel(year, month, day),
+                                                text = lunarText,
                                                 style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontSize = 8.sp,
-                                                    lineHeight = 10.sp,
+                                                    fontSize = if (showBoth) 7.sp else 8.sp,
+                                                    lineHeight = if (showBoth) 8.sp else 10.sp,
                                                 ),
                                                 color = when {
                                                     isEdge -> MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
@@ -823,6 +1002,23 @@ private fun CalendarMonthGrid(
                                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                                 },
                                                 maxLines = 1,
+                                            )
+                                        }
+                                        if (amountText.isNotEmpty()) {
+                                            Text(
+                                                text = amountText,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = when {
+                                                        amountText.length > 8 -> 6.sp
+                                                        showBoth -> 7.sp
+                                                        else -> 8.sp
+                                                    },
+                                                    lineHeight = if (showBoth) 8.sp else 9.sp,
+                                                ),
+                                                color = numberColor,
+                                                maxLines = 1,
+                                                softWrap = false,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                     }
@@ -893,37 +1089,41 @@ private fun SelectionSummary(
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "$includedCount ${tr("笔")}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 if (hasSelection) {
                     TextButton(
                         onClick = onClear,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     ) {
-                        Text(tr("清除"), style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            tr("清除"),
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text(
-                    text = "${tr("支出")} ${formatCny(expense)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = semantic.expenseText,
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CalendarMetric(
+                    tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f),
                 )
-                Text(
-                    text = "${tr("收入")} ${formatCny(income)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = semantic.income,
+                CalendarMetric(
+                    tr("收入"), formatCny(income), semantic.income, Modifier.weight(1f),
                 )
-                Text(
-                    text = "${tr("结余")} " +
-                        (if (net >= 0) "+" else "−") + formatCny(abs(net)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CalendarMetric(
+                    tr("结余"),
+                    (if (net >= 0) "+" else "−") + formatCny(abs(net)),
+                    if (net >= 0) semantic.income else semantic.expenseText,
+                    Modifier.weight(1f),
+                )
+                CalendarMetric(
+                    tr("笔"), includedCount.toString(),
+                    MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f),
                 )
             }
         }
