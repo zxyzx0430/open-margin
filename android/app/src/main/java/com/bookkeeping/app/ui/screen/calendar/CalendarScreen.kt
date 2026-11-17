@@ -494,9 +494,7 @@ fun CalendarScreen(
         val availableHeight = maxHeight
         val gridRowHeight = calendarGridRowHeightDp(availableHeight.value).dp
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(pageScrollState, enabled = !rangeDragActive),
+            modifier = Modifier.fillMaxSize(),
         ) {
         Row(
             modifier = Modifier
