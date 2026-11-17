@@ -54,9 +54,21 @@ function Invoke-OmWebAction {
     $dryRunRequested = $DryRun -or ([bool]$Params.dryRun)
     switch ($Action) {
         'check' {
-            $ignorePorts = @()
+            # The running wizard's own setup port is not a conflict. Mirror the
+            # CLI ignore list: configured setup port plus the live port from
+            # setup-web.json (and the setupPort passed by the web job).
+            $ignorePorts = @([int]$Ports.setup)
             if ($Params.PSObject.Properties['setupPort'] -and $Params.setupPort) {
-                $ignorePorts += [int]$Params.setupPort
+                $livePort = [int]$Params.setupPort
+                if ($ignorePorts -notcontains $livePort) { $ignorePorts += $livePort }
+            }
+            $setupWebPath = Join-Path $StateRoot 'setup-web.json'
+            if (Test-Path -LiteralPath $setupWebPath) {
+                try {
+                    $setupWeb = Get-Content -Path $setupWebPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $statePort = [int]$setupWeb.port
+                    if ($statePort -gt 0 -and $ignorePorts -notcontains $statePort) { $ignorePorts += $statePort }
+                } catch { }
             }
             $checks = @(Get-OmEnvironmentChecks -Ports $Ports -RepoRoot $RepoRoot -IgnorePorts $ignorePorts)
             $summary = Get-OmCheckSummary $checks
@@ -65,6 +77,10 @@ function Invoke-OmWebAction {
             return [pscustomobject]@{ ok = $summary.ok; checks = $checks; summary = $summary; dryRun = $false }
         }
         'install-deps' {
+            $licenseAcknowledged = $false
+            if ($Params.PSObject.Properties['licenseAcknowledged']) {
+                $licenseAcknowledged = [bool]$Params.licenseAcknowledged
+            }
             $current = Read-OmState
             if (Test-OmStepTransition -From ([string]$current.step) -To 'INSTALLING_DEPS') {
                 $null = Set-OmStep 'INSTALLING_DEPS'
@@ -73,9 +89,9 @@ function Invoke-OmWebAction {
             }
             $progressPath = Get-OmJobProgressPath -StateRoot $StateRoot -JobId $JobId
             if (-not (Test-OmAdmin)) {
-                $result = Invoke-OmElevatedDependencyInstall -SetupPort $Ports.setup -ProgressPath $progressPath -DryRun:$dryRunRequested
+                $result = Invoke-OmElevatedDependencyInstall -SetupPort $Ports.setup -ProgressPath $progressPath -LicenseAcknowledged:$licenseAcknowledged -DryRun:$dryRunRequested
             } else {
-                $result = Install-OmDependencies -SetupPort $Ports.setup -ProgressPath $progressPath -DryRun:$dryRunRequested
+                $result = Install-OmDependencies -SetupPort $Ports.setup -ProgressPath $progressPath -LicenseAcknowledged:$licenseAcknowledged -DryRun:$dryRunRequested
             }
             if ($result.ok) {
                 if ($result.pendingReboot -and -not $dryRunRequested) {
@@ -92,6 +108,9 @@ function Invoke-OmWebAction {
                 }
             } elseif ($result.code -eq 'ADMIN_DENIED' -or $result.code -eq 'ADMIN_REQUIRED') {
                 $null = Set-OmStep 'NEEDS_USER' -Force
+            } elseif ($result.code -eq 'DOCKER_LICENSE_REQUIRED') {
+                # Waiting for an explicit user consent, not a hard failure.
+                $null = Set-OmStep 'NEEDS_USER' -Force
             } else {
                 $null = Set-OmStep 'FAILED' ([pscustomobject]@{ step = 'install-deps'; code = $result.code; message = $result.message }) -Force
             }
@@ -104,6 +123,10 @@ function Invoke-OmWebAction {
             $ackPublic = [bool]$Params.ackPublic
             $skipFunnel = [bool]$Params.skipFunnel
             $noBuild = [bool]$Params.noBuild
+            # An imported offline bundle must win over the default build path.
+            # The state flag also makes a later CLI deploy without --no-build
+            # reuse the loaded images.
+            if (-not $noBuild -and [bool]$state.offlineImported) { $noBuild = $true }
             if (-not $adminUser -or -not $adminPassword) {
                 return [pscustomobject]@{ ok = $false; code = 'MISSING_ADMIN'; message = '请填写管理员用户名和密码。'; retryable = $true }
             }
@@ -216,6 +239,23 @@ function Invoke-OmWebAction {
         }
         'watchdog-status' {
             return (Invoke-OmWatchdogStatus -StateRoot $StateRoot)
+        }
+        'select-offline-file' {
+            # The wizard server handles this action synchronously so the
+            # OpenFileDialog belongs to the interactive desktop session.
+            if ($dryRunRequested) {
+                return [pscustomobject]@{ ok = $false; code = 'PICKER_UNAVAILABLE'; message = '演练模式不会打开文件选择框。'; retryable = $true }
+            }
+            return (Select-OmOfflineBundleFile)
+        }
+        'import-offline' {
+            $offlinePath = [string]$Params.path
+            if ([string]::IsNullOrWhiteSpace($offlinePath)) {
+                return [pscustomobject]@{ ok = $false; code = 'MISSING_PATH'; message = '请先选择离线镜像包。'; retryable = $true }
+            }
+            $offlineVersion = ''
+            if ($Params.PSObject.Properties['version'] -and $Params.version) { $offlineVersion = [string]$Params.version }
+            return (Import-OmOfflineBundle -Path $offlinePath -Version $offlineVersion -DryRun:$dryRunRequested)
         }
         default {
             return [pscustomobject]@{ ok = $false; code = 'UNKNOWN_ACTION'; message = ('unknown action: ' + $Action); retryable = $false }

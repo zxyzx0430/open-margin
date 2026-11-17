@@ -55,13 +55,66 @@ function Test-OmVirtualization {
 }
 
 function Get-OmDiskInfo {
-    $driveLetter = $env:SystemDrive.TrimEnd(':')
+    param([string]$Path = '')
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        $Path = $script:OmRepoRoot
+    }
+    if ([string]::IsNullOrWhiteSpace($Path)) { $Path = (Get-Location).Path }
     try {
-        $drive = Get-PSDrive -Name $driveLetter -ErrorAction Stop
-        $freeGb = [math]::Round($drive.Free / 1GB, 1)
-        return [pscustomobject]@{ drive = $env:SystemDrive; freeGB = $freeGb; ok = ($freeGb -ge 10) }
-    } catch {
-        return [pscustomobject]@{ drive = $env:SystemDrive; freeGB = $null; ok = $false }
+        $full = [IO.Path]::GetFullPath($Path)
+        $root = [IO.Path]::GetPathRoot($full)
+        if ($root -match '^([A-Za-z]):\\?$') {
+            $letter = $matches[1]
+            $drive = Get-PSDrive -Name $letter -ErrorAction Stop
+            $freeGb = [math]::Round($drive.Free / 1GB, 1)
+            return [pscustomobject]@{
+                drive = ($letter.ToUpperInvariant() + ':\');
+                path = $full; freeGB = $freeGb; ok = ($freeGb -ge 2)
+            }
+        }
+    } catch { }
+    return [pscustomobject]@{ drive = $Path; path = $Path; freeGB = $null; ok = $false }
+}
+
+function ConvertFrom-OmWslBasePath {
+    param([string]$BasePath)
+    if ([string]::IsNullOrWhiteSpace($BasePath)) { return $null }
+    $plain = $BasePath
+    # WSL registry BasePath looks like \\?\E:\DockerDesktopWSL\main.
+    if ($plain.StartsWith('\\?\')) { $plain = $plain.Substring(4) }
+    if ($plain -match '^([A-Za-z]):') {
+        return ($matches[1].ToUpperInvariant() + ':\')
+    }
+    return $null
+}
+
+function Get-OmDockerDataDrive {
+    param(
+        [string]$RegistryRoot = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss',
+        [string]$FallbackPath = ''
+    )
+    $fallback = Get-OmDiskInfo -Path $FallbackPath
+    try {
+        foreach ($key in @(Get-ChildItem -Path $RegistryRoot -ErrorAction Stop)) {
+            $props = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+            $distro = [string]$props.DistributionName
+            if ($distro -ne 'docker-desktop' -and $distro -ne 'docker-desktop-data') { continue }
+            $basePath = [string]$props.BasePath
+            $driveRoot = ConvertFrom-OmWslBasePath -BasePath $basePath
+            if ($driveRoot) {
+                $info = Get-OmDiskInfo -Path $driveRoot
+                if ($null -ne $info.freeGB) {
+                    return [pscustomobject]@{
+                        drive = $info.drive; freeGB = $info.freeGB;
+                        basePath = $basePath; source = $distro
+                    }
+                }
+            }
+        }
+    } catch { }
+    return [pscustomobject]@{
+        drive = $fallback.drive; freeGB = $fallback.freeGB;
+        basePath = $null; source = 'fallback'
     }
 }
 
@@ -236,15 +289,28 @@ function Get-OmEnvironmentChecks {
         $checks.Add((New-OmCheck 'virtualization' '硬件虚拟化' 'ok' '已开启。'))
     }
 
-    $disk = Get-OmDiskInfo
+    $installPath = if ($RepoRoot) { $RepoRoot } else { (Get-OmStateRoot) }
+    $disk = Get-OmDiskInfo -Path $installPath
     if ($null -eq $disk.freeGB) {
-        $checks.Add((New-OmCheck 'disk' '磁盘空间' 'unknown' '无法读取系统盘空间。' '确保系统盘至少 10GB 可用。' 'DISK_UNKNOWN'))
-    } elseif ($disk.freeGB -lt 10) {
-        $checks.Add((New-OmCheck 'disk' '磁盘空间' 'fail' ('系统盘只剩 ' + $disk.freeGB + 'GB。') '至少清理到 15GB 可用。' 'DISK_LOW'))
-    } elseif ($disk.freeGB -lt 15) {
-        $checks.Add((New-OmCheck 'disk' '磁盘空间' 'warn' ('系统盘只剩 ' + $disk.freeGB + 'GB。') '建议清理到 15GB 以上。' 'DISK_TIGHT'))
+        $checks.Add((New-OmCheck 'disk' '安装盘空间' 'unknown' ('无法读取安装盘 ' + $disk.drive + ' 的可用空间。') '确保安装目录所在磁盘至少 2GB 可用。' 'DISK_UNKNOWN'))
+    } elseif ($disk.freeGB -lt 2) {
+        $checks.Add((New-OmCheck 'disk' '安装盘空间' 'fail' ('安装盘 ' + $disk.drive + ' 只剩 ' + $disk.freeGB + 'GB（' + $disk.path + '）。') '至少清理到 2GB，建议保持 5GB 以上可用。' 'DISK_LOW'))
+    } elseif ($disk.freeGB -lt 5) {
+        $checks.Add((New-OmCheck 'disk' '安装盘空间' 'warn' ('安装盘 ' + $disk.drive + ' 只剩 ' + $disk.freeGB + 'GB（' + $disk.path + '）。') '建议保持 5GB 以上可用空间。' 'DISK_TIGHT'))
     } else {
-        $checks.Add((New-OmCheck 'disk' '磁盘空间' 'ok' ('系统盘可用 ' + $disk.freeGB + 'GB。')))
+        $checks.Add((New-OmCheck 'disk' '安装盘空间' 'ok' ('安装盘 ' + $disk.drive + ' 可用 ' + $disk.freeGB + 'GB。')))
+    }
+
+    $dockerDisk = Get-OmDockerDataDrive -FallbackPath $installPath
+    $dockerSource = if ($dockerDisk.source -eq 'fallback') { '（未找到 Docker 数据盘配置，按安装盘检查）' } elseif ($dockerDisk.basePath) { '（' + $dockerDisk.basePath + '）' } else { '' }
+    if ($null -eq $dockerDisk.freeGB) {
+        $checks.Add((New-OmCheck 'docker-disk' 'Docker 数据盘空间' 'unknown' ('无法读取 Docker 数据盘 ' + $dockerDisk.drive + ' 的可用空间。') '确保 Docker Desktop 数据所在磁盘至少 3GB 可用。' 'DOCKER_DISK_UNKNOWN'))
+    } elseif ($dockerDisk.freeGB -lt 3) {
+        $checks.Add((New-OmCheck 'docker-disk' 'Docker 数据盘空间' 'fail' ('Docker 数据盘 ' + $dockerDisk.drive + ' 只剩 ' + $dockerDisk.freeGB + 'GB' + $dockerSource + '。') '至少清理到 3GB，建议保持 5GB 以上可用；也可在 Docker Desktop 设置中移动数据盘。' 'DOCKER_DISK_LOW'))
+    } elseif ($dockerDisk.freeGB -lt 5) {
+        $checks.Add((New-OmCheck 'docker-disk' 'Docker 数据盘空间' 'warn' ('Docker 数据盘 ' + $dockerDisk.drive + ' 只剩 ' + $dockerDisk.freeGB + 'GB' + $dockerSource + '。') '建议保持 5GB 以上可用；镜像较多时优先清理旧镜像。' 'DOCKER_DISK_TIGHT'))
+    } else {
+        $checks.Add((New-OmCheck 'docker-disk' 'Docker 数据盘空间' 'ok' ('Docker 数据盘 ' + $dockerDisk.drive + ' 可用 ' + $dockerDisk.freeGB + 'GB' + $dockerSource + '。')))
     }
 
     $wsl = Get-OmWslInfo

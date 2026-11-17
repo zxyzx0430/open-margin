@@ -85,6 +85,11 @@ function New-OmDefaultState {
         watchdogPaused     = $false
         watchdogPausedUntil = $null
         watchdogInstalled  = $false
+        offlineImported    = $false
+        offlineBundleVersion = $null
+        offlineImportedAt  = $null
+        offlineBundleName  = $null
+        offlineImages      = @()
         lastCheck          = $null
         lastError          = $null
         jobId              = $null

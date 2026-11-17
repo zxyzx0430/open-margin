@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="om-header-right">
+      <button id="btn-home" class="om-btn om-btn-ghost om-home-btn" type="button">返回主界面</button>
       <span id="header-state" class="om-pill om-pill-neutral">正在检查</span>
       <span id="version" class="om-version">v1.3.0</span>
     </div>
@@ -55,6 +56,43 @@
         <button id="btn-recheck" class="om-btn om-btn-ghost">重新检测</button>
       </div>
       <div id="env-checks" class="om-check-list" aria-live="polite"></div>
+      <!-- offline-bundle-card (thread E): self-contained block; keep merge changes inside it -->
+      <div id="offline-card" class="om-card om-offline-card">
+        <div class="om-offline-head">
+          <div>
+            <h3>Docker 下载失败？使用离线镜像包</h3>
+            <p class="om-hint">国内网络拉取 Docker Hub 失败时，用已经构建好的镜像包，不必重新下载。</p>
+          </div>
+          <span id="offline-pill" class="om-pill om-pill-neutral">未导入</span>
+        </div>
+        <div class="om-actions">
+          <a id="offline-download" class="om-btn om-btn-ghost" href="https://github.com/zxyzx0430/open-margin/releases/download/v1.3.0/OpenMargin-Offline-1.3.0.tar.gz" target="_blank" rel="noopener">下载离线镜像包</a>
+        </div>
+        <ol class="om-list om-offline-steps">
+          <li>下载 <span id="offline-asset-name" class="om-mono">OpenMargin-Offline-1.3.0.tar.gz</span>（<span id="offline-size">约 154 MiB</span>，可转发）。</li>
+          <li>核对 SHA256：<span id="offline-sha" class="om-offline-sha om-mono">d74f570191302c023639fa2eeb52526f53a49a6a6212e26c3e185e026f543783</span></li>
+          <li>点“我已下载，导入”，在文件选择框里选中下载的 <code>.tar.gz</code>；加载完成后继续部署。</li>
+        </ol>
+        <div class="om-actions">
+          <button id="btn-offline-import" class="om-btn om-btn-primary">我已下载，导入</button>
+          <button id="btn-offline-path" class="om-btn om-btn-ghost">手动输入路径</button>
+        </div>
+        <div id="offline-path-row" class="om-offline-path om-hidden">
+          <input id="offline-path" type="text" placeholder="D:\Downloads\OpenMargin-Offline-1.3.0.tar.gz" autocomplete="off" spellcheck="false" aria-label="离线镜像包完整路径">
+          <button id="btn-offline-path-import" class="om-btn om-btn-ghost">导入此文件</button>
+        </div>
+        <p id="offline-status" class="om-hint" aria-live="polite">尚未导入。部署时仍会在线拉取镜像。</p>
+      </div>
+      <!-- /offline-bundle-card -->
+      <div id="docker-license-card" class="om-card om-note">
+        <strong>Docker Desktop 许可确认</strong>
+        <p class="om-hint" id="docker-license-recorded">安装器已记录你的 Docker 许可确认，可以继续安装依赖。</p>
+        <label class="om-check om-checkbox" id="docker-license-row">
+          <input type="checkbox" id="ack-docker-license">
+          <span>我已阅读并接受 <a href="https://www.docker.com/legal/docker-subscription-service-agreement/" target="_blank" rel="noopener">Docker 订阅服务协议</a>；安装 Docker Desktop 时会代表我接受许可。商业使用请确认符合 Docker 的免费条件或已购买订阅。</span>
+        </label>
+      </div>
+      <p id="elevation-hint" class="om-hint om-hidden">当前向导不是以管理员权限运行（可能是通过 /NOELEVATE 启动）。环境检查会提示管理员权限失败；点“一键安装依赖”时仍会弹出 UAC 并请求提权。</p>
       <div class="om-actions">
         <button id="btn-install-deps" class="om-btn om-btn-primary">一键安装依赖</button>
         <button id="btn-env-next" class="om-btn om-btn-ghost" disabled>下一步</button>
