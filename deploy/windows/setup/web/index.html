@@ -84,6 +84,14 @@
         <p id="offline-status" class="om-hint" aria-live="polite">尚未导入。部署时仍会在线拉取镜像。</p>
       </div>
       <!-- /offline-bundle-card -->
+      <div id="docker-license-card" class="om-card om-note">
+        <strong>Docker Desktop 许可确认</strong>
+        <p class="om-hint" id="docker-license-recorded">安装器已记录你的 Docker 许可确认，可以继续安装依赖。</p>
+        <label class="om-check om-checkbox" id="docker-license-row">
+          <input type="checkbox" id="ack-docker-license">
+          <span>我已阅读并接受 <a href="https://www.docker.com/legal/docker-subscription-service-agreement/" target="_blank" rel="noopener">Docker 订阅服务协议</a>；安装 Docker Desktop 时会代表我接受许可。商业使用请确认符合 Docker 的免费条件或已购买订阅。</span>
+        </label>
+      </div>
       <div class="om-actions">
         <button id="btn-install-deps" class="om-btn om-btn-primary">一键安装依赖</button>
         <button id="btn-env-next" class="om-btn om-btn-ghost" disabled>下一步</button>
