@@ -852,6 +852,15 @@ internal object EnglishUiText {
         "记录信息" to "Record info",
         "账户（可选）" to "Account (optional)",
         "银行" to "Bank",
+        "现金" to "Cash",
+        "银行卡" to "Bank card",
+        "不填" to "None",
+
+        // === 新建账单：保存前的疑似重复提示 + 检查中的按钮态 ===
+        "可能重复" to "Possible duplicate",
+        "账本里已有一笔相似的账单。" to "There is already a similar record in the ledger.",
+        "仍然记这一笔" to "Record it anyway",
+        "正在检查…" to "Checking…",
         "时间不能晚于当前时间 5 分钟以上" to "Time cannot be more than 5 minutes in the future",
         "请选择有效分类" to "Choose a valid category",
         "请选择有效来源" to "Choose a valid source",
@@ -995,6 +1004,48 @@ internal object EnglishUiText {
             "The QR device key is invalid (at least 16 characters, no whitespace).",
         "二维码里的账本身份无效（至少 16 位）。" to
             "The QR ledger identity is invalid (at least 16 characters).",
+
+        // === 一句话记账 / 长按 FAB 说话记账 ===
+        // 占位示例给具体日期和钟点：相对时间（"昨天中午"）会让用户照着说不出可解析的时间。
+        "比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐" to
+            "e.g. Nov 16, 12:00 PM at McDonald's, 36.50, food, WeChat Pay, note: overtime meal",
+        "一句话记账" to "Quick entry",
+        "写下消费或收入，自动帮你填好账单" to
+            "Describe the expense or income and the form fills itself",
+        "语音记账" to "Voice entry",
+        "新建账单，长按说话记账" to "New transaction; press and hold to speak",
+        "长按 + 1 秒，说话记账" to "Hold + for 1 second, then speak",
+        // 录音面板：准备模型 → 听 → 收尾 → 失败，以及失败后的两个出口。
+        "正在准备语音模型…" to "Preparing the voice model…",
+        "正在请求麦克风权限…" to "Requesting microphone permission…",
+        "请说话…" to "Speak now…",
+        "停止" to "Stop",
+        "正在识别最后几个字…" to "Finishing the last words…",
+        "本地识别，音频不会上传" to "Recognized on this device; audio is never uploaded",
+        "去系统设置授权" to "Allow in system settings",
+        // 引擎错误码 → 用户可读提示（VoiceCaptureLogic.messageFor 的原文）。
+        "没有麦克风权限，无法语音记账" to
+            "No microphone permission, so voice entry is unavailable",
+        "安装包缺少语音模型，请重新安装应用" to
+            "This build is missing the voice model. Reinstall the app.",
+        "语音模型损坏，请重装应用后再试" to
+            "The voice model is corrupted. Reinstall the app and try again.",
+        "此设备的 CPU 架构不支持本地语音识别" to
+            "This device's CPU architecture does not support on-device speech recognition",
+        "语音引擎初始化失败，请重试" to "The speech engine failed to start. Try again.",
+        "麦克风被占用或打不开，请稍后重试" to
+            "The microphone is busy or unavailable. Try again shortly.",
+        "语音引擎还没准备好，请重试" to "The speech engine is not ready yet. Try again.",
+        "语音会话已经结束，请重新长按" to "The voice session has ended. Press and hold again.",
+        "没有听清，请再说一次" to "Didn't catch that. Please say it again.",
+        // 引擎 prepare() 的进度文案（面板直接用它显示进度）。
+        "语音模型已就绪" to "Voice model ready",
+        "正在校验语音模型" to "Verifying the voice model",
+        "正在加载语音识别引擎" to "Loading the speech recognizer",
+        // 一句话解析的两种提醒：没看出金额、以及填好了但要核对。
+        "没看出金额，请手动补上" to "No amount found; please fill it in",
+        "已按这句话填好，请核对金额、分类和时间" to
+            "Filled from your sentence; check the amount, category and time",
     )
 
     fun translate(chinese: String): String {
@@ -1032,6 +1083,9 @@ internal object EnglishUiText {
         if (chinese.startsWith("有 ") && chinese.endsWith(" 笔冲突待处理；其余修改已上传")) {
             val count = chinese.removePrefix("有 ").removeSuffix(" 笔冲突待处理；其余修改已上传")
             return "$count conflicts need review; other changes were uploaded"
+        }
+        if (chinese.startsWith("正在释放语音模型 ")) {
+            return "Unpacking voice model " + chinese.removePrefix("正在释放语音模型 ")
         }
         if (chinese.startsWith("无法读取 XLSX：")) {
             return "Could not read XLSX: " + chinese.removePrefix("无法读取 XLSX：")

@@ -6,6 +6,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +24,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -33,7 +34,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,11 +52,15 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -89,8 +93,12 @@ import com.bookkeeping.app.ui.components.LedgerSearchBar
 import com.bookkeeping.app.ui.components.MerchantAvatar
 import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.MonthlySummaryCard
+import com.bookkeeping.app.ui.components.QuickEntryHintPrefs
+import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
+import com.bookkeeping.app.ui.components.VoiceFab
+import com.bookkeeping.app.ui.components.VoiceHintBubble
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
@@ -122,6 +130,14 @@ fun TransactionListScreen(
     drilldown: StatsLedgerDrilldown? = null,
     onDrilldownConsumed: () -> Unit = {},
     onOpenDetail: (Long) -> Unit = {},
+    // 长按 FAB 满 1 秒的落点由外部注入：RootNavigation 打开录音面板。
+    // 账单页本身不碰麦克风、不写库；新建账单的点按走页面自己的对话框。
+    onVoiceEntry: () -> Unit = {},
+    // 录音会话进行中：把 FAB 按住动作禁用，避免同一时刻开两个会话。
+    voiceBusy: Boolean = false,
+    // 语音面板拿到的 Final 文本（null = 没听清）。非 null 就打开新建表单并预填。
+    voiceRequest: VoiceEntryRequest? = null,
+    onVoiceRequestConsumed: () -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val ledgerLoadState by viewModel.ledgerLoadState.collectAsState()
@@ -148,8 +164,11 @@ fun TransactionListScreen(
     }
 
     var showAddDialog by remember { mutableStateOf(false) }
+    // 新建表单顶部「一句话记账」的预填：语音 Final 或空（点 FAB 手填）。
+    var addDialogQuickEntry by remember { mutableStateOf("") }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
+    var showVoiceHint by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<TransactionEntity?>(null) }
     var activeDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     var exactDateFilter by remember { mutableStateOf<Pair<Long, Long>?>(null) }
@@ -179,8 +198,32 @@ fun TransactionListScreen(
     LaunchedEffect(duplicateCandidates.isEmpty()) {
         if (duplicateCandidates.isEmpty()) duplicateListExpanded = false
     }
+    // 语音面板交回 Final 文本：打开新建表单并预填。文本为 null（没听清）也开表单，
+    // 只是不预填——比让用户重来一次长按更快。
+    LaunchedEffect(voiceRequest) {
+        val request = voiceRequest ?: return@LaunchedEffect
+        addDialogQuickEntry = request.text.orEmpty()
+        showAddDialog = true
+        onVoiceRequestConsumed()
+    }
 
     val context = LocalContext.current
+    // 首次进账单页的「长按 + 1 秒」气泡：看过一次就写 seen，之后不再出现。
+    val dismissVoiceHint: () -> Unit = {
+        if (showVoiceHint) {
+            showVoiceHint = false
+            QuickEntryHintPrefs.markVoiceHintSeen(context)
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (!QuickEntryHintPrefs.shouldShowVoiceHint(context)) return@LaunchedEffect
+        showVoiceHint = true
+        delay(QuickEntryRule.HINT_VISIBLE_MS)
+        if (showVoiceHint) {
+            showVoiceHint = false
+            QuickEntryHintPrefs.markVoiceHintSeen(context)
+        }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     var notificationListenerEnabled by remember {
         mutableStateOf(NotificationListenerHelper.isEnabled(context))
@@ -261,17 +304,54 @@ fun TransactionListScreen(
     val duplicatesIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0)
+    // pointerInput 只会创建一次：用 rememberUpdatedState 保证按下时调用最新的收起逻辑。
+    val latestDismissVoiceHint by rememberUpdatedState(dismissVoiceHint)
 
     Scaffold(
+        // 气泡不用遮罩，但任何一次按下都收起它：Initial 阶段只观察、不消费，
+        // 这一下点击照样落到下面的列表和 FAB 上。
+        modifier = Modifier.pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                latestDismissVoiceHint()
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Icon(Icons.Default.Add, contentDescription = tr("新建账单"))
+            // 气泡压在 FAB 上方，但不能把 FAB 顶走：FAB 始终贴右，气泡往左上展开。
+            Layout(
+                content = {
+                    VoiceFab(
+                        onTap = {
+                            addDialogQuickEntry = ""
+                            showAddDialog = true
+                        },
+                        onVoiceStart = {
+                            dismissVoiceHint()
+                            onVoiceEntry()
+                        },
+                        // 录音会话进行中（面板开着）禁用按住动作：不能开第二个会话。
+                        enabled = !voiceBusy,
+                    )
+                    if (showVoiceHint) {
+                        VoiceHintBubble(
+                            text = tr("长按 + 1 秒，说话记账"),
+                            onDismiss = dismissVoiceHint,
+                        )
+                    }
+                },
+            ) { measurables, constraints ->
+                val loose = constraints.copy(minWidth = 0, minHeight = 0)
+                val fab = measurables.first().measure(loose)
+                val bubble = measurables.getOrNull(1)?.measure(loose)
+                val gap = 8.dp.roundToPx()
+                val width = maxOf(fab.width, bubble?.width ?: 0)
+                val height = fab.height + (bubble?.let { it.height + gap } ?: 0)
+                layout(width, height) {
+                    fab.placeRelative(width - fab.width, height - fab.height)
+                    bubble?.placeRelative(width - bubble.width, 0)
+                }
             }
         },
     ) { innerPadding ->
@@ -586,17 +666,27 @@ fun TransactionListScreen(
 
     if (showAddDialog) {
         AddTransactionDialog(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { amount, type, category, merchant, note, timestampMs ->
+            onDismiss = {
+                showAddDialog = false
+                addDialogQuickEntry = ""
+            },
+            initialQuickEntry = addDialogQuickEntry,
+            // 手动新建和语音预填共用这一条保存路径：先查疑似重复，再入账。
+            checkDuplicate = { amount, merchant, timestampMs ->
+                viewModel.findPossibleDuplicate(amount, merchant, timestampMs)
+            },
+            onConfirm = { amount, type, category, merchant, note, timestampMs, account ->
                 viewModel.addTransaction(
-                    amount,
-                    type,
-                    category,
-                    merchant,
-                    note,
-                    timestampMs,
+                    amountCents = amount,
+                    type = type,
+                    category = category,
+                    merchant = merchant,
+                    note = note,
+                    timestampMs = timestampMs,
+                    account = account,
                 )
                 showAddDialog = false
+                addDialogQuickEntry = ""
             },
         )
     }

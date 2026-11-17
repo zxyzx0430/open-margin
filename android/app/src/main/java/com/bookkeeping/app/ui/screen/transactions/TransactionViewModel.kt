@@ -11,7 +11,9 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.CaptureMergePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.ui.screen.transactions.DuplicateCandidate as SaveCandidate
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -299,6 +301,7 @@ class TransactionViewModel @Inject constructor(
         merchant: String,
         note: String,
         timestampMs: Long = System.currentTimeMillis(),
+        account: String? = null,
     ) {
         viewModelScope.launch {
             val entity = TransactionEntity(
@@ -307,6 +310,8 @@ class TransactionViewModel @Inject constructor(
                 category = category.name,
                 merchant = merchant,
                 note = note,
+                // 账户是本地字段：空就存 null，不写空串，避免把「没填」当成一个值同步出去。
+                account = account?.trim()?.ifBlank { null },
                 source = TransactionSource.MANUAL.name,
                 timestamp = timestampMs,
             )
@@ -315,6 +320,38 @@ class TransactionViewModel @Inject constructor(
                 settings.recordCategoryLearning(merchant, category)
             }
         }
+    }
+
+    /**
+     * 保存前的疑似重复检查：先按金额 + ±1 天粗筛，再交给纯逻辑 [DuplicateRule] 判定。
+     *
+     * 只读、不改任何记录；命中只用于在表单上多问一句，是否入账由用户决定。
+     * 查询失败时返回 null（当作没命中）——数据库读不出来不应该拦住用户记账。
+     */
+    suspend fun findPossibleDuplicate(
+        amountCents: Long,
+        merchant: String,
+        timestampMs: Long,
+    ): SaveCandidate? {
+        val window = DuplicateRule.SAME_MERCHANT_WINDOW_MS
+        // 读失败按「没命中」处理；协程取消要原样抛出去，否则弹窗已关还会继续保存。
+        val rows = try {
+            dao.findAmountCandidatesAround(
+                amountCents = amountCents,
+                windowStartMs = timestampMs - window,
+                windowEndMs = timestampMs + window,
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return DuplicateRule.find(
+            list = rows.map { it.toDuplicateCandidate() },
+            amountCents = amountCents,
+            merchant = merchant,
+            timestampMs = timestampMs,
+        )
     }
 
     fun updateTransaction(

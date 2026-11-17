@@ -47,6 +47,8 @@ import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
+import com.bookkeeping.app.ui.screen.transactions.VoiceCaptureSheet
+import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
 @Composable
@@ -62,6 +64,10 @@ fun RootNavigation() {
     val showBottomBar = currentDestination?.hierarchy?.any { destination ->
         navItems.any { it.route == destination.route }
     } == true
+    // 长按 FAB 的录音面板：开着的时候同时禁掉 FAB 的按住动作，一个时刻只有一个会话。
+    var voiceSheetOpen by remember { mutableStateOf(false) }
+    // 面板交回的 Final 文本（null = 没听清）。账单页消费后置回 null。
+    var voiceRequest by remember { mutableStateOf<VoiceEntryRequest?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -136,6 +142,13 @@ fun RootNavigation() {
                     drilldown = pendingLedgerDrilldown,
                     onDrilldownConsumed = { pendingLedgerDrilldown = null },
                     onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
+                    // 长按满 1 秒：打开录音面板。面板已经开着就不再开第二个会话。
+                    onVoiceEntry = {
+                        if (!voiceSheetOpen) voiceSheetOpen = true
+                    },
+                    voiceBusy = voiceSheetOpen,
+                    voiceRequest = voiceRequest,
+                    onVoiceRequestConsumed = { voiceRequest = null },
                 )
             }
             composable(
@@ -209,6 +222,18 @@ fun RootNavigation() {
                 )
             }
         }
+    }
+
+    // 录音面板本身就是模态的：铺在 Scaffold 之上，录音期间底下的 tab / FAB 都点不到。
+    // onFinal 的 text 为 null 表示「说了但没听清」：表单照开、不预填，不写空备注。
+    if (voiceSheetOpen) {
+        VoiceCaptureSheet(
+            onCancel = { voiceSheetOpen = false },
+            onFinal = { text ->
+                voiceSheetOpen = false
+                voiceRequest = VoiceEntryRequest(text)
+            },
+        )
     }
 }
 

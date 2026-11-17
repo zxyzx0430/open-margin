@@ -26,7 +26,10 @@ class LanguageSwitchInstrumentationTest {
             assertTrue(AppLanguage.set(app, AppLanguage.CHINESE))
             assertEquals(AppLanguage.CHINESE, AppLanguage.read(app))
             val chinese = AppLanguage.wrap(app)
-            assertEquals("清衡", chinese.getString(R.string.app_name))
+            // debug 变体用 resValue 把 app_name 覆盖成「清衡测试」（和正式版并存安装），
+            // 所以这里不比对完整字符串，只断言中文资源生效、用的是中文品牌名。
+            val chineseName = chinese.getString(R.string.app_name)
+            assertTrue("中文界面应显示中文品牌名，实际：$chineseName", chineseName.startsWith("清衡"))
             assertEquals("支出", AppLanguage.tr("支出"))
             assertEquals("餐饮", AppLanguage.tr("餐饮"))
         } finally {
