@@ -3,13 +3,16 @@ package com.bookkeeping.app.i18n
 import android.content.Context
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import com.bookkeeping.app.notification.CaptureNotifier
+import com.bookkeeping.app.notification.KeepAliveService
 
 /**
  * User-selected Android UI language. Persistence is independent of bookkeeping
  * database and sync settings. No transaction/category values are rewritten.
  *
- * AppCompatDelegate applies the selected locale to Android resources, while
- * the active value remains available for Compose text translated through tr().
+ * AppCompatDelegate applies the selected locale to Android resources (launcher
+ * label, recents title, notification app name), while the active value remains
+ * available for Compose text translated through tr().
  */
 object AppLanguage {
     private const val PREFS = "open_margin_ui_language"
@@ -32,6 +35,9 @@ object AppLanguage {
         if (ok) {
             active = selected
             applyApplicationLocale(selected)
+            // Channel names are user-visible; rebuild them in the new language.
+            KeepAliveService.ensureChannel(context)
+            CaptureNotifier.ensureChannel(context)
         }
         return ok
     }

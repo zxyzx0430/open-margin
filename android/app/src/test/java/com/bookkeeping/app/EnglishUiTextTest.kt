@@ -458,6 +458,41 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun systemNotificationLabelsTranslate() {
+        val expected = mapOf(
+            "清衡 OpenMargin" to "Open Margin",
+            "自动记账服务正常运行中" to "Auto capture service is running normally",
+            "正在确认运行状态" to "Checking capture status",
+            "通知使用权已关闭 · 点击开启" to "Notification access is off · tap to enable",
+            "尚未连接过 · 点击检查权限" to "Has not connected yet · tap to check permission",
+            "上次连接 %s，当前未连接 · 点击检查权限" to
+                "Last connected %s; currently disconnected · tap to check permission",
+            "%s 断开 · 已断开 %s · 点击检查权限" to
+                "Disconnected at %s · down for %s · tap to check permission",
+            "去检查权限" to "Check permission",
+            "采集运行状态" to "Capture status",
+            "显示自动记账采集是否在运行" to "Shows whether automatic capture is running",
+            "自动记账提醒" to "Auto-capture notifications",
+            "保存成功后显示金额、商户和时间" to
+                "Shows amount, merchant and time after a successful save",
+            "自动记账成功" to "Transaction saved",
+            "已合并重复采集" to "Duplicate capture merged",
+            "已保存，待确认重复" to "Saved — possible duplicate",
+            "已合并到已有记录" to "Merged into the existing record",
+            "可能与已有记录重复" to "May duplicate an existing record",
+            "微信" to "WeChat",
+            "支付宝" to "Alipay",
+            "银行短信" to "Bank SMS",
+            "手动" to "Manual",
+            "其他来源" to "Other source",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun duplicateWarningAndAccountLabels() {
         // 新建账单：账户预设 + 保存前的疑似重复提示。
         val expected = mapOf(
