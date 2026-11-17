@@ -971,6 +971,23 @@ internal object EnglishUiText {
         "显示自动记账采集是否在运行" to "Shows whether automatic capture is running",
 
         // === Windows 扫码配对（v1 Funnel 远程同步） ===
+        "配对电脑" to "Pair computer",
+        "多端同步 · 看板 · MCP" to "Multi-device sync · Dashboard · MCP",
+        "扫一扫" to "Scan now",
+        "手机、电脑、网页多端同步" to "Sync across phone, computer and web",
+        "在手机、电脑和网页之间同步同一份账本。" to
+            "Keep one ledger in sync across your phone, computer and web.",
+        "电脑端看板" to "Computer dashboard",
+        "查看长期趋势、订阅预测、对账和重复复核。" to
+            "Review long-term trends, subscription forecasts, reconciliation and duplicate reviews.",
+        "MCP 接入" to "MCP integration",
+        "接入自己的 AI 客户端，可查账、记账、改账、管理订阅、设置预算。" to
+            "Connect your own AI client to query, create and edit records, manage subscriptions and set budgets.",
+        "手动填写地址和密钥" to "Enter the address and key manually",
+        "二维码无效，请扫描电脑上的清衡配对二维码。" to
+            "Invalid QR code. Scan an Open Margin pairing code from your computer.",
+        "未获得相机权限，无法扫码，请在系统设置中允许相机权限。" to
+            "Camera permission is required to scan. Allow camera access in system settings.",
         "扫码连接" to "Scan QR code",
         "从相册选择二维码" to "Choose QR from gallery",
         "对准电脑上的配对二维码" to "Point at the pairing QR on your PC",

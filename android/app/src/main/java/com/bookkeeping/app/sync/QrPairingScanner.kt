@@ -13,9 +13,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -131,6 +135,44 @@ internal fun QrPairingControls(
             enabled = enabled,
             onClick = { galleryLauncher.launch("image/*") },
         ) { Text(tr("从相册选择二维码")) }
+    }
+}
+
+/** Compact camera action for the pairing information page; it opens the camera directly. */
+@Composable
+internal fun PairingQrScanAction(
+    enabled: Boolean = true,
+    onPayload: (PairingPayload) -> Unit,
+    onRejected: (PairingRejectReason) -> Unit,
+    onFailure: (QrScanFailure) -> Unit,
+) {
+    val context = LocalContext.current
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        when (val parsed = PairingPayload.parse(result.contents)) {
+            is PairingParseResult.Success -> onPayload(parsed.payload)
+            is PairingParseResult.Rejected -> onRejected(parsed.reason)
+        }
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) scanLauncher.launch(scanOptions())
+        else onFailure(QrScanFailure.CAMERA_DENIED)
+    }
+
+    TextButton(
+        enabled = enabled,
+        onClick = {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (granted) scanLauncher.launch(scanOptions())
+            else permissionLauncher.launch(Manifest.permission.CAMERA)
+        },
+    ) {
+        Icon(Icons.Filled.QrCodeScanner, contentDescription = null)
+        Text(tr("扫一扫"))
     }
 }
 
