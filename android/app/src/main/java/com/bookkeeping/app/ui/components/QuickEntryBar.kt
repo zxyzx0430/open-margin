@@ -13,7 +13,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
@@ -47,25 +46,20 @@ fun QuickEntryBar(
     }
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text(
-            text = tr("一句话记账"),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = fieldModifier.fillMaxWidth(),
-            minLines = 1,
+            label = { Text(tr("一句话记账")) },
+            minLines = 2,
             maxLines = 3,
             textStyle = MaterialTheme.typography.bodyMedium,
             shape = RoundedCornerShape(12.dp),
             placeholder = {
                 Text(
-                    text = tr("比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐"),
+                    text = tr("例：午餐 36 元，微信支付"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = QingTextSecondary,
                 )
@@ -81,7 +75,7 @@ fun QuickEntryBar(
             ),
         )
         Text(
-            text = tr("写下消费或收入，自动帮你填好账单"),
+            text = tr("可留空；识别后自动填表"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

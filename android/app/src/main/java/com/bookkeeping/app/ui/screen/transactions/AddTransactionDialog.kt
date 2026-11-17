@@ -1,18 +1,16 @@
 package com.bookkeeping.app.ui.screen.transactions
 
 import com.bookkeeping.app.i18n.tr
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -40,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.input.KeyboardType
@@ -80,7 +79,7 @@ private data class PendingSave(
 // "新建账单"对话框
 // 所有数据从外部传入、所有事件通过回调传出；表单状态只在对话框存活期间存在。
 // 顶部那句「一句话记账」只做预填（解析结果写进表单），保存仍然走 onConfirm。
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTransactionDialog(
     onDismiss: () -> Unit,
@@ -276,11 +275,11 @@ fun AddTransactionDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.imePadding(),
         title = { Text(if (initial == null) tr("新建账单") else tr("编辑账单")) },
         text = {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // 一句话记账：可以不填；填了就在回车（键盘「完成」）或离开输入框时解析成下面的字段。
                 // 失焦补解析只在表单还没被手工填过时做，免得把用户刚改的金额/商户冲掉。
@@ -328,108 +327,120 @@ fun AddTransactionDialog(
                     )
                 }
 
-                OutlinedButton(
-                    onClick = { showDatePicker = true },
-                    modifier = Modifier.fillMaxWidth(),
+                // 日期与金额并排，金额使用剩余宽度。
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        imageVector = Icons.Outlined.CalendarMonth,
-                        contentDescription = null,
+                    OutlinedButton(
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.width(100.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarMonth,
+                            contentDescription = null,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(formatCompactDate(timestamp))
+                    }
+
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = { raw ->
+                            if (raw.contains('-') || raw.contains('−')) {
+                                // Keep the previous amount, but surface the rejected negative input.
+                                amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
+                            } else {
+                                val candidate = raw.filter { c -> c.isDigit() || c == '.' }
+                                if (candidate.hasMoreThanTwoFractionDigits()) {
+                                    // Reject the edit rather than silently dropping extra decimal digits.
+                                    amountInputError = tr("金额最多保留两位小数")
+                                } else {
+                                    amountText = candidate
+                                    amountInputError = null
+                                }
+                            }
+                        },
+                        label = { Text(tr("金额（元）")) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        isError = amountError != null,
+                        supportingText = {
+                            if (amountError != null) {
+                                Text(amountError, color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text("${tr("日期")}：${formatDate(timestamp)}")
                 }
 
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { raw ->
-                        if (raw.contains('-') || raw.contains('−')) {
-                            // Keep the previous amount, but surface the rejected negative input.
-                            amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
-                        } else {
-                            val candidate = raw.filter { c -> c.isDigit() || c == '.' }
-                            if (candidate.hasMoreThanTwoFractionDigits()) {
-                                // Reject the edit rather than silently dropping extra decimal digits.
-                                amountInputError = tr("金额最多保留两位小数")
-                            } else {
-                                amountText = candidate
-                                amountInputError = null
+                // 分类与商户并排，分类下拉保留原有分类集合与选择语义。
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ExposedDropdownMenuBox(
+                        expanded = categoryMenuExpanded,
+                        onExpandedChange = { categoryMenuExpanded = it },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        OutlinedTextField(
+                            value = tr(selectedCategory.displayName),
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text(tr("分类")) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                        )
+                        DropdownMenu(
+                            expanded = categoryMenuExpanded,
+                            onDismissRequest = { categoryMenuExpanded = false },
+                            modifier = Modifier.heightIn(max = 320.dp),
+                        ) {
+                            TransactionCategory.entries.forEach { cat ->
+                                DropdownMenuItem(
+                                    text = { Text(tr(cat.displayName)) },
+                                    onClick = {
+                                        selectedCategory = cat
+                                        // 手工选过就锁定：后面再解析一句话也不覆盖。
+                                        categoryTouched = true
+                                        categoryMenuExpanded = false
+                                    }
+                                )
                             }
                         }
-                    },
-                    label = { Text(tr("金额（元）")) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    isError = amountError != null,
-                    supportingText = {
-                        if (amountError != null) {
-                            Text(amountError, color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // 分类下拉
-                ExposedDropdownMenuBox(
-                    expanded = categoryMenuExpanded,
-                    onExpandedChange = { categoryMenuExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = tr(selectedCategory.displayName),
-                        onValueChange = { },
-                        readOnly = true,
-                        label = { Text(tr("分类")) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    DropdownMenu(
-                        expanded = categoryMenuExpanded,
-                        onDismissRequest = { categoryMenuExpanded = false },
-                        modifier = Modifier.heightIn(max = 320.dp),
-                    ) {
-                        TransactionCategory.entries.forEach { cat ->
-                            DropdownMenuItem(
-                                text = { Text(tr(cat.displayName)) },
-                                onClick = {
-                                    selectedCategory = cat
-                                    // 手工选过就锁定：后面再解析一句话也不覆盖。
-                                    categoryTouched = true
-                                    categoryMenuExpanded = false
-                                }
-                            )
-                        }
                     }
+
+                    OutlinedTextField(
+                        value = merchant,
+                        onValueChange = { merchant = it },
+                        label = { Text(tr("商户/对方（可选）")) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1.15f),
+                    )
                 }
 
-                OutlinedTextField(
-                    value = merchant,
-                    onValueChange = { merchant = it },
-                    label = { Text(tr("商户/对方（可选）")) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // 账户：默认「不填」；选中的就是写进库里的中文值（与自动采集口径一致）。
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 标签与账户选项同排；360dp 宽时 chips 仅横向滚动，不折到第二行。
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
                         text = tr("账户"),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Row(
+                        modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         FilterChip(
                             selected = account.isBlank(),
                             onClick = { account = "" },
-                            label = { Text(tr("不填")) },
+                            label = { Text(tr("不填"), style = MaterialTheme.typography.labelSmall) },
                         )
                         ACCOUNT_PRESETS.forEach { preset ->
                             FilterChip(
                                 selected = account == preset,
                                 onClick = { account = if (account == preset) "" else preset },
-                                label = { Text(tr(preset)) },
+                                label = { Text(tr(preset), style = MaterialTheme.typography.labelSmall) },
                             )
                         }
                         // 编辑自动采集的账单时账户可能是「招商银行 (1234)」这类自由文本，
@@ -439,7 +450,7 @@ fun AddTransactionDialog(
                             FilterChip(
                                 selected = true,
                                 onClick = { account = "" },
-                                label = { Text(custom) },
+                                label = { Text(custom, style = MaterialTheme.typography.labelSmall) },
                             )
                         }
                     }
@@ -522,8 +533,8 @@ fun AddTransactionDialog(
     }
 }
 
-private fun formatDate(timestampMs: Long): String =
-    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestampMs))
+private fun formatCompactDate(timestampMs: Long): String =
+    SimpleDateFormat("MM/dd", Locale.getDefault()).format(Date(timestampMs))
 
 /** 疑似重复弹框里的对方时间：日期 + 时分，够用来判断是不是同一笔。 */
 private fun formatDateTime(timestampMs: Long): String =
