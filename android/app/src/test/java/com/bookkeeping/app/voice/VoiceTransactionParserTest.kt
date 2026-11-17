@@ -701,6 +701,19 @@ class VoiceTransactionParserTest {
     }
 
     @Test
+    fun shortQuickEntryPlaceholderExamplesParseAmountCategoryAndAccount() {
+        val lunch = parse("午饭 25 微信")
+        assertEquals(2_500L, lunch.amountCents)
+        assertEquals(TransactionCategory.FOOD, lunch.category)
+        assertEquals("微信", lunch.account)
+
+        val ride = parse("打车 18 支付宝")
+        assertEquals(1_800L, ride.amountCents)
+        assertEquals(TransactionCategory.TRANSPORT, ride.category)
+        assertEquals("支付宝", ride.account)
+    }
+
+    @Test
     fun noAccountIsNull() {
         assertNull(parse("麦当劳 36").account)
     }
