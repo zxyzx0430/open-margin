@@ -22,6 +22,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,8 +39,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
@@ -75,6 +80,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -377,7 +383,8 @@ fun VoiceCapturePanel(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
+                        .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
+                        .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     // 下滑关闭的手柄区：标题 + 拖柄都算，拖动超过阈值就取消。
@@ -419,6 +426,9 @@ fun VoiceCapturePanel(
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                             Spacer(Modifier.width(10.dp))
                             RecordingBadge(state = state)
@@ -506,6 +516,8 @@ private fun RecordingBadge(state: VoiceCaptureState) {
         text = label,
         style = MaterialTheme.typography.labelMedium,
         color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
     )
 }
 
@@ -513,6 +525,7 @@ private fun RecordingBadge(state: VoiceCaptureState) {
  * 可编辑的文本区 + 冻结提示 + 按钮。Listening 与 Review 共用：
  * 同一个输入框贯穿「说话中」和「停止后」，用户不用在两个界面之间搬文本。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditorBody(
     state: VoiceCaptureState,
@@ -576,12 +589,18 @@ private fun EditorBody(
                     text = tr("点停止结束，说话时可以直接改"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             } else {
                 Text(
                     text = tr("已暂停自动更新"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 TextButton(onClick = onResumeAutoFollow, contentPadding = PaddingValues(horizontal = 8.dp)) {
                     Text(tr("恢复"))
@@ -594,6 +613,9 @@ private fun EditorBody(
                 text = tr("正在识别最后几个字…"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (!listening && !submittable) {
@@ -607,7 +629,13 @@ private fun EditorBody(
     if (suggestion != null) {
         AssistChip(
             onClick = onAcceptReplacement,
-            label = { Text(tr("识别更新了，点此替换")) },
+            label = {
+                Text(
+                    text = tr("识别更新了，点此替换"),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
             leadingIcon = {
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
             },
@@ -616,16 +644,23 @@ private fun EditorBody(
     }
 
     Spacer(Modifier.height(12.dp))
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        TextButton(onClick = onCancel) { Text(tr("取消")) }
+        TextButton(onClick = onCancel) { Text(tr("取消"), maxLines = 1) }
         if (!listening && onRetry != null && submittable) {
-            OutlinedButton(onClick = onRetry) { Text(tr("重说")) }
+            OutlinedButton(onClick = onRetry) { Text(tr("重说"), maxLines = 1) }
         }
-        Button(onClick = onPrimary, modifier = Modifier.weight(1f)) { Text(primaryLabel) }
+        Button(
+            onClick = onPrimary,
+            modifier = Modifier
+                .weight(1f)
+                .widthIn(min = 96.dp),
+        ) {
+            Text(primaryLabel)
+        }
     }
 }
 
