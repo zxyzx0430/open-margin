@@ -348,387 +348,69 @@ fun VoiceCapturePanel(
 
     BackHandler { cancel() }
 
-    // 入场：淡入 + 轻微上滑。录音中面板是「跟着手指出现」的，不能有等待感。
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { visible = true }
-    val fade by animateFloatAsState(if (visible) 1f else 0f, tween(160), label = "voicePanelFade")
-    val rise by animateDpAsState(if (visible) 0.dp else 56.dp, tween(180), label = "voicePanelRise")
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        // 遮罩：点一下 = 取消（丢弃本次，不填表）。
-        val interaction = remember { MutableInteractionSource() }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .alpha(fade)
-                .background(Color.Black.copy(alpha = 0.45f))
-                .clickable(interactionSource = interaction, indication = null) { cancel() },
-        )
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                // safeDrawing 的底部 = max(导航栏, 输入法)：键盘弹出时整块面板上推，
-                // 输入框和主按钮都不会被输入法盖住。
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                .offset { IntOffset(0, dragOffset.roundToInt() + rise.roundToPx()) },
-        ) {
-            Surface(
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 12.dp,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // 下滑关闭的手柄区：标题 + 拖柄都算，拖动超过阈值就取消。
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .draggable(
-                                state = rememberDraggableState { delta ->
-                                    dragOffset = (dragOffset + delta).coerceAtLeast(0f)
-                                },
-                                orientation = Orientation.Vertical,
-                                onDragStopped = {
-                                    if (dragOffset > dismissThresholdPx) {
-                                        cancel()
-                                    } else {
-                                        dragOffset = 0f
-                                    }
-                                },
-                            ),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 10.dp, bottom = 6.dp)
-                                .size(width = 36.dp, height = 4.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                    RoundedCornerShape(2.dp),
-                                ),
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp, bottom = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = tr("语音记账"),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            RecordingBadge(state = state)
-                        }
-                    }
-                    when (val current = state) {
-                        is VoiceCaptureState.Preparing -> PreparingBody(
-                            detail = current.detail,
-                            onCancel = { cancel() },
-                        )
-
-                        is VoiceCaptureState.Listening -> EditorBody(
-                            state = current,
-                            field = field,
-                            onFieldChange = { value ->
-                                field = value
-                                state = VoiceCaptureLogic.edit(state, value.text)
-                            },
-                            onResumeAutoFollow = { state = VoiceCaptureLogic.resumeAutoFollow(state) },
-                            onAcceptReplacement = { state = VoiceCaptureLogic.acceptReplacement(state) },
-                            primaryLabel = tr("停止"),
-                            onPrimary = { stopRecording() },
-                            onCancel = { cancel() },
-                        )
-
-                        is VoiceCaptureState.Review -> EditorBody(
-                            state = current,
-                            field = field,
-                            onFieldChange = { value ->
-                                field = value
-                                state = VoiceCaptureLogic.edit(state, value.text)
-                            },
-                            onResumeAutoFollow = { state = VoiceCaptureLogic.resumeAutoFollow(state) },
-                            onAcceptReplacement = { state = VoiceCaptureLogic.acceptReplacement(state) },
-                            primaryLabel = if (VoiceCaptureLogic.isSubmittable(current.text)) {
-                                tr("填入账单")
-                            } else {
-                                tr("重说")
-                            },
-                            onPrimary = {
-                                if (VoiceCaptureLogic.isSubmittable(current.text)) submit() else restart()
-                            },
-                            onRetry = { restart() },
-                            onCancel = { cancel() },
-                        )
-
-                        is VoiceCaptureState.Failed -> FailedBody(
-                            state = current,
-                            onRetry = { if (!settled) restart() },
-                            onOpenSettings = { openAppSettings(context) },
-                            onCancel = { cancel() },
-                        )
-
-                        // 终态：面板正在收起，这里只是过渡帧。
-                        is VoiceCaptureState.Delivered -> Unit
-                        VoiceCaptureState.Cancelled -> Unit
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = tr("本地识别，音频不会上传"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RecordingBadge(state: VoiceCaptureState) {
-    val (label, color) = when (state) {
-        is VoiceCaptureState.Listening -> tr("录音中…") to MaterialTheme.colorScheme.error
-        is VoiceCaptureState.Review -> tr("已停止录音") to MaterialTheme.colorScheme.onSurfaceVariant
-        else -> return
-    }
-    Box(
-        modifier = Modifier
-            .size(8.dp)
-            .background(color, RoundedCornerShape(4.dp)),
-    )
-    Spacer(Modifier.width(6.dp))
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
-}
-
-/**
- * 可编辑的文本区 + 冻结提示 + 按钮。Listening 与 Review 共用：
- * 同一个输入框贯穿「说话中」和「停止后」，用户不用在两个界面之间搬文本。
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun EditorBody(
-    state: VoiceCaptureState,
-    field: TextFieldValue,
-    onFieldChange: (TextFieldValue) -> Unit,
-    onResumeAutoFollow: () -> Unit,
-    onAcceptReplacement: () -> Unit,
-    primaryLabel: String,
-    onPrimary: () -> Unit,
-    onRetry: (() -> Unit)? = null,
-    onCancel: () -> Unit,
-) {
-    val listening = state is VoiceCaptureState.Listening
-    val text = when (state) {
-        is VoiceCaptureState.Listening -> state.text
-        is VoiceCaptureState.Review -> state.text
-        else -> ""
-    }
-    val autoFollow = when (state) {
-        is VoiceCaptureState.Listening -> state.autoFollow
-        is VoiceCaptureState.Review -> state.autoFollow
-        else -> true
-    }
-    val waitingFinal = (state as? VoiceCaptureState.Review)?.waitingFinal == true
-    val suggestion = when (state) {
-        is VoiceCaptureState.Listening -> state.suggestedReplacement
-        is VoiceCaptureState.Review -> state.suggestedReplacement
-        else -> null
-    }
-    val submittable = VoiceCaptureLogic.isSubmittable(text)
-
-    OutlinedTextField(
-        value = field,
-        onValueChange = onFieldChange,
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 116.dp),
-        textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-        placeholder = {
-            Text(
-                text = if (listening) tr("请说话…") else tr("没有听清，请再说一次"),
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        minLines = 2,
-        maxLines = 5,
-        shape = RoundedCornerShape(16.dp),
-    )
-
-    Spacer(Modifier.height(8.dp))
-    // 一行状态：跟随中 / 已冻结（可恢复）/ 正在识别 / 没听清。
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    EntryPanelLayout(
+        title = tr("语音记账"),
+        onDismiss = { cancel() },
+        headerTrailing = { RecordingBadge(state = state) },
     ) {
-        if (listening) {
-            if (autoFollow) {
-                Text(
-                    text = tr("点停止结束，说话时可以直接改"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            } else {
-                Text(
-                    text = tr("已暂停自动更新"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                TextButton(onClick = onResumeAutoFollow, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text(tr("恢复"))
-                }
-            }
-        }
-        if (waitingFinal) {
-            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-            Text(
-                text = tr("正在识别最后几个字…"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+        when (val current = state) {
+            is VoiceCaptureState.Preparing -> PreparingBody(
+                detail = current.detail,
+                onCancel = { cancel() },
             )
-        }
-        if (!listening && !submittable) {
-            Text(
-                text = tr("没有听清，请再说一次"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+            is VoiceCaptureState.Listening -> EditorBody(
+                state = current,
+                field = field,
+                onFieldChange = { value ->
+                    field = value
+                    state = VoiceCaptureLogic.edit(state, value.text)
+                },
+                onResumeAutoFollow = { state = VoiceCaptureLogic.resumeAutoFollow(state) },
+                onAcceptReplacement = { state = VoiceCaptureLogic.acceptReplacement(state) },
+                primaryLabel = tr("停止"),
+                onPrimary = { stopRecording() },
+                onCancel = { cancel() },
             )
-        }
-    }
-    if (suggestion != null) {
-        AssistChip(
-            onClick = onAcceptReplacement,
-            label = {
-                Text(
-                    text = tr("识别更新了，点此替换"),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            },
-            leadingIcon = {
-                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-            },
-        )
-        Spacer(Modifier.height(4.dp))
-    }
 
-    Spacer(Modifier.height(12.dp))
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        TextButton(onClick = onCancel) { Text(tr("取消"), maxLines = 1) }
-        if (!listening && onRetry != null && submittable) {
-            OutlinedButton(onClick = onRetry) { Text(tr("重说"), maxLines = 1) }
-        }
-        Button(
-            onClick = onPrimary,
-            modifier = Modifier
-                .weight(1f)
-                .widthIn(min = 96.dp),
-        ) {
-            Text(primaryLabel)
-        }
-    }
-}
+            is VoiceCaptureState.Review -> EditorBody(
+                state = current,
+                field = field,
+                onFieldChange = { value ->
+                    field = value
+                    state = VoiceCaptureLogic.edit(state, value.text)
+                },
+                onResumeAutoFollow = { state = VoiceCaptureLogic.resumeAutoFollow(state) },
+                onAcceptReplacement = { state = VoiceCaptureLogic.acceptReplacement(state) },
+                primaryLabel = if (VoiceCaptureLogic.isSubmittable(current.text)) {
+                    tr("填入账单")
+                } else {
+                    tr("重说")
+                },
+                onPrimary = {
+                    if (VoiceCaptureLogic.isSubmittable(current.text)) submit() else restart()
+                },
+                onRetry = { restart() },
+                onCancel = { cancel() },
+            )
 
-@Composable
-private fun PreparingBody(detail: String, onCancel: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        CircularProgressIndicator(modifier = Modifier.size(36.dp), strokeWidth = 3.dp)
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = detail,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onCancel) { Text(tr("取消")) }
-    }
-}
+            is VoiceCaptureState.Failed -> FailedBody(
+                state = current,
+                onRetry = { if (!settled) restart() },
+                onOpenSettings = { openAppSettings(context) },
+                onCancel = { cancel() },
+            )
 
-@Composable
-private fun FailedBody(
-    state: VoiceCaptureState.Failed,
-    onRetry: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(
-            imageVector = Icons.Filled.Warning,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(32.dp),
-        )
+            // 终态：面板正在收起，这里只是过渡帧。
+            is VoiceCaptureState.Delivered -> Unit
+            VoiceCaptureState.Cancelled -> Unit
+        }
         Spacer(Modifier.height(12.dp))
         Text(
-            text = tr(state.message),
-            style = MaterialTheme.typography.bodyLarge,
+            text = tr("本地识别，音频不会上传"),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurface,
         )
-        Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = onRetry) { Text(tr("重试")) }
-            OutlinedButton(onClick = onCancel) { Text(tr("取消")) }
-        }
-        if (state.code == AsrErrorCode.PERMISSION_DENIED) {
-            // 拒绝一次后再申请，系统可能不再弹框：必须给一条去系统设置的路。
-            TextButton(onClick = onOpenSettings) { Text(tr("去系统设置授权")) }
-        }
     }
 }
-
-private fun hasRecordPermission(context: Context): Boolean =
-    ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-        PackageManager.PERMISSION_GRANTED
-
-/** 打开本应用的系统详情页；打不开时退到系统设置首页，绝不因为按钮没反应而卡住用户。 */
-private fun openAppSettings(context: Context) {
-    val details = Intent(
-        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-        Uri.fromParts("package", context.packageName, null),
-    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    val opened = runCatching { context.startActivity(details) }.isSuccess
-    if (!opened) {
-        runCatching {
-            context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
-    }
-}
-
-private const val TAG = "VoiceCapturePanel"
