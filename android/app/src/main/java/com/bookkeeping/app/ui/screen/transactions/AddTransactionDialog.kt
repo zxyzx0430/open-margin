@@ -328,7 +328,6 @@ fun AddTransactionDialog(
         delay(500)
         applyQuickEntry(quickEntry)
     }
-    LaunchedEffect(amountFocusRequester) { amountFocusRequester.requestFocus() }
 
     val amountIsNegative = amountText.contains('-') || amountText.contains('−') ||
         (amountText.toDoubleOrNull()?.let { it < 0.0 } == true)
@@ -474,7 +473,7 @@ fun AddTransactionDialog(
                     isError = amountError != null,
                     modifier = Modifier
                         .weight(1f)
-                        .height(56.dp)
+                        .heightIn(min = 64.dp)
                         .focusRequester(amountFocusRequester),
                 )
 
@@ -642,9 +641,7 @@ fun AddTransactionDialog(
                     )
                 },
                 singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
 
             OutlinedTextField(
