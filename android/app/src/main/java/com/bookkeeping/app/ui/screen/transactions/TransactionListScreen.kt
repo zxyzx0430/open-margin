@@ -1070,7 +1070,7 @@ private fun LedgerTransactionRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                sourceTag?.let { SoftBadge(text = it, tone = StatusTone.NEUTRAL) }
+                SoftBadge(text = sourceTag, tone = StatusTone.NEUTRAL)
                 Text(
                     text = transactionSubtitle(
                         categoryLabel = tr(category.displayName),
@@ -1115,10 +1115,17 @@ private fun transactionStatusLabel(transaction: TransactionEntity): Pair<String,
     }
 }
 
-/** 来源标注：[扫描] / [导入] 写在备注开头，列表里单独做成小标签。 */
-private fun transactionSourceTag(transaction: TransactionEntity): String? {
-    val match = SOURCE_TAG.find(transaction.note) ?: return null
-    return tr(match.value)
+/** 来源标注：每笔都显示一个来源，优先看扫描/导入前缀，其次看来源字段。 */
+private fun transactionSourceTag(transaction: TransactionEntity): String {
+    val prefix = SOURCE_TAG.find(transaction.note)?.groupValues?.getOrNull(1)
+    return when {
+        transaction.captureKind != null || prefix == "扫描" -> tr("扫描")
+        prefix == "导入" -> tr("导入")
+        transaction.source == "BANK_SMS" -> tr("短信")
+        transaction.source == "ALIPAY" || transaction.source == "WECHAT" -> tr("通知")
+        transaction.source == "MANUAL" -> tr("手动")
+        else -> tr("其他来源")
+    }
 }
 
 private val SOURCE_TAG = Regex("^\\[(扫描|导入)]")
