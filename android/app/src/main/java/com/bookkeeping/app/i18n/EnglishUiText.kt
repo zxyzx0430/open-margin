@@ -444,7 +444,7 @@ internal object EnglishUiText {
         "总收入" to "Total income",
         "分类明细" to "Category details",
         "选择月份" to "Select month",
-        "回到本月" to "Back to this month",
+        "回到本月" to "Return to this month",
         "上一年" to "Previous year",
         "下一年" to "Next year",
         "更多" to "More",
