@@ -130,9 +130,14 @@ fun TransactionListScreen(
     drilldown: StatsLedgerDrilldown? = null,
     onDrilldownConsumed: () -> Unit = {},
     onOpenDetail: (Long) -> Unit = {},
-    // 长按 FAB 满 1 秒的落点由外部注入。录音与 ASR 在 feat/voice-asr-engine 上接入，
+    // 长按 FAB 满 1 秒的落点由外部注入：RootNavigation 打开录音面板。
     // 账单页本身不碰麦克风、不写库；新建账单的点按走页面自己的对话框。
     onVoiceEntry: () -> Unit = {},
+    // 录音会话进行中：把 FAB 按住动作禁用，避免同一时刻开两个会话。
+    voiceBusy: Boolean = false,
+    // 语音面板拿到的 Final 文本（null = 没听清）。非 null 就打开新建表单并预填。
+    voiceRequest: VoiceEntryRequest? = null,
+    onVoiceRequestConsumed: () -> Unit = {},
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val ledgerLoadState by viewModel.ledgerLoadState.collectAsState()
@@ -159,6 +164,8 @@ fun TransactionListScreen(
     }
 
     var showAddDialog by remember { mutableStateOf(false) }
+    // 新建表单顶部「一句话记账」的预填：语音 Final 或空（点 FAB 手填）。
+    var addDialogQuickEntry by remember { mutableStateOf("") }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
     var showVoiceHint by remember { mutableStateOf(false) }
@@ -190,6 +197,14 @@ fun TransactionListScreen(
     }
     LaunchedEffect(duplicateCandidates.isEmpty()) {
         if (duplicateCandidates.isEmpty()) duplicateListExpanded = false
+    }
+    // 语音面板交回 Final 文本：打开新建表单并预填。文本为 null（没听清）也开表单，
+    // 只是不预填——比让用户重来一次长按更快。
+    LaunchedEffect(voiceRequest) {
+        val request = voiceRequest ?: return@LaunchedEffect
+        addDialogQuickEntry = request.text.orEmpty()
+        showAddDialog = true
+        onVoiceRequestConsumed()
     }
 
     val context = LocalContext.current
@@ -308,11 +323,16 @@ fun TransactionListScreen(
             Layout(
                 content = {
                     VoiceFab(
-                        onTap = { showAddDialog = true },
+                        onTap = {
+                            addDialogQuickEntry = ""
+                            showAddDialog = true
+                        },
                         onVoiceStart = {
                             dismissVoiceHint()
                             onVoiceEntry()
                         },
+                        // 录音会话进行中（面板开着）禁用按住动作：不能开第二个会话。
+                        enabled = !voiceBusy,
                     )
                     if (showVoiceHint) {
                         VoiceHintBubble(
@@ -646,7 +666,11 @@ fun TransactionListScreen(
 
     if (showAddDialog) {
         AddTransactionDialog(
-            onDismiss = { showAddDialog = false },
+            onDismiss = {
+                showAddDialog = false
+                addDialogQuickEntry = ""
+            },
+            initialQuickEntry = addDialogQuickEntry,
             onConfirm = { amount, type, category, merchant, note, timestampMs ->
                 viewModel.addTransaction(
                     amount,
@@ -657,6 +681,7 @@ fun TransactionListScreen(
                     timestampMs,
                 )
                 showAddDialog = false
+                addDialogQuickEntry = ""
             },
         )
     }

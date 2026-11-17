@@ -1006,7 +1006,33 @@ internal object EnglishUiText {
         "语音记账" to "Voice entry",
         "新建账单，长按说话记账" to "New transaction; press and hold to speak",
         "长按 + 1 秒，说话记账" to "Hold + for 1 second, then speak",
-        "语音记账还在接入中" to "Voice entry is still being connected",
+        // 录音面板：准备模型 → 听 → 收尾 → 失败，以及失败后的两个出口。
+        "正在准备语音模型…" to "Preparing the voice model…",
+        "正在请求麦克风权限…" to "Requesting microphone permission…",
+        "请说话…" to "Speak now…",
+        "停止" to "Stop",
+        "正在识别最后几个字…" to "Finishing the last words…",
+        "本地识别，音频不会上传" to "Recognized on this device; audio is never uploaded",
+        "去系统设置授权" to "Allow in system settings",
+        // 引擎错误码 → 用户可读提示（VoiceCaptureLogic.messageFor 的原文）。
+        "没有麦克风权限，无法语音记账" to
+            "No microphone permission, so voice entry is unavailable",
+        "安装包缺少语音模型，请重新安装应用" to
+            "This build is missing the voice model. Reinstall the app.",
+        "语音模型损坏，请重装应用后再试" to
+            "The voice model is corrupted. Reinstall the app and try again.",
+        "此设备的 CPU 架构不支持本地语音识别" to
+            "This device's CPU architecture does not support on-device speech recognition",
+        "语音引擎初始化失败，请重试" to "The speech engine failed to start. Try again.",
+        "麦克风被占用或打不开，请稍后重试" to
+            "The microphone is busy or unavailable. Try again shortly.",
+        "语音引擎还没准备好，请重试" to "The speech engine is not ready yet. Try again.",
+        "语音会话已经结束，请重新长按" to "The voice session has ended. Press and hold again.",
+        "没有听清，请再说一次" to "Didn't catch that. Please say it again.",
+        // 引擎 prepare() 的进度文案（面板直接用它显示进度）。
+        "语音模型已就绪" to "Voice model ready",
+        "正在校验语音模型" to "Verifying the voice model",
+        "正在加载语音识别引擎" to "Loading the speech recognizer",
         // 一句话解析的两种提醒：没看出金额、以及填好了但要核对。
         "没看出金额，请手动补上" to "No amount found; please fill it in",
         "已按这句话填好，请核对金额、分类和时间" to
@@ -1048,6 +1074,9 @@ internal object EnglishUiText {
         if (chinese.startsWith("有 ") && chinese.endsWith(" 笔冲突待处理；其余修改已上传")) {
             val count = chinese.removePrefix("有 ").removeSuffix(" 笔冲突待处理；其余修改已上传")
             return "$count conflicts need review; other changes were uploaded"
+        }
+        if (chinese.startsWith("正在释放语音模型 ")) {
+            return "Unpacking voice model " + chinese.removePrefix("正在释放语音模型 ")
         }
         if (chinese.startsWith("无法读取 XLSX：")) {
             return "Could not read XLSX: " + chinese.removePrefix("无法读取 XLSX：")
