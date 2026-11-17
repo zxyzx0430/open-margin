@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -30,11 +31,13 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -44,6 +47,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -93,11 +98,9 @@ import com.bookkeeping.app.sync.readPendingCounts
 import com.bookkeeping.app.ui.components.AutomationSetupPrompt
 import com.bookkeeping.app.ui.components.CategoryFilterSheet
 import com.bookkeeping.app.ui.components.CategoryFilterTotal
-import com.bookkeeping.app.ui.components.DayHeader
 import com.bookkeeping.app.ui.components.LedgerEmptyState
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.components.LedgerFilterRow
-import com.bookkeeping.app.ui.components.LedgerSearchBar
 import com.bookkeeping.app.ui.components.MerchantAvatar
 import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.MonthlySummaryCard
@@ -107,6 +110,7 @@ import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.VoiceFab
 import com.bookkeeping.app.ui.components.VoiceHintBubble
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
@@ -114,6 +118,10 @@ import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.stats.StatsPeriod
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingSurface
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -542,7 +550,7 @@ fun TransactionListScreen(
             }
 
             item(key = "search") {
-                LedgerSearchBar(
+                TransactionSearchBar(
                     query = searchQuery,
                     onQueryChange = viewModel::setSearchQuery,
                 )
@@ -653,7 +661,7 @@ fun TransactionListScreen(
                             .filter { it.type == "INCOME" }
                             .sumOf { it.amountCents }
                         val foreignOnly = valid.isEmpty() && dayItems.any { it.currency != "CNY" }
-                        DayHeader(
+                        TransactionDayHeader(
                             label = dayLabel(dayKey),
                             count = valid.size,
                             expenseCents = expense,
@@ -791,6 +799,158 @@ fun TransactionListScreen(
 }
 
 @Composable
+private fun TransactionSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        shape = RoundedCornerShape(16.dp),
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Outlined.Search,
+                contentDescription = null,
+                tint = QingTextSecondary,
+            )
+        },
+        trailingIcon = if (query.isNotBlank()) {
+            {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = tr("清空搜索"),
+                        tint = QingTextSecondary,
+                    )
+                }
+            }
+        } else {
+            null
+        },
+        placeholder = {
+            Text(
+                text = if (AppLanguage.current() == AppLanguage.ENGLISH) {
+                    tr("商户、备注或精确金额")
+                } else {
+                    tr("搜索商户、备注或精确金额")
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = QingTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = QingSurface,
+            unfocusedContainerColor = QingSurface,
+            focusedBorderColor = QingPrimary,
+            unfocusedBorderColor = QingOutline,
+            cursorColor = QingPrimary,
+        ),
+    )
+}
+
+@Composable
+private fun TransactionDayHeader(
+    label: String,
+    count: Int,
+    expenseCents: Long,
+    incomeCents: Long,
+    hasForeignOnly: Boolean,
+    excludedCount: Int,
+) {
+    val semantic = LocalQingSemanticColors.current
+    val countUnit = if (AppLanguage.current() == AppLanguage.ENGLISH) tr("条") else tr("笔")
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "$label · $count $countUnit",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (expenseCents > 0L) {
+                    DayTotalRow(
+                        label = tr("支出"),
+                        amountCents = expenseCents,
+                        color = semantic.expenseText,
+                    )
+                }
+                if (incomeCents > 0L) {
+                    DayTotalRow(
+                        label = tr("收入"),
+                        amountCents = incomeCents,
+                        color = semantic.income,
+                    )
+                }
+                if (expenseCents <= 0L && incomeCents <= 0L) {
+                    Text(
+                        text = if (hasForeignOnly) tr("仅外币 · 未换算") else tr("—"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 160.dp),
+                    )
+                }
+            }
+        }
+        if (excludedCount > 0) {
+            Text(
+                text = "$excludedCount ${tr("未计入")}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DayTotalRow(
+    label: String,
+    amountCents: Long,
+    color: Color,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        AutoSizeAmountText(
+            text = formatCny(amountCents),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.widthIn(min = 64.dp),
+            color = color,
+            textAlign = TextAlign.End,
+        )
+    }
+}
+
+@Composable
 private fun DayCard(
     items: List<TransactionEntity>,
     onOpenDetail: (Long) -> Unit,
@@ -904,14 +1064,16 @@ private fun LedgerTransactionRow(
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f),
                 )
                 status?.let { (label, color) ->
                     Text(
                         text = " · " + label,
                         style = MaterialTheme.typography.labelSmall,
                         color = color,
+                        modifier = Modifier.widthIn(max = 104.dp),
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -929,17 +1091,19 @@ private fun LedgerTransactionRow(
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        Text(
+        AutoSizeAmountText(
             text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
             style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.widthIn(min = 80.dp),
             fontWeight = FontWeight.SemiBold,
             color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
-            maxLines = 1,
+            textAlign = TextAlign.End,
         )
     }
 }

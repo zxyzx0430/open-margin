@@ -1145,6 +1145,7 @@ internal object EnglishUiText {
         "分享日志" to "Share log",
         "分享崩溃日志" to "Share crash log",
         "将电脑上的二维码放入框内" to "Place the QR code shown on your computer inside the frame.",
+        "商户、备注或精确金额" to "Merchant, note or exact amount",
     )
 
     fun translate(chinese: String): String {
