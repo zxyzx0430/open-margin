@@ -3,6 +3,7 @@ package com.bookkeeping.app.ui.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -13,6 +14,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,23 +51,27 @@ fun QuickEntryBar(
     }
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = fieldModifier.fillMaxWidth(),
-            label = { Text(tr("一句话记账")) },
+            modifier = fieldModifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .semantics { contentDescription = tr("一句话记账") },
+            label = null,
             minLines = 2,
-            maxLines = 3,
-            textStyle = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            textStyle = MaterialTheme.typography.bodySmall,
             shape = RoundedCornerShape(12.dp),
             placeholder = {
                 Text(
                     text = tr("例如：午饭 25 微信") + "\n" + tr("打车 18 支付宝"),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
                     maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
