@@ -164,7 +164,7 @@ private fun PairingQrCaptureControls(
         }
 
         Text(
-            text = "将电脑上的二维码放入框内",
+            text = tr("将电脑上的二维码放入框内"),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()

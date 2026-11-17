@@ -21,6 +21,10 @@ class FeedbackReportTest {
         assertTrue(diagnostics.contains("Xiaomi 23127PN0CC"))
         assertTrue(diagnostics.contains("API 35"))
         assertTrue(diagnostics.contains("zh_CN"))
+        assertTrue(diagnostics.contains("版本: 1.3.1"))
+        assertTrue(diagnostics.contains("机型: Xiaomi 23127PN0CC"))
+        assertTrue(diagnostics.contains("Android: 15 (API 35)"))
+        assertTrue(diagnostics.contains("语言: zh_CN"))
     }
 
     @Test

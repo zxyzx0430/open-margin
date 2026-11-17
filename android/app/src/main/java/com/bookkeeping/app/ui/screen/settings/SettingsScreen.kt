@@ -351,8 +351,8 @@ fun SettingsScreen(
                 SettingsGroupCard {
                     SettingsActionRow(
                         icon = Icons.Filled.FileUpload,
-                        title = tr("导入账单"),
-                        subtitle = tr("微信 / 支付宝 CSV"),
+                        title = tr("导入 / 导出账单"),
+                        subtitle = tr("导入 CSV、导出全部账单"),
                         onClick = {
                             exportFeedback = null
                             showImportExportSheet = true
