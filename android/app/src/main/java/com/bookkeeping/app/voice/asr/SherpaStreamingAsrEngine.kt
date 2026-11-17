@@ -377,7 +377,7 @@ class SherpaStreamingAsrEngine(
     }
 
     private suspend fun captureLoop(queue: Channel<AudioCommand>, sessionId: Long) {
-        val capturer = MicrophoneCapture(SAMPLE_RATE)
+        val capturer = MicrophoneCapture(appContext, SAMPLE_RATE)
         synchronized(nativeLock) { microphone = capturer }
         try {
             capturer.start()
