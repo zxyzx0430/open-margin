@@ -397,7 +397,7 @@ fun SettingsScreen(
             item { LanguageCard() }
 
             item { SectionHeader(tr("关于与更新")) }
-            item { AboutUpdateCard() }
+            item { AboutUpdateCard(onOpenAbout = { detailDialog = "about" }) }
 
             item { SectionHeader(tr("国产 ROM 后台白名单")) }
             item {
@@ -407,6 +407,18 @@ fun SettingsScreen(
                         title = tr("后台运行设置"),
                         subtitle = tr("自启动与省电策略"),
                         onClick = { detailDialog = "rom" },
+                    )
+                }
+            }
+
+            item { SectionHeader(tr("反馈")) }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("反馈问题"),
+                        subtitle = tr("邮件或 GitHub Issue"),
+                        onClick = { detailDialog = "feedback" },
                     )
                 }
             }
@@ -499,6 +511,8 @@ fun SettingsScreen(
                         onOpenNotificationSettings = { openAppNotificationSettings(context) },
                     )
                 }
+                "feedback" -> FeedbackDialog(onDismiss = { detailDialog = null })
+                "about" -> AboutDialog(onDismiss = { detailDialog = null })
             }
         }
     }
@@ -1604,7 +1618,7 @@ private fun LanguageCard() {
 
 /** Stable-release check that downloads the APK and hands it to the system installer. */
 @Composable
-private fun AboutUpdateCard() {
+private fun AboutUpdateCard(onOpenAbout: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -1725,6 +1739,13 @@ private fun AboutUpdateCard() {
                 )
             }
         }
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.Info,
+            title = tr("关于清衡"),
+            subtitle = "Open Margin · " + BuildConfig.VERSION_NAME,
+            onClick = onOpenAbout,
+        )
         SettingsRowDivider()
         Column(
             Modifier.fillMaxWidth().padding(vertical = 12.dp),
