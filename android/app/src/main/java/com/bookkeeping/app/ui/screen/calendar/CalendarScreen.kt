@@ -686,7 +686,7 @@ private fun CalendarMonthGrid(
             }
         }
     }
-    val heatMax = heatValues.values.maxOrNull() ?: 0L
+    val heatSamples = remember(heatValues) { heatValues.values.filter { it > 0L }.sorted() }
     val labels = if (weekStartsMonday) {
         if (AppLanguage.current() == AppLanguage.ENGLISH) listOf("M", "T", "W", "T", "F", "S", "S")
         else listOf("一", "二", "三", "四", "五", "六", "日")
@@ -945,8 +945,8 @@ private fun CalendarMonthGrid(
                                 }
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
-                            val heat = if (inMonth && heatMax > 0) {
-                                heatmapLevel(heatValues[day] ?: 0L, heatMax)
+                            val heatAlpha = if (inMonth) {
+                                heatmapAlpha(heatValues[day] ?: 0L, heatSamples)
                             } else {
                                 0f
                             }
@@ -967,7 +967,7 @@ private fun CalendarMonthGrid(
                                             isEdge -> MaterialTheme.colorScheme.primary
                                             inRange -> MaterialTheme.colorScheme.primaryContainer
                                             // 有支出/收入的日子直接把整格底色染上，不再用底部小条
-                                            heat > 0f -> base.copy(alpha = 0.06f + 0.16f * heat)
+                                            heatAlpha > 0f -> base.copy(alpha = heatAlpha)
                                             else -> Color.Transparent
                                         },
                                     ),
@@ -1314,14 +1314,24 @@ private fun currentCalendarDate(): CalendarDate =
         )
     }
 
-private fun heatmapLevel(value: Long, maximum: Long): Float {
-    if (value <= 0L || maximum <= 0L) return 0f
-    val ratio = value.toDouble() / maximum.toDouble()
+/** Alpha for a day, using sorted positive daily values from the current month. */
+internal fun heatmapAlpha(value: Long, sortedPositiveDailyValues: List<Long>): Float {
+    if (value <= 0L || sortedPositiveDailyValues.isEmpty()) return 0f
+    if (sortedPositiveDailyValues.size < 4) return 0.14f
+
+    fun percentile(percent: Int): Long {
+        val rank = (sortedPositiveDailyValues.size * percent + 99) / 100
+        return sortedPositiveDailyValues[rank - 1]
+    }
+
+    val p50 = percentile(50)
+    val p75 = percentile(75)
+    val p90 = percentile(90)
     return when {
-        ratio <= 0.25 -> 0.25f
-        ratio <= 0.5 -> 0.5f
-        ratio <= 0.75 -> 0.75f
-        else -> 1f
+        value <= p50 -> 0.08f
+        value <= p75 -> 0.14f
+        value <= p90 -> 0.20f
+        else -> 0.28f
     }
 }
 
