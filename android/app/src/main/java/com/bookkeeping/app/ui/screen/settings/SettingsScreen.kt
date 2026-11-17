@@ -414,7 +414,10 @@ fun SettingsScreen(
             item { LanguageCard() }
 
             item { SectionHeader(tr("关于与更新")) }
-            item { AboutUpdateCard(onOpenAbout = { detailDialog = "about" }) }
+            item { AboutUpdateCard(
+                onOpenAbout = { detailDialog = "about" },
+                onOpenFeedback = { detailDialog = "feedback" },
+            ) }
 
             item { SectionHeader(tr("国产 ROM 后台白名单")) }
             item {
@@ -428,17 +431,6 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("反馈")) }
-            item {
-                SettingsGroupCard {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Info,
-                        title = tr("反馈问题"),
-                        subtitle = tr("邮件或 GitHub Issue"),
-                        onClick = { detailDialog = "feedback" },
-                    )
-                }
-            }
         }
 
         if (showImportExportSheet) {
@@ -1504,7 +1496,7 @@ private fun LanguageCard() {
 
 /** Stable-release check that downloads the APK and hands it to the system installer. */
 @Composable
-private fun AboutUpdateCard(onOpenAbout: () -> Unit) {
+private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -1631,6 +1623,13 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit) {
             title = tr("关于清衡"),
             subtitle = "Open Margin · " + BuildConfig.VERSION_NAME,
             onClick = onOpenAbout,
+        )
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.Info,
+            title = tr("反馈问题"),
+            subtitle = tr("邮件或 GitHub Issue"),
+            onClick = onOpenFeedback,
         )
         SettingsRowDivider()
         Column(
