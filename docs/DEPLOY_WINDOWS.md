@@ -109,7 +109,50 @@ docker load -i .\images.tar
   - 看门狗：`%LOCALAPPDATA%\OpenMargin\logs\watchdog.log`
   - Inno Setup 安装日志：`%TEMP%\Setup Log*.txt`（临时目录，不长期保留）
 
-### 0.9 本线程实际验证了什么 / 没验证什么
+### 0.9 卸载、升级与本地权限（lifecycle / ACL）
+
+**卸载做什么（`installer/Uninstall-OpenMargin.ps1`，由 Inno `[UninstallRun]` 在删除文件前调用）：**
+
+1. 停止属于本安装目录的隐藏向导进程（只按命令行中的 `Start-OpenMarginSetupWeb.ps1` 绝对路径匹配，不杀无关 PowerShell）。
+2. 停止看门狗进程，并执行 `open-margin-setup.ps1 uninstall-watchdog` 注销 `OpenMarginWatchdog` 计划任务。
+3. 用部署引擎移除本项目的 Tailscale Funnel / Serve 路由；检测到别人的路由时返回 `FOREIGN_*` 并跳过，不会误删。
+4. 执行 `docker compose --project-name personal-finance-system ... down`，**不带 `-v`**，Docker 命名卷保留。
+5. 删除 18770–18779 的 loopback URL ACL 预留。
+6. Docker 或 Tailscale 缺失时继续卸载并在摘要中标记 `skipped`。
+
+**卸载保留什么：** `secrets/`、`.env`、Docker 命名卷（账本数据）、`%LOCALAPPDATA%\OpenMargin`（状态、日志、备份、看门狗状态）。Inno 只删除安装日志里记录的安装文件；运行期创建的这些路径不会被删。卸载脚本会把动作、保留项和手动清理命令写入：
+
+- `%ProgramData%\OpenMargin\logs\uninstall-summary-<yyyyMMdd-HHmmss>.txt`
+- 写入失败时回退到 `%LOCALAPPDATA%\OpenMargin\logs\`。
+
+手动彻底清理（**删除 volume 会永久丢失账本数据**，只在确认不再需要时执行）：
+
+```powershell
+docker compose --project-name personal-finance-system --project-directory "%ProgramData%\OpenMargin\app" -f "%ProgramData%\OpenMargin\app\compose.yaml" down
+docker volume ls --filter label=com.docker.compose.project=personal-finance-system
+docker volume rm <上一步列出的卷名>
+Remove-Item -Recurse -Force "$env:ProgramData\OpenMargin\app\secrets"
+Remove-Item -Force "$env:ProgramData\OpenMargin\app\.env"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
+```
+
+**升级 / 覆盖安装：** Inno 对相同 `AppId` 的新版本采用覆盖式升级（追加卸载日志，不会自动运行旧版卸载程序）。因此 `OpenMargin.iss` 的 `PrepareToInstall` 会把随安装包携带的 `Stop-OpenMargin.ps1` / `Lifecycle.Common.ps1` 提取到 `{tmp}` 后运行，先停掉旧的隐藏向导、看门狗和 compose 项目，再替换文件，避免锁文件或继续跑旧代码。`[UninstallRun]` 只用于真正的卸载，并在 `waituntilterminated` 下等待清理完成；`RunOnceId` 防止多次升级后重复执行。从更早版本（没有 lifecycle 脚本）升级时，Pascal 代码回退为 `uninstall-watchdog` + `schtasks /End` + `docker compose ... down`。升级后旧容器已停止，重新打开“清衡设置”并执行一次部署即可；数据卷和 `secrets/` 不受影响。
+
+**单实例：** 隐藏向导把 PID/端口写入 `%LOCALAPPDATA%\OpenMargin\setup-web.json`。`Stop-OpenMargin.ps1 -Status -Json` 返回：
+
+```json
+{"wizard":{"running":true,"pids":[1234],"statePid":1234,"stateMatches":true,"url":"http://127.0.0.1:18770/"}}
+```
+
+`Launch-Setup.ps1`（由启动器线程维护）应在选择新端口前先调用它：`running=true` 时直接打开已有 URL；`statePid` 存活但 `stateMatches=false` 时先删除过期 `setup-web.json`，不要静默在 18771 再起一个向导。`Stop-OpenMargin.ps1 -WizardOnly` 用于明确停止旧向导。
+
+**本地权限（`Set-AppAcl.ps1` / `Install-UrlAcl.ps1`）：**
+
+- URL ACL 不再授权 `BUILTIN\Users`（`S-1-5-32-545`）或 `Everyone`；改为 `sddl=D:(A;;GX;;;<安装用户SID>)(A;;GX;;;S-1-5-32-544)`，只给安装用户和 Administrators。SDDL 被系统拒绝时回退为仅安装用户的 `user=*<SID>` 预留，并在输出中警告。向导如果以管理员运行，URL ACL 本身不是必需；这条窄预留只服务 `-NoElevate` 路径。
+- 应用根目录只有安装/原始用户可写（Modify），Administrators / SYSTEM 完全控制；`backend`、`deploy`、`docs` 给 Users 只读+执行（RX）；`secrets/` 仅安装用户 / Administrators / SYSTEM。升级时会显式删除旧安装留下的 Users/Everyone 显式 ACE（`/remove:g`），不只依赖 `/inheritance:r`。
+- 脚本接受 `-OriginalUserSid` 和 `-OriginalUser`；正常 UAC 提权时当前进程身份仍是同一用户 SID，可作为兜底。若安装器由另一个管理员账户“以其他用户身份”提权，`{username}` 是管理员账户而不是原用户，此时应由集成方传入 `-OriginalUserSid <原用户SID>`；否则原用户可能无法写入 `.env` 和 `secrets/`。这是已知限制。
+
+### 0.10 本线程实际验证了什么 / 没验证什么
 
 已验证（静态）：
 
@@ -117,10 +160,15 @@ docker load -i .\images.tar
 - `docker compose --profile windows-private-sync config -q` 与 `--profile windows-public-sync config -q`（使用临时占位 secrets）。
 - 新增 GitHub Actions YAML 通过 Python YAML 解析。
 - `python scripts/check-public-ready.py` 通过（若本机依赖可用）。
+- Pester 5.7.1：`deploy/windows/setup/tests` 共 83 项通过（本机 Windows 10 19045，含 `Lifecycle.Tests.ps1` 22 项）。Lifecycle 测试使用临时目录 + 假 `docker.cmd` / `tailscale.cmd`，覆盖：dry-run 不产生外部调用、真实路径 `compose down` 无 `-v`、只杀命令行匹配本安装目录的向导进程、`setup-web.json` 单实例状态、保留 `secrets/`、Funnel/Serve 只删自己的路由、Docker/Tailscale 缺失时继续、ACL 的 `icacls`/`netsh` 参数计划、`OpenMargin.iss` 的 `[UninstallRun]`/`PrepareToInstall` 静态接线。
+- `OpenMargin.iss` 未在本机编译（本机无 Inno Setup）；静态检查确认 `[UninstallRun]` 在 `[Code]` 之前配置了 `Uninstall-OpenMargin.ps1`、`waituntilterminated`、`RunOnceId`、`skipifdoesntexist`，`PrepareToInstall` 提取 `dontcopy` 的 `Stop-OpenMargin.ps1`，`CloseApplications=yes`，且没有 `[UninstallDelete]` 指向 `secrets/` 或 `.env`。
 
 未验证（发布前必须做）：
 
 - Inno Setup 实际编译 `OpenMargin-Setup.exe`（本机未安装 Inno；CI 会安装并编译）。
+- 在本机真实安装上执行一次卸载与一次覆盖升级（本轮只在隔离临时目录和假 CLI 上验证，未触碰 `D:\OpenMargin\app`）。
+- 以管理员实际执行 `netsh http add urlacl ... sddl=...` 并确认 HttpListener 非提权绑定成功（本轮只验证参数计划；SDDL 被拒时的 `user=` 回退分支也未实机触发）。
+- 真实 Tailscale 账号下卸载时移除 Funnel/Serve（本轮用 fixture 假 `tailscale`）。
 - 当前分支的 `compose.yaml` 还没有 `windows-public-sync` service；运行时/compose 线程补齐前，远程同步 profile 不完整。
 - 干净 Windows 10 Home 22H2 / Windows 11 虚拟机从零安装。
 - 真实 Tailscale 账号、MagicDNS/HTTPS、Funnel 授权与公共 DNS 传播。
