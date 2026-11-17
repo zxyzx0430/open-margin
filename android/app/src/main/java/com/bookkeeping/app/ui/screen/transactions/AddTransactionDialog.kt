@@ -4,12 +4,14 @@ import com.bookkeeping.app.i18n.tr
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -41,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.data.local.entity.TransactionCategory
@@ -334,14 +337,20 @@ fun AddTransactionDialog(
                 ) {
                     OutlinedButton(
                         onClick = { showDatePicker = true },
-                        modifier = Modifier.width(100.dp),
+                        modifier = Modifier.widthIn(min = 84.dp, max = 112.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.CalendarMonth,
                             contentDescription = null,
                         )
                         Spacer(Modifier.width(4.dp))
-                        Text(formatCompactDate(timestamp))
+                        Text(
+                            text = formatCompactDate(timestamp),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
 
                     OutlinedTextField(
@@ -379,13 +388,15 @@ fun AddTransactionDialog(
                     ExposedDropdownMenuBox(
                         expanded = categoryMenuExpanded,
                         onExpandedChange = { categoryMenuExpanded = it },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1.25f),
                     ) {
                         OutlinedTextField(
                             value = tr(selectedCategory.displayName),
                             onValueChange = { },
                             readOnly = true,
-                            label = { Text(tr("分类")) },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall,
+                            label = { Text(tr("分类"), maxLines = 1, softWrap = false) },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryMenuExpanded) },
                             modifier = Modifier.menuAnchor().fillMaxWidth(),
                         )
@@ -411,36 +422,59 @@ fun AddTransactionDialog(
                     OutlinedTextField(
                         value = merchant,
                         onValueChange = { merchant = it },
-                        label = { Text(tr("商户/对方（可选）")) },
+                        label = {
+                            Text(
+                                text = tr("商户/对方（可选）"),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                         singleLine = true,
-                        modifier = Modifier.weight(1.15f),
+                        modifier = Modifier.weight(1f),
                     )
                 }
 
                 // 标签与账户选项同排；360dp 宽时 chips 仅横向滚动，不折到第二行。
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
                         text = tr("账户"),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(
                         modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
                         FilterChip(
                             selected = account.isBlank(),
                             onClick = { account = "" },
-                            label = { Text(tr("不填"), style = MaterialTheme.typography.labelSmall) },
+                            label = {
+                                Text(
+                                    tr("不填"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            },
                         )
                         ACCOUNT_PRESETS.forEach { preset ->
                             FilterChip(
                                 selected = account == preset,
                                 onClick = { account = if (account == preset) "" else preset },
-                                label = { Text(tr(preset), style = MaterialTheme.typography.labelSmall) },
+                                label = {
+                                    Text(
+                                        tr(preset),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                    )
+                                },
                             )
                         }
                         // 编辑自动采集的账单时账户可能是「招商银行 (1234)」这类自由文本，
@@ -450,7 +484,15 @@ fun AddTransactionDialog(
                             FilterChip(
                                 selected = true,
                                 onClick = { account = "" },
-                                label = { Text(custom, style = MaterialTheme.typography.labelSmall) },
+                                label = {
+                                    Text(
+                                        text = custom,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                },
                             )
                         }
                     }
