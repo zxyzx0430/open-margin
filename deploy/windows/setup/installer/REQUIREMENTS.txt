@@ -1,0 +1,80 @@
+﻿清衡 Open Margin｜安装前要求与说明
+==================================
+
+一、系统要求
+------------
+- 64 位 Windows 10 21H2（内部版本 19044）或更高版本；推荐 Windows 10
+  22H2（内部版本 19045）或 Windows 11。低于 19044 的系统会被安装器阻止。
+- Windows 10 22H2 已停止支持：仍可安装，但建议升级 Windows 11。
+- 在 BIOS/UEFI 中开启硬件虚拟化（Intel VT-x / AMD-V）。Docker Desktop
+  需要 WSL2 和虚拟化；向导会检测并给出图文提示。
+- 系统盘至少保留 15 GB 可用空间（Docker 镜像、容器和更新会占用更多），
+  建议 30 GB 以上。安装到 D:/E: 不会把 Docker 数据卷移出系统盘。
+- 管理员账户和一次 UAC 授权。向导安装 WSL2 / Docker / Tailscale 时会再
+  请求一次 UAC；拒绝 UAC 不会安装任何东西。
+- 可访问 Docker Hub、GitHub 和 Tailscale 的网络。国内网络拉取镜像失败
+  时使用离线镜像包（见第六节）。
+
+二、第三方软件与许可
+--------------------
+- Docker Desktop：见同目录 DockerDesktopNotice.txt 和安装器中的
+  “Docker Desktop 许可与依赖说明”页。免费/商业订阅条件由 Docker 决定。
+- Tailscale：需要注册/登录 Tailscale 账号，并在管理台开启 MagicDNS 和
+  HTTPS；Funnel 仍是 beta 功能。
+- WSL2：由向导按需安装，可能需要重启。
+- Open Margin 安装器不附带 Docker 镜像、密钥或 .env 文件。
+
+三、安装器与 SmartScreen
+------------------------
+- 安装包未购买代码签名证书，SmartScreen 可能显示“Windows 已保护你的
+  电脑”。确认文件来自 GitHub Releases 后，点“更多信息”->“仍要运行”。
+- 不要因为未签名就关闭杀毒软件或系统防护。
+- 下载后先校验 SHA256（Release 页面或同名 .sha256 文件）：
+    Get-FileHash .\OpenMargin-Setup.exe -Algorithm SHA256
+- 安装界面默认中文；需要英文时可在安装器中选择 English。
+
+四、安装位置与迁移
+------------------
+- 默认安装到 C:\ProgramData\OpenMargin\app。
+- 安装器会记住上一次的安装目录（UsePreviousAppDir），升级/修复时优先
+  沿用；你也可以在“选择目标位置”页改成 D:/E: 等自定义路径。
+- 如果你已经在别处安装过 Open Margin（例如 D:\OpenMargin\app），再装到
+  新路径会在磁盘上留下两套程序目录、secrets 和看门狗；旧 Docker 容器和
+  命名卷不会自动迁移，也不会被删除。
+- 换路径前请先运行以下脚本（默认只检测，不改动数据）：
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\windows\setup\installer\Migrate-OpenMargin.ps1
+  按提示加 -Backup -Yes 备份 secrets，加 -StopOld -Yes 停止旧容器；需要
+  保留手机配对时加 -CopySecrets -Yes 把旧 secrets 复制到新目录。
+- 绝对不要执行 docker compose down -v，也不要删除旧数据卷；迁移完成并
+  验证前请保留旧目录。
+
+五、浏览器与向导
+----------------
+- 安装完成后会打开“清衡设置”本机向导，地址类似
+  http://127.0.0.1:18770/（端口被占用时顺延到 18779）。
+- 只允许同时运行一个向导。重复双击“清衡设置”可能启动新的隐藏进程；
+  如果浏览器没有自动打开，请先查看
+  %LOCALAPPDATA%\OpenMargin\setup-web.json 中的端口，再手动打开；
+  不要同时运行多个安装器或向导。
+- 如果页面提示需要 setup token，请关闭旧的隐藏向导进程
+  （任务管理器中的 powershell.exe）后重新双击“清衡设置”；不要从
+  未知来源的链接获取 token。
+- 推荐 Edge/Chrome，并允许浏览器访问 127.0.0.1 本机地址。
+
+六、离线镜像包
+--------------
+- 离线包是 GitHub Release 中的独立资产：
+  OpenMargin-Offline-<版本>.tar.gz 和同名 .sha256。
+- 校验后解压并加载：
+    Get-FileHash .\OpenMargin-Offline-<版本>.tar.gz -Algorithm SHA256
+    tar -xzf .\OpenMargin-Offline-<版本>.tar.gz
+    docker load -i .\images.tar
+- v1 向导仍使用 docker compose up --build；离线包可以避免重复下载镜像，
+  但完全离线重建尚未验证。不要把“有离线包”宣传成“保证离线可装”。
+
+七、安装后
+----------
+- 开始菜单：“清衡设置”打开向导，“清衡账本”打开本机账本，
+  “安装说明”打开本文件所在目录的 README-INSTALL.txt。
+- 日志：%LOCALAPPDATA%\OpenMargin\logs；数据在 Docker 命名卷中。
+- 卸载程序默认保留 secrets 和数据卷；卸载前请先备份。

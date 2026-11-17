@@ -48,6 +48,7 @@ body { padding: 0 18px 60px; }
 .om-brand strong { display: block; font-size: 16px; }
 .om-sub { display: block; color: var(--om-secondary); font-size: 12px; letter-spacing: .04em; }
 .om-header-right { display: flex; align-items: center; gap: 10px; }
+.om-home-btn { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
 .om-version { color: var(--om-secondary); font-size: 12px; }
 
 .om-pill {
@@ -225,6 +226,35 @@ h3 { margin: 0 0 10px; font-size: 16px; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px; color: var(--om-ink); word-break: break-all;
 }
+
+/* ---- Offline bundle card (thread E): self-contained block ---- */
+.om-offline-card {
+  border-color: #cfd9ee;
+  background: linear-gradient(180deg, #fbfcff 0%, #fff 100%);
+}
+.om-offline-head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; margin-bottom: 6px;
+}
+.om-offline-head h3 { margin-bottom: 2px; }
+.om-offline-steps { margin-top: 6px; }
+.om-offline-sha {
+  display: block; margin-top: 6px; padding: 8px 10px;
+  background: #f3f6fc; border: 1px solid var(--om-border);
+  border-radius: 8px; line-height: 1.45;
+}
+.om-offline-path { display: flex; gap: 8px; margin: 0 0 10px; }
+.om-offline-path input {
+  flex: 1; min-width: 0; min-height: 42px; padding: 9px 11px;
+  border: 1px solid var(--om-border); border-radius: 10px;
+  background: var(--om-surface); color: var(--om-ink); font: inherit;
+}
+.om-offline-path input:focus { outline: 3px solid rgba(66, 109, 229, .18); border-color: var(--om-primary); }
+@media (max-width: 720px) {
+  .om-offline-head { flex-direction: column; gap: 6px; }
+  .om-offline-path { flex-direction: column; }
+}
+/* ---- /Offline bundle card (thread E) ---- */
 
 @media (max-width: 720px) {
   body { padding: 0 12px 48px; }

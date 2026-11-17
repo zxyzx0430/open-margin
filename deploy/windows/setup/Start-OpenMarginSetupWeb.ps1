@@ -144,13 +144,42 @@ function Read-OmRequestBody {
     try { return ($body | ConvertFrom-Json) } catch { throw 'invalid json body' }
 }
 
+function Write-OmJsonFileAtomic {
+    param([string]$Path, [string]$Json)
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $attempts = 5
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        $tmp = $Path + '.tmp-' + $PID + '-' + [guid]::NewGuid().ToString('N')
+        try {
+            [IO.File]::WriteAllText($tmp, $Json, $utf8)
+            if ([IO.File]::Exists($Path)) {
+                # Move-Item -Force does not reliably replace a locked/existing
+                # target under Windows PowerShell 5.1; Replace/Copy is atomic
+                # enough for status and result files.
+                try {
+                    [IO.File]::Replace($tmp, $Path, $null)
+                } catch {
+                    [IO.File]::Copy($tmp, $Path, $true)
+                    [IO.File]::Delete($tmp)
+                }
+            } else {
+                [IO.File]::Move($tmp, $Path)
+            }
+            return
+        } catch {
+            try { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } } catch { }
+            if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (100 * $attempt) }
+        }
+    }
+    throw ('could not write ' + $Path)
+}
+
 function Write-OmAtomicJson {
     param([string]$Path, $Value)
     $json = $Value | ConvertTo-Json -Depth 12
-    $tmp = $Path + '.tmp'
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($tmp, $json, $utf8)
-    Move-Item -Force $tmp $Path
+    Write-OmJsonFileAtomic -Path $Path -Json $json
 }
 
 function Set-OmJobStatus {
@@ -163,7 +192,8 @@ $allowedWebActions = @(
     'check', 'install-deps', 'deploy', 'create-owner', 'login-tailscale',
     'approve-funnel', 'verify', 'disable', 'enable', 'repair', 'backup',
     'pair-qr', 'rotate-token', 'pause-watchdog', 'resume-watchdog',
-    'install-watchdog', 'uninstall-watchdog', 'watchdog-status'
+    'install-watchdog', 'uninstall-watchdog', 'watchdog-status',
+    'select-offline-file', 'import-offline'
 )
 
 function Start-OmWebJob {
@@ -181,13 +211,34 @@ function Start-OmWebJob {
     Start-Job -Name ('om-' + $id) -ScriptBlock {
         param($ModulePath, $ActionName, $ParamsPath, $StatusPath, $ResultPath, $StateRootArg, $RepoRootArg, $SetupPortArg, $DryRunArg, $JobIdArg)
         $ErrorActionPreference = 'Stop'
+        $jobUtf8 = New-Object System.Text.UTF8Encoding($false)
+        function Write-JobFile([string]$Path, [string]$Text) {
+            $attempts = 5
+            for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+                $tmp = $Path + '.tmp-' + $PID + '-' + [guid]::NewGuid().ToString('N')
+                try {
+                    [IO.File]::WriteAllText($tmp, $Text, $jobUtf8)
+                    if ([IO.File]::Exists($Path)) {
+                        try {
+                            [IO.File]::Replace($tmp, $Path, $null)
+                        } catch {
+                            [IO.File]::Copy($tmp, $Path, $true)
+                            [IO.File]::Delete($tmp)
+                        }
+                    } else {
+                        [IO.File]::Move($tmp, $Path)
+                    }
+                    return
+                } catch {
+                    try { if ([IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) } } catch { }
+                    if ($attempt -lt $attempts) { Start-Sleep -Milliseconds (100 * $attempt) }
+                }
+            }
+            throw ('could not write ' + $Path)
+        }
         function Write-JobStatus([string]$s) {
             $payload = [pscustomobject]@{ status = $s; updatedAt = (Get-Date).ToString('o') }
-            $json = $payload | ConvertTo-Json
-            $tmp = $StatusPath + '.tmp'
-            $utf8 = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($tmp, $json, $utf8)
-            Move-Item -Force $tmp $StatusPath
+            Write-JobFile -Path $StatusPath -Text ($payload | ConvertTo-Json)
         }
         try {
             Import-Module $ModulePath -Force -DisableNameChecking
@@ -200,10 +251,7 @@ function Start-OmWebJob {
             $state = Read-OmState
             $result = Invoke-OmWebAction -Action $ActionName -Params $p -Ports $state.ports -ProjectName 'personal-finance-system' -StateRoot $StateRootArg -RepoRoot $RepoRootArg -JobId $JobIdArg
             $payload = $result | ConvertTo-Json -Depth 12
-            $tmp = $ResultPath + '.tmp'
-            $utf8 = New-Object System.Text.UTF8Encoding($false)
-            [System.IO.File]::WriteAllText($tmp, $payload, $utf8)
-            Move-Item -Force $tmp $ResultPath
+            Write-JobFile -Path $ResultPath -Text $payload
             Write-JobStatus 'done'
         } catch {
             $message = [string]$_.Exception.Message
@@ -211,10 +259,7 @@ function Start-OmWebJob {
             $message = $message -replace '\b[A-Za-z0-9_-]{40,}\b', '***'
             $errorPayload = [pscustomobject]@{ ok = $false; code = 'JOB_ERROR'; message = $message }
             try {
-                $tmp = $ResultPath + '.tmp'
-                $utf8 = New-Object System.Text.UTF8Encoding($false)
-                [System.IO.File]::WriteAllText($tmp, ($errorPayload | ConvertTo-Json -Depth 6), $utf8)
-                Move-Item -Force $tmp $ResultPath
+                Write-JobFile -Path $ResultPath -Text ($errorPayload | ConvertTo-Json -Depth 6)
             } catch { }
             Write-JobStatus 'failed'
         } finally {
@@ -298,9 +343,28 @@ Write-OmAtomicJson -Path $pidPath -Value ([pscustomobject]@{
     dev = [bool]$Dev; dryRun = [bool]$DryRun; url = ('http://127.0.0.1:' + $Port + '/')
 })
 $url = $prefix + '?token=' + [uri]::EscapeDataString($setupToken)
+# One-time handoff for an elevated wizard process: Launch-Setup reads this
+# loopback URL and opens the browser through explorer.exe (original user).
+# The file is ACL-restricted and removed when the server exits.
+$launchUrlPath = Join-Path $StateRoot 'setup-web-url.txt'
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($launchUrlPath, $url, $utf8NoBom)
+try {
+    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls.exe $launchUrlPath /inheritance:r /grant:r ($currentUser + ':M') '*S-1-5-32-544:(F)' '*S-1-5-18:(F)' *> $null
+} catch { }
 Write-Output ('Open Margin setup wizard: ' + $url)
+Write-OmLog -Level INFO -Message ('setup server elevated=' + [bool](Test-OmAdmin) + ' port=' + $Port + ' stateRoot=' + $StateRoot)
 if (-not $NoBrowser) {
-    try { Start-Process $url | Out-Null } catch { }
+    # Do not swallow a browser-launch failure: the token URL is the only way
+    # into the wizard, so keep setup-web-url.txt and print it for the caller.
+    try {
+        Start-Process $url -ErrorAction Stop | Out-Null
+    } catch {
+        Write-OmLog -Level WARN -Message ('browser open failed: ' + $_.Exception.Message)
+        Write-Output ('Browser did not open automatically. Open this URL manually: ' + $url)
+        Write-Output ('The URL is also saved at: ' + $launchUrlPath)
+    }
 }
 
 try {
@@ -365,8 +429,11 @@ try {
                     }
                     $state = Read-OmState
                     Write-OmJson -Context $context -Value @{
-                        ok = $true; version = '1.3.0'; repoRoot = $RepoRoot;
-                        ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun
+                        ok = $true; version = [string]$state.engineVersion; repoRoot = $RepoRoot;
+                        ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun;
+                        elevated = [bool](Test-OmAdmin);
+                        dockerLicenseAcknowledged = (Test-OmDockerLicenseAcknowledged);
+                        offline = (Get-OmOfflineBundleInfo -Version ([string]$state.engineVersion))
                     }
                 }
                 '^/api/status$' {
@@ -444,6 +511,21 @@ try {
                         continue
                     }
                     if ($DryRun) { $body | Add-Member -NotePropertyName dryRun -NotePropertyValue $true -Force }
+                    if ($action -eq 'select-offline-file') {
+                        # A file picker needs an STA interactive desktop. Run it
+                        # inline; this endpoint stays loopback-only and behind
+                        # the setup token, and never accepts a file body.
+                        if ($DryRun) {
+                            Write-OmJson -Context $context -Value ([pscustomobject]@{
+                                ok = $false; code = 'PICKER_UNAVAILABLE';
+                                message = '演练模式不会打开文件选择框，请手动输入路径。'; retryable = $true
+                            })
+                            continue
+                        }
+                        $selection = Select-OmOfflineBundleFile
+                        Write-OmJson -Context $context -Value $selection
+                        continue
+                    }
                     $id = Start-OmWebJob -Action $action -Params $body
                     Write-OmJson -Context $context -Value @{ ok = $true; jobId = $id; action = $action; dryRun = [bool]$DryRun }
                 }
@@ -460,4 +542,5 @@ try {
 } finally {
     try { $listener.Stop(); $listener.Close() } catch { }
     Remove-Item -Force $pidPath -ErrorAction SilentlyContinue
+    Remove-Item -Force $launchUrlPath -ErrorAction SilentlyContinue
 }

@@ -8,6 +8,8 @@ let jobTimer = null;
 let progressTimer = null;
 let pairTimer = null;
 let pollFailures = 0;
+let homeRequested = false;
+let dockerLicenseRecorded = false;
 
 const STEP_LABELS = {
   UNINITIALIZED: '未开始',
@@ -60,6 +62,11 @@ function showScreen(name) {
   if (el) el.classList.add('is-active');
   updateSteps(name);
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goHome() {
+  homeRequested = true;
+  showScreen('welcome');
 }
 
 function updateSteps(screen) {
@@ -208,6 +215,7 @@ function startProgressWatch() {
 }
 
 async function runCheck(targetScreen) {
+  homeRequested = false;
   const screen = targetScreen || 'env';
   showScreen(screen);
   const containerId = screen === 'tailscale' ? 'ts-checks' : 'env-checks';
@@ -232,12 +240,29 @@ async function runCheck(targetScreen) {
   }
 }
 
+function applyDockerLicenseInfo(recorded) {
+  dockerLicenseRecorded = !!(recorded === true);
+  const row = $('docker-license-row');
+  const note = $('docker-license-recorded');
+  const ack = $('ack-docker-license');
+  if (row) row.classList.toggle('om-hidden', dockerLicenseRecorded);
+  if (note) note.classList.toggle('om-hidden', !dockerLicenseRecorded);
+  if (ack && dockerLicenseRecorded) ack.checked = true;
+}
+
 async function installDeps() {
+  homeRequested = false;
+  const ack = $('ack-docker-license');
+  if (!dockerLicenseRecorded && !(ack && ack.checked)) {
+    toast('请先勾选 Docker 许可确认，再安装依赖。', true);
+    if (ack) ack.focus();
+    return;
+  }
   const button = $('btn-install-deps');
   button.disabled = true;
   toast('如果弹出 Windows 管理员确认（UAC），请点“是”。');
   try {
-    const result = await postAction('install-deps');
+    const result = await postAction('install-deps', { licenseAcknowledged: dockerLicenseRecorded || !!(ack && ack.checked) });
     if (!result.jobId) { toast(result.message || '安装没有启动。', true); return; }
     pollJob(result.jobId, (data) => {
       button.disabled = false;
@@ -247,7 +272,16 @@ async function installDeps() {
         return;
       }
       if (data.ok) { toast('依赖安装完成，正在重新检查。'); runCheck('env'); }
-      else { toast(data.message || '依赖安装失败。', true); }
+      else {
+        if (data.code === 'DOCKER_LICENSE_REQUIRED') {
+          applyDockerLicenseInfo(false);
+          toast(data.message || '需要先确认 Docker 许可。', true);
+          const box = $('ack-docker-license');
+          if (box) box.focus();
+          return;
+        }
+        toast(data.message || '依赖安装失败。', true);
+      }
     }, () => {});
   } catch (error) {
     button.disabled = false;
@@ -268,10 +302,11 @@ async function tailscaleLogin() {
   }
 }
 
-function nextFromEnv() { showScreen('tailscale'); runCheck('tailscale'); }
-function nextFromSecurity() { showScreen('admin'); }
+function nextFromEnv() { homeRequested = false; showScreen('tailscale'); runCheck('tailscale'); }
+function nextFromSecurity() { homeRequested = false; showScreen('admin'); }
 
 function nextFromAdmin() {
+  homeRequested = false;
   const user = $('admin-user').value.trim();
   const password = $('admin-password').value;
   const password2 = $('admin-password2').value;
@@ -289,6 +324,12 @@ function showVerify(checks, serverId) {
   $('verify-state').textContent = ok ? '通过' : '需要处理';
   $('verify-state').className = 'om-pill ' + (ok ? 'om-pill-ok' : 'om-pill-error');
   $('btn-verify-continue').disabled = !ok;
+  if (homeRequested) {
+    // The user returned to the main screen; keep the job running but do not
+    // yank them away from where they are.
+    toast('后台任务已完成。点“查看运行状态”查看结果。');
+    return;
+  }
   showScreen('verify');
 }
 
@@ -337,6 +378,7 @@ function handleDeployResult(data) {
 }
 
 async function startDeploy() {
+  homeRequested = false;
   const user = $('admin-user').value.trim();
   const password = $('admin-password').value;
   if (!user || password.length < 8) { toast('请先完成管理员账号设置。', true); showScreen('admin'); return; }
@@ -374,6 +416,7 @@ async function startDeploy() {
 }
 
 async function approveFunnel() {
+  homeRequested = false;
   $('btn-approve-funnel').disabled = true;
   toast('正在确认 Funnel 授权…');
   try {
@@ -396,6 +439,7 @@ async function approveFunnel() {
 }
 
 async function runVerifyAgain() {
+  homeRequested = false;
   $('btn-verify-again').disabled = true;
   try {
     const result = await postAction('verify');
@@ -532,12 +576,184 @@ async function backup() {
   }
 }
 
+/* ---- Offline bundle card (thread E): keep changes inside this block ---- */
+let offlineImportRunning = false;
+
+function offlineFileName(path) {
+  const parts = String(path || '').split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+function offlineSetPill(text, kind) {
+  const pill = $('offline-pill');
+  if (!pill) return;
+  pill.textContent = text;
+  pill.className = 'om-pill ' + (kind || 'om-pill-neutral');
+}
+
+function offlineSetStatus(text, isError) {
+  const status = $('offline-status');
+  if (!status) return;
+  status.textContent = text;
+  status.style.color = isError ? 'var(--om-danger)' : '';
+}
+
+function offlineFormatSize(bytes) {
+  if (!bytes || isNaN(bytes)) return '大小以 Release 为准';
+  return '约 ' + Math.round(bytes / (1024 * 1024)) + ' MiB';
+}
+
+function applyOfflineInfo(info) {
+  if (!info) return;
+  const link = $('offline-download');
+  if (link && info.url) {
+    link.href = info.url;
+    link.textContent = '下载 ' + (info.assetName || '离线镜像包');
+  }
+  if (info.assetName) {
+    const name = $('offline-asset-name'); if (name) name.textContent = info.assetName;
+    const pathInput = $('offline-path');
+    if (pathInput && !pathInput.value) pathInput.placeholder = 'D:\\Downloads\\' + info.assetName;
+  }
+  const sha = $('offline-sha');
+  if (sha) {
+    sha.textContent = info.sha256 || '未知版本：请以 Release 旁的 .sha256 为准';
+    sha.title = info.sha256 || '';
+  }
+  const size = $('offline-size');
+  if (size) size.textContent = offlineFormatSize(info.sizeBytes);
+}
+
+function renderOfflineState(state) {
+  if (!state) return;
+  if (state.offlineImported) {
+    offlineSetPill('已导入', 'om-pill-ok');
+    const version = state.offlineBundleVersion ? (' ' + state.offlineBundleVersion) : '';
+    offlineSetStatus('离线镜像包' + version + '已导入；下一次部署会使用 --no-build，不再重新构建镜像。');
+    const button = $('btn-offline-import');
+    if (button) button.textContent = '重新导入';
+  }
+}
+
+async function refreshOfflineState() {
+  try {
+    const data = await api('/api/status');
+    if (data && data.state) renderOfflineState(data.state);
+  } catch (error) { }
+}
+
+async function importOfflinePath(path) {
+  const clean = String(path || '').trim().replace(/^["']|["']$/g, '');
+  if (!clean) { toast('请先选择离线镜像包。', true); return; }
+  if (offlineImportRunning) { toast('离线镜像包正在导入，请等待完成。'); return; }
+  const choose = $('btn-offline-import');
+  const manual = $('btn-offline-path-import');
+  offlineImportRunning = true;
+  if (choose) choose.disabled = true;
+  if (manual) manual.disabled = true;
+  const finish = () => {
+    offlineImportRunning = false;
+    if (choose) choose.disabled = false;
+    if (manual) manual.disabled = false;
+  };
+  offlineSetPill('导入中', 'om-pill-warn');
+  offlineSetStatus('正在校验并加载 ' + offlineFileName(clean) + '，可能需要几分钟，请不要关闭页面。');
+  try {
+    const started = await postAction('import-offline', { path: clean });
+    if (!started.jobId) {
+      offlineSetPill('需要处理', 'om-pill-error');
+      offlineSetStatus(started.message || '导入没有启动。', true);
+      toast(started.message || '导入没有启动。', true);
+      finish();
+      return;
+    }
+    pollJob(started.jobId, (data) => {
+      finish();
+      if (data.ok) {
+        if (data.dryRun) {
+          offlineSetPill('演练通过', 'om-pill-warn');
+          offlineSetStatus('演练通过：SHA256 和压缩包结构有效，但没有解压或加载镜像。');
+          toast('演练通过：没有加载镜像。');
+          return;
+        }
+        offlineSetPill('已导入', 'om-pill-ok');
+        const version = data.version ? (' ' + data.version) : '';
+        offlineSetStatus('离线镜像包' + version + '已导入；下一次部署会使用 --no-build。');
+        toast('离线镜像包已导入，可以继续部署。');
+        refreshOfflineState().catch(() => {});
+      } else {
+        offlineSetPill('需要处理', 'om-pill-error');
+        const detail = data.file ? ('（' + data.file + '）') : '';
+        offlineSetStatus((data.message || '导入失败。') + detail, true);
+        toast(data.message || '导入失败。', true);
+      }
+    }, (job) => {
+      if (job && job.progress && job.progress.message) offlineSetStatus(job.progress.message);
+    });
+  } catch (error) {
+    offlineSetPill('需要处理', 'om-pill-error');
+    offlineSetStatus(error.message || '导入失败。', true);
+    toast(error.message || '导入失败。', true);
+    finish();
+  }
+}
+
+async function chooseOfflineFile() {
+  const choose = $('btn-offline-import');
+  if (choose) choose.disabled = true;
+  offlineSetStatus('请在弹出的窗口里选择下载好的 OpenMargin-Offline-*.tar.gz。');
+  try {
+    const picked = await postAction('select-offline-file');
+    if (picked.ok && picked.path) {
+      await importOfflinePath(picked.path);
+      return;
+    }
+    if (picked.code === 'PICKER_CANCELLED') {
+      offlineSetStatus('已取消选择。需要时再点“我已下载，导入”。');
+      return;
+    }
+    $('offline-path-row').classList.remove('om-hidden');
+    offlineSetStatus(picked.message || '无法打开文件选择框，请手动输入完整路径。', true);
+    const input = $('offline-path');
+    if (input) input.focus();
+  } catch (error) {
+    $('offline-path-row').classList.remove('om-hidden');
+    offlineSetStatus(error.message || '无法打开文件选择框，请手动输入完整路径。', true);
+  } finally {
+    if (choose && !offlineImportRunning) choose.disabled = false;
+  }
+}
+
+function initOffline() {
+  if (!$('offline-card')) return;
+  $('btn-offline-import').addEventListener('click', chooseOfflineFile);
+  $('btn-offline-path').addEventListener('click', () => {
+    const row = $('offline-path-row');
+    row.classList.toggle('om-hidden');
+    if (!row.classList.contains('om-hidden')) $('offline-path').focus();
+  });
+  $('btn-offline-path-import').addEventListener('click', () => {
+    importOfflinePath($('offline-path').value);
+  });
+  $('offline-path').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') importOfflinePath($('offline-path').value);
+  });
+  api('/api/config').then((data) => {
+    if (data && data.ok) applyOfflineInfo(data.offline);
+  }).catch(() => {});
+  refreshOfflineState();
+}
+/* ---- /Offline bundle card (thread E) ---- */
+
 function loadConfig() {
   api('/api/config').then((data) => {
     if (data && data.ok) {
       currentConfig = data;
       $('version').textContent = 'v' + data.version;
       if (data.dryRun) $('dry-run-banner').classList.remove('om-hidden');
+      const elevationHint = $('elevation-hint');
+      if (elevationHint) elevationHint.classList.toggle('om-hidden', data.elevated !== false);
+      applyDockerLicenseInfo(data.dockerLicenseAcknowledged);
     }
   }).catch(() => {});
 }
@@ -573,6 +789,7 @@ async function boot() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  $('btn-home').addEventListener('click', goHome);
   $('btn-start').addEventListener('click', () => { showScreen('env'); runCheck('env'); });
   $('btn-status').addEventListener('click', showStatus);
   $('btn-recheck').addEventListener('click', () => runCheck('env'));
@@ -619,5 +836,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadQr(true);
   });
   $('btn-status-enable').addEventListener('click', () => runSimpleAction('enable', '远程同步已重新开启。'));
+  initOffline(); // offline bundle card (thread E)
   boot();
 });

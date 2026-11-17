@@ -157,10 +157,25 @@ try {
     $state.ports = $ports
     Save-OmState $state
 
+    # The CLI is frequently run while the setup wizard is listening. Its own
+    # setup port is not a conflict: ignore the configured port and the port
+    # recorded by the live wizard (setup-web.json may have advanced past 18770).
+    $ignorePorts = @([int]$ports.setup)
+    $setupWebPath = Join-Path $StateRoot 'setup-web.json'
+    if (Test-Path -LiteralPath $setupWebPath) {
+        try {
+            $setupWeb = Get-Content -Path $setupWebPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $livePort = 0
+            if ($setupWeb.port -and [int]::TryParse([string]$setupWeb.port, [ref]$livePort) -and $livePort -gt 0) {
+                if ($ignorePorts -notcontains $livePort) { $ignorePorts += $livePort }
+            }
+        } catch { }
+    }
+
     switch ($Command) {
         'status' {
             $current = Read-OmState
-            $checks = @(Get-OmEnvironmentChecks -SkipNetwork -Ports $ports -RepoRoot $RepoRoot)
+            $checks = @(Get-OmEnvironmentChecks -SkipNetwork -Ports $ports -RepoRoot $RepoRoot -IgnorePorts $ignorePorts)
             $summary = Get-OmCheckSummary $checks
             $watchdog = Invoke-OmWatchdogStatus -StateRoot $StateRoot
             Write-OmCliResult ([pscustomobject]@{
@@ -169,7 +184,7 @@ try {
             }) 0
         }
         'check' {
-            $checks = @(Get-OmEnvironmentChecks -Ports $ports -RepoRoot $RepoRoot)
+            $checks = @(Get-OmEnvironmentChecks -Ports $ports -RepoRoot $RepoRoot -IgnorePorts $ignorePorts)
             $summary = Get-OmCheckSummary $checks
             Write-OmCliResult ([pscustomobject]@{ ok = $summary.ok; checks = $checks; summary = $summary }) $(if ($summary.ok) { 0 } else { 10 })
         }
