@@ -309,3 +309,102 @@ CI 只能证明“能编译、能打包、单测过”，下面这些必须在�
 - 中英混说可以，但纯英文长句偶有拼写错误（`descent` → `disscent`），金额/关键词不受影响。
 - 首次启动要把 71MB 模型从 assets 拷到 `filesDir`（约 1~3s，带进度文案），之后启动只做浅校验。
 - 不支持热词/自定义词表（sherpa 的 `hotwords` 需要额外建模），账单场景暂不需要。
+
+---
+
+## 11. 语音入口如何接入 UI
+
+引擎只负责「把一段话变成 Final」，谁开麦克风、什么时候关、Final 进哪个表单，都在 UI 层。
+
+### 11.1 链路
+
+```
+账单页 VoiceFab（按住 1s 松手）
+  → RootNavigation.onVoiceEntry            （voiceSheetOpen = true，已开着就忽略）
+  → VoiceCaptureSheet                      （ModalBottomSheet，模态）
+      prepare() → 权限 → startSession()
+      events: Partial 只刷大字预览 / Final 才收尾 / Error 转可重试失败
+  → onFinal(text: String?)                 （面板 hide() 后回调一次）
+  → RootNavigation.voiceRequest            （VoiceEntryRequest(text)）
+  → 账单页 LaunchedEffect(voiceRequest)     （打开 AddTransactionDialog）
+  → AddTransactionDialog(initialQuickEntry = text.orEmpty())
+```
+
+| 文件 | 职责 |
+| --- | --- |
+| `ui/screen/transactions/VoiceCaptureLogic.kt` | 面板状态 + 纯逻辑（Final 文本选取、Partial 丢弃、错误码→文案），无 Android 依赖 |
+| `ui/screen/transactions/VoiceCaptureSheet.kt` | 面板 UI、权限申请、引擎持有与 `close()`、生命周期 |
+| `ui/navigation/RootNavigation.kt` | 长按落点、面板开合、把 Final 交给账单页 |
+| `ui/screen/transactions/TransactionListScreen.kt` | 收到 Final 后打开新建表单并预填；录音中禁用 FAB |
+| `ui/components/VoiceFab.kt` | `enabled = false` 时按压手势与读屏动作一起失效 |
+
+### 11.2 三条硬约定
+
+1. **Partial 绝不进表单。** CTC 的 Partial 是「当前前缀」，说话过程中随时被改写；
+   只有 `finishInput()` 之后那一个 Final 才能交给解析器。`VoiceCaptureLogic.withPartial`
+   在非聆听态直接丢弃，`capture()` 也只接受聆听/收尾两个状态。
+2. **空 Final 仍然开表单。** `entryText()` 把空白串折叠成 `null`，`Captured(null)` 表示
+   「说了但没听清」：表单照开、预填为空，绝不把空串写进备注 —— 用户点一下「保存」
+   就能手填，比再长按一次快。
+3. **一个时刻只有一个会话，且必须放麦克风。** 面板开着时 `voiceSheetOpen` 同时是
+   面板可见标志和 FAB 的 `enabled = !voiceBusy`；面板 `onDismissRequest` / 取消 /
+   `ON_STOP` / 组合销毁四条路径都收敛到 `engine.close()`（幂等）。面板每次打开都新建
+   引擎，因为 `close()` 之后按接口契约不可复用（`prepare()` 会返回 `ENGINE_CLOSED`）。
+
+### 11.3 权限与异常
+
+- `prepare()` 成功后才检查 `RECORD_AUDIO`：模型拷完了再弹系统对话框，用户不会先看到
+  一个「准备中」的转圈再被权限框打断两次。
+- 权限被拒不是静默失败：面板留在失败态，给「重试」和「去系统设置授权」
+  （`Settings.ACTION_APPLICATION_DETAILS_SETTINGS`，打不开时退到系统设置首页）。
+  拒绝一次后系统可能不再弹框，所以必须留这条去设置的路。
+- 申请权限时 Activity 会走 `onStop`，这期间**不**当作「切后台」关面板（`awaitingPermission`），
+  否则权限框一弹面板就自己没了。
+- 麦克风被占用 / `AudioRecord` 打不开：引擎发 `Error(AUDIO_INIT_FAILED)`，面板显示错误 + 「重试」。
+  引擎此时仍在 READY，重试直接 `startSession()`，不需要重建引擎。
+- 收尾 5s 没有 Final：`finishTimedOut()` 转成可重试失败，绝不把面板卡在「结束中」。
+
+### 11.4 纯 JVM 单测
+
+`android/app/src/test/java/com/bookkeeping/app/ui/screen/transactions/VoiceCaptureLogicTest.kt`：
+
+| 测试 | 钉住什么 |
+| --- | --- |
+| `finalTextIsTrimmedAndBlankBecomesNull` | Final 去首尾空白；空串/纯空格/换行 → `null` |
+| `partialOnlyRefreshesPreviewWhileListening` | Partial 只在 Listening 生效；收尾/失败/已交付后的迟到 Partial 被丢弃 |
+| `stopKeepsLastPartialAndIgnoresRepeats` | 停止保留最后一版预览；连点停止幂等；准备阶段点不到 |
+| `emptyFinalStillClosesSheetWithoutPrefill` | 空 Final → `Captured(null)`（表单照开、不预填） |
+| `finalOutsideListeningDoesNotOpenForm` | 准备/失败/已交付状态收到的 Final 不触发开表单 |
+| `finishTimeoutOnlyAppliesWhileFinishing` | 超时兜底只对收尾态生效 |
+| `everyErrorCodeHasDistinctReadableMessage` | 每个 `AsrErrorCode` 都有独立的中文提示；null 码不崩 |
+| `everyErrorMessageHasEnglishTranslation` | 错误提示都有 EnglishUiText 条目（它们不走 `tr("字面量")`，覆盖率测试扫不到） |
+
+### 11.5 真机必测项（UI 接线）
+
+CI 只能证明能编译、能打包、单测过；下面这些必须在真机上过一遍：
+
+1. **面板状态**：长按 1 秒松手 → 看到「正在准备语音模型…」→ 首次会显示「正在释放语音模型 …」
+   进度 → 进入聆听态，说 2~3 个字后大字区出现 Partial。
+2. **Partial 不落表单**：说完不点停止、直接划掉面板，账单列表不应多出任何记录。
+3. **Final 预填**：说「今天中午吃饭花了三十块钱」→ 点停止 → 面板收起 → 新建表单已打开，
+   金额 30.00、分类餐饮、一句话原文在顶部输入框里。
+4. **空 Final**：捂住麦克风或小声说一句听不清的话 → 停止 → 表单仍然打开且金额为空，
+   备注里没有空串，用户能直接手填。
+5. **权限首次拒绝**：全新安装 → 长按 → 系统对话框点「拒绝」→ 面板显示可读提示 +
+   「重试」「去系统设置授权」；去设置授予后返回，再长按应能直接说话。
+6. **权限永久拒绝**（勾选「不再询问」后）：再长按不应毫无反应，应仍显示失败态与去设置入口。
+7. **切后台/锁屏**：录音中按 Home 或锁屏 → 回到 App 时面板已关闭、麦克风已释放
+   （系统状态栏的麦克风指示消失）；期间不应崩溃。
+8. **旋转屏幕**：录音中旋转 → Activity 重建，面板关闭，麦克风释放；再长按能重新开始。
+9. **快速连按**：面板打开的瞬间再连按 FAB 数次 → 只有一个会话、不会叠两个面板
+   （`voiceSheetOpen` 守卫 + FAB `enabled=false`）。
+10. **麦克风占用**：先用其他 App（录音机/通话）占住麦克风再长按 → 显示「麦克风被占用或打不开」
+    + 「重试」；关掉占用 App 后点重试应能正常识别。
+11. **取消路径**：聆听中点「取消」、下滑面板、按返回键三种方式 → 都回到账单页，
+    不弹新建表单，麦克风指示消失。
+12. **连续 20 次开关**：每次长按→取消，`adb shell dumpsys meminfo <pkg> | grep -i native`
+    不应持续增长（每开一次面板都会 new 一个引擎，靠 `close()` 释放 native）。
+13. **与 OCR 共存**：先触发一次页面识别（paddle-ocr 用 ORT），再语音记账，两个引擎都要能工作。
+14. **英文界面**：切到 English → 面板所有文案（含准备进度、错误提示）都是英文，不露中文。
+15. **读屏**：TalkBack 下 FAB 的「语音记账」长按动作能打开面板；面板开着时 FAB 不再响应长按。
+
