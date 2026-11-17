@@ -58,19 +58,21 @@ fun QuickEntryBar(
             onValueChange = onValueChange,
             modifier = fieldModifier
                 .fillMaxWidth()
-                .height(72.dp)
+                .height(124.dp)
                 .semantics { contentDescription = tr("一句话记账") },
             label = null,
-            minLines = 2,
-            maxLines = 2,
-            textStyle = MaterialTheme.typography.bodySmall,
+            minLines = 4,
+            maxLines = 4,
+            textStyle = MaterialTheme.typography.bodyMedium,
             shape = RoundedCornerShape(12.dp),
             placeholder = {
                 Text(
-                    text = tr("例如：午饭 25 微信") + "\n" + tr("打车 18 支付宝"),
+                    text = tr("比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐") +
+                        "\n" + tr("昨天 星巴克 32 支付宝") +
+                        "\n" + tr("工资 8000 银行卡 收入"),
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
-                    maxLines = 2,
+                    maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
             },
@@ -84,6 +86,15 @@ fun QuickEntryBar(
                 cursorColor = QingPrimary,
             ),
         )
+        if (value.isBlank()) {
+            Text(
+                text = tr("可以说：金额 · 时间 · 商户 · 分类 · 账户 · 收入或支出"),
+                style = MaterialTheme.typography.bodySmall,
+                color = QingTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         previewContent()
         if (warning != null) {
             Text(
