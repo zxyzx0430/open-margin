@@ -146,8 +146,8 @@ fun TransactionListScreen(
     drilldown: StatsLedgerDrilldown? = null,
     onDrilldownConsumed: () -> Unit = {},
     onOpenDetail: (Long) -> Unit = {},
-    // 长按 FAB 满 1 秒的落点由外部注入：RootNavigation 立刻打开录音面板并开始录音。
-    // 账单页本身不碰麦克风、不写库；新建账单的点按走页面自己的对话框。
+    // 长按 FAB 达到录音阈值的落点由外部注入：RootNavigation 立刻打开录音面板并开始录音。
+    // 账单页本身不碰麦克风、不写库；点按 + 打开手动新建面板。
     onVoiceEntry: () -> Unit = {},
     // 开录后按住时滑走取消：面板和引擎都在 RootNavigation 那层。
     onVoiceCancelled: () -> Unit = {},
@@ -231,7 +231,7 @@ fun TransactionListScreen(
     }
 
     val context = LocalContext.current
-    // 首次进账单页的「长按 + 1 秒」气泡：看过一次就写 seen，之后不再出现。
+    // 首次进账单页的「长按 + 开始说话」气泡：看过一次就写 seen，之后不再出现。
     val dismissVoiceHint: () -> Unit = {
         if (showVoiceHint) {
             showVoiceHint = false
@@ -369,7 +369,7 @@ fun TransactionListScreen(
                             addDialogQuickEntry = ""
                             showAddDialog = true
                         },
-                        // 满 1 秒：立刻打开面板并开始录音（不等松手）。
+                        // 达到长按阈值：立刻打开面板并开始录音（不等松手）。
                         onLongPressStart = {
                             dismissVoiceHint()
                             onVoiceEntry()
@@ -381,7 +381,7 @@ fun TransactionListScreen(
                     )
                     if (showVoiceHint) {
                         VoiceHintBubble(
-                            text = tr("长按 1 秒说话，点停止结束"),
+                            text = tr("长按开始说话，点停止结束"),
                             onDismiss = dismissVoiceHint,
                         )
                     }
@@ -743,40 +743,29 @@ fun TransactionListScreen(
                 )
             },
             onConfirm = { amount, type, category, merchant, note, timestampMs, account ->
+                viewModel.addTransaction(
+                    amountCents = amount,
+                    type = type,
+                    category = category,
+                    merchant = merchant,
+                    note = note,
+                    timestampMs = timestampMs,
+                    account = account,
+                )
+            },
+            onSaved = { saved ->
                 saveRequestSequence += 1
                 val requestSequence = saveRequestSequence
-                showAddDialog = false
-                addDialogQuickEntry = ""
                 scope.launch {
-                    val savedId = viewModel.addTransaction(
-                        amountCents = amount,
-                        type = type,
-                        category = category,
-                        merchant = merchant,
-                        note = note,
-                        timestampMs = timestampMs,
-                        account = account,
-                    )
                     if (requestSequence < latestFeedbackSaveSequence) return@launch
                     latestFeedbackSaveSequence = requestSequence
                     scrollTargetTransactionId = null
                     highlightedTransactionId = null
-                    val saved = TransactionEntity(
-                        id = savedId,
-                        amountCents = amount,
-                        type = type.name,
-                        category = category.name,
-                        merchant = merchant,
-                        note = note,
-                        account = account.trim().ifBlank { null },
-                        source = "MANUAL",
-                        timestamp = timestampMs,
-                    )
                     val inExactDateRange = exactDateFilter?.let { (start, end) ->
-                        timestampMs >= start && timestampMs < end
+                        saved.timestamp >= start && saved.timestamp < end
                     } ?: true
                     if (inExactDateRange && viewModel.isVisibleWithCurrentFilters(saved)) {
-                        scrollTargetTransactionId = savedId
+                        scrollTargetTransactionId = saved.id
                     }
                     snackbarHostState.currentSnackbarData?.dismiss()
                     snackbarHostState.showSnackbar(tr("已记录"))
