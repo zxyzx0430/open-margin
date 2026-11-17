@@ -29,6 +29,48 @@ class CalendarNumberDisplayTest {
     }
 
     @Test
+    fun selectedRangeTotalsOnlyIncludeTransactionsEligibleForStatistics() {
+        val selected = listOf(
+            transaction(250, TransactionType.EXPENSE),
+            transaction(1_000, TransactionType.INCOME),
+            transaction(50_000, TransactionType.EXPENSE, currency = "USD"),
+            transaction(30_000, TransactionType.EXPENSE, duplicateOfId = 2L),
+        )
+
+        assertEquals(
+            CalendarSelectionTotals(
+                expenseCents = 250,
+                incomeCents = 1_000,
+                netCents = 750,
+                includedCount = 2,
+            ),
+            calendarSelectionTotals(selected),
+        )
+        assertEquals(
+            CalendarDrawerDayAmount(TransactionType.INCOME, 1_000),
+            calendarDrawerDayAmount(selected),
+        )
+        assertNull(calendarDrawerDayAmount(emptyList()))
+    }
+
+    @Test
+    fun singleDaySummaryChoosesTheLargerIncludedDirection() {
+        assertEquals(
+            CalendarDrawerDayAmount(TransactionType.EXPENSE, 1_200),
+            calendarDrawerDayAmount(
+                listOf(
+                    transaction(1_200, TransactionType.EXPENSE),
+                    transaction(900, TransactionType.INCOME),
+                ),
+            ),
+        )
+        assertEquals(
+            CalendarDrawerDayAmount(TransactionType.INCOME, 800),
+            calendarDrawerDayAmount(listOf(transaction(800, TransactionType.INCOME))),
+        )
+    }
+
+    @Test
     fun daysWithoutEligibleRecordsHaveNoCalendarNumber() {
         val empty = calendarNumberTotals(emptyList())
         CalendarNumberMode.entries.forEach { mode ->
@@ -53,11 +95,13 @@ class CalendarNumberDisplayTest {
         assertFalse(shouldShowCalendarLunar(showLunar = true, english = true))
 
         assertEquals("日历数字：", calendarNumbersMenuPrefix(english = false))
-        assertEquals("Calendar numbers: ", calendarNumbersMenuPrefix(english = true))
+        assertEquals("Day numbers: ", calendarNumbersMenuPrefix(english = true))
         assertEquals("不显示", calendarNumberModeLabel(CalendarNumberMode.OFF, english = false))
         assertEquals("Off", calendarNumberModeLabel(CalendarNumberMode.OFF, english = true))
         assertEquals("Nov 17", CalendarDateText.day(2026, 11, 17, english = true))
         assertEquals("Expense", calendarNumberModeLabel(CalendarNumberMode.EXPENSE, english = true))
+        assertEquals("Net", calendarNumberModeLabel(CalendarNumberMode.NET, english = true))
+        assertEquals("Net", calendarHeatmapModeLabel(HeatmapMode.NET, english = true))
     }
 
     private fun transaction(

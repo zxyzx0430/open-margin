@@ -46,6 +46,7 @@ fun MonthPickerDialog(
     selectedMonth: String,
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit,
+    calendarPickerActions: Boolean = false,
 ) {
     val selectedParts = remember(selectedMonth) { BudgetMonth.parse(selectedMonth) }
     var year by remember(selectedMonth) {
@@ -130,8 +131,19 @@ fun MonthPickerDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    TextButton(onClick = { onSelect(BudgetMonth.currentKey()) }) {
-                        Text(tr("回到本月"))
+                    TextButton(
+                        onClick = {
+                            onSelect(BudgetMonth.currentKey())
+                            if (calendarPickerActions) onDismiss()
+                        },
+                    ) {
+                        Text(
+                            if (calendarPickerActions && AppLanguage.current() == AppLanguage.ENGLISH) {
+                                tr("本月")
+                            } else {
+                                tr("回到本月")
+                            },
+                        )
                     }
                     TextButton(onClick = onDismiss) {
                         Text(tr("取消"))
