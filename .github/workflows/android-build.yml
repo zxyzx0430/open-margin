@@ -8,6 +8,7 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
     steps:
@@ -21,12 +22,46 @@ jobs:
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -n 1)
           test -n "$SDKMANAGER"
           "$SDKMANAGER" --install 'platforms;android-35' 'build-tools;35.0.0'
+      # 模型（71MB）与 sherpa-onnx 原生库（36MB）不进 git；缓存键绑定模型名 +
+      # 两个文件的 sha256，换模型/换版本会自动 miss，不会拿旧模型骗过校验。
+      - name: Restore on-device ASR model cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            android/app/src/main/assets/asr
+            android/app/libs
+            ~/.cache/open-margin-asr
+          key: asr-zipformer-medium-ctc-chunk16-7cb84949b8d4f40d72df137e2e3529a1aadfc897e5257460f720bb73c99f10f1-e2f16836a4c712a9a01a1656f4610f66093fe283159883ee66b73ebb6e80364b
+          restore-keys: |
+            asr-zipformer-medium-ctc-chunk16-
+      - name: Prepare on-device ASR model
+        working-directory: android
+        run: |
+          chmod +x app/download-asr-model.sh
+          bash app/download-asr-model.sh
+          # 再跑一次 --check：确认落到磁盘的资产与脚本里的 sha256 完全一致。
+          bash app/download-asr-model.sh --check
       - name: Build and test Android APKs
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Verify ASR payload inside the APK
+        working-directory: android
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          LIST=$(unzip -l "$APK")
+          echo "$LIST" | grep -q 'assets/asr/zipformer-medium-ctc/ctc-chunk-16-left-64.int8.onnx'
+          echo "$LIST" | grep -q 'assets/asr/zipformer-medium-ctc/tokens.txt'
+          echo "$LIST" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          # 只能有一个 ONNX Runtime（paddle-ocr 的 1.21.1）。sherpa 静态链接 ORT，
+          # 若这里出现第二份 libonnxruntime.so，说明 AAR 被换回了普通版本。
+          COUNT=$(echo "$LIST" | grep -c 'lib/arm64-v8a/libonnxruntime.so' || true)
+          test "$COUNT" -eq 1
+          ls -l "$APK"
+          echo "APK_MB=$(( $(stat -c%s "$APK") / 1024 / 1024 ))"
       - uses: actions/upload-artifact@v4
         with:
           name: finance-collector-debug-apk
