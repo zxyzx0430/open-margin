@@ -524,11 +524,11 @@ fun SettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(tr("微信"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「常见问题」→「下载账单」→「用于个人对账」，选时间范围并填邮箱，收到邮件后解压得到 CSV。"))
+                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「…」→「下载账单」→「用于个人对账」→ 选时间范围 → 接收方式选「微信」，文件直接发到微信支付服务号，无需邮箱、无需解压；也可以选邮箱。"))
                     Text(tr("支付宝"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」，选时间范围并填邮箱，解压密码在邮件里。"))
+                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」→ 选时间范围与交易类型 → 接收方式选「支付宝」，文件直接发到支付宝消息；也可以选邮箱。"))
                     Text(
-                        tr("导入时选解压出的 CSV 文件即可。"),
+                        tr("导入时选择下载到的账单文件（CSV / XLSX）即可。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
