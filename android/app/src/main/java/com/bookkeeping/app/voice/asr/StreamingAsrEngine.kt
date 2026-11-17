@@ -22,6 +22,14 @@ interface StreamingAsrEngine {
      */
     suspend fun prepare(onProgress: (String) -> Unit = {}): Result<Unit>
 
+    /**
+     * 用一小段静音跑一遍解码，把 onnxruntime 的图/内存池热起来，让第一次真实出字更快。
+     *
+     * 约定：只在 READY 时生效、幂等、**不产生任何 [AsrEvent]**；失败只记日志，
+     * 不影响引擎可用性。没有这个实现的引擎可以不覆写（默认空实现）。
+     */
+    suspend fun warmUp() {}
+
     /** 开一次识别会话。language 为 "zh" / "en"（当前模型中英双语，仅作提示）。 */
     fun startSession(language: String)
 
@@ -31,7 +39,14 @@ interface StreamingAsrEngine {
     /** 停止送音频，冲刷尾部并产生 Final。 */
     fun finishInput()
 
-    /** 释放资源；幂等。 */
+    /**
+     * 中止当前会话：立刻放掉麦克风和半句话，识别器保持 READY。
+     *
+     * 面板关闭 / 切后台走这里，**不要** close()——引擎是进程级常驻的。
+     */
+    fun cancelSession() {}
+
+    /** 释放资源；幂等。释放后实例不可复用，需要重新创建。 */
     fun close()
 
     /** Ready / Partial / Final / Error。 */

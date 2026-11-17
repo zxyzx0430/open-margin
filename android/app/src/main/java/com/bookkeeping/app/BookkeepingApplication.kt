@@ -1,6 +1,8 @@
 package com.bookkeeping.app
 
 import android.app.Application
+import android.content.ComponentCallbacks2
+import android.util.Log
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -9,6 +11,9 @@ import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.CaptureHealthWorker
 import com.bookkeeping.app.notification.CategoryLearning
+import com.bookkeeping.app.voice.asr.AsrMemoryAction
+import com.bookkeeping.app.voice.asr.AsrTrimMemoryPolicy
+import com.bookkeeping.app.voice.asr.VoiceAsrHolder
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +22,11 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
+/**
+ * Application 同时是 `ComponentCallbacks2`（[android.app.Application] 本来就实现了它），
+ * 系统内存紧张时会回调 [onTrimMemory]。这里只把「真的紧张」的级别转成释放 ASR 模型：
+ * 常驻策略见 [AsrTrimMemoryPolicy] 与 docs/VOICE_POLISH.md。
+ */
 @HiltAndroidApp
 class BookkeepingApplication : Application() {
     @Inject lateinit var settings: SettingsPreferences
@@ -28,6 +38,7 @@ class BookkeepingApplication : Application() {
         super.onCreate()
         // 最先安装：后面任何初始化出错都能留下堆栈
         CrashCatcher.install(this)
+        installVoiceAsr()
         applicationScope.launch {
             MerchantRules.replace(settings.merchantRulesBlocking())
             val (counts, disabled) = settings.categoryLearningBlocking()
@@ -37,6 +48,46 @@ class BookkeepingApplication : Application() {
             runCatching { transactionRepository.repairCapturedDuplicatesOnce() }
         }
         scheduleCaptureHealthRecovery()
+    }
+
+    /**
+     * 语音引擎常驻：不在这里加载模型（不能拖慢启动），只安装 Context 并排一个
+     * 延迟 2.5s 的后台预热；真正加载失败也不影响其他功能，用户长按时会再试。
+     */
+    private fun installVoiceAsr() {
+        // 纯 JVM 侧的常量是平台常量的镜像：启动时核对一次，防止以后有人改错数字。
+        check(AsrTrimMemoryPolicy.RUNNING_LOW == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            "AsrTrimMemoryPolicy.RUNNING_LOW 与平台常量不一致"
+        }
+        check(AsrTrimMemoryPolicy.RUNNING_CRITICAL == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            "AsrTrimMemoryPolicy.RUNNING_CRITICAL 与平台常量不一致"
+        }
+        check(AsrTrimMemoryPolicy.COMPLETE == ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            "AsrTrimMemoryPolicy.COMPLETE 与平台常量不一致"
+        }
+        VoiceAsrHolder.install(this)
+        VoiceAsrHolder.schedulePrewarm()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when (AsrTrimMemoryPolicy.actionFor(level)) {
+            AsrMemoryAction.RELEASE -> {
+                Log.d(TAG, "内存紧张（level=$level），释放 ASR 模型")
+                VoiceAsrHolder.releaseNow("trim-memory level=$level")
+            }
+
+            // RUNNING_LOW 不释放：这时候释放，下一次记账就得重新等模型加载。
+            AsrMemoryAction.LOG_ONLY -> Log.d(TAG, "内存偏低（level=$level），ASR 模型保持常驻")
+
+            AsrMemoryAction.NONE -> Unit
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        Log.d(TAG, "onLowMemory：释放 ASR 模型")
+        VoiceAsrHolder.releaseNow("onLowMemory")
     }
 
     private fun scheduleCaptureHealthRecovery() {
@@ -51,5 +102,9 @@ class BookkeepingApplication : Application() {
                 request,
             )
         }
+    }
+
+    private companion object {
+        const val TAG = "BookkeepingApplication"
     }
 }

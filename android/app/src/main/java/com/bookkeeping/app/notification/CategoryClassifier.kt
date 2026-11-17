@@ -445,6 +445,31 @@ object CategoryClassifier {
         }
     }
 
+    /**
+     * 表单预填用的「商户记忆」：用户显式规则 > 学到的纠正 > 内置关键词。
+     *
+     * 直接复用 [classify] 里那条现成的管道（[ClassificationInput] 版本），不另写优先级：
+     * `post` 之外依次是 user rule → learned → source category → specific rule → keyword。
+     *
+     * 和 [classify] 的区别只有一个：**没有任何命中时返回 null**，而不是兜底成
+     * [TransactionCategory.OTHER]。调用方（语音预填）据此保留解析器自己的猜测，
+     * 不会被一句「记忆里没有」改成「其他」。
+     */
+    fun rememberedCategory(merchant: String, contextText: String = ""): TransactionCategory? {
+        if (merchant.isBlank()) return null
+        val result = classify(
+            ClassificationInput(
+                merchantRaw = merchant,
+                contextText = contextText,
+                direction = ClassificationDirection.EXPENSE,
+                source = ClassificationSource.MANUAL,
+                kind = ClassificationKind.PAYMENT,
+            ),
+        )
+        // 无命中时管道给的是 OTHER + confidence 0；显式规则/学习/关键词都 > 0。
+        return result.category.takeIf { result.confidence > 0f }
+    }
+
     private fun bestMatch(text: String): Match? {
         if (text.isBlank()) return null
         var best: Match? = null
