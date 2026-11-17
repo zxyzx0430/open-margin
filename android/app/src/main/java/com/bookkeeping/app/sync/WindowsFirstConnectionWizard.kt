@@ -19,18 +19,22 @@ import java.net.URL
 
 /** Optional onboarding. Existing sync settings remain intact until explicit confirmation. */
 @Composable
-fun WindowsFirstConnectionWizard() {
+fun WindowsFirstConnectionWizard(initialPayload: PairingPayload? = null) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE) }
-    var expanded by remember { mutableStateOf(false) }
-    var step by remember { mutableIntStateOf(0) }
-    var url by remember { mutableStateOf(prefs.getString("url", "") ?: "") }
-    var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
+    var expanded by remember(initialPayload) { mutableStateOf(initialPayload != null) }
+    var step by remember(initialPayload) { mutableIntStateOf(if (initialPayload != null) 1 else 0) }
+    var url by remember(initialPayload) {
+        mutableStateOf(initialPayload?.url ?: (prefs.getString("url", "") ?: ""))
+    }
+    var token by remember(initialPayload) {
+        mutableStateOf(initialPayload?.token ?: (prefs.getString("token", "") ?: ""))
+    }
     var testResult by remember { mutableStateOf<WindowsConnectionPolicy.Result?>(null) }
     var verifiedServer by remember { mutableStateOf("") }
     // server_id read from the QR. Null means the fields are typed manually and
     // the probe trusts the identity already stored on the phone (if any).
-    var scannedServerId by remember { mutableStateOf<String?>(null) }
+    var scannedServerId by remember(initialPayload) { mutableStateOf(initialPayload?.serverId) }
     var testing by remember { mutableStateOf(false) }
     var confirmed by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
@@ -90,6 +94,15 @@ fun WindowsFirstConnectionWizard() {
                 }
             }
         }
+    }
+
+    LaunchedEffect(initialPayload) {
+        val payload = initialPayload ?: return@LaunchedEffect
+        testResult = null
+        verifiedServer = ""
+        confirmed = false
+        message = tr("已读取配对二维码，正在做只读验证…")
+        startProbe(payload.url, payload.token, payload.serverId)
     }
 
     Card(
