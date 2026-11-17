@@ -8,7 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 长按 1 秒的时序与「空白不提交」都是纯规则，直接测数值，不依赖 Composables。
+ * 长按 0.75 秒的时序与「空白不提交」都是纯规则，直接测数值，不依赖 Composables。
  */
 class QuickEntryRuleTest {
     @Test
@@ -27,8 +27,8 @@ class QuickEntryRuleTest {
 
     @Test
     fun voiceTriggersAtOneSecondAndNotBefore() {
-        assertFalse(QuickEntryRule.isLongEnough(999L))
-        assertTrue(QuickEntryRule.isLongEnough(1_000L))
+        assertFalse(QuickEntryRule.isLongEnough(749L))
+        assertTrue(QuickEntryRule.isLongEnough(750L))
     }
 
     @Test
@@ -41,16 +41,16 @@ class QuickEntryRuleTest {
 
     @Test
     fun releaseDecidesBetweenTapRecordAndAbort() {
-        // 不到 1 秒松手 = 普通点击（开表单，不录音）。
+        // 不到 0.75 秒松手 = 普通点击（开表单，不录音）。
         assertEquals(HoldRelease.TAP, QuickEntryRule.releaseAction(armed = false, cancelled = false))
         // 没开录就滑走 = 什么都不做。
         assertEquals(HoldRelease.NOTHING, QuickEntryRule.releaseAction(armed = false, cancelled = true))
-        // 满 1 秒后正常松手 = 什么也不做，录音继续，不能结束会话。
+        // 满 0.75 秒后正常松手 = 什么也不做，录音继续，不能结束会话。
         assertEquals(
             HoldRelease.NOTHING,
             QuickEntryRule.releaseAction(armed = true, cancelled = false),
         )
-        // 满 1 秒后仍按住并滑走 = 取消录音并关面板，绝不能退化成点击。
+        // 满 0.75 秒后仍按住并滑走 = 取消录音并关面板，绝不能退化成点击。
         assertEquals(
             HoldRelease.ABORT_RECORDING,
             QuickEntryRule.releaseAction(armed = true, cancelled = true),

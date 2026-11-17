@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.calendar
 
+import com.bookkeeping.app.ui.components.MonthPickerDialog
+
 import android.content.Context
 import android.icu.util.ChineseCalendar
 import android.os.SystemClock
@@ -148,6 +150,7 @@ fun CalendarScreen(
     }
     var hasManuallyNavigatedMonth by rememberSaveable { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var showMonthPicker by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestToday = rememberUpdatedState(today)
@@ -236,6 +239,7 @@ fun CalendarScreen(
             monthKey = monthKey,
             onPrevious = { navigateMonth(shiftMonth(monthKey, -1)) },
             onNext = { navigateMonth(shiftMonth(monthKey, 1)) },
+            onPickMonth = { showMonthPicker = true },
             menu = {
                 Box {
                     IconButton(onClick = { menuExpanded = true }) {
@@ -289,6 +293,17 @@ fun CalendarScreen(
             },
         )
         MonthTotalsRow(monthTransactions)
+        if (showMonthPicker) {
+            MonthPickerDialog(
+                selectedMonth = monthKey,
+                onDismiss = { showMonthPicker = false },
+                onSelect = { picked ->
+                    navigateMonth(picked)
+                    showMonthPicker = false
+                },
+            )
+        }
+
         CalendarMonthGrid(
             year = parts.year,
             month = parts.month,
@@ -369,6 +384,7 @@ private fun MonthHeader(
     monthKey: String,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onPickMonth: () -> Unit,
     menu: @Composable () -> Unit,
 ) {
     // 翻月反馈：月份标题 150ms 淡入 + 轻微放大，让用户看出「刚翻了一页」。
@@ -407,6 +423,7 @@ private fun MonthHeader(
             text = monthLabel(monthKey),
             modifier = Modifier
                 .weight(1f)
+                .clickable(onClick = onPickMonth)
                 .graphicsLayer {
                     val progress = flipProgress.value
                     alpha = 0.25f + 0.75f * progress
