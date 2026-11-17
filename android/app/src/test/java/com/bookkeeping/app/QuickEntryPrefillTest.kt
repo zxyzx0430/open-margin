@@ -43,6 +43,7 @@ class QuickEntryPrefillTest {
         dateKnown: Boolean = false,
         preciseTime: Boolean = false,
         note: String? = null,
+        account: String? = null,
         warnings: Set<VoiceWarning> = emptySet(),
     ): VoiceDraft = VoiceDraft(
         amountCents = amountCents,
@@ -53,7 +54,7 @@ class QuickEntryPrefillTest {
         dateKnown = dateKnown,
         preciseTime = preciseTime,
         timeOfDayLabel = null,
-        account = null,
+        account = account,
         note = note,
         warnings = warnings,
         raw = "测试",
@@ -189,5 +190,46 @@ class QuickEntryPrefillTest {
         // 空白商户当没解析出来，不要用空格覆盖输入框。
         assertNull(prefill.merchant)
         assertEquals("补发", prefill.note)
+    }
+
+    // ================================================================ 账户
+
+    @Test
+    fun spokenPaymentMethodFillsAccountNotSource() {
+        // 语音只是录入方式：说「微信支付」填的是账户，来源仍然是 MANUAL（由 ViewModel 写）。
+        val raw = "11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐"
+        val parsed = VoiceTransactionParser.parse(raw, now, zone)
+        val prefill = QuickEntryPrefill.from(parsed, now, zone)
+
+        assertEquals("微信", prefill.account)
+    }
+
+    @Test
+    fun accountIsPassedThroughWhenParsed() {
+        val prefill = QuickEntryPrefill.from(draft(account = "支付宝"), now, zone)
+        assertEquals("支付宝", prefill.account)
+    }
+
+    @Test
+    fun accountNotSpokenStaysNullSoTheFormKeepsItsOwnValue() {
+        val prefill = QuickEntryPrefill.from(draft(account = null), now, zone)
+        assertNull(prefill.account)
+    }
+
+    @Test
+    fun blankAccountIsTreatedAsNotParsed() {
+        val prefill = QuickEntryPrefill.from(draft(account = "  "), now, zone)
+        assertNull(prefill.account)
+    }
+
+    @Test
+    fun wechatVariantsFoldIntoTheWechatPresetButSpecificAccountsStay() {
+        // 表单预设只有「微信」，微信支付/零钱并过去；花呗、招商银行是具体账户，原文保留。
+        assertEquals("微信", QuickEntryPrefill.accountName("微信支付"))
+        assertEquals("微信", QuickEntryPrefill.accountName(" 微信零钱 "))
+        assertEquals("支付宝", QuickEntryPrefill.accountName("支付宝"))
+        assertEquals("花呗", QuickEntryPrefill.accountName("花呗"))
+        assertEquals("招商银行", QuickEntryPrefill.accountName("招商银行"))
+        assertEquals("现金", QuickEntryPrefill.accountName("现金"))
     }
 }
