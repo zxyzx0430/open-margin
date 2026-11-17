@@ -1,3 +1,15 @@
+# System.Formats.Tar is available in PowerShell 7 / .NET 7+. The
+# traversal/symlink fixtures use it; skip those two cases on 5.1 while keeping
+# the entry-name validator and all other tests active. This must be evaluated
+# outside BeforeAll because Pester 5 evaluates It -Skip during discovery.
+$script:hasTarWriter = $false
+try {
+    Add-Type -AssemblyName System.Formats.Tar -ErrorAction Stop
+    $script:hasTarWriter = $null -ne ('System.Formats.Tar.TarWriter' -as [type])
+} catch {
+    $script:hasTarWriter = $false
+}
+
 BeforeAll {
     $script:modulePath = Join-Path $PSScriptRoot '..\OpenMargin.Setup.psd1'
     Import-Module $script:modulePath -Force -DisableNameChecking
@@ -5,10 +17,6 @@ BeforeAll {
     $script:stateRoot = Join-Path $TestDrive 'offline-state'
     Initialize-OmPaths -StateRoot $script:stateRoot -RepoRoot $script:repoRoot
     $script:ports = [pscustomobject]@{ api = 8767; wallos = 18082; gateway = 18768; setup = 18770 }
-    # System.Formats.Tar is available in PowerShell 7 / .NET 7+. The
-    # traversal/symlink fixtures use it; skip those two cases on 5.1 while
-    # keeping the entry-name validator and all other tests active.
-    $script:hasTarWriter = $null -ne ('System.Formats.Tar.TarWriter' -as [type])
     $script:tar = (Get-Command tar.exe -ErrorAction SilentlyContinue).Source
     if (-not $script:tar) { $script:tar = (Get-Command tar -ErrorAction SilentlyContinue).Source }
 
