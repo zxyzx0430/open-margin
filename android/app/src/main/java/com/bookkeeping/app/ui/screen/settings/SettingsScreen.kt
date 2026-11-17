@@ -123,11 +123,8 @@ import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.theme.QingIncome
 import com.bookkeeping.app.ui.theme.QingPrimary
-import com.bookkeeping.app.ui.theme.QingPrimaryContainer
-import com.bookkeeping.app.ui.theme.QingPrimaryDeep
 import com.bookkeeping.app.ui.theme.QingTextSecondary
 import com.bookkeeping.app.ui.theme.QingWarning
-import com.bookkeeping.app.ui.theme.QingWarningContainer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -293,13 +290,6 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item {
-                AutomationSetupCard(
-                    missingNames = missingCapabilityNames,
-                    onStart = { detailDialog = "automation" },
-                )
-            }
-
             item { SectionHeader(tr("权限与运行状态")) }
             item {
                 PermissionStatusGroup(
@@ -748,70 +738,6 @@ private fun requiredAutomationReady(
 
 private fun wizardProgress(step: AutomationWizardStep): String =
     String.format(Locale.getDefault(), "%d/%d", step.ordinal + 1, AUTOMATION_WIZARD_STEPS)
-
-@Composable
-private fun AutomationSetupCard(
-    missingNames: List<String>,
-    onStart: () -> Unit,
-) {
-    val ready = missingNames.isEmpty()
-    val container = if (ready) QingPrimaryContainer else QingWarningContainer
-    val content = if (ready) QingPrimaryDeep else QingWarning
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = container),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = tr("自动记账设置"),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = content,
-                    modifier = Modifier.weight(1f),
-                )
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                ) {
-                    Text(
-                        text = if (ready) tr("已开启") else String.format(
-                            Locale.getDefault(),
-                            tr("还缺 %d 项"),
-                            missingNames.size,
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (ready) QingPrimary else QingWarning,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                    )
-                }
-            }
-            Text(
-                text = if (ready) {
-                    tr("短信与 ROM 设置可选")
-                } else {
-                    tr("按提示逐项开启，系统开关只能由你手动确认")
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            if (!ready) {
-                Text(
-                    text = tr("缺少：") + missingNames.joinToString(" / "),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Button(onClick = onStart) {
-                    Text(tr("开始设置"))
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun AutomationSetupPanel(
