@@ -163,7 +163,8 @@ $allowedWebActions = @(
     'check', 'install-deps', 'deploy', 'create-owner', 'login-tailscale',
     'approve-funnel', 'verify', 'disable', 'enable', 'repair', 'backup',
     'pair-qr', 'rotate-token', 'pause-watchdog', 'resume-watchdog',
-    'install-watchdog', 'uninstall-watchdog', 'watchdog-status'
+    'install-watchdog', 'uninstall-watchdog', 'watchdog-status',
+    'select-offline-file', 'import-offline'
 )
 
 function Start-OmWebJob {
@@ -365,8 +366,9 @@ try {
                     }
                     $state = Read-OmState
                     Write-OmJson -Context $context -Value @{
-                        ok = $true; version = '1.3.0'; repoRoot = $RepoRoot;
-                        ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun
+                        ok = $true; version = [string]$state.engineVersion; repoRoot = $RepoRoot;
+                        ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun;
+                        offline = (Get-OmOfflineBundleInfo -Version ([string]$state.engineVersion))
                     }
                 }
                 '^/api/status$' {
@@ -444,6 +446,21 @@ try {
                         continue
                     }
                     if ($DryRun) { $body | Add-Member -NotePropertyName dryRun -NotePropertyValue $true -Force }
+                    if ($action -eq 'select-offline-file') {
+                        # A file picker needs an STA interactive desktop. Run it
+                        # inline; this endpoint stays loopback-only and behind
+                        # the setup token, and never accepts a file body.
+                        if ($DryRun) {
+                            Write-OmJson -Context $context -Value ([pscustomobject]@{
+                                ok = $false; code = 'PICKER_UNAVAILABLE';
+                                message = '演练模式不会打开文件选择框，请手动输入路径。'; retryable = $true
+                            })
+                            continue
+                        }
+                        $selection = Select-OmOfflineBundleFile
+                        Write-OmJson -Context $context -Value $selection
+                        continue
+                    }
                     $id = Start-OmWebJob -Action $action -Params $body
                     Write-OmJson -Context $context -Value @{ ok = $true; jobId = $id; action = $action; dryRun = [bool]$DryRun }
                 }

@@ -89,14 +89,34 @@ v1 **没有购买 Windows 代码签名证书**。双击安装器时 SmartScreen 
 - `RESTORE.md`：恢复说明。
 - 外层 `OpenMargin-Offline-<version>.tar.gz` 与 `.sha256`。
 
-恢复：
+v1.3.0 资产（可以直接转发给用户）：
+
+- 下载：<https://github.com/zxyzx0430/open-margin/releases/download/v1.3.0/OpenMargin-Offline-1.3.0.tar.gz>
+- 大小：161,126,294 字节（约 154 MiB）
+- SHA256：`d74f570191302c023639fa2eeb52526f53a49a6a6212e26c3e185e026f543783`
+- 校验文件：同目录的 `OpenMargin-Offline-1.3.0.tar.gz.sha256`
+
+向导内导入：
+
+1. 打开“清衡设置”，进入第 1 步“环境检查”，找到“Docker 下载失败？使用离线镜像包”卡片。
+2. 点“下载离线镜像包”，下载完成后核对卡片上显示的 SHA256（或 Release 旁的 `.sha256`）。
+3. 点“我已下载，导入”。向导服务器会在本机弹出 Windows 文件选择框；选中 `.tar.gz` 后开始导入。浏览器不需要上传 161 MB 文件。
+   - 如果文件选择框打不开，点“手动输入路径”，粘贴完整路径（例如 `D:\Downloads\OpenMargin-Offline-1.3.0.tar.gz`）。
+   - 导入过程：校验 SHA256 → 拒绝路径穿越/符号链接并安全解压到临时目录 → 校验 `manifest.json` / `images.tar` → `docker load -i images.tar`。可能需要几分钟。
+   - 成功后写入 `offlineImported=true`；从这一步开始的部署会自动使用 `docker compose up --no-build`，不再重新构建镜像。后续“一键修复/重新开启”也复用已加载镜像。
+   - 失败时不会删除已下载的离线包；Docker 未安装或未运行时会在解压前返回明确错误。SHA 不一致、解压失败、manifest 版本不匹配都会停止导入。
+
+手动恢复（不使用向导时）：
 
 ```powershell
+Get-FileHash .\OpenMargin-Offline-1.3.0.tar.gz -Algorithm SHA256
 tar -xzf .\OpenMargin-Offline-1.3.0.tar.gz
 docker load -i .\images.tar
 ```
 
-**限制（必须如实告知用户）**：当前向导以 `docker compose up --build` 启动；加载离线包可以避免重复下载镜像，但完全离线重建仍依赖后续引擎支持预构建镜像 / `--no-build`。因此 v1 的端到端离线安装**尚未验证**，不要把“有离线包”宣传成“保证离线可装”。
+然后再从开始菜单打开“清衡设置”继续。手动 `docker load` 不会写入向导状态；如果要在向导里继续用 `--no-build`，请使用上面的“导入”入口。
+
+**验证边界**：离线包资产已在 GitHub Release 上（本线程通过 GitHub API 核对了名称、大小与 SHA256）。本线程用 Pester 和假的 `docker` 验证了 SHA 校验、路径穿越/符号链接拒绝、manifest 校验、`docker load -i` 参数与 `offlineImported` 状态；**没有在本机实际下载并加载 161 MB 实包，也没有在干净 Windows 虚拟机做完全离线部署**。发布前仍需按第 7 节实机验收。
 
 ### 0.8 看门狗、备份与关闭
 
