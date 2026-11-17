@@ -91,6 +91,8 @@ import com.bookkeeping.app.update.UpdateComponentScope
 import com.bookkeeping.app.update.UpdateInstallFlow
 import com.bookkeeping.app.update.UpdatePresentation
 import com.bookkeeping.app.update.UpdateVersionPolicy
+import com.bookkeeping.app.sync.PairingPayload
+import com.bookkeeping.app.sync.PairingQrScanAction
 import com.bookkeeping.app.sync.SyncSettingsPanel
 import com.bookkeeping.app.sync.SyncState
 import com.bookkeeping.app.sync.SyncStateKind
@@ -106,6 +108,7 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Visibility
@@ -184,6 +187,7 @@ fun SettingsScreen(
         mutableStateOf(endpointHost(syncPrefs.getString("url", "")))
     }
     var detailDialog by remember { mutableStateOf<String?>(null) }
+    var initialPairingPayload by remember { mutableStateOf<PairingPayload?>(null) }
     var showExportGuide by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
 
@@ -316,6 +320,16 @@ fun SettingsScreen(
                         subtitle = syncHost.ifBlank { tr("未配置服务器") },
                         onClick = { detailDialog = "syncSettings" },
                     )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.QrCodeScanner,
+                        title = tr("配对电脑"),
+                        subtitle = tr("多端同步 · 看板 · MCP"),
+                        onClick = {
+                            initialPairingPayload = null
+                            detailDialog = "pairComputer"
+                        },
+                    )
                 }
             }
 
@@ -439,8 +453,28 @@ fun SettingsScreen(
                         onOpenWizard = { detailDialog = "wizard" },
                     )
                 }
-                "wizard" -> SettingsDetailDialog(tr("首次连接向导"), { detailDialog = null }) {
-                    WindowsFirstConnectionWizard()
+                "pairComputer" -> PairComputerDialog(
+                    onDismiss = {
+                        detailDialog = null
+                        initialPairingPayload = null
+                    },
+                    onManualEntry = {
+                        initialPairingPayload = null
+                        detailDialog = "wizard"
+                    },
+                    onPairingPayload = { payload ->
+                        initialPairingPayload = payload
+                        detailDialog = "wizard"
+                    },
+                )
+                "wizard" -> SettingsDetailDialog(
+                    tr("首次连接向导"),
+                    {
+                        detailDialog = null
+                        initialPairingPayload = null
+                    },
+                ) {
+                    WindowsFirstConnectionWizard(initialPairingPayload)
                 }
                 "rom" -> SettingsDetailDialog(tr("国产 ROM 后台白名单"), { detailDialog = null }) {
                     RomGuideCard()
@@ -489,6 +523,126 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = { showExportGuide = false }) { Text(tr("知道了")) }
             },
+        )
+    }
+}
+
+@Composable
+private fun PairComputerDialog(
+    onDismiss: () -> Unit,
+    onManualEntry: () -> Unit,
+    onPairingPayload: (PairingPayload) -> Unit,
+) {
+    var scanMessage by remember { mutableStateOf("") }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .heightIn(max = 600.dp),
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = tr("配对电脑"),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    PairingQrScanAction(
+                        onPayload = { payload ->
+                            scanMessage = ""
+                            onPairingPayload(payload)
+                        },
+                        onRejected = {
+                            scanMessage = tr("二维码无效，请扫描电脑上的清衡配对二维码。")
+                        },
+                        onFailure = {
+                            scanMessage = tr("未获得相机权限，无法扫码，请在系统设置中允许相机权限。")
+                        },
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = tr("关闭"),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    SettingsGroupCard {
+                        Column(
+                            modifier = Modifier.padding(vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            PairingBenefit(
+                                title = tr("手机、电脑、网页多端同步"),
+                                description = tr("在手机、电脑和网页之间同步同一份账本。"),
+                            )
+                            SettingsRowDivider()
+                            PairingBenefit(
+                                title = tr("电脑端看板"),
+                                description = tr("查看长期趋势、订阅预测、对账和重复复核。"),
+                            )
+                            SettingsRowDivider()
+                            PairingBenefit(
+                                title = tr("MCP 接入"),
+                                description = tr("接入自己的 AI 客户端，可查账、记账、改账、管理订阅、设置预算。"),
+                            )
+                        }
+                    }
+                    if (scanMessage.isNotBlank()) {
+                        Text(
+                            text = scanMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onManualEntry,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(tr("手动填写地址和密钥"))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingBenefit(title: String, description: String) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
