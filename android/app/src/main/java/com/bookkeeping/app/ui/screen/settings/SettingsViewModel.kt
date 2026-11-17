@@ -1,20 +1,27 @@
 package com.bookkeeping.app.ui.screen.settings
 
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bookkeeping.app.billexport.BillExport
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.KeepAliveService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -88,6 +95,36 @@ class SettingsViewModel @Inject constructor(
     fun setSuccessNotifications(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setSuccessNotificationsEnabled(enabled)
+        }
+    }
+
+    fun exportBills(uri: Uri, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val message = try {
+                withContext(Dispatchers.IO) {
+                    val records = transactionDao.observeAll().first().map { transaction ->
+                        BillExport.Record(
+                            timestampMs = transaction.timestamp,
+                            type = transaction.type,
+                            amountCents = transaction.amountCents,
+                            category = transaction.category,
+                            merchant = transaction.merchant,
+                            account = transaction.account,
+                            source = transaction.source,
+                            note = transaction.note,
+                        )
+                    }
+                    val output = appContext.contentResolver.openOutputStream(uri, "wt")
+                        ?: error("Unable to open document output stream")
+                    output.use { it.write(BillExport.csvBytes(records)) }
+                }
+                AppLanguage.tr(appContext, "账单已导出")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                AppLanguage.tr(appContext, "账单导出失败")
+            }
+            onResult(message)
         }
     }
 

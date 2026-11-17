@@ -547,7 +547,13 @@ internal object EnglishUiText {
         "自启动 / 省电策略 / 后台运行；常驻通知见「常驻运行状态」" to "Autostart / battery policy / background running; see Persistent capture status for the ongoing notification",
         "国产 ROM 还需允许自启动、把省电策略设为「无限制」，并允许常驻/持续通知；这些状态无法自动检测。" to "On Chinese ROMs, also allow autostart, set battery usage to Unrestricted and allow the ongoing/persistent notification; these states cannot be detected automatically.",
         "系统设置会暂时切走本页；返回后状态会自动刷新。" to "System settings will take you away from this page; status refreshes when you return.",
+        "账单已导出" to "Bills exported",
+        "账单导出失败" to "Bill export failed",
         "账单导入" to "Bill import",
+        "导入 / 导出账单" to "Import / export bills",
+        "支持微信/支付宝 CSV、XLSX 或文本；确认前不写入账本" to
+            "Supports WeChat/Alipay CSV, XLSX or text; nothing is written until you confirm.",
+        "导出全部账单" to "Export all bills",
         "历史账单请使用官方导出文件。自动采集的高置信度记录会自动入账，低置信度记录进入待确认；密码/验证页面会跳过。" to "Use official exports for historical bills. High-confidence automatic captures are saved directly; low-confidence ones go to review. Password and verification pages are skipped.",
         "历史账单请使用官方导出文件。扫描到的已完成记录会直接入账，并在交易行标注置信度和账单日期；密码/验证页面会跳过。" to "Use official exports for historical bills. Completed scanned records are saved directly and annotated with confidence and bill date; password and verification pages are skipped.",
         "一键开启自动记账" to "Turn on automatic tracking",
