@@ -316,7 +316,7 @@ class EnglishUiTextTest {
     @Test
     fun monthPickerLabelsTranslate() {
         assertEquals("Select month", EnglishUiText.translate("选择月份"))
-        assertEquals("Back to this month", EnglishUiText.translate("回到本月"))
+        assertEquals("Return to this month", EnglishUiText.translate("回到本月"))
         assertEquals("Previous year", EnglishUiText.translate("上一年"))
         assertEquals("Next year", EnglishUiText.translate("下一年"))
         assertEquals("Cancel", EnglishUiText.translate("取消"))

@@ -7,15 +7,17 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
@@ -48,11 +51,22 @@ fun MonthPickerDialog(
     var year by remember(selectedMonth) {
         mutableIntStateOf(selectedParts?.year ?: Calendar.getInstance().get(Calendar.YEAR))
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(tr("选择月份")) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.widthIn(min = 280.dp, max = 560.dp).fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = tr("选择月份"),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -70,57 +84,62 @@ fun MonthPickerDialog(
                         Icon(Icons.Default.KeyboardArrowRight, contentDescription = tr("下一年"))
                     }
                 }
-                for (row in 0 until 4) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        for (col in 0 until 3) {
-                            val month = row * 3 + col + 1
-                            val key = BudgetMonth.keyOf(year, month)
-                            val selected = key == selectedMonth
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .heightIn(min = 48.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (selected) MaterialTheme.colorScheme.primary
-                                        else QingSurfaceVariant
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (row in 0 until 4) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            for (col in 0 until 3) {
+                                val month = row * 3 + col + 1
+                                val key = BudgetMonth.keyOf(year, month)
+                                val selected = key == selectedMonth
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primary
+                                            else QingSurfaceVariant
+                                        )
+                                        .selectable(
+                                            selected = selected,
+                                            role = Role.RadioButton,
+                                            onClick = { onSelect(key) },
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = monthCellLabel(year, month),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            QingTextSecondary
+                                        },
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                     )
-                                    .selectable(
-                                        selected = selected,
-                                        role = Role.RadioButton,
-                                        onClick = { onSelect(key) },
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = monthCellLabel(year, month),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) {
-                                        MaterialTheme.colorScheme.onPrimary
-                                    } else {
-                                        QingTextSecondary
-                                    },
-                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                                )
+                                }
                             }
                         }
                     }
                 }
-                TextButton(
-                    onClick = { onSelect(BudgetMonth.currentKey()) },
-                    modifier = Modifier.align(Alignment.End),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(tr("回到本月"))
+                    TextButton(onClick = { onSelect(BudgetMonth.currentKey()) }) {
+                        Text(tr("回到本月"))
+                    }
+                    TextButton(onClick = onDismiss) {
+                        Text(tr("取消"))
+                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(tr("取消")) }
-        },
-    )
+        }
+    }
 }
 
 fun monthLabel(key: String): String {
