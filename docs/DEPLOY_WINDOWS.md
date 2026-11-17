@@ -32,20 +32,23 @@ v1 **没有购买 Windows 代码签名证书**。双击安装器时 SmartScreen 
 
 ### 0.2 安装器做什么
 
-- 安装到 `%ProgramData%\OpenMargin\app`。
+- 安装到用户选择的位置；默认 `D:\OpenMargin\app`，没有 D: 时默认 `E:\OpenMargin\app`，再退回系统盘。安装向导始终显示“选择安装位置”页面，可改到任意有空间的磁盘。
+- 安装向导分别检查**安装盘**和 **Docker 数据盘**：安装盘低于 2GB 阻止、低于 5GB 警告；Docker 数据盘低于 3GB 阻止、低于 5GB 警告。检查的是实际盘符，不再固定检查 C:。
 - 开始菜单创建：
   - **清衡设置**：启动本机向导（`http://127.0.0.1:18770/` 起，端口被占用时顺延到 18779）并打开浏览器。
   - **清衡账本**：打开 `http://127.0.0.1:18082/`。
-- 不要求 Git、Python、Node 或 PowerShell 7；网页向导本身以 Windows PowerShell 5.1 启动（依赖安装步骤目前仍有 PowerShell 7 缺口，见 0.4）。
+- 不要求 Git、Python、Node 或 PowerShell 7；网页向导本身以 Windows PowerShell 5.1 启动。
 - **不打包** `secrets/`、`.env`、数据库、Docker 卷或设备令牌。运行期密钥由向导在本机生成。
 - 安装器需要管理员权限（一次 UAC）。安装本身只写程序目录和开始菜单，不安装 Docker/Tailscale。
 - 支持 Windows 10/11 64 位。Windows 10 22H2 已停止支持：向导会警告并建议升级 Windows 11，但不会直接阻止安装。
+- 安装完成后自动启动“清衡设置”向导并打开浏览器；自动化安装可加 `/NOAUTOSTART` 跳过自动启动。`Launch-Setup.ps1` 启动失败会弹出可见的错误对话框。
+- **一次 UAC 的向导**：安装器已经提权，向导服务器复用该管理员权限运行，配置 Docker/Tailscale/URL ACL 时不再反复弹 UAC；浏览器通过 `explorer.exe` 以当前普通用户打开，不是管理员浏览器。服务器仍只监听 `127.0.0.1`，使用一次性 setup token、Host/Origin 校验和固定动作白名单；token URL 只短暂写入受 ACL 限制的本机文件，启动后即删除。安全取舍是：本机获得该 token 的程序可以触发向导的固定动作，因此不要把它暴露给其他本机用户。`/NOELEVATE` 可退回以普通用户运行向导（后续依赖安装可能再次弹 UAC）。
 - 重复安装会进入升级/修复流程，不覆盖已有 `secrets/` 和 Docker 命名卷。
 
 ### 0.3 向导流程
 
 1. 打开“清衡设置”，浏览器进入本机向导。
-2. 环境检查：Windows 版本/64 位、管理员、磁盘、WSL2、Docker Desktop、Tailscale、端口、已有安装。
+2. 环境检查：Windows 版本/64 位、管理员、安装盘空间、Docker 数据盘空间、WSL2、Docker Desktop、Tailscale、端口、已有安装。
 3. 一键安装依赖：WSL2、Docker Desktop、Tailscale。会再请求一次 UAC；取消 UAC 表示没有安装任何东西，可以重试。
 4. 注册/登录 Tailscale；在 Tailscale 管理台开启 **MagicDNS** 和 **HTTPS**。
 5. 安全确认：向导只开放同步接口，需要设备密钥。
@@ -61,8 +64,8 @@ v1 **没有购买 Windows 代码签名证书**。双击安装器时 SmartScreen 
 
 - WSL2 / Docker Desktop 首次安装后可能需要重启。
 - 重启后从开始菜单重新打开“清衡设置”；状态文件 `%LOCALAPPDATA%\OpenMargin\setup-state.json` 会保留，向导继续检查。
-- **v1 尚未实现 `RunOnce` 自动弹出向导**；不要假设重启后会自动打开。
-- 当前脚手架还有一个已知问题：依赖安装的提权 helper 调用 `pwsh.exe`（PowerShell 7）。只有 Windows PowerShell 5.1 的机器会在该步骤失败；在修复前，这类机器需先安装 PowerShell 7，或等待后续版本。安装器本身和向导服务器不依赖 PowerShell 7。
+- `WAITING_REBOOT` 会写当前用户的 `RunOnce`，重启登录后自动重新打开向导（`-Resume`）。
+- 依赖安装的提权 helper 已检测并使用 Windows PowerShell 5.1 的 `powershell.exe`，不再要求 PowerShell 7。
 
 ### 0.5 手机、商业 VPN 与 Tailscale 冲突
 

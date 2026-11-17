@@ -11,7 +11,7 @@
 
 ### Windows 一键安装器
 
-- 新增 `OpenMargin-Setup.exe`（Inno Setup），安装到 `%ProgramData%\OpenMargin\app`。
+- 新增 `OpenMargin-Setup.exe`（Inno Setup），默认安装到 `D:\OpenMargin\app`；没有 D: 时默认 `E:\OpenMargin\app`，再退回系统盘。安装向导始终显示目录选择页，可安装到任意有空间的磁盘。
 - 内置部署引擎、网页向导、`backend/` 构建上下文、`compose.yaml`、`deploy/windows/` 和运行所需文档。
 - 开始菜单：
   - “清衡设置”启动本机向导并打开浏览器。
@@ -63,10 +63,13 @@
 - Android 真机扫码与商业 VPN 下的同步未验证；JVM 单测 660 条通过，模拟器相册二维码解码由 Android 分支单独验证。
 - 管理员提权安装（WSL2 / Docker Desktop / Tailscale、UAC、URL ACL、重启续装）未在干净机验证；开发机当前不是管理员。
 - Wallos 真实容器内的 `/registration.php` 表单未验证（仅 mock）。
-- 安装器未做代码签名；本机未安装 Inno Setup，只验证了 `Build-Installer.ps1` 在缺少 ISCC 时以退出码 2 停止且不自动安装。
+- 安装器未做代码签名；本机未安装 Inno Setup，只验证了 `Build-Installer.ps1` 在缺少 ISCC 时以退出码 2 停止且不自动安装。自定义安装路径和安装后自动启动向导已做静态测试，但尚未用新编译的安装器在 D:/E: 实机验收。
 - 离线镜像包本环境未实际构建（磁盘空间不足）；`-SkipBuild` 在缺少镜像时安全失败并清理占位 secrets。
 - 看门狗用伪 Docker/Tailscale 做了故障注入，真实 Docker Desktop 重启、登录计划任务和“无窗口”行为未在干净机验证。
-- 开发机系统盘可用空间仅 3.1GB，低于向导要求的 15GB，因此环境检查会按设计阻止继续；演练流程通过测试钩子绕过该环境门槛。
+- 安装完成后自动打开“清衡设置”向导并打开浏览器（正常安装和 `/SILENT` 都生效）；自动化场景可加 `/NOAUTOSTART`。启动失败会显示可见错误对话框。
+- 向导服务器复用安装器的一次 UAC 以管理员权限运行，配置 Docker/Tailscale/URL ACL 时不再反复提权；浏览器通过 `explorer.exe` 以普通用户打开。`/NOELEVATE` 可退回普通用户向导。服务器仍只监听 127.0.0.1，使用一次性 token、Host/Origin 校验和固定动作白名单；token URL 只写入受 ACL 限制的临时本机文件并在启动后删除。
+- 所有页面顶部都有“返回主界面”按钮；从“查看运行状态”或其他页面都能回到欢迎页，后台部署 Job 继续运行，不会因为返回而中断。
+- 环境检查分别测量**实际安装盘**和 **Docker Desktop WSL 数据盘**（从 `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss` 的 `docker-desktop` BasePath 解析）。安装盘 <2GB 失败、<5GB 警告；Docker 数据盘 <3GB 失败、<5GB 警告；不再固定检查 C: 或要求 10/15GB。
 
 ## 升级与兼容
 
@@ -79,7 +82,7 @@
 
 已在集成分支实际运行（2026-11-17）：
 
-- Pester 5：61 条通过，0 失败（`deploy/windows/setup/tests/Run-Tests.ps1 -CI`）。
+- Pester 5：68+ 条通过，0 失败（`deploy/windows/setup/tests/Run-Tests.ps1 -CI`）；包含安装器自定义路径/自动启动静态检查、`Get-OmDiskInfo -Path`、Docker 数据盘解析和 D:/E: 磁盘检查。
 - 后端 unittest：102 条通过（`FINANCE_PUBLIC_URL=... python -m unittest discover -p "test_*.py"`）。
 - Android JVM 单测：660 条，0 失败，1 跳过；`:app:assembleDebug` 成功（versionCode 25 / versionName 1.3.0）。
 - 网关：Docker nginx 私有/公网各 5 条允许、15 条拒绝，公网限流生效，访问日志无 token。

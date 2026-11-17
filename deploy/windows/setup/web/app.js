@@ -8,6 +8,7 @@ let jobTimer = null;
 let progressTimer = null;
 let pairTimer = null;
 let pollFailures = 0;
+let homeRequested = false;
 
 const STEP_LABELS = {
   UNINITIALIZED: '未开始',
@@ -60,6 +61,11 @@ function showScreen(name) {
   if (el) el.classList.add('is-active');
   updateSteps(name);
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goHome() {
+  homeRequested = true;
+  showScreen('welcome');
 }
 
 function updateSteps(screen) {
@@ -208,6 +214,7 @@ function startProgressWatch() {
 }
 
 async function runCheck(targetScreen) {
+  homeRequested = false;
   const screen = targetScreen || 'env';
   showScreen(screen);
   const containerId = screen === 'tailscale' ? 'ts-checks' : 'env-checks';
@@ -233,6 +240,7 @@ async function runCheck(targetScreen) {
 }
 
 async function installDeps() {
+  homeRequested = false;
   const button = $('btn-install-deps');
   button.disabled = true;
   toast('如果弹出 Windows 管理员确认（UAC），请点“是”。');
@@ -268,10 +276,11 @@ async function tailscaleLogin() {
   }
 }
 
-function nextFromEnv() { showScreen('tailscale'); runCheck('tailscale'); }
-function nextFromSecurity() { showScreen('admin'); }
+function nextFromEnv() { homeRequested = false; showScreen('tailscale'); runCheck('tailscale'); }
+function nextFromSecurity() { homeRequested = false; showScreen('admin'); }
 
 function nextFromAdmin() {
+  homeRequested = false;
   const user = $('admin-user').value.trim();
   const password = $('admin-password').value;
   const password2 = $('admin-password2').value;
@@ -289,6 +298,12 @@ function showVerify(checks, serverId) {
   $('verify-state').textContent = ok ? '通过' : '需要处理';
   $('verify-state').className = 'om-pill ' + (ok ? 'om-pill-ok' : 'om-pill-error');
   $('btn-verify-continue').disabled = !ok;
+  if (homeRequested) {
+    // The user returned to the main screen; keep the job running but do not
+    // yank them away from where they are.
+    toast('后台任务已完成。点“查看运行状态”查看结果。');
+    return;
+  }
   showScreen('verify');
 }
 
@@ -337,6 +352,7 @@ function handleDeployResult(data) {
 }
 
 async function startDeploy() {
+  homeRequested = false;
   const user = $('admin-user').value.trim();
   const password = $('admin-password').value;
   if (!user || password.length < 8) { toast('请先完成管理员账号设置。', true); showScreen('admin'); return; }
@@ -374,6 +390,7 @@ async function startDeploy() {
 }
 
 async function approveFunnel() {
+  homeRequested = false;
   $('btn-approve-funnel').disabled = true;
   toast('正在确认 Funnel 授权…');
   try {
@@ -396,6 +413,7 @@ async function approveFunnel() {
 }
 
 async function runVerifyAgain() {
+  homeRequested = false;
   $('btn-verify-again').disabled = true;
   try {
     const result = await postAction('verify');
@@ -573,6 +591,7 @@ async function boot() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  $('btn-home').addEventListener('click', goHome);
   $('btn-start').addEventListener('click', () => { showScreen('env'); runCheck('env'); });
   $('btn-status').addEventListener('click', showStatus);
   $('btn-recheck').addEventListener('click', () => runCheck('env'));
