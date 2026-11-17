@@ -19,14 +19,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -50,7 +47,8 @@ import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
-import kotlinx.coroutines.launch
+import com.bookkeeping.app.ui.screen.transactions.VoiceCaptureSheet
+import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
 @Composable
@@ -66,14 +64,13 @@ fun RootNavigation() {
     val showBottomBar = currentDestination?.hierarchy?.any { destination ->
         navItems.any { it.route == destination.route }
     } == true
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    // 长按 FAB 的录音/ASR 还没接进来：先给一句明确提示，别静默无反应。
-    val voicePendingText = tr("语音记账还在接入中")
+    // 长按 FAB 的录音面板：开着的时候同时禁掉 FAB 的按住动作，一个时刻只有一个会话。
+    var voiceSheetOpen by remember { mutableStateOf(false) }
+    // 面板交回的 Final 文本（null = 没听清）。账单页消费后置回 null。
+    var voiceRequest by remember { mutableStateOf<VoiceEntryRequest?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (showBottomBar) Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -145,10 +142,13 @@ fun RootNavigation() {
                     drilldown = pendingLedgerDrilldown,
                     onDrilldownConsumed = { pendingLedgerDrilldown = null },
                     onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
-                    // 占位：下一批接 feat/voice-asr-engine 的录音与识别。
+                    // 长按满 1 秒：打开录音面板。面板已经开着就不再开第二个会话。
                     onVoiceEntry = {
-                        scope.launch { snackbarHostState.showSnackbar(voicePendingText) }
+                        if (!voiceSheetOpen) voiceSheetOpen = true
                     },
+                    voiceBusy = voiceSheetOpen,
+                    voiceRequest = voiceRequest,
+                    onVoiceRequestConsumed = { voiceRequest = null },
                 )
             }
             composable(
@@ -222,6 +222,18 @@ fun RootNavigation() {
                 )
             }
         }
+    }
+
+    // 录音面板本身就是模态的：铺在 Scaffold 之上，录音期间底下的 tab / FAB 都点不到。
+    // onFinal 的 text 为 null 表示「说了但没听清」：表单照开、不预填，不写空备注。
+    if (voiceSheetOpen) {
+        VoiceCaptureSheet(
+            onCancel = { voiceSheetOpen = false },
+            onFinal = { text ->
+                voiceSheetOpen = false
+                voiceRequest = VoiceEntryRequest(text)
+            },
+        )
     }
 }
 
