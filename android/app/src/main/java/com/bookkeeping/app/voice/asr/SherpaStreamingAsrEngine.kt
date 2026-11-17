@@ -190,7 +190,7 @@ class SherpaStreamingAsrEngine(
         }
     }
 
-    override fun startSession(language: String) {
+    override fun startSession(language: String): Long? {
         // 未 prepare 会在这里抛 IllegalStateException（接口契约）。
         state.checkCanStartSession()
 
@@ -198,7 +198,7 @@ class SherpaStreamingAsrEngine(
             eventFlow.tryEmit(
                 AsrEvent.Error(AsrErrorCode.PERMISSION_DENIED, "没有录音权限，无法语音记账"),
             )
-            return
+            return null
         }
 
         closeActiveSession()
@@ -206,7 +206,7 @@ class SherpaStreamingAsrEngine(
         val active = synchronized(nativeLock) { recognizer }
         if (active == null) {
             eventFlow.tryEmit(AsrEvent.Error(AsrErrorCode.NOT_PREPARED, "语音引擎未就绪：请先 prepare()"))
-            return
+            return null
         }
 
         currentLanguage = if (language.equals(LANGUAGE_EN, ignoreCase = true)) LANGUAGE_EN else LANGUAGE_ZH
@@ -220,8 +220,9 @@ class SherpaStreamingAsrEngine(
 
         decodeJob = scope.launch { decodeLoop(active, queue, generation) }
         if (captureFromMicrophone) {
-            captureJob = scope.launch(captureDispatcher) { captureLoop(queue) }
+            captureJob = scope.launch(captureDispatcher) { captureLoop(queue, generation) }
         }
+        return generation
     }
 
     override fun acceptAudio(pcm16: ShortArray, sampleRate: Int) {
@@ -233,6 +234,7 @@ class SherpaStreamingAsrEngine(
                     AsrEvent.Error(
                         AsrErrorCode.AUDIO_INIT_FAILED,
                         "语音采样率必须是 ${SAMPLE_RATE}Hz，收到 ${sampleRate}Hz",
+                        sessionId = state.currentGeneration(),
                     ),
                 )
             }
@@ -333,7 +335,7 @@ class SherpaStreamingAsrEngine(
                         val text = AsrText.normalize(active.getResult(stream).text)
                         if (text.isNotBlank() && text != lastPartial) {
                             lastPartial = text
-                            eventFlow.tryEmit(AsrEvent.Partial(text))
+                            eventFlow.tryEmit(AsrEvent.Partial(text, sessionId = generation))
                         }
                     }
 
@@ -342,7 +344,7 @@ class SherpaStreamingAsrEngine(
                         stream.inputFinished()
                         drain(active, stream)
                         val finalText = AsrText.normalize(active.getResult(stream).text).trim()
-                        eventFlow.tryEmit(AsrEvent.Final(finalText))
+                        eventFlow.tryEmit(AsrEvent.Final(finalText, sessionId = generation))
                         return
                     }
                 }
@@ -350,7 +352,7 @@ class SherpaStreamingAsrEngine(
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (failure: Throwable) {
-            eventFlow.tryEmit(AsrEvent.Error(AsrErrorCode.INTERNAL, "语音识别中断", failure))
+            eventFlow.tryEmit(AsrEvent.Error(AsrErrorCode.INTERNAL, "语音识别中断", failure, generation))
         } finally {
             synchronized(nativeLock) {
                 runCatching { stream.release() }
@@ -374,7 +376,7 @@ class SherpaStreamingAsrEngine(
         }
     }
 
-    private suspend fun captureLoop(queue: Channel<AudioCommand>) {
+    private suspend fun captureLoop(queue: Channel<AudioCommand>, sessionId: Long) {
         val capturer = MicrophoneCapture(SAMPLE_RATE)
         synchronized(nativeLock) { microphone = capturer }
         try {
@@ -386,7 +388,11 @@ class SherpaStreamingAsrEngine(
                     queue.trySend(AudioCommand.Audio(toFloatSamples(buffer, read)))
                 } else if (read < 0) {
                     eventFlow.tryEmit(
-                        AsrEvent.Error(AsrErrorCode.AUDIO_INIT_FAILED, "录音读取失败（$read）"),
+                        AsrEvent.Error(
+                            AsrErrorCode.AUDIO_INIT_FAILED,
+                            "录音读取失败（$read）",
+                            sessionId = sessionId,
+                        ),
                     )
                     return
                 }
@@ -394,9 +400,23 @@ class SherpaStreamingAsrEngine(
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (security: SecurityException) {
-            eventFlow.tryEmit(AsrEvent.Error(AsrErrorCode.PERMISSION_DENIED, "没有录音权限", security))
+            eventFlow.tryEmit(
+                AsrEvent.Error(
+                    AsrErrorCode.PERMISSION_DENIED,
+                    "没有录音权限",
+                    security,
+                    sessionId,
+                ),
+            )
         } catch (failure: Throwable) {
-            eventFlow.tryEmit(AsrEvent.Error(AsrErrorCode.AUDIO_INIT_FAILED, "麦克风初始化失败", failure))
+            eventFlow.tryEmit(
+                AsrEvent.Error(
+                    AsrErrorCode.AUDIO_INIT_FAILED,
+                    "麦克风初始化失败",
+                    failure,
+                    sessionId,
+                ),
+            )
         } finally {
             capturer.release()
             synchronized(nativeLock) { if (microphone === capturer) microphone = null }

@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 /**
- * 首次进账单页的一次性提示气泡：「长按 1 秒说话，松手结束」。
+ * 首次进账单页的一次性提示气泡：「长按 1 秒说话，点停止结束」。
  *
  * 挂在 FAB 上方，下缘的小三角指向 FAB。不是 Dialog、也不铺遮罩：
  * 气泡本身可点掉，页面上的任何一次按下也会让它消失（由调用方监听后收起），
