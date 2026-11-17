@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,6 +71,7 @@ import com.bookkeeping.app.data.budget.BudgetSummary
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.MonthPickerDialog
 import com.bookkeeping.app.ui.components.SectionHeader
@@ -181,7 +183,12 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
                         TextButton(onClick = { showAddCategory = true }) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(tr("添加分类"))
+                            Text(
+                                tr("添加分类"),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     },
                 )
@@ -311,6 +318,7 @@ private fun MonthSelector(
     ) {
         Row(
             modifier = Modifier
+                .weight(1f)
                 .clip(RoundedCornerShape(50))
                 .background(QingSurface)
                 .border(1.dp, QingOutline, RoundedCornerShape(50))
@@ -322,6 +330,7 @@ private fun MonthSelector(
             }
             Row(
                 modifier = Modifier
+                    .weight(1f)
                     .clip(RoundedCornerShape(50))
                     .clickable(role = Role.Button, onClick = onPickMonth)
                     .padding(horizontal = 6.dp, vertical = 8.dp),
@@ -339,20 +348,30 @@ private fun MonthSelector(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
             }
             IconButton(onClick = onNext) {
                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = tr("下一月"))
             }
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(4.dp))
         FilledTonalButton(
             onClick = onAdjust,
+            modifier = Modifier.widthIn(min = 96.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
         ) {
             Icon(Icons.Outlined.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text(tr("调整预算"))
+            Text(
+                tr("调整预算"),
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -478,16 +497,14 @@ private fun BudgetMetric(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             color = QingPrimaryDeep.copy(alpha = 0.72f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            maxLines = 2,
+            softWrap = true,
         )
-        Text(
+        AutoSizeAmountText(
             text = value,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -563,6 +580,7 @@ private fun BudgetInsightCard(
                     text = paceText,
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
+                    softWrap = true,
                 )
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
@@ -577,6 +595,7 @@ private fun BudgetInsightCard(
                     text = adviceText,
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
+                    softWrap = true,
                 )
             }
         }
@@ -612,6 +631,7 @@ private fun CategoryBudgetRow(
                         text = tr(category.displayName),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
+                        softWrap = true,
                         modifier = Modifier.weight(1f),
                     )
                     if (status != BudgetStatus.NORMAL && status != BudgetStatus.UNSET) {
@@ -622,6 +642,7 @@ private fun CategoryBudgetRow(
                     text = "${tr("已使用")} ${formatCny(spentCents)} / ${formatCny(budgetCents)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
+                    softWrap = true,
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }

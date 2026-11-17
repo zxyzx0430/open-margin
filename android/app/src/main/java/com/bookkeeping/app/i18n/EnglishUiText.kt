@@ -422,7 +422,7 @@ internal object EnglishUiText {
         "预算建议" to "Budget advice",
         "接近超支" to "Near limit",
         "已超预算" to "Over budget",
-        "调整预算" to "Adjust budget",
+        "调整预算" to "Adjust",
         "未设置" to "Not set",
         "正常" to "Normal",
         "支出偏快" to "spending is fast",
