@@ -76,7 +76,7 @@ object UpdateVersionPolicy {
     // Stable v1.3.0: Windows one-click setup (installer, web wizard, Funnel
     // public gateway, hidden watchdog) and Android QR pairing.
     // Keep both release tag and Android versionCode in sync.
-    const val CURRENT_TAG = "v1.3.0"
+    const val CURRENT_TAG = "v1.3.1"
 
     fun latestNewer(
         releases: List<PublishedRelease>,
