@@ -210,6 +210,29 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun quickEntryAndVoiceFabLabelsTranslate() {
+        // 表单内的一句话记账、长按 FAB、首次提示：中文是 key，缺一条英文就会在英文模式里露中文。
+        val expected = mapOf(
+            "比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐" to
+                "e.g. Nov 16, 12:00 PM at McDonald's, 36.50, food, WeChat Pay, note: overtime meal",
+            "一句话记账" to "Quick entry",
+            "写下消费或收入，自动帮你填好账单" to
+                "Describe the expense or income and the form fills itself",
+            "语音记账" to "Voice entry",
+            "新建账单，长按说话记账" to "New transaction; press and hold to speak",
+            "长按 + 1 秒，说话记账" to "Hold + for 1 second, then speak",
+            "语音记账还在接入中" to "Voice entry is still being connected",
+            "没看出金额，请手动补上" to "No amount found; please fill it in",
+            "已按这句话填好，请核对金额、分类和时间" to
+                "Filled from your sentence; check the amount, category and time",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun merchantRulesPageLabelsTranslate() {
         // 商户分类记忆页：标题栏、搜索、列表状态、空状态、编辑面板、清除确认。
         val expected = mapOf(

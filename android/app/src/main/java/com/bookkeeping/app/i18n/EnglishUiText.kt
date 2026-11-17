@@ -995,6 +995,22 @@ internal object EnglishUiText {
             "The QR device key is invalid (at least 16 characters, no whitespace).",
         "二维码里的账本身份无效（至少 16 位）。" to
             "The QR ledger identity is invalid (at least 16 characters).",
+
+        // === 一句话记账 / 长按 FAB 说话记账 ===
+        // 占位示例给具体日期和钟点：相对时间（"昨天中午"）会让用户照着说不出可解析的时间。
+        "比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐" to
+            "e.g. Nov 16, 12:00 PM at McDonald's, 36.50, food, WeChat Pay, note: overtime meal",
+        "一句话记账" to "Quick entry",
+        "写下消费或收入，自动帮你填好账单" to
+            "Describe the expense or income and the form fills itself",
+        "语音记账" to "Voice entry",
+        "新建账单，长按说话记账" to "New transaction; press and hold to speak",
+        "长按 + 1 秒，说话记账" to "Hold + for 1 second, then speak",
+        "语音记账还在接入中" to "Voice entry is still being connected",
+        // 一句话解析的两种提醒：没看出金额、以及填好了但要核对。
+        "没看出金额，请手动补上" to "No amount found; please fill it in",
+        "已按这句话填好，请核对金额、分类和时间" to
+            "Filled from your sentence; check the amount, category and time",
     )
 
     fun translate(chinese: String): String {
