@@ -31,9 +31,11 @@ AppPublisher=Open Margin
 AppPublisherURL=https://github.com/zxyzx0430/open-margin
 AppSupportURL=https://github.com/zxyzx0430/open-margin/issues
 AppUpdatesURL=https://github.com/zxyzx0430/open-margin/releases
-DefaultDirName={commonappdata}\OpenMargin\app
+DefaultDirName={code:GetDefaultInstallDir}
 DefaultGroupName=清衡 Open Margin
 DisableProgramGroupPage=yes
+; Always show the directory page so users can install on D:/E: instead of C:.
+DisableDirPage=no
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -95,13 +97,62 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\deploy\windows\setup\installer\Fix-ScriptEncoding.ps1"" -Root ""{app}"""; StatusMsg: "正在准备本机脚本..."; Flags: runhidden waituntilterminated
 ; A one-time URL ACL lets the un-elevated wizard bind 127.0.0.1 setup ports.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\deploy\windows\setup\installer\Install-UrlAcl.ps1"""; StatusMsg: "正在配置本机向导端口..."; Flags: runhidden waituntilterminated
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"""; Description: "立即打开清衡设置向导"; Flags: postinstall nowait skipifsilent runhidden runasoriginaluser
+; Start the wizard elevated so Docker/Tailscale/URL ACL setup needs only the
+; installer's one UAC. Launch-Setup opens the browser through explorer.exe so
+; the browser itself stays at the original user's integrity level.
+; /NOELEVATE selects the original user-level wizard instead; /NOAUTOSTART
+; disables both postinstall entries for automation.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"""; Description: "立即打开清衡设置向导"; Flags: postinstall nowait runhidden; Check: ShouldRunElevatedWizard
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -NoElevate"; Description: "以当前用户权限打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunUnelevatedWizard
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\deploy\windows\setup\open-margin-setup.ps1"" uninstall-watchdog"; Flags: runhidden waituntilterminated
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\deploy\windows\setup\installer\Install-UrlAcl.ps1"" -Remove"; Flags: runhidden waituntilterminated
 
 [Code]
+function HasCmdLineParam(const Value: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    if Lowercase(ParamStr(I)) = Lowercase(Value) then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function NoAutoStart(): Boolean;
+begin
+  { Automation can pass /NOAUTOSTART to keep the postinstall wizard closed. }
+  Result := not HasCmdLineParam('/NOAUTOSTART');
+end;
+
+function ShouldRunElevatedWizard(): Boolean;
+begin
+  Result := NoAutoStart() and (not HasCmdLineParam('/NOELEVATE'));
+end;
+
+function ShouldRunUnelevatedWizard(): Boolean;
+begin
+  Result := NoAutoStart() and HasCmdLineParam('/NOELEVATE');
+end;
+
+function GetDefaultInstallDir(Param: String): String;
+begin
+  { Prefer D:, then E:, then the system drive. Users can still change the
+    directory on the wizard's directory page. }
+  if DirExists('D:\') then
+    Result := 'D:\OpenMargin\app'
+  else if DirExists('E:\') then
+    Result := 'E:\OpenMargin\app'
+  else
+    Result := ExpandConstant('{sd}\OpenMargin\app');
+end;
+
 function InitializeSetup(): Boolean;
 begin
   Result := True;

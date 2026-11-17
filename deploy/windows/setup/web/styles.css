@@ -48,6 +48,7 @@ body { padding: 0 18px 60px; }
 .om-brand strong { display: block; font-size: 16px; }
 .om-sub { display: block; color: var(--om-secondary); font-size: 12px; letter-spacing: .04em; }
 .om-header-right { display: flex; align-items: center; gap: 10px; }
+.om-home-btn { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
 .om-version { color: var(--om-secondary); font-size: 12px; }
 
 .om-pill {

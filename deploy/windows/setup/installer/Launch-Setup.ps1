@@ -17,7 +17,8 @@ param(
     [int[]]$Ports = @(18770, 18771, 18772, 18773, 18774, 18775, 18776, 18777, 18778, 18779),
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'OpenMargin'),
     [string]$AppRoot = '',
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$NoElevate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,7 +88,7 @@ try {
     }
 
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1}' -f $setupScript, $port
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1} -StateRoot "{2}"' -f $setupScript, $port, $StateRoot
     if ($NoBrowser) { $arguments += ' -NoBrowser' }
 
     Write-LaunchLog ('starting setup wizard on port ' + $port)
@@ -96,6 +97,39 @@ try {
 
     if ($process.HasExited) {
         throw ('向导未能启动（退出码 ' + $process.ExitCode + '）。日志：' + $logPath)
+    }
+
+    if (-not $NoBrowser) {
+        # The server writes the token URL for this one-time handoff. Reading it
+        # here avoids guessing the port when the server auto-advances.
+        $launchUrlPath = Join-Path $StateRoot 'setup-web-url.txt'
+        $url = $null
+        $deadline = (Get-Date).AddSeconds(15)
+        do {
+            if (Test-Path $launchUrlPath) {
+                try { $url = (Get-Content -Path $launchUrlPath -Raw -Encoding UTF8).Trim() } catch { }
+            }
+            if (-not $url) { Start-Sleep -Milliseconds 200 }
+        } while (-not $url -and (Get-Date) -lt $deadline)
+        if (-not $url) { $url = 'http://127.0.0.1:' + $port + '/' }
+        Remove-Item -Force $launchUrlPath -ErrorAction SilentlyContinue
+
+        $isElevated = $false
+        try {
+            $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+            $isElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        } catch { }
+        if ($isElevated -and -not $NoElevate) {
+            # explorer.exe forwards the URL to the existing (non-elevated)
+            # shell so the browser is not launched elevated.
+            try {
+                Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList $url | Out-Null
+            } catch {
+                Start-Process $url | Out-Null
+            }
+        } else {
+            Start-Process $url | Out-Null
+        }
     }
 
     Write-LaunchLog ('setup wizard pid ' + $process.Id + ' port ' + $port)
