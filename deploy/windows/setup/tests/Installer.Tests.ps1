@@ -129,6 +129,11 @@ Describe 'Browser fallback and wizard single-instance' {
         $launch | Should -Match 'handoff file kept until wizard exit'
         $launch | Should -Match 'Show-SetupUrlFallback'
         $launch | Should -Match 'Wait-LaunchBrowserStarted'
+        # Both the reuse path and the fresh-start path must fall back to a
+        # visible MessageBox containing the full token URL.
+        ([regex]::Matches($launch, 'Show-SetupUrlFallback')).Count | Should -BeGreaterOrEqual 2
+        $launch | Should -Match '含一次性登录 token'
+        $launch | Should -Match '地址也保存在'
     }
 
     It 'launcher reuses or clears the existing wizard through Stop-OpenMargin.ps1' {
