@@ -396,6 +396,18 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            item { SectionHeader(tr("反馈")) }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("反馈问题"),
+                        subtitle = tr("邮件或 GitHub Issue"),
+                        onClick = { detailDialog = "feedback" },
+                    )
+                }
+            }
         }
 
         detailDialog?.let { key ->
@@ -465,6 +477,7 @@ fun SettingsScreen(
                         onOpenNotificationSettings = { openAppNotificationSettings(context) },
                     )
                 }
+                "feedback" -> FeedbackDialog(onDismiss = { detailDialog = null })
             }
         }
     }
