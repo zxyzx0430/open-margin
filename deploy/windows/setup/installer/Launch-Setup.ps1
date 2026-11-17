@@ -80,6 +80,23 @@ function Test-LaunchElevated {
     }
 }
 
+function Wait-LaunchBrowserStarted {
+    param([datetime]$Since, [int]$TimeoutSeconds = 3)
+    $names = @('chrome', 'msedge', 'firefox', 'brave', 'opera', 'vivaldi', 'iexplore')
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        foreach ($name in $names) {
+            try {
+                $process = @(Get-Process -Name $name -ErrorAction SilentlyContinue |
+                    Where-Object { $_.StartTime -ge $Since })
+                if ($process.Count -gt 0) { return $true }
+            } catch { }
+        }
+        Start-Sleep -Milliseconds 400
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
 function Get-LaunchWizardStatus {
     param([string]$StopScript, [string]$AppRoot, [string]$StateRoot)
     if (-not (Test-Path $StopScript)) { return $null }
@@ -96,12 +113,16 @@ function Get-LaunchWizardStatus {
 function Open-SetupUrl {
     param([string]$Url, [bool]$Elevated)
     $errors = @()
+    $attemptedAt = (Get-Date).AddSeconds(-1)
     if ($Elevated) {
         # explorer.exe forwards the URL to the existing (non-elevated) shell so
-        # the browser is not launched with the elevated token.
+        # the browser is not launched with the elevated token. explorer.exe
+        # can return without actually opening anything, so verify that a
+        # browser process appeared; otherwise fall through to ShellExecute.
         try {
             Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList $Url -ErrorAction Stop | Out-Null
-            return $true
+            if (Wait-LaunchBrowserStarted -Since $attemptedAt) { return $true }
+            Write-LaunchLog 'explorer.exe handoff did not start a browser; using ShellExecute'
         } catch {
             $errors += $_.Exception.Message
         }
@@ -148,6 +169,23 @@ $stopScript = Join-Path $PSScriptRoot 'Stop-OpenMargin.ps1'
 $handoffPath = Join-Path $StateRoot 'setup-web-url.txt'
 $isElevated = Test-LaunchElevated
 
+# The installer's postinstall entry already runs elevated. A Start Menu launch
+# does not, so self-elevate with one UAC (matching the installer's one-UAC
+# design) unless the caller explicitly chose the /NOELEVATE path.
+if (-not $isElevated -and -not $NoElevate) {
+    try {
+        $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $argumentLine = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+            $PSCommandPath + '" -AppRoot "' + $AppRoot + '" -StateRoot "' + $StateRoot + '"'
+        if ($NoBrowser) { $argumentLine += ' -NoBrowser' }
+        Write-LaunchLog 'launcher is not elevated; requesting UAC and relaunching'
+        Start-Process -FilePath $powershellExe -ArgumentList $argumentLine -Verb RunAs -ErrorAction Stop | Out-Null
+        return
+    } catch {
+        Write-LaunchLog ('elevation was cancelled or failed; continuing unelevated: ' + $_.Exception.Message)
+    }
+}
+
 try {
     if (-not (Test-Path $setupScript)) {
         throw ('找不到向导脚本：' + $setupScript)
@@ -171,7 +209,11 @@ try {
             } else {
                 $opened = Open-SetupUrl -Url $reuseUrl -Elevated $isElevated
                 if ($opened) {
-                    Remove-Item -Force $handoffPath -ErrorAction SilentlyContinue
+                    # Keep the ACL-restricted handoff file while the wizard is
+                    # running: it is the only recovery path if the browser
+                    # reused an existing process without showing the tab. The
+                    # server removes it when the wizard exits.
+                    Write-LaunchLog 'reused wizard URL opened'
                 } else {
                     Show-SetupUrlFallback -Url $reuseUrl -UrlPath $handoffPath
                 }
@@ -227,9 +269,10 @@ try {
 
         $opened = Open-SetupUrl -Url $url -Elevated $isElevated
         if ($opened) {
-            # Remove the token handoff once the browser has it; the server also
-            # removes it on exit.
-            Remove-Item -Force $handoffPath -ErrorAction SilentlyContinue
+            # Keep the ACL-restricted handoff file while the wizard is running;
+            # the server removes it on exit. Deleting it here made a failed
+            # explorer handoff unrecoverable on a real install.
+            Write-LaunchLog 'setup URL opened; handoff file kept until wizard exit'
         } else {
             Show-SetupUrlFallback -Url $url -UrlPath $handoffPath
         }

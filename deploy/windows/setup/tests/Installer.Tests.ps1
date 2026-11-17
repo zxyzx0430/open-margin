@@ -116,6 +116,21 @@ Describe 'Installer compliance and lifecycle hooks' {
 }
 
 Describe 'Browser fallback and wizard single-instance' {
+    It 'self-elevates a Start Menu launch unless -NoElevate is passed' {
+        $launch = Get-Content -Path (Join-Path $script:setupRoot 'installer\Launch-Setup.ps1') -Raw -Encoding UTF8
+        $launch | Should -Match 'if \(-not \$isElevated -and -not \$NoElevate\)'
+        $launch | Should -Match '-Verb RunAs'
+        $launch | Should -Match 'elevation was cancelled or failed'
+    }
+
+    It 'keeps the token handoff file while the wizard runs' {
+        $launch = Get-Content -Path (Join-Path $script:setupRoot 'installer\Launch-Setup.ps1') -Raw -Encoding UTF8
+        $launch | Should -Not -Match 'Remove-Item -Force \$handoffPath'
+        $launch | Should -Match 'handoff file kept until wizard exit'
+        $launch | Should -Match 'Show-SetupUrlFallback'
+        $launch | Should -Match 'Wait-LaunchBrowserStarted'
+    }
+
     It 'launcher reuses or clears the existing wizard through Stop-OpenMargin.ps1' {
         $launch = Get-Content -Path (Join-Path $script:setupRoot 'installer\Launch-Setup.ps1') -Raw -Encoding UTF8
         $launch | Should -Match 'Stop-OpenMargin\.ps1'
@@ -134,6 +149,8 @@ Describe 'Browser fallback and wizard single-instance' {
         $server | Should -Match 'Open this URL manually'
         $server | Should -Not -Match 'try \{ Start-Process \$url \| Out-Null \} catch \{ \}'
         $server | Should -Match 'dockerLicenseAcknowledged'
+        $server | Should -Match 'elevated = \[bool\]\(Test-OmAdmin\)'
+        $server | Should -Match 'setup server elevated='
     }
 }
 
