@@ -246,17 +246,23 @@ CI（`.github/workflows/android-build.yml` 与 `android-emulator-smoke.yml`）�
 
 ## 7. 包体
 
-release 只保留 `arm64-v8a`（`abiFilters`），APK 里新增：
+`defaultConfig` 里把 ABI 收敛到 `arm64-v8a`（debug/release 一致）。原因不只是体积：
+sherpa 的 AAR 自带 x86/x86_64 的 `libsherpa-onnx-jni.so`，如果 debug 包混进 x86_64 `.so`，
+系统就会把应用当成 x86_64 原生应用，反而加载不了只有 arm64 的 OCR/OpenCV 库
+（`PaddleOcrInstrumentedTest` 会以 `opencv_init_failed` 失败）。收敛后模拟器继续走
+系统的 arm64 翻译层，与加语音之前的行为一致，debug 包也少约 70MB。
 
-| 内容 | 大小 |
-| --- | --- |
-| `assets/asr/.../ctc-chunk-16-left-64.int8.onnx` | 70.96 MiB（zip 压缩后略小） |
-| `assets/asr/.../tokens.txt` | 84 KiB |
-| `lib/arm64-v8a/libsherpa-onnx-jni.so` | 22.5 MiB（未压缩存放） |
+release APK 实测 **125,389,711 B（119.6 MiB，CI 日志 `APK_MB=119`）**，达成 ~120MB 目标。
+其中语音部分：
 
-构建后实测：见 CI 日志 `APK_MB=`（上一版无语音的 release 约 45MB）。
-如果后续要压到 120MB 以内还不够，可选项是换成 40MB 级的小模型（准确率下降），
-或在首次启动时联网下载模型（破坏“离线可用”的承诺）——两者都不建议现在做。
+| APK 内条目 | 原始 | APK 内 |
+| --- | --- | --- |
+| `assets/asr/.../ctc-chunk-16-left-64.int8.onnx` | 74,410,051 | 53,606,917（deflate，省 28%） |
+| `assets/asr/.../tokens.txt` | 86,313 | 37,904 |
+| `lib/arm64-v8a/libsherpa-onnx-jni.so` | 23,646,824 | 23,646,824（`extractNativeLibs=false`，不压缩） |
+
+语音合计约 77.3MB；去掉语音的同等构建约 48MB。
+如果后续还要压：换 40MB 级小模型（准确率下降）或首次启动联网下载（破坏离线承诺），都不建议现在做。
 
 ---
 

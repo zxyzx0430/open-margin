@@ -83,15 +83,9 @@ jobs:
             adb logcat -c
             adb shell settings put secure enabled_accessibility_services "com.bookkeeping.app.sync2/com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService"
             adb shell settings put secure accessibility_enabled 1
-            success=0
-            for i in $(seq 1 15); do
-              if adb logcat -d -s BkAccessibility:D | grep -q "AccessibilityCaptureService connected"; then
-                success=1
-                break
-              fi
-              sleep 2
-            done
-            test "$success" -eq 1
+            # android-emulator-runner 是一行一个 sh -c 执行的，循环和变量判断必须写成一行；
+            # 拆成多行会报 "Syntax error: end of file unexpected (expecting done)"。
+            success=0; for i in $(seq 1 15); do if adb logcat -d -s BkAccessibility:D | grep -q "AccessibilityCaptureService connected"; then success=1; break; fi; sleep 2; done; test "$success" -eq 1
             adb shell pidof com.bookkeeping.app.sync2
             mkdir -p emulator-proof
             adb shell dumpsys accessibility > "emulator-proof/accessibility-api-${{ matrix.api-level }}.txt"
