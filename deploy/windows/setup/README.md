@@ -118,7 +118,7 @@ winget install --id JRSoftware.InnoSetup --exact
 
 `Build-Installer.ps1` locates `ISCC.exe` in Program Files, the registry, PATH or the winget package cache. It writes `OpenMargin-Setup.exe` and `OpenMargin-Setup.exe.sha256` under `installer/Output` by default. The installer is unsigned by design for v1; publish the SHA256 and SmartScreen guidance with every Release.
 
-The Inno Setup script installs to `%ProgramData%\OpenMargin\app`, creates the start-menu shortcuts “清衡设置” and “清衡账本”, reserves the loopback wizard ports, and never ships `secrets/` or `.env`.
+The Inno Setup script shows the directory page and defaults to `D:\OpenMargin\app` (then `E:\OpenMargin\app`, then `<system drive>\OpenMargin\app`); users can install on any drive. It creates the start-menu shortcuts “清衡设置” and “清衡账本”, reserves the loopback wizard ports, and never ships `secrets/` or `.env`. After a normal or silent install it starts the wizard elevated (reusing the installer's one UAC) and opens the browser through `explorer.exe` at the original user's integrity level; `/NOELEVATE` runs the wizard user-level and `/NOAUTOSTART` skips it. The wizard remains loopback-only and token-authenticated; the token URL file is ACL-restricted and deleted after the handoff. The environment check measures the actual install drive and the Docker Desktop WSL data drive separately (install: fail <2GB / warn <5GB; Docker data: fail <3GB / warn <5GB).
 
 ## 离线镜像包 / Offline Docker bundle
 
