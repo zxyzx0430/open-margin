@@ -306,7 +306,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($launchUrlPath, $url, $utf8NoBom)
 try {
     $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    & icacls.exe $launchUrlPath /inheritance:r /grant:r ($currentUser + ':R') '*S-1-5-32-544:(F)' '*S-1-5-18:(F)' *> $null
+    & icacls.exe $launchUrlPath /inheritance:r /grant:r ($currentUser + ':M') '*S-1-5-32-544:(F)' '*S-1-5-18:(F)' *> $null
 } catch { }
 Write-Output ('Open Margin setup wizard: ' + $url)
 if (-not $NoBrowser) {

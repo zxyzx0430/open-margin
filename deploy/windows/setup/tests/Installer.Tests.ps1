@@ -59,6 +59,7 @@ Describe 'Installer custom path and autostart' {
         $server = Get-Content -Path (Join-Path $script:setupRoot 'Start-OpenMarginSetupWeb.ps1') -Raw -Encoding UTF8
         $server | Should -Match 'setup-web-url\.txt'
         $server | Should -Match 'icacls'
+        $server | Should -Match "currentUser \+ ':M'"
         $script:iss | Should -Not -Match ' -Dev\b'
     }
 
