@@ -72,8 +72,72 @@ Describe 'Installer custom path and autostart' {
     }
 }
 
-Describe 'Wizard home button' {
-    It 'is present in the persistent header on every screen' {
+Describe 'Installer compliance and lifecycle hooks' {
+    It 'requires Windows 10 21H2 and ships the Chinese language first' {
+        $script:iss | Should -Match '(?m)^MinVersion=10\.0\.19044\s*$'
+        $script:iss | Should -Match '(?m)^Name:\s*"chinesesimplified";\s*MessagesFile:.*ChineseSimplified\.isl'
+        $chinese = $script:iss.IndexOf('Name: "chinesesimplified"')
+        $english = $script:iss.IndexOf('Name: "english"')
+        $chinese | Should -BeGreaterThan 0
+        $english | Should -BeGreaterThan $chinese
+        $script:iss | Should -Match 'InfoBeforeFile=.*REQUIREMENTS\.txt'
+    }
+
+    It 'shows the Docker license consent page and writes the ack marker only after consent' {
+        $script:iss | Should -Match 'DockerNoticePage'
+        $script:iss | Should -Match 'DockerNoticeCheck\.Checked'
+        $script:iss | Should -Match 'docker-license-ack\.txt'
+        $script:iss | Should -Match 'DockerDesktopNotice\.txt'
+        $script:iss | Should -Match 'DockerNoticeAccepted'
+    }
+
+    It 'wires the standalone uninstaller with waituntilterminated and RunOnceId' {
+        $uninstall = Get-Content -Path (Join-Path $script:setupRoot 'installer\Uninstall-OpenMargin.ps1') -Raw -Encoding UTF8
+        $uninstall | Should -Not -BeNullOrEmpty
+        $script:iss | Should -Match '(?m)^\[UninstallRun\]'
+        $script:iss | Should -Match 'Uninstall-OpenMargin\.ps1'
+        $script:iss | Should -Match 'waituntilterminated'
+        $script:iss | Should -Match 'RunOnceId:\s*"OpenMarginLifecycleUninstall"'
+        $script:iss | Should -Match 'CloseApplications=yes'
+        $script:iss | Should -Match 'RestartApplications=no'
+    }
+
+    It 'extracts the stop helper before replacing files' {
+        $script:iss | Should -Match 'Stop-OpenMargin\.ps1"; Flags: dontcopy noencryption'
+        $script:iss | Should -Match 'Lifecycle\.Common\.ps1"; Flags: dontcopy noencryption'
+        $script:iss | Should -Match 'function PrepareToInstall'
+        $script:iss | Should -Match 'StopPreviousInstall\(\)'
+    }
+
+    It 'passes the original user to the ACL helpers' {
+        $script:iss | Should -Match 'Set-AppAcl\.ps1.*-OriginalUser ""\{username\}""'
+        $script:iss | Should -Match 'Install-UrlAcl\.ps1.*-OriginalUser ""\{username\}""'
+    }
+}
+
+Describe 'Browser fallback and wizard single-instance' {
+    It 'launcher reuses or clears the existing wizard through Stop-OpenMargin.ps1' {
+        $launch = Get-Content -Path (Join-Path $script:setupRoot 'installer\Launch-Setup.ps1') -Raw -Encoding UTF8
+        $launch | Should -Match 'Stop-OpenMargin\.ps1'
+        $launch | Should -Match '-Status'
+        $launch | Should -Match '-WizardOnly'
+        $launch | Should -Match 'setup-web-url\.txt'
+        $launch | Should -Match 'Show-SetupUrlFallback'
+        $launch | Should -Match 'Open-SetupUrl'
+        # The hidden server must not open a second browser of its own.
+        $launch | Should -Match '-NoBrowser'
+    }
+
+    It 'server keeps the token URL and reports launch failure instead of swallowing it' {
+        $server = Get-Content -Path (Join-Path $script:setupRoot 'Start-OpenMarginSetupWeb.ps1') -Raw -Encoding UTF8
+        $server | Should -Match 'browser open failed'
+        $server | Should -Match 'Open this URL manually'
+        $server | Should -Not -Match 'try \{ Start-Process \$url \| Out-Null \} catch \{ \}'
+        $server | Should -Match 'dockerLicenseAcknowledged'
+    }
+}
+
+Describe 'Wizard home button' {    It 'is present in the persistent header on every screen' {
         $html = Get-Content -Path (Join-Path $script:setupRoot 'web\index.html') -Raw -Encoding UTF8
         $html | Should -Match 'id="btn-home"'
         $html | Should -Match '返回主界面'

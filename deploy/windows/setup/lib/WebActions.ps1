@@ -65,6 +65,10 @@ function Invoke-OmWebAction {
             return [pscustomobject]@{ ok = $summary.ok; checks = $checks; summary = $summary; dryRun = $false }
         }
         'install-deps' {
+            $licenseAcknowledged = $false
+            if ($Params.PSObject.Properties['licenseAcknowledged']) {
+                $licenseAcknowledged = [bool]$Params.licenseAcknowledged
+            }
             $current = Read-OmState
             if (Test-OmStepTransition -From ([string]$current.step) -To 'INSTALLING_DEPS') {
                 $null = Set-OmStep 'INSTALLING_DEPS'
@@ -73,9 +77,9 @@ function Invoke-OmWebAction {
             }
             $progressPath = Get-OmJobProgressPath -StateRoot $StateRoot -JobId $JobId
             if (-not (Test-OmAdmin)) {
-                $result = Invoke-OmElevatedDependencyInstall -SetupPort $Ports.setup -ProgressPath $progressPath -DryRun:$dryRunRequested
+                $result = Invoke-OmElevatedDependencyInstall -SetupPort $Ports.setup -ProgressPath $progressPath -LicenseAcknowledged:$licenseAcknowledged -DryRun:$dryRunRequested
             } else {
-                $result = Install-OmDependencies -SetupPort $Ports.setup -ProgressPath $progressPath -DryRun:$dryRunRequested
+                $result = Install-OmDependencies -SetupPort $Ports.setup -ProgressPath $progressPath -LicenseAcknowledged:$licenseAcknowledged -DryRun:$dryRunRequested
             }
             if ($result.ok) {
                 if ($result.pendingReboot -and -not $dryRunRequested) {
@@ -91,6 +95,9 @@ function Invoke-OmWebAction {
                     $null = Unregister-OmResumeRunOnce
                 }
             } elseif ($result.code -eq 'ADMIN_DENIED' -or $result.code -eq 'ADMIN_REQUIRED') {
+                $null = Set-OmStep 'NEEDS_USER' -Force
+            } elseif ($result.code -eq 'DOCKER_LICENSE_REQUIRED') {
+                # Waiting for an explicit user consent, not a hard failure.
                 $null = Set-OmStep 'NEEDS_USER' -Force
             } else {
                 $null = Set-OmStep 'FAILED' ([pscustomobject]@{ step = 'install-deps'; code = $result.code; message = $result.message }) -Force

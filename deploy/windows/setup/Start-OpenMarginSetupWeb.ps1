@@ -311,7 +311,15 @@ try {
 } catch { }
 Write-Output ('Open Margin setup wizard: ' + $url)
 if (-not $NoBrowser) {
-    try { Start-Process $url | Out-Null } catch { }
+    # Do not swallow a browser-launch failure: the token URL is the only way
+    # into the wizard, so keep setup-web-url.txt and print it for the caller.
+    try {
+        Start-Process $url -ErrorAction Stop | Out-Null
+    } catch {
+        Write-OmLog -Level WARN -Message ('browser open failed: ' + $_.Exception.Message)
+        Write-Output ('Browser did not open automatically. Open this URL manually: ' + $url)
+        Write-Output ('The URL is also saved at: ' + $launchUrlPath)
+    }
 }
 
 try {
@@ -378,6 +386,7 @@ try {
                     Write-OmJson -Context $context -Value @{
                         ok = $true; version = [string]$state.engineVersion; repoRoot = $RepoRoot;
                         ports = $state.ports; webPort = $Port; dev = [bool]$Dev; dryRun = [bool]$DryRun;
+                        dockerLicenseAcknowledged = (Test-OmDockerLicenseAcknowledged);
                         offline = (Get-OmOfflineBundleInfo -Version ([string]$state.engineVersion))
                     }
                 }

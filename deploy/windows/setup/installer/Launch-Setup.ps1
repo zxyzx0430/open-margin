@@ -55,6 +55,79 @@ function Show-LaunchError {
     }
 }
 
+function Show-LaunchMessage {
+    param([string]$Message, [string]$Title = '清衡设置')
+    Write-LaunchLog $Message
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        [System.Windows.Forms.MessageBox]::Show(
+            $Message,
+            $Title,
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+    } catch {
+        Write-Warning $Message
+    }
+}
+
+function Test-LaunchElevated {
+    try {
+        $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+function Get-LaunchWizardStatus {
+    param([string]$StopScript, [string]$AppRoot, [string]$StateRoot)
+    if (-not (Test-Path $StopScript)) { return $null }
+    try {
+        $raw = & $StopScript -Status -AppRoot $AppRoot -StateRoot $StateRoot -Json 2>$null
+        if (-not $raw) { return $null }
+        return ($raw | Out-String | ConvertFrom-Json)
+    } catch {
+        Write-LaunchLog ('wizard status check failed: ' + $_.Exception.Message)
+        return $null
+    }
+}
+
+function Open-SetupUrl {
+    param([string]$Url, [bool]$Elevated)
+    $errors = @()
+    if ($Elevated) {
+        # explorer.exe forwards the URL to the existing (non-elevated) shell so
+        # the browser is not launched with the elevated token.
+        try {
+            Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList $Url -ErrorAction Stop | Out-Null
+            return $true
+        } catch {
+            $errors += $_.Exception.Message
+        }
+    }
+    try {
+        Start-Process $Url -ErrorAction Stop | Out-Null
+        return $true
+    } catch {
+        $errors += $_.Exception.Message
+    }
+    Write-LaunchLog ('browser open failed: ' + ($errors -join ' | '))
+    return $false
+}
+
+function Show-SetupUrlFallback {
+    param([string]$Url, [string]$UrlPath)
+    $lines = @(
+        '向导已启动，但浏览器没有自动打开。',
+        '',
+        '请手动打开下面的地址（含一次性登录 token）：',
+        $Url,
+        ''
+    )
+    if ($UrlPath) { $lines += ('地址也保存在：' + $UrlPath) }
+    Show-LaunchMessage -Message ($lines -join [Environment]::NewLine)
+}
 function Test-LoopbackPortFree {
     param([int]$Port)
     $listener = $null
@@ -71,9 +144,48 @@ function Test-LoopbackPortFree {
     }
 }
 
+$stopScript = Join-Path $PSScriptRoot 'Stop-OpenMargin.ps1'
+$handoffPath = Join-Path $StateRoot 'setup-web-url.txt'
+$isElevated = Test-LaunchElevated
+
 try {
     if (-not (Test-Path $setupScript)) {
         throw ('找不到向导脚本：' + $setupScript)
+    }
+
+    # Single instance: reuse a live wizard and clear a stale setup-web.json
+    # before choosing a new port. Stop-OpenMargin.ps1 is designed to be invoked
+    # in-process (it returns instead of calling exit).
+    $wizardStatus = Get-LaunchWizardStatus -StopScript $stopScript -AppRoot $AppRoot -StateRoot $StateRoot
+    if ($wizardStatus -and $wizardStatus.wizard) {
+        $wizard = $wizardStatus.wizard
+        if ([bool]$wizard.running -and [string]$wizard.url) {
+            $reuseUrl = $null
+            if (Test-Path $handoffPath) {
+                try { $reuseUrl = (Get-Content -Path $handoffPath -Raw -Encoding UTF8).Trim() } catch { }
+            }
+            if (-not $reuseUrl) { $reuseUrl = [string]$wizard.url }
+            Write-LaunchLog ('reusing running setup wizard at ' + $reuseUrl)
+            if ($NoBrowser) {
+                Write-Output ('Open Margin setup wizard already running: ' + $reuseUrl)
+            } else {
+                $opened = Open-SetupUrl -Url $reuseUrl -Elevated $isElevated
+                if ($opened) {
+                    Remove-Item -Force $handoffPath -ErrorAction SilentlyContinue
+                } else {
+                    Show-SetupUrlFallback -Url $reuseUrl -UrlPath $handoffPath
+                }
+            }
+            return
+        }
+        if ($wizard.statePid -and -not [bool]$wizard.stateMatches) {
+            Write-LaunchLog ('clearing stale setup-web.json (recorded pid ' + $wizard.statePid + ')')
+            try {
+                & $stopScript -WizardOnly -AppRoot $AppRoot -StateRoot $StateRoot -Json | Out-Null
+            } catch {
+                Write-LaunchLog ('stale wizard state cleanup failed: ' + $_.Exception.Message)
+            }
+        }
     }
 
     $port = 0
@@ -88,8 +200,9 @@ try {
     }
 
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1} -StateRoot "{2}"' -f $setupScript, $port, $StateRoot
-    if ($NoBrowser) { $arguments += ' -NoBrowser' }
+    # The launcher owns the token-URL browser handoff, so the hidden server must
+    # never open a second browser of its own.
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1} -StateRoot "{2}" -NoBrowser' -f $setupScript, $port, $StateRoot
 
     Write-LaunchLog ('starting setup wizard on port ' + $port)
     $process = Start-Process -FilePath $powershell -ArgumentList $arguments -WorkingDirectory $AppRoot -WindowStyle Hidden -PassThru
@@ -102,33 +215,23 @@ try {
     if (-not $NoBrowser) {
         # The server writes the token URL for this one-time handoff. Reading it
         # here avoids guessing the port when the server auto-advances.
-        $launchUrlPath = Join-Path $StateRoot 'setup-web-url.txt'
         $url = $null
         $deadline = (Get-Date).AddSeconds(15)
         do {
-            if (Test-Path $launchUrlPath) {
-                try { $url = (Get-Content -Path $launchUrlPath -Raw -Encoding UTF8).Trim() } catch { }
+            if (Test-Path $handoffPath) {
+                try { $url = (Get-Content -Path $handoffPath -Raw -Encoding UTF8).Trim() } catch { }
             }
             if (-not $url) { Start-Sleep -Milliseconds 200 }
         } while (-not $url -and (Get-Date) -lt $deadline)
         if (-not $url) { $url = 'http://127.0.0.1:' + $port + '/' }
-        Remove-Item -Force $launchUrlPath -ErrorAction SilentlyContinue
 
-        $isElevated = $false
-        try {
-            $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-            $isElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-        } catch { }
-        if ($isElevated -and -not $NoElevate) {
-            # explorer.exe forwards the URL to the existing (non-elevated)
-            # shell so the browser is not launched elevated.
-            try {
-                Start-Process -FilePath (Join-Path $env:SystemRoot 'explorer.exe') -ArgumentList $url | Out-Null
-            } catch {
-                Start-Process $url | Out-Null
-            }
+        $opened = Open-SetupUrl -Url $url -Elevated $isElevated
+        if ($opened) {
+            # Remove the token handoff once the browser has it; the server also
+            # removes it on exit.
+            Remove-Item -Force $handoffPath -ErrorAction SilentlyContinue
         } else {
-            Start-Process $url | Out-Null
+            Show-SetupUrlFallback -Url $url -UrlPath $handoffPath
         }
     }
 

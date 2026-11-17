@@ -108,14 +108,48 @@ function Get-OmInstallerTrust {
     }
 }
 
+function Get-OmDockerLicenseAckPath {
+    param([string]$AppRoot = '')
+    $root = $AppRoot
+    if (-not $root) { $root = $script:OmRepoRoot }
+    if (-not $root) { return $null }
+    return (Join-Path $root 'docker-license-ack.txt')
+}
+
+function Test-OmDockerLicenseAcknowledged {
+    param([string]$AppRoot = '')
+    $path = Get-OmDockerLicenseAckPath -AppRoot $AppRoot
+    if (-not $path) { return $false }
+    try { return (Test-Path -LiteralPath $path -PathType Leaf) } catch { return $false }
+}
+
 function Install-OmDockerDesktop {
-    param([switch]$DryRun)
+    param(
+        [switch]$DryRun,
+        [switch]$LicenseAcknowledged,
+        [string]$AppRoot = ''
+    )
     $existing = Get-OmDockerInfo
     if ($existing.installed) {
         return [pscustomobject]@{ ok = $true; code = 'DOCKER_PRESENT'; message = 'Docker 已安装。'; version = $existing.version }
     }
+    # Docker Desktop's installer accepts the Docker Subscription Service
+    # Agreement through --accept-license. Never do that on the user's behalf:
+    # require either the installer's ack marker ({app}\docker-license-ack.txt,
+    # written only after the consent page checkbox) or an explicit acknowledgement
+    # from the wizard UI for this request.
+    $licenseReady = $LicenseAcknowledged.IsPresent -or (Test-OmDockerLicenseAcknowledged -AppRoot $AppRoot)
+    if (-not $DryRun -and -not $licenseReady) {
+        return [pscustomobject]@{
+            ok        = $false
+            code      = 'DOCKER_LICENSE_REQUIRED'
+            message   = '安装 Docker Desktop 前需要确认 Docker 订阅服务协议。请在向导中勾选许可确认（或重新运行安装器并勾选 Docker 许可页）后重试。'
+            action    = 'acknowledge_docker_license'
+            retryable = $true
+        }
+    }
     if ($DryRun) {
-        return [pscustomobject]@{ ok = $true; code = 'DRY_RUN'; message = 'winget install Docker.DockerDesktop, fallback official installer + Authenticode' }
+        return [pscustomobject]@{ ok = $true; code = 'DRY_RUN'; message = 'winget install Docker.DockerDesktop, fallback official installer + Authenticode'; licenseAcknowledged = [bool]$licenseReady }
     }
     $winget = Get-OmCommandPath 'winget'
     if ($winget) {
@@ -208,6 +242,7 @@ function Install-OmDependencies {
     param(
         [int]$SetupPort = 18770,
         [switch]$DryRun,
+        [switch]$LicenseAcknowledged,
         [string]$ProgressPath = ''
     )
     if (-not (Test-OmAdmin) -and -not $DryRun) {
@@ -226,7 +261,7 @@ function Install-OmDependencies {
     }
 
     Write-OmProgressFile -Path $ProgressPath -Stage 'docker' -Percent 40 -Message '安装 Docker Desktop'
-    $docker = Install-OmDockerDesktop -DryRun:$DryRun
+    $docker = Install-OmDockerDesktop -DryRun:$DryRun -LicenseAcknowledged:$LicenseAcknowledged
     $steps.Add($docker)
     if (-not $docker.ok) {
         return [pscustomobject]@{ ok = $false; steps = @($steps); message = $docker.message; code = $docker.code; retryable = $true }
@@ -330,20 +365,21 @@ function Invoke-OmElevatedDependencyInstall {
         [Parameter(Mandatory = $true)][int]$SetupPort,
         [string]$ModulePath = (Join-Path $script:OmSetupRoot 'OpenMargin.Setup.psd1'),
         [string]$ProgressPath = '',
+        [switch]$LicenseAcknowledged,
         [switch]$DryRun
     )
     if ($DryRun) {
-        return (Install-OmDependencies -SetupPort $SetupPort -DryRun -ProgressPath $ProgressPath)
+        return (Install-OmDependencies -SetupPort $SetupPort -DryRun -LicenseAcknowledged:$LicenseAcknowledged -ProgressPath $ProgressPath)
     }
     $tempRoot = Join-Path $env:TEMP ('openmargin-elevated-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
     $scriptPath = Join-Path $tempRoot 'install.ps1'
     $resultPath = Join-Path $tempRoot 'result.json'
     $scriptBody = @'
-param([string]$ModulePath,[int]$SetupPort,[string]$ResultPath,[string]$ProgressPath)
+param([string]$ModulePath,[int]$SetupPort,[string]$ResultPath,[string]$ProgressPath,[switch]$LicenseAcknowledged)
 Import-Module $ModulePath -Force -DisableNameChecking
 try {
-  $r = Install-OmDependencies -SetupPort $SetupPort -ProgressPath $ProgressPath
+  $r = Install-OmDependencies -SetupPort $SetupPort -ProgressPath $ProgressPath -LicenseAcknowledged:$LicenseAcknowledged
   $r | ConvertTo-Json -Depth 10 | Set-Content -Path $ResultPath -Encoding UTF8
 } catch {
   @{ ok = $false; code = 'ELEVATED_INSTALL_FAILED'; message = $_.Exception.Message } |
@@ -359,6 +395,7 @@ try {
             '-ModulePath', $ModulePath, '-SetupPort', $SetupPort, '-ResultPath', $resultPath
         )
         if ($ProgressPath) { $arguments += @('-ProgressPath', $ProgressPath) }
+        if ($LicenseAcknowledged) { $arguments += '-LicenseAcknowledged' }
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -Verb RunAs -Wait -PassThru
         if (Test-Path $resultPath) {
             return (Get-Content -Path $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json)

@@ -9,6 +9,7 @@ let progressTimer = null;
 let pairTimer = null;
 let pollFailures = 0;
 let homeRequested = false;
+let dockerLicenseRecorded = false;
 
 const STEP_LABELS = {
   UNINITIALIZED: '未开始',
@@ -239,13 +240,29 @@ async function runCheck(targetScreen) {
   }
 }
 
+function applyDockerLicenseInfo(recorded) {
+  dockerLicenseRecorded = !!(recorded === true);
+  const row = $('docker-license-row');
+  const note = $('docker-license-recorded');
+  const ack = $('ack-docker-license');
+  if (row) row.classList.toggle('om-hidden', dockerLicenseRecorded);
+  if (note) note.classList.toggle('om-hidden', !dockerLicenseRecorded);
+  if (ack && dockerLicenseRecorded) ack.checked = true;
+}
+
 async function installDeps() {
   homeRequested = false;
+  const ack = $('ack-docker-license');
+  if (!dockerLicenseRecorded && !(ack && ack.checked)) {
+    toast('请先勾选 Docker 许可确认，再安装依赖。', true);
+    if (ack) ack.focus();
+    return;
+  }
   const button = $('btn-install-deps');
   button.disabled = true;
   toast('如果弹出 Windows 管理员确认（UAC），请点“是”。');
   try {
-    const result = await postAction('install-deps');
+    const result = await postAction('install-deps', { licenseAcknowledged: dockerLicenseRecorded || !!(ack && ack.checked) });
     if (!result.jobId) { toast(result.message || '安装没有启动。', true); return; }
     pollJob(result.jobId, (data) => {
       button.disabled = false;
@@ -255,7 +272,16 @@ async function installDeps() {
         return;
       }
       if (data.ok) { toast('依赖安装完成，正在重新检查。'); runCheck('env'); }
-      else { toast(data.message || '依赖安装失败。', true); }
+      else {
+        if (data.code === 'DOCKER_LICENSE_REQUIRED') {
+          applyDockerLicenseInfo(false);
+          toast(data.message || '需要先确认 Docker 许可。', true);
+          const box = $('ack-docker-license');
+          if (box) box.focus();
+          return;
+        }
+        toast(data.message || '依赖安装失败。', true);
+      }
     }, () => {});
   } catch (error) {
     button.disabled = false;
@@ -725,6 +751,7 @@ function loadConfig() {
       currentConfig = data;
       $('version').textContent = 'v' + data.version;
       if (data.dryRun) $('dry-run-banner').classList.remove('om-hidden');
+      applyDockerLicenseInfo(data.dockerLicenseAcknowledged);
     }
   }).catch(() => {});
 }
