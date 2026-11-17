@@ -17,9 +17,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -39,10 +42,16 @@ internal fun EntryPanelLayout(
     title: String,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    canDismiss: Boolean = true,
     headerTrailing: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // 保存中不允许下滑把面板藏起来：否则写入失败时用户看不到也改不了。
+    val latestCanDismiss by rememberUpdatedState(canDismiss)
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { target -> target != SheetValue.Hidden || latestCanDismiss },
+    )
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -69,7 +78,7 @@ internal fun EntryPanelLayout(
                     overflow = TextOverflow.Ellipsis,
                 )
                 headerTrailing()
-                IconButton(onClick = onDismiss) {
+                IconButton(onClick = onDismiss, enabled = canDismiss) {
                     Icon(Icons.Filled.Close, contentDescription = null)
                 }
             }

@@ -375,7 +375,9 @@ fun TransactionListScreen(
                             onVoiceEntry()
                         },
                         // 开录后仍按住时滑走：取消本次并关面板，不填表。
-                        onAbort = onVoiceCancelled,
+                        // 面板已经打开后，手指事件会被底部面板窗口接管；
+                        // 此时不能再把「事件中断」当滑出取消，否则一开录就被取消。
+                        onAbort = { if (!voiceBusy) onVoiceCancelled() },
                         // 录音会话进行中（面板开着）禁用新的按压：不能开第二个会话。
                         enabled = !voiceBusy,
                     )

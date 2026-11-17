@@ -311,6 +311,16 @@ fun SettingsScreen(
                     onOpenSmsSettings = { openAppDetailsSettings(context) },
                 )
             }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Notifications,
+                        title = tr("自动记账设置"),
+                        subtitle = tr("通知、页面识别与无障碍回退的开启向导"),
+                        onClick = { detailDialog = "automation" },
+                    )
+                }
+            }
 
             item { SectionHeader(tr("同步")) }
             item {
