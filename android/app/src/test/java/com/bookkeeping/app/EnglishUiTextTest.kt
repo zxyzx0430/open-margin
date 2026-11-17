@@ -7,6 +7,24 @@ import org.junit.Test
 
 class EnglishUiTextTest {
     @Test
+    fun billImportExportLabelsTranslate() {
+        val expected = mapOf(
+            "账单导入" to "Bill import",
+            "导入 / 导出账单" to "Import / export bills",
+            "支持微信/支付宝 CSV、XLSX 或文本；确认前不写入账本" to
+                "Supports WeChat/Alipay CSV, XLSX or text; nothing is written until you confirm.",
+            "选择账单文件" to "Choose bill file",
+            "导出全部账单" to "Export all bills",
+            "账单已导出" to "Bills exported",
+            "账单导出失败" to "Bill export failed",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun transactionAndNavigationTranslations() {
         val expected = mapOf(
             "账单" to "Records",
