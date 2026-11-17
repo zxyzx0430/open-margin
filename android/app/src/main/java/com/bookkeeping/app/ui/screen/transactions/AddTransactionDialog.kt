@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.data.MoneyAmount
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -408,6 +410,7 @@ fun AddTransactionDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = selectedType == TransactionType.EXPENSE,
+                    modifier = Modifier.height(36.dp),
                     onClick = {
                         selectedType = TransactionType.EXPENSE
                         typeTouched = true
@@ -417,10 +420,11 @@ fun AddTransactionDialog(
                             quickEntryPreview = quickEntryPreview?.copy(category = null)
                         }
                     },
-                    label = { Text(tr("支出")) },
+                    label = { Text(tr("支出"), maxLines = 1, softWrap = false) },
                 )
                 FilterChip(
                     selected = selectedType == TransactionType.INCOME,
+                    modifier = Modifier.height(36.dp),
                     onClick = {
                         selectedType = TransactionType.INCOME
                         typeTouched = true
@@ -430,7 +434,7 @@ fun AddTransactionDialog(
                             quickEntryPreview = quickEntryPreview?.copy(category = null)
                         }
                     },
-                    label = { Text(tr("收入")) },
+                    label = { Text(tr("收入"), maxLines = 1, softWrap = false) },
                 )
             }
 
@@ -456,8 +460,15 @@ fun AddTransactionDialog(
                             }
                         }
                     },
-                    label = { Text(tr("金额（元）"), maxLines = 1, softWrap = false) },
-                    textStyle = MaterialTheme.typography.headlineSmall,
+                    label = {
+                        Text(
+                            amountError ?: tr("金额（元）"),
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    textStyle = MaterialTheme.typography.headlineSmall.copy(fontSize = 28.sp),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Decimal,
                         imeAction = ImeAction.Done,
@@ -465,17 +476,18 @@ fun AddTransactionDialog(
                     keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
                     singleLine = true,
                     isError = amountError != null,
-                    supportingText = {
-                        if (amountError != null) {
-                            Text(amountError, color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    modifier = Modifier.weight(1f).focusRequester(amountFocusRequester),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp)
+                        .focusRequester(amountFocusRequester),
                 )
 
                 OutlinedButton(
                     onClick = { showDatePicker = true },
-                    modifier = Modifier.widthIn(min = 88.dp, max = 112.dp),
+                    modifier = Modifier
+                        .widthIn(min = 88.dp, max = 112.dp)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(50),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
                     Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = null)
@@ -492,8 +504,11 @@ fun AddTransactionDialog(
             Box {
                 OutlinedButton(
                     onClick = { categoryMenuExpanded = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -556,6 +571,7 @@ fun AddTransactionDialog(
                 ) {
                     FilterChip(
                         selected = account.isBlank(),
+                        modifier = Modifier.height(36.dp),
                         onClick = {
                             account = ""
                             accountTouched = true
@@ -573,6 +589,7 @@ fun AddTransactionDialog(
                     ACCOUNT_PRESETS.forEach { preset ->
                         FilterChip(
                             selected = account == preset,
+                            modifier = Modifier.height(36.dp),
                             onClick = {
                                 account = preset
                                 accountTouched = true
@@ -593,6 +610,7 @@ fun AddTransactionDialog(
                     if (custom.isNotEmpty() && custom !in ACCOUNT_PRESETS) {
                         FilterChip(
                             selected = true,
+                            modifier = Modifier.height(36.dp),
                             onClick = {
                                 account = ""
                                 accountTouched = true
@@ -628,7 +646,9 @@ fun AddTransactionDialog(
                     )
                 },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
             )
 
             OutlinedTextField(
@@ -638,16 +658,18 @@ fun AddTransactionDialog(
                     noteTouched = true
                 },
                 label = { Text(tr("备注（可选）"), maxLines = 1, softWrap = false) },
-                minLines = 2,
-                maxLines = 3,
-                modifier = Modifier.fillMaxWidth(),
+                minLines = 1,
+                maxLines = 2,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp, max = 72.dp),
             )
         }
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             saveError?.let { error ->
@@ -661,17 +683,24 @@ fun AddTransactionDialog(
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { if (!saving) onDismiss() }, enabled = !saving) {
+                TextButton(
+                    onClick = { if (!saving) onDismiss() },
+                    enabled = !saving,
+                    modifier = Modifier.height(44.dp),
+                ) {
                     Text(tr("取消"), maxLines = 1)
                 }
-                Spacer(Modifier.width(8.dp))
                 Button(
                     onClick = requestSave,
                     enabled = !checking && !saving &&
                         (amountValid || (amountText.isBlank() && QuickEntryRule.canSubmit(quickEntry))),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .widthIn(min = 96.dp),
                 ) {
                     Text(
                         when {
