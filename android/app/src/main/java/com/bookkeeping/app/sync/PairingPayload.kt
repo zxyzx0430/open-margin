@@ -18,7 +18,7 @@ internal enum class PairingRejectReason {
     INVALID_SERVER_ID,
 }
 
-internal sealed interface PairingParseResult {
+sealed interface PairingParseResult {
     data class Success(val payload: PairingPayload) : PairingParseResult
     data class Rejected(val reason: PairingRejectReason) : PairingParseResult
 }
