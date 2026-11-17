@@ -26,6 +26,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -79,6 +81,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import com.bookkeeping.app.billexport.BillExport
+import com.bookkeeping.app.ui.screen.billimport.BillImportExportSheet
+import com.bookkeeping.app.ui.screen.billimport.BillImportViewModel
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureHealth
 import com.bookkeeping.app.notification.accessibility.AccessibilityConnectionState
@@ -135,7 +140,6 @@ import com.bookkeeping.app.sync.WindowsFirstConnectionWizard
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
-    onImportBills: () -> Unit = {},
     onOpenMerchantRules: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
@@ -144,6 +148,7 @@ fun SettingsScreen(
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
     val merchantRules by viewModel.merchantRules.collectAsState()
     val context = LocalContext.current
+    val importViewModel: BillImportViewModel = hiltViewModel()
     val lifecycleOwner = LocalLifecycleOwner.current
     val syncPrefs = remember {
         context.getSharedPreferences(TransactionSyncWorker.PREFS, android.content.Context.MODE_PRIVATE)
@@ -189,6 +194,9 @@ fun SettingsScreen(
     var detailDialog by remember { mutableStateOf<String?>(null) }
     var initialPairingPayload by remember { mutableStateOf<PairingPayload?>(null) }
     var showExportGuide by remember { mutableStateOf(false) }
+    var showImportExportSheet by remember { mutableStateOf(false) }
+    var exportFeedback by remember { mutableStateOf<String?>(null) }
+    var exportInProgress by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
 
     LaunchedEffect(openAutomationSetup) {
@@ -204,6 +212,27 @@ fun SettingsScreen(
         postNotificationsGranted = areNotificationsGranted(context)
         smsGranted = SmsPermissionHelper.isGranted(context)
         permissionRefreshKey++
+    }
+
+    val exportDocumentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv"),
+    ) { uri ->
+        if (uri != null) {
+            exportInProgress = true
+            exportFeedback = null
+            viewModel.exportBills(uri) { message ->
+                exportFeedback = message
+                exportInProgress = false
+            }
+        }
+    }
+
+    fun dismissImportExportSheet() {
+        if (!importViewModel.state.value.importing) {
+            showImportExportSheet = false
+            importViewModel.reset()
+            exportFeedback = null
+        }
     }
 
     LaunchedEffect(lifecycleOwner, permissionRefreshKey) {
@@ -340,15 +369,19 @@ fun SettingsScreen(
                         icon = Icons.Filled.FileUpload,
                         title = tr("导入账单"),
                         subtitle = tr("微信 / 支付宝 CSV"),
-                        onClick = onImportBills,
+                        onClick = {
+                            exportFeedback = null
+                            showImportExportSheet = true
+                        },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("微信 / 支付宝导出账单教程"),
+                        subtitle = tr("两分钟导出 CSV"),
+                        onClick = { showExportGuide = true },
                     )
                 }
-                SettingsActionRow(
-                    icon = Icons.Filled.Info,
-                    title = tr("微信 / 支付宝导出账单教程"),
-                    subtitle = tr("两分钟导出 CSV"),
-                    onClick = { showExportGuide = true },
-                )
             }
 
             item { SectionHeader(tr("自动分类")) }
@@ -421,6 +454,27 @@ fun SettingsScreen(
                         onClick = { detailDialog = "feedback" },
                     )
                 }
+            }
+        }
+
+        if (showImportExportSheet) {
+            val importSheetState = rememberModalBottomSheetState(
+                skipPartiallyExpanded = true,
+                confirmValueChange = { !importViewModel.state.value.importing },
+            )
+            ModalBottomSheet(
+                onDismissRequest = { dismissImportExportSheet() },
+                sheetState = importSheetState,
+            ) {
+                BillImportExportSheet(
+                    onClose = { dismissImportExportSheet() },
+                    onExportBills = {
+                        exportDocumentLauncher.launch(BillExport.defaultFileName())
+                    },
+                    exportFeedback = exportFeedback,
+                    exportInProgress = exportInProgress,
+                    viewModel = importViewModel,
+                )
             }
         }
 

@@ -182,7 +182,7 @@ fun RootNavigation() {
                         onOpenTransaction = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
                     )
                 }
-                // 账单导入：独立页面，从设置页或账单页进来都行；关掉就 popBackStack 回原页面。
+                // 账单页仍可打开独立导入页；设置页入口在本页弹出导入 / 导出面板。
                 composable(
                     route = AppRoutes.BILL_IMPORT,
                     enterTransition = { EnterTransition.None },
@@ -223,8 +223,6 @@ fun RootNavigation() {
                     popEnterTransition = { EnterTransition.None },
                 ) {
                     SettingsScreen(
-                        // 导入账单走独立路由：关掉后 popBackStack 回设置页，不再切到账单 tab。
-                        onImportBills = { navController.navigate(AppRoutes.BILL_IMPORT) },
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
                     )
                 }
