@@ -19,11 +19,14 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -47,6 +50,7 @@ import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
+import kotlinx.coroutines.launch
 
 // 根 NavHost：底部 tab 切换
 @Composable
@@ -62,9 +66,14 @@ fun RootNavigation() {
     val showBottomBar = currentDestination?.hierarchy?.any { destination ->
         navItems.any { it.route == destination.route }
     } == true
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    // 长按 FAB 的录音/ASR 还没接进来：先给一句明确提示，别静默无反应。
+    val voicePendingText = tr("语音记账还在接入中")
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (showBottomBar) Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -136,6 +145,10 @@ fun RootNavigation() {
                     drilldown = pendingLedgerDrilldown,
                     onDrilldownConsumed = { pendingLedgerDrilldown = null },
                     onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
+                    // 占位：下一批接 feat/voice-asr-engine 的录音与识别。
+                    onVoiceEntry = {
+                        scope.launch { snackbarHostState.showSnackbar(voicePendingText) }
+                    },
                 )
             }
             composable(
