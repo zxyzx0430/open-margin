@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -835,6 +836,7 @@ private fun DayCard(
  * 排序：商户 → 金额；副行「[扫描]/[导入] 分类 · 来源 · 时间」。
  * 审核状态只显示已确认/不计入/转账/退款这类非默认值，默认状态不占字。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LedgerTransactionRow(
     transaction: TransactionEntity,
