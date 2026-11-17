@@ -2,7 +2,7 @@
 
 Windows 和 VPS 共用 `compose.yaml`、Finance API、Wallos、SQLite 结构及 Android 双向同步协议。区别只是连接入口。**默认 Web 仅可从 Windows 本机访问，远程同步接口需要单独开启。**
 
-> **证据标签（2026-11-17）**：本文的一键安装脚本、Inno Setup 脚本、离线镜像包脚本和 CI 工作流已在本仓库实现，并通过 PowerShell 解析、compose 配置解析与 YAML 语法检查。真实 Windows 干净机、Tailscale Funnel、中国 SIM + 商业 VPN、Android 真机扫码与安装器编译**尚未在本线程实际运行**；发布前必须按第 7 节逐项验收。
+> **证据标签（2026-11-17）**：本文的一键安装脚本、Inno Setup 脚本、离线镜像包脚本和 CI 工作流已在本仓库实现，并通过 PowerShell 解析、Pester、compose 配置解析与 YAML 语法检查；安装器已在本机用 Inno Setup 6.7.4/6.3.3 实际编译。真实 Windows 干净机、Tailscale Funnel、中国 SIM + 商业 VPN、Android 真机扫码与真实安装/卸载**尚未在本线程实际运行**；发布前必须按第 7 节逐项验收。
 
 ## 方案 0：一键安装（v1.3.0，推荐；仅远程 Funnel 同步）
 
@@ -40,9 +40,10 @@ v1 **没有购买 Windows 代码签名证书**。双击安装器时 SmartScreen 
 - 不要求 Git、Python、Node 或 PowerShell 7；网页向导本身以 Windows PowerShell 5.1 启动。
 - **不打包** `secrets/`、`.env`、数据库、Docker 卷或设备令牌。运行期密钥由向导在本机生成。
 - 安装器需要管理员权限（一次 UAC）。安装本身只写程序目录和开始菜单，不安装 Docker/Tailscale。
-- 支持 Windows 10/11 64 位。Windows 10 22H2 已停止支持：向导会警告并建议升级 Windows 11，但不会直接阻止安装。
-- 安装完成后自动启动“清衡设置”向导并打开浏览器；自动化安装可加 `/NOAUTOSTART` 跳过自动启动。`Launch-Setup.ps1` 启动失败会弹出可见的错误对话框。
+- 支持 64 位 Windows 10 21H2（内部版本 19044）及以上，推荐 Windows 10 22H2（19045）或 Windows 11；低于 19044 会被安装器直接阻止。Windows 10 22H2 已停止支持：向导会警告并建议升级 Windows 11，但不会因为 21H2/22H2 而阻止安装。
+- 安装完成后自动启动“清衡设置”向导并打开浏览器；自动化安装可加 `/NOAUTOSTART` 跳过自动启动。`Launch-Setup.ps1` 启动失败会弹出可见的错误对话框，并在浏览器无法打开时显示完整 URL。
 - **一次 UAC 的向导**：安装器已经提权，向导服务器复用该管理员权限运行，配置 Docker/Tailscale/URL ACL 时不再反复弹 UAC；浏览器通过 `explorer.exe` 以当前普通用户打开，不是管理员浏览器。服务器仍只监听 `127.0.0.1`，使用一次性 setup token、Host/Origin 校验和固定动作白名单；token URL 只短暂写入受 ACL 限制的本机文件，启动后即删除。安全取舍是：本机获得该 token 的程序可以触发向导的固定动作，因此不要把它暴露给其他本机用户。`/NOELEVATE` 可退回以普通用户运行向导（后续依赖安装可能再次弹 UAC）。
+- 安装器界面默认简体中文（可切换 English），包含 Docker Desktop 许可确认页、安装前要求页和自定义路径迁移警告；详见 0.11。
 - 重复安装会进入升级/修复流程，不覆盖已有 `secrets/` 和 Docker 命名卷。
 
 ### 0.3 向导流程
@@ -151,11 +152,12 @@ docker load -i .\images.tar
 手动彻底清理（**删除 volume 会永久丢失账本数据**，只在确认不再需要时执行）：
 
 ```powershell
-docker compose --project-name personal-finance-system --project-directory "%ProgramData%\OpenMargin\app" -f "%ProgramData%\OpenMargin\app\compose.yaml" down
+$app = 'D:\OpenMargin\app'   # 或你安装时选择的目录（无 D: 时默认 E:\OpenMargin\app）
+docker compose --project-name personal-finance-system --project-directory $app -f "$app\compose.yaml" down
 docker volume ls --filter label=com.docker.compose.project=personal-finance-system
 docker volume rm <上一步列出的卷名>
-Remove-Item -Recurse -Force "$env:ProgramData\OpenMargin\app\secrets"
-Remove-Item -Force "$env:ProgramData\OpenMargin\app\.env"
+Remove-Item -Recurse -Force "$app\secrets"
+Remove-Item -Force "$app\.env"
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 ```
 
@@ -167,7 +169,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 {"wizard":{"running":true,"pids":[1234],"statePid":1234,"stateMatches":true,"url":"http://127.0.0.1:18770/"}}
 ```
 
-`Launch-Setup.ps1`（由启动器线程维护）应在选择新端口前先调用它：`running=true` 时直接打开已有 URL；`statePid` 存活但 `stateMatches=false` 时先删除过期 `setup-web.json`，不要静默在 18771 再起一个向导。`Stop-OpenMargin.ps1 -WizardOnly` 用于明确停止旧向导。
+`Launch-Setup.ps1` 在选择新端口前先调用它：`running=true` 时直接打开已有 URL；`statePid` 存活但 `stateMatches=false` 时先调用 `Stop-OpenMargin.ps1 -WizardOnly` 清理过期状态，不会静默在 18771 再起一个向导。`Stop-OpenMargin.ps1 -WizardOnly` 也用于明确停止旧向导。
 
 **本地权限（`Set-AppAcl.ps1` / `Install-UrlAcl.ps1`）：**
 
@@ -177,18 +179,20 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 
 ### 0.10 本线程实际验证了什么 / 没验证什么
 
-已验证（静态）：
+已验证（静态与安装器编译）：
 
-- 全部 `deploy/windows/**` PowerShell 文件通过 `[System.Management.Automation.Language.Parser]::ParseFile`。
+- 全部 `deploy/windows/**` PowerShell 文件通过 `[System.Management.Automation.Language.Parser]::ParseFile`；新增 `Migrate-OpenMargin.ps1` 同时通过 PowerShell 7 与 Windows PowerShell 5.1 parser。
 - `docker compose --profile windows-private-sync config -q` 与 `--profile windows-public-sync config -q`（使用临时占位 secrets）。
 - 新增 GitHub Actions YAML 通过 Python YAML 解析。
 - `python scripts/check-public-ready.py` 通过（若本机依赖可用）。
-- Pester 5.7.1：`deploy/windows/setup/tests` 共 83 项通过（本机 Windows 10 19045，含 `Lifecycle.Tests.ps1` 22 项）。Lifecycle 测试使用临时目录 + 假 `docker.cmd` / `tailscale.cmd`，覆盖：dry-run 不产生外部调用、真实路径 `compose down` 无 `-v`、只杀命令行匹配本安装目录的向导进程、`setup-web.json` 单实例状态、保留 `secrets/`、Funnel/Serve 只删自己的路由、Docker/Tailscale 缺失时继续、ACL 的 `icacls`/`netsh` 参数计划、`OpenMargin.iss` 的 `[UninstallRun]`/`PrepareToInstall` 静态接线。
-- `OpenMargin.iss` 未在本机编译（本机无 Inno Setup）；静态检查确认 `[UninstallRun]` 在 `[Code]` 之前配置了 `Uninstall-OpenMargin.ps1`、`waituntilterminated`、`RunOnceId`、`skipifdoesntexist`，`PrepareToInstall` 提取 `dontcopy` 的 `Stop-OpenMargin.ps1`，`CloseApplications=yes`，且没有 `[UninstallDelete]` 指向 `secrets/` 或 `.env`。
+- Pester 5.7.1：`deploy/windows/setup/tests` 全部通过（本机 Windows 10 19045；测试数量以本次集成验证记录为准），含 `Lifecycle.Tests.ps1`、`OfflineBundle.Tests.ps1`、`Installer.Tests.ps1` 与 `Probes.Tests.ps1`。Lifecycle 测试使用临时目录 + 假 `docker.cmd` / `tailscale.cmd`，覆盖：dry-run 不产生外部调用、真实路径 `compose down` 无 `-v`、只杀命令行匹配本安装目录的向导进程、`setup-web.json` 单实例状态、保留 `secrets/`、Funnel/Serve 只删自己的路由、Docker/Tailscale 缺失时继续、ACL 的 `icacls`/`netsh` 参数计划、`OpenMargin.iss` 的 `[UninstallRun]`/`PrepareToInstall` 静态接线。
+- 安装器已用 **Inno Setup 6.7.4** 和 **6.3.3** 在本机实际编译通过：`Build-Installer.ps1 -OutputDir ... -NoAutoInstall` 分别产出 `OpenMargin-Setup.exe`。编译覆盖中文语言文件、`MinVersion`、Docker 许可自定义页、`REQUIREMENTS.txt` 的 `InfoBeforeFile` 和自定义目录警告。6.3.3 会忽略 6.5 新增的下载/校验消息并把 3 条旧消息回退为英文（仅下载/哈希错误路径），不影响安装主流程。
+- `Migrate-OpenMargin.ps1` 在 Windows PowerShell 5.1 下以只读模式识别到本机现有安装 `D:\OpenMargin\app`（未修改/卸载该目录）；在 `E:\DevCaches` 合成目录完成 `-Backup -Yes` 与 `-CopySecrets -Yes`，验证备份清单、SHA256 与不覆盖行为。未对真实安装执行 `-StopOld`/`-CopySecrets`。
 
 未验证（发布前必须做）：
 
-- Inno Setup 实际编译 `OpenMargin-Setup.exe`（本机未安装 Inno；CI 会安装并编译）。
+- CI（`windows-setup-installer.yml`，choco 安装最新 Inno）尚未在本线程运行；本机只验证了 Inno 6.7.4 与 6.3.3，Inno 6.4 未单独编译。
+- 安装器 UI 在干净 Windows 10/11 上的实际点击、中文渲染、Docker 许可页勾选和目录迁移警告未做人工走查。
 - 在本机真实安装上执行一次卸载与一次覆盖升级（本轮只在隔离临时目录和假 CLI 上验证，未触碰 `D:\OpenMargin\app`）。
 - 以管理员实际执行 `netsh http add urlacl ... sddl=...` 并确认 HttpListener 非提权绑定成功（本轮只验证参数计划；SDDL 被拒时的 `user=` 回退分支也未实机触发）。
 - 真实 Tailscale 账号下卸载时移除 Funnel/Serve（本轮用 fixture 假 `tailscale`）。
@@ -199,6 +203,20 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\OpenMargin"
 - Android 真机扫码、`server_id` 校验、断线补传。
 - 完全离线安装（见 0.7）。
 - 安装器无签名时的 SmartScreen 文案只在文档层面提供，未在真实下载链路验收。
+
+### 0.11 安装器界面、许可与迁移（安装器 UX/合规）
+
+- **界面语言**：`[Languages]` 第一项为简体中文，`LanguageDetectionMethod=uilanguage`；非中文 Windows UI 仍可在安装器里切换 English。中文语言文件随安装器打包在 `installer/languages/ChineseSimplified.isl`（来自 Inno Setup 官方翻译，仅把版本过低提示改成 Open Margin 专用文案），不依赖本机是否安装编译器语言包。
+- **系统门槛**：`MinVersion=10.0.19044`（64 位 Windows 10 21H2，也是 Docker Desktop 的最低要求）。`[Code]` 的 `InitializeSetup` 再检查 64 位与内部版本；Windows 10 21H2（19044）会提示“建议升级 22H2/Windows 11”但继续；系统盘可用空间低于 15 GB 只警告不阻止；硬件虚拟化仍由向导 `Probes.ps1` 检测。
+- **版本过低文案**：`ChineseSimplified.isl` 的 `WinVersionTooLowError` 已改为中文，明确写出 64 位、19044/22H2、Windows Update 和“安装已停止”。
+- **Docker Desktop 许可/同意**：安装器在安装任何文件前显示自定义“Docker Desktop 许可与依赖说明”页，内容来自 `DockerDesktopNotice.txt`；必须勾选“我已阅读并理解上述说明”才能继续。文案说明 Docker Subscription Service Agreement、个人/教育/非商业开源/小企业免费条件（员工 <250 且年收入 <$10M）、商业订阅链接，以及向导的 `--accept-license` 会代表用户接受 Docker 条款。勾选后在 `{app}\docker-license-ack.txt` 写确认标记（时间、安装器版本、说明文件名；不含账号、密码或订阅密钥）。
+  - **集成结果**：向导的 `install-deps` 卡片现在显示 Docker 许可同意复选框；`lib/Dependencies.ps1` 的 `Install-OmDockerDesktop` 只有在 `{app}\docker-license-ack.txt` 存在（安装器已确认）或本次请求携带 `licenseAcknowledged=true`（网页复选框）时才传 `--accept-license`，否则返回 `DOCKER_LICENSE_REQUIRED` 并提示用户确认许可。
+- **安装前要求页**：`REQUIREMENTS.txt` 通过 `InfoBeforeFile` 在 Ready 页前显示；涵盖 Windows 22H2+/19044、虚拟化、15 GB 磁盘、UAC、Docker/Tailscale、SmartScreen、SHA256、自定义路径、浏览器兜底和离线包位置。`README-INSTALL.txt` 是开始菜单“安装说明”和同目录文本说明。
+- **浏览器兜底与单实例**：安装完成后 `[Run]` 启动 `Launch-Setup.ps1`，且已去掉 `skipifsilent`，静默安装也会拉起向导。向导在 18770–18779 选空闲端口并打开浏览器。README-INSTALL 说明浏览器未打开时查看 `%LOCALAPPDATA%\OpenMargin\setup-web.json` 的端口、结束旧隐藏 `powershell.exe` 后重新打开“清衡设置”，并明确只允许同时运行一个向导。
+  - **集成结果**：`Start-OpenMarginSetupWeb.ps1` 不再吞掉 `Start-Process $url` 失败，会把 URL 写入仅当前用户可读的 `setup-web-url.txt`；`Launch-Setup.ps1` 启动前调用 `Stop-OpenMargin.ps1 -Status` 复用存活向导，清理 PID 已失效的残留 `setup-web.json`，浏览器打不开时用 MessageBox 显示完整 URL（含 token）。
+- **自定义路径迁移**：`UsePreviousAppDir=yes` 会优先沿用注册表里的 `InstallLocation`（本机现有安装即 `D:\OpenMargin\app`）；`DirExistsWarning=no` 保留 Inno 的升级/修复行为。`[Code]` 在选择目录页检测“上一安装目录 ≠ 新目录”或“默认目录（D:\OpenMargin\app，无 D: 时 E:\OpenMargin\app，再退回系统盘）已存在”，用中文警告说明继续会留下两套程序目录/secrets/看门狗，旧容器和命名卷不会自动迁移或删除。
+  - `Migrate-OpenMargin.ps1`（新增，安装后在 `{app}\deploy\windows\setup\installer\`）默认只读：扫描 Inno 卸载注册表（AppId `{9D2D6B5A-...}`）和常见路径，报告容器/命名卷/看门狗状态；`-Backup -Yes` 把 `secrets/`、`.env`、`compose.yaml` 复制到 `%LOCALAPPDATA%\OpenMargin\migration-backups\<timestamp>` 并写 `MIGRATION.json`（含 SHA256）；`-StopOld -Yes` 执行 `docker compose ... stop` 并结束旧看门狗任务（保留计划任务、容器和卷）；`-CopySecrets -Yes` 把旧 `secrets/` 复制到新根且不覆盖已有文件。脚本不删除文件、不卸载、不执行 `docker compose down -v`。
+- **离线包位置**：仍是 GitHub Release 的独立资产 `OpenMargin-Offline-<version>.tar.gz` + `.sha256`；安装器和 `REQUIREMENTS.txt` 不承诺“完全离线可装”。
 
 ## 方案 A：只在 Windows 本机使用（手动，不需要 Tailscale）
 
