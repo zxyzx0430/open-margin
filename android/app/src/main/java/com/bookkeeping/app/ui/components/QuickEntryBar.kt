@@ -61,7 +61,7 @@ fun QuickEntryBar(
             shape = RoundedCornerShape(12.dp),
             placeholder = {
                 Text(
-                    text = tr("例如：午饭 25 微信\n打车 18 支付宝"),
+                    text = tr("例如：午饭 25 微信") + "\n" + tr("打车 18 支付宝"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = QingTextSecondary,
                     maxLines = 2,
