@@ -53,17 +53,16 @@ import com.bookkeeping.app.i18n.tr
  * 时序（时间常量都在 [QuickEntryRule]，改那里就是改这里）：
  * - 按下：图标立刻从「+」换成麦克风，进度弧从 0 开始，在 1000ms 内正好扫满一圈；
  * - 500ms：轻震一次（TextHandleMove），提示「再坚持一下」；
- * - 1000ms：重震一次（LongPress）+ 进度弧满格 + **立即回调 [onHoldStart]**（开录音、开面板），
+ * - 1000ms：重震一次（LongPress）+ 进度弧满格 + **立即回调 [onLongPressStart]**（开录音、开面板），
  *   不等松手——这就是「按住即录」；
- * - 松手（已开录）：回调 [onHoldRelease]，由上层 `finishInput()` 结束录音；面板不关；
+ * - 松手（已开录）：什么也不发生，录音继续；
  * - 松手（没到 1 秒）：取消计时、进度弧回弹，按普通点击回调 [onTap]；
- * - 开录后手指滑出两倍触摸阈值：回调 [onHoldAbort]（取消录音并关面板），不当作点击；
+ * - 开录后手指仍按住时滑出两倍触摸阈值：回调 [onAbort]（取消录音并关面板），不当作点击；
  * - 没开录就滑出 / 系统取消：只收弧，什么都不回调。
  *
  * 为什么手势装在 `pointerInput(Unit)` 上而不是 `pointerInput(enabled)`：满 1 秒时面板会打开，
  * 上层同时把 `enabled` 置 false（禁止再开第二个会话）。如果手势跟着 key 重建，正在按着的
- * 这一段会被取消，松手事件就永远收不到——「松手结束」直接失效。所以 `enabled` 只在按下
- * 的那一刻检查，已经开始的这一段完整走完。
+ * 这一段会被取消；固定 key 保证滑出取消仍可收到。
  *
  * 进度弧画在 FAB 外侧，整体（含外圈）宽度比 FAB 直径大 12dp，
  * 仍在 Scaffold 为 FAB 留的 16dp 边距之内，所以不会被裁掉。
@@ -71,9 +70,8 @@ import com.bookkeeping.app.i18n.tr
 @Composable
 fun VoiceFab(
     onTap: () -> Unit,
-    onHoldStart: () -> Unit,
-    onHoldRelease: () -> Unit,
-    onHoldAbort: () -> Unit,
+    onLongPressStart: () -> Unit,
+    onAbort: () -> Unit,
     modifier: Modifier = Modifier,
     fabSize: Dp = 56.dp,
     ringWidth: Dp = 2.5.dp,
@@ -83,9 +81,8 @@ fun VoiceFab(
 ) {
     val haptics = rememberUpdatedState(LocalHapticFeedback.current)
     val tapAction = rememberUpdatedState(onTap)
-    val startAction = rememberUpdatedState(onHoldStart)
-    val releaseAction = rememberUpdatedState(onHoldRelease)
-    val abortAction = rememberUpdatedState(onHoldAbort)
+    val startAction = rememberUpdatedState(onLongPressStart)
+    val abortAction = rememberUpdatedState(onAbort)
     val enabledState = rememberUpdatedState(enabled)
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
@@ -94,7 +91,7 @@ fun VoiceFab(
     val voiceLabel = tr("语音记账")
 
     var pressing by remember { mutableStateOf(false) }
-    // 满 1 秒已经开录：这一次松手要「结束录音」而不是「点击」。
+    // 满 1 秒已经开录：抬手只结束按压，不结束录音。
     var armed by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     val pressScale by animateFloatAsState(
@@ -103,7 +100,7 @@ fun VoiceFab(
     )
 
     // 计时与进度弧：用真实时钟推进，掉帧也不会把「按满 1 秒」拖成更久。
-    // 满 1 秒这一帧就回调 onHoldStart（开始录音 + 开面板），然后退出循环把进度留在满格。
+    // 满 1 秒这一帧就回调 onLongPressStart（开始录音 + 开面板），然后退出循环把进度留在满格。
     LaunchedEffect(pressing) {
         if (!pressing) {
             val from = progress
@@ -185,8 +182,8 @@ fun VoiceFab(
                 .shadow(6.dp, CircleShape)
                 .clip(CircleShape)
                 .background(primary)
-                // key 固定为 Unit：面板打开导致 enabled 变 false 时不能重建手势，
-                // 否则正在按着的那一段被取消，松手就收不到了。
+                // key 固定为 Unit：面板打开会把 enabled 置 false，但已经开始的按压手势不能重建，
+                // 否则仍按住时的滑出取消会收不到。
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -219,7 +216,6 @@ fun VoiceFab(
                         }
                         when (QuickEntryRule.releaseAction(armed = armed, cancelled = cancelled)) {
                             HoldRelease.TAP -> tapAction.value()
-                            HoldRelease.FINISH_RECORDING -> releaseAction.value()
                             HoldRelease.ABORT_RECORDING -> abortAction.value()
                             HoldRelease.NOTHING -> Unit
                         }

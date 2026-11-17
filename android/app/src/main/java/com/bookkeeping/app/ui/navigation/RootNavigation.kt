@@ -68,8 +68,6 @@ fun RootNavigation() {
     } == true
     // 长按 FAB 的录音面板：满 1 秒就打开（不等松手），开着的时候禁掉 FAB 的新按压。
     var voiceSheetOpen by remember { mutableStateOf(false) }
-    // 松手信号：FAB 抬手时置 true，面板消费后置回 false（面板重开不能带着旧值）。
-    var voiceStopRequested by remember { mutableStateOf(false) }
     // 面板交回的文本。账单页消费后置回 null。
     var voiceRequest by remember { mutableStateOf<VoiceEntryRequest?>(null) }
 
@@ -149,19 +147,11 @@ fun RootNavigation() {
                         onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
                         // 长按满 1 秒：立刻打开录音面板并开始录音。面板已经开着就不再开第二个会话。
                         onVoiceEntry = {
-                            if (!voiceSheetOpen) {
-                                voiceSheetOpen = true
-                                voiceStopRequested = false
-                            }
+                            if (!voiceSheetOpen) voiceSheetOpen = true
                         },
-                        // 松手：结束录音，面板留在 Review 等用户确认/改字。
-                        onVoiceStopped = {
-                            if (voiceSheetOpen) voiceStopRequested = true
-                        },
-                        // 开录后手指滑走：取消本次并关面板，不填表。
+                        // 开录后手指仍按住时滑走：取消本次并关面板，不填表。
                         onVoiceCancelled = {
                             voiceSheetOpen = false
-                            voiceStopRequested = false
                         },
                         voiceBusy = voiceSheetOpen,
                         voiceRequest = voiceRequest,
@@ -241,20 +231,16 @@ fun RootNavigation() {
             }
         }
 
-        // 录音面板是和 FAB 同一个窗口的覆盖层（不是 Dialog）：录音中手指还按着 FAB，
-        // Dialog 抢焦点会让系统把这次按压 CANCEL 掉，「松手结束」就失效了。
+        // 录音面板是和 FAB 同一个窗口的覆盖层（不是 Dialog）：满 1 秒开面板后仍允许
+        // 按住时滑出取消；点面板「停止」才结束录音。
         // 面板只铺在 Scaffold 之上，录音期间底下的 tab / FAB 都点不到。
         if (voiceSheetOpen) {
             VoiceCapturePanel(
-                stopRequested = voiceStopRequested,
-                onStopRequestConsumed = { voiceStopRequested = false },
                 onCancel = {
                     voiceSheetOpen = false
-                    voiceStopRequested = false
                 },
                 onSubmit = { text ->
                     voiceSheetOpen = false
-                    voiceStopRequested = false
                     voiceRequest = VoiceEntryRequest(text)
                 },
             )

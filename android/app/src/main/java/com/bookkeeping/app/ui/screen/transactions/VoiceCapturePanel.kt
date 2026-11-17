@@ -97,10 +97,9 @@ import kotlin.math.roundToInt
 /**
  * 长按「+」满 1 秒后出现的录音面板（**录音中就已经打开**，不是松手才出现）。
  *
- * 为什么不是 `ModalBottomSheet`：它是 Dialog，会在手指还按着的时候抢走 Activity 窗口的
- * 焦点，正在进行的按压手势会被系统 CANCEL —— 松手事件就永远收不到，「松手结束录音」直接失效。
- * 所以这里画在同一个窗口里（`Box` + 底部 `Surface`），FAB 的 pointerInput 才能把 UP 交上来；
- * 下滑关闭也自己实现（拖动手柄/标题区）。
+ * 为什么不是 `ModalBottomSheet`：录音刚开始时 FAB 手势还可能需要处理「按住滑出取消」。它是 Dialog，
+ * 会在新窗口拿焦点时把这段触摸标成 CANCEL，导致滑出取消收不到。所以这里画在同一个窗口里
+ * （`Box` + 底部 `Surface`）；下滑关闭也自己实现（拖动手柄/标题区）。
  *
  * 状态流转全部走 [VoiceCaptureLogic]（纯 JVM 可测），这里只负责：
  * - 从进程级 [VoiceAsrHolder] 拿引擎（首次懒加载，之后常驻），面板关闭/销毁只
@@ -108,17 +107,15 @@ import kotlin.math.roundToInt
  * - 把引擎事件翻译成面板状态：Partial 只刷输入框（用户改过就冻结），Final 只更新文本；
  * - 权限、切后台、超时这些「会捂着麦克风」的路径都收敛到 `cancelSession()` + 取消。
  *
- * 关键取舍：**松手不填表**。松手只把 Listening 变成 Review，用户看到识别结果、改完字，
+ * 关键取舍：**录音中不填表**。用户点「停止」只把 Listening 变成 Review，用户看到识别结果、改完字，
  * 点「填入账单」才把文本交给上层解析。
  *
- * @param stopRequested 上层监听到 FAB 松手时置 true；面板收到后立刻 `finishInput()`。
- * @param onStopRequestConsumed 消费掉上面的标志，避免面板重开时误判「已经松手」。
+ * @param onCancel 用户取消时关闭面板。
+ * @param onSubmit 用户确认后的文本。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VoiceCapturePanel(
-    stopRequested: Boolean,
-    onStopRequestConsumed: () -> Unit,
     onCancel: () -> Unit,
     onSubmit: (String) -> Unit,
 ) {
@@ -136,6 +133,8 @@ fun VoiceCapturePanel(
     var state by remember {
         mutableStateOf<VoiceCaptureState>(VoiceCaptureState.Preparing(tr("正在准备语音模型…")))
     }
+    // 会话代号：重说后丢弃上一轮可能迟到的 Partial / Final / Error。
+    var activeSessionId by remember { mutableStateOf<Long?>(null) }
     // 输入框自己的状态：文本与光标。文本的真源是 state（沿用 Logic 的冻结规则），
     // 这里只镜像一份给 TextField，保证 Partial 刷新时光标落在末尾。
     var field by remember { mutableStateOf(TextFieldValue("")) }
@@ -145,23 +144,20 @@ fun VoiceCapturePanel(
     var settled by remember { mutableStateOf(false) }
     // 系统权限对话框会让 Activity 走 onStop；这期间不能把面板当成「切后台」关掉。
     var awaitingPermission by remember { mutableStateOf(false) }
-    // 松手可能比会话先到（面板刚弹、模型还在准备）：先记下，进 Listening 后立刻收尾。
-    var releaseRequested by remember { mutableStateOf(false) }
     // 下滑关闭：拖动过程中整体上移，超过阈值就取消。
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val dismissThresholdPx = with(density) { 72.dp.toPx() }
 
-    /** 松手 = 结束录音：Listening → Review（面板不关、文本保留），并让引擎补尾部静音。 */
-    fun finishRecording() {
-        releaseRequested = true
-        if (state is VoiceCaptureState.Listening) {
-            state = VoiceCaptureLogic.release(state)
-            engine?.finishInput()
-        }
+    /** 点面板「停止」：Listening → Review（面板不关、文本保留），并让引擎补尾部静音。 */
+    fun stopRecording() {
+        if (state !is VoiceCaptureState.Listening) return
+        state = VoiceCaptureLogic.stop(state)
+        engine?.finishInput()
     }
 
     /** 开一次会话。引擎没准备好 / 已释放会抛 IllegalStateException，转成可重试失败。 */
     fun startListening(active: StreamingAsrEngine?) {
+        activeSessionId = null
         val target = active ?: engine
         if (target == null) {
             state = VoiceCaptureLogic.forError(AsrErrorCode.NOT_PREPARED)
@@ -169,13 +165,13 @@ fun VoiceCapturePanel(
         }
         val language = if (AppLanguage.current() == AppLanguage.ENGLISH) "en" else "zh"
         val started = runCatching { target.startSession(language) }
-        state = if (started.isSuccess) {
-            VoiceCaptureState.Listening("")
-        } else {
-            VoiceCaptureLogic.forError(AsrErrorCode.NOT_PREPARED)
+        val sessionId = started.getOrNull()
+        activeSessionId = sessionId
+        state = when {
+            started.isFailure -> VoiceCaptureLogic.forError(AsrErrorCode.NOT_PREPARED)
+            sessionId != null -> VoiceCaptureState.Listening("")
+            else -> VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
         }
-        // 手指在面板出现前就松了：会话一开就收尾，别让用户对着一个「永远在听」的面板。
-        if (VoiceCaptureLogic.shouldFinishImmediately(state, releaseRequested)) finishRecording()
     }
 
     /** 取消：丢弃本次，绝不填表；引擎只结束会话，模型留在内存里。 */
@@ -183,16 +179,33 @@ fun VoiceCapturePanel(
         if (settled) return
         settled = true
         state = VoiceCaptureLogic.cancel()
+        activeSessionId = null
         engine?.cancelSession()
         latestCancel()
     }
 
-    /** 重说 / 重试：结束当前会话回到 Preparing，attempt+1 让 LaunchedEffect 重跑一次。 */
+    /**
+     * 重说：立即清空上一轮输入。常驻引擎就绪时同步开启新会话，不经过 Preparing；
+     * 只有引擎不可用或权限缺失时才重新 acquire / 请求权限。
+     */
     fun restart() {
-        engine?.cancelSession()
-        releaseRequested = false
-        state = VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
-        attempt += 1
+        val freshState = VoiceCaptureLogic.restart(state) ?: return
+        val active = engine
+        val canStartImmediately = active != null &&
+            active === VoiceAsrHolder.current() &&
+            VoiceAsrHolder.isReady() &&
+            hasRecordPermission(context)
+
+        field = TextFieldValue("")
+        activeSessionId = null
+        state = freshState
+        active?.cancelSession()
+        if (canStartImmediately) {
+            startListening(active)
+        } else {
+            state = VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
+            attempt += 1
+        }
     }
 
     /** 唯一交付路径：把用户确认过的文本交给上层去解析 + 开表单。 */
@@ -202,6 +215,7 @@ fun VoiceCapturePanel(
         settled = true
         state = delivered
         // 可能还在收尾：结束会话，避免引擎继续占用麦克风。
+        activeSessionId = null
         engine?.cancelSession()
         latestSubmit(delivered.request.text.orEmpty())
     }
@@ -228,10 +242,22 @@ fun VoiceCapturePanel(
             if (settled) return@collect
             when (event) {
                 AsrEvent.Ready -> Unit
-                is AsrEvent.Partial -> state = VoiceCaptureLogic.withPartial(state, event.text)
-                is AsrEvent.Final -> state = VoiceCaptureLogic.onFinal(state, event.text)
+                is AsrEvent.Partial -> if (
+                    VoiceCaptureLogic.isCurrentSession(event.sessionId, activeSessionId)
+                ) {
+                    state = VoiceCaptureLogic.withPartial(state, event.text)
+                }
+                is AsrEvent.Final -> if (
+                    VoiceCaptureLogic.isCurrentSession(event.sessionId, activeSessionId)
+                ) {
+                    state = VoiceCaptureLogic.onFinal(state, event.text)
+                }
                 is AsrEvent.Error -> {
+                    if (!VoiceCaptureLogic.isCurrentSession(event.sessionId, activeSessionId)) {
+                        return@collect
+                    }
                     state = VoiceCaptureLogic.onError(state, event.code)
+                    activeSessionId = null
                     // 采集已经出错：顺手把麦克风放掉，别让失败的会话一直占着。
                     engine?.cancelSession()
                 }
@@ -269,14 +295,6 @@ fun VoiceCapturePanel(
             awaitingPermission = true
             permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
-    }
-
-    // 松手信号：上层在 FAB 松手时置 true。先消费标志，再结束录音，
-    // 这样面板重开时不会因为残留的 true 立刻收尾。
-    LaunchedEffect(stopRequested) {
-        if (!stopRequested) return@LaunchedEffect
-        onStopRequestConsumed()
-        finishRecording()
     }
 
     // 收尾兜底：Final 一直不来也不能把面板卡在「正在识别」。
@@ -422,7 +440,7 @@ fun VoiceCapturePanel(
                             onResumeAutoFollow = { state = VoiceCaptureLogic.resumeAutoFollow(state) },
                             onAcceptReplacement = { state = VoiceCaptureLogic.acceptReplacement(state) },
                             primaryLabel = tr("停止"),
-                            onPrimary = { finishRecording() },
+                            onPrimary = { stopRecording() },
                             onCancel = { cancel() },
                         )
 
@@ -493,7 +511,7 @@ private fun RecordingBadge(state: VoiceCaptureState) {
 
 /**
  * 可编辑的文本区 + 冻结提示 + 按钮。Listening 与 Review 共用：
- * 同一个输入框贯穿「说话中」和「松手后」，用户不用在两个界面之间搬文本。
+ * 同一个输入框贯穿「说话中」和「停止后」，用户不用在两个界面之间搬文本。
  */
 @Composable
 private fun EditorBody(
@@ -555,7 +573,7 @@ private fun EditorBody(
         if (listening) {
             if (autoFollow) {
                 Text(
-                    text = tr("松手结束，说话时可以直接改"),
+                    text = tr("点停止结束，说话时可以直接改"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

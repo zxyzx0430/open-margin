@@ -5,13 +5,10 @@ enum class HoldRelease {
     /** 没到 1 秒就松手：普通点击，打开新建账单表单。 */
     TAP,
 
-    /** 已经开录，正常松手：结束录音并进面板的 Review（不填表）。 */
-    FINISH_RECORDING,
-
-    /** 已经开录，手指滑走：取消本次录音并关面板。 */
+    /** 已经开录，手指仍按住时滑出：取消本次录音并关面板。 */
     ABORT_RECORDING,
 
-    /** 还没开录就滑走 / 被系统取消：什么都不做。 */
+    /** 已开录后正常松手，或还没开录就滑走 / 被系统取消：什么都不做。 */
     NOTHING,
 }
 
@@ -52,13 +49,13 @@ object QuickEntryRule {
      * 这一段按压结束时该做什么。
      *
      * @param armed 满 1 秒时已经回调过「开始录音」。
-     * @param cancelled 手指滑出阈值或被系统取消。
+     * @param cancelled 手指仍按住时滑出阈值。
      */
     fun releaseAction(armed: Boolean, cancelled: Boolean): HoldRelease = when {
-        // 开录之后滑走：取消录音 + 关面板，绝不能当成点击去开表单。
+        // 开录之后仍按着时滑走：取消录音 + 关面板，绝不能当成点击去开表单。
         armed && cancelled -> HoldRelease.ABORT_RECORDING
-        // 开录之后松手：结束录音，面板留在 Review。
-        armed -> HoldRelease.FINISH_RECORDING
+        // 开录之后正常抬手：录音继续，只有面板「停止」按钮能结束。
+        armed -> HoldRelease.NOTHING
         // 没开录就滑走：既不算点击也不算录音。
         cancelled -> HoldRelease.NOTHING
         // 不到 1 秒的普通点击。

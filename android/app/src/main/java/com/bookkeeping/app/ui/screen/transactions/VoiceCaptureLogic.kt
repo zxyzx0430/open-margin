@@ -3,16 +3,16 @@ package com.bookkeeping.app.ui.screen.transactions
 import com.bookkeeping.app.voice.asr.AsrErrorCode
 
 /**
- * 「按住说话」录音面板的界面状态。
+ * 录音面板的界面状态。
  *
  * 这里刻意不放任何 Compose / Android 类型：面板的状态迁移、冻结规则和「哪段文本能进表单」
  * 全部由 [VoiceCaptureLogic] 的纯函数决定，`VoiceCaptureLogicTest` 在纯 JVM 上就能
  * 覆盖——CI 里没有真麦克风，唯一能自动验证的就是这套判定。
  *
- * 交互主线（长按即录，松手结束，面板不关）：
+ * 交互主线（长按即录，手动停止，面板不关）：
  * `Preparing → Listening（可编辑）→ Review（可编辑，等 Final）→ Delivered / Cancelled`。
  * [Listening] 与 [Review] 是同一块输入框的两个阶段，文本都在 [Listening.text] /
- * [Review.text] 里，区别只是麦克风还开着没有。
+ * [Review.text] 里，区别只是麦克风还开着没有。抬手不改变阶段。
  */
 sealed interface VoiceCaptureState {
 
@@ -20,7 +20,7 @@ sealed interface VoiceCaptureState {
     data class Preparing(val detail: String) : VoiceCaptureState
 
     /**
-     * 正在听（手指还按着）。
+     * 正在听（手指抬起后仍继续录音，直到用户点「停止」）。
      *
      * @param text 输入框里的文本：用户没动键盘时跟随 Partial，动过之后就是用户自己写的字。
      * @param autoFollow false = 用户编辑过，后续 Partial 不再覆盖（「已暂停自动更新」）。
@@ -34,7 +34,7 @@ sealed interface VoiceCaptureState {
     ) : VoiceCaptureState
 
     /**
-     * 松手之后：麦克风已停，面板留着同一个输入框让用户改完再交。
+     * 用户点「停止」后：麦克风已停，面板留着同一个输入框让用户改完再交。
      *
      * @param waitingFinal 引擎还在补尾部静音 / 解码最后一帧；此时只显示一个小的「正在识别」，
      *   输入框和「填入账单」都可以照常操作——不把用户扣在转圈上。
@@ -71,7 +71,7 @@ data class VoiceEntryRequest(val text: String?)
  * 1. Partial 只在「还在听且用户没改过」时刷新文本；一旦编辑就冻结，绝不覆盖用户写的字；
  * 2. 冻结期间到达的 Final 不静默替换，只作为 [VoiceCaptureState.Listening.suggestedReplacement]
  *    交给用户点；
- * 3. 松手只把 Listening 变成 Review，**从不**直接交付；交付只发生在用户明确点「填入账单」；
+ * 3. Listening 只有在用户点「停止」后才变成 Review；停止本身从不交付，交付只发生在用户明确点「填入账单」；
  * 4. 空白 / 纯标点的文本不能提交，UI 把主按钮换成「重说」；
  * 5. 取消是终态：之后的 Partial / Final / Error 一律丢弃。
  */
@@ -108,11 +108,11 @@ object VoiceCaptureLogic {
         }
 
     /**
-     * 松手：停止跟随识别结果，但**不交付**。
+     * 用户点「停止」：停止跟随识别结果，但**不交付**。
      *
-     * 面板留在 Review，等用户确认或改字。重复调用（读屏点「停止」、手指抖动）不会重复迁移。
+     * 面板留在 Review，等用户确认或改字。重复调用不会重复迁移。
      */
-    fun release(state: VoiceCaptureState): VoiceCaptureState =
+    fun stop(state: VoiceCaptureState): VoiceCaptureState =
         if (state is VoiceCaptureState.Listening) {
             VoiceCaptureState.Review(
                 text = state.text,
@@ -123,6 +123,19 @@ object VoiceCaptureLogic {
         } else {
             state
         }
+
+    /**
+     * 开始一轮干净的重录。只接受 Review / Failed；返回 null 表示已经在新周期或准备中，
+     * 可用于阻止重复点击堆叠 startSession()。
+     */
+    fun restart(state: VoiceCaptureState): VoiceCaptureState.Listening? = when (state) {
+        is VoiceCaptureState.Review, is VoiceCaptureState.Failed -> VoiceCaptureState.Listening("")
+        else -> null
+    }
+
+    /** 只接纳当前会话的事件，避免上一轮迟到的 Partial / Final / Error 污染重录。 */
+    fun isCurrentSession(eventSessionId: Long?, currentSessionId: Long?): Boolean =
+        eventSessionId == currentSessionId
 
     /**
      * Final 到达。
@@ -196,7 +209,7 @@ object VoiceCaptureLogic {
     /**
      * 唯一允许的交付：只有 Review 且文本有意义时才返回 [VoiceCaptureState.Delivered]。
      *
-     * 录音中、准备中、失败态、取消态一律返回 null——「松手就填表」和「空文本填表」都被这里挡住。
+     * 录音中、准备中、失败态、取消态一律返回 null——「录音中直接填表」和「空文本填表」都被这里挡住。
      */
     fun submit(state: VoiceCaptureState): VoiceCaptureState.Delivered? {
         if (state !is VoiceCaptureState.Review) return null
@@ -233,13 +246,6 @@ object VoiceCaptureLogic {
         } else {
             forError(code)
         }
-
-    /**
-     * 松手可能比会话先到（面板刚弹、模型还在准备）：界面记下这个标志，
-     * startSession 成功后用它决定是否立刻收尾。
-     */
-    fun shouldFinishImmediately(state: VoiceCaptureState, releaseRequested: Boolean): Boolean =
-        releaseRequested && state is VoiceCaptureState.Listening
 
     /** 权限被拒：必须给「去设置」，不能静默失败。 */
     fun permissionDenied(): VoiceCaptureState.Failed =

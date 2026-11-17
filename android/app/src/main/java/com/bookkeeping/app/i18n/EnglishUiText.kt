@@ -1015,7 +1015,7 @@ internal object EnglishUiText {
             "Describe the expense or income and the form fills itself",
         "语音记账" to "Voice entry",
         "新建账单，长按说话记账" to "New transaction; press and hold to speak",
-        "长按 1 秒说话，松手结束" to "Hold for 1 second and speak; release to stop",
+        "长按 1 秒说话，点停止结束" to "Hold for 1 second and speak; tap Stop to finish",
         // 录音面板：准备模型 → 听 → 收尾 → 失败，以及失败后的两个出口。
         "正在准备语音模型…" to "Preparing the voice model…",
         "正在请求麦克风权限…" to "Requesting microphone permission…",
@@ -1023,7 +1023,8 @@ internal object EnglishUiText {
         "停止" to "Stop",
         "录音中…" to "Recording…",
         "已停止录音" to "Recording stopped",
-        "松手结束，说话时可以直接改" to "Release to stop; you can edit the text while speaking",
+        "点停止结束，说话时可以直接改" to
+            "Tap Stop to finish; you can edit the text while speaking",
         "已暂停自动更新" to "Auto-update paused",
         "恢复" to "Resume",
         "识别更新了，点此替换" to "Recognition updated; tap to replace",

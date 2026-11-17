@@ -317,7 +317,7 @@ CI 只能证明“能编译、能打包、单测过”，下面这些必须在�
 ## 11. 语音入口如何接入 UI
 
 引擎只负责「把一段话变成 Final」，谁开麦克风、什么时候关、文本进哪个表单，都在 UI 层。
-**交互细节（按住即录 / 松手结束 / 面板内编辑与冻结 / 什么时候才允许填表）单独写在
+**交互细节（按住即录 / 手动停止 / 面板内编辑与冻结 / 什么时候才允许填表）单独写在
 [`docs/VOICE_PANEL_EDIT.md`](VOICE_PANEL_EDIT.md)**，这一节只讲引擎与 UI 的接线。
 
 ### 11.1 链路
@@ -328,8 +328,9 @@ CI 只能证明“能编译、能打包、单测过”，下面这些必须在�
   → VoiceCapturePanel                      （同窗口覆盖层，非 Dialog）
       prepare()/acquire() → 权限 → startSession()
       events: Partial 刷输入框（用户改过就冻结）/ Final 只更新文本 / Error 转失败
-  → FAB 松手 → onHoldRelease → voiceStopRequested → panel.finishInput() → Review
-  → 用户点「填入账单」→ VoiceCaptureLogic.submit() → Delivered
+  → FAB 松手                            （无结束回调，会话继续）
+  → 用户点面板「停止」                  → panel.finishInput() → Review
+  → 用户点「填入账单」                  → VoiceCaptureLogic.submit() → Delivered
   → RootNavigation.voiceRequest            （VoiceEntryRequest(trim 过的文本)）
   → 账单页 LaunchedEffect(voiceRequest)     （打开 AddTransactionDialog）
   → AddTransactionDialog(initialQuickEntry = text.orEmpty())
@@ -339,9 +340,9 @@ CI 只能证明“能编译、能打包、单测过”，下面这些必须在�
 | --- | --- |
 | `ui/screen/transactions/VoiceCaptureLogic.kt` | 状态机 + 冻结/替换/交付判定（无 Android 依赖） |
 | `ui/screen/transactions/VoiceCapturePanel.kt` | 面板 UI、权限申请、引擎会话、键盘与下滑关闭 |
-| `ui/components/VoiceFab.kt` | 按压时序：满 1s 开录、松手结束、开录后滑走取消 |
-| `ui/components/QuickEntryRule.kt` | 时间常量 + `releaseAction()` 四条分支 |
-| `ui/navigation/RootNavigation.kt` | 面板开合、松手信号、把确认后的文本交给账单页 |
+| `ui/components/VoiceFab.kt` | 按压时序：满 1s 开录、松手继续、按住滑出取消 |
+| `ui/components/QuickEntryRule.kt` | 时间常量 + `releaseAction()`（纯函数，单测覆盖） |
+| `ui/navigation/RootNavigation.kt` | 面板开合、把确认后的文本交给账单页 |
 | `ui/screen/transactions/TransactionListScreen.kt` | 收到文本后打开新建表单并预填；录音中禁用 FAB |
 
 ### 11.2 三条硬约定
@@ -349,8 +350,8 @@ CI 只能证明“能编译、能打包、单测过”，下面这些必须在�
 1. **Partial 绝不进表单。** CTC 的 Partial 是「当前前缀」，说话过程中随时被改写；
    面板里它只是输入框的默认文本，用户点「填入账单」时才交付，而且交付的是**用户看到并确认过的字**
    （改过就不会被识别结果覆盖，见 `VOICE_PANEL_EDIT.md` §4）。
-2. **松手不填表。** 松手只把 `Listening` 变成 `Review` 并 `finishInput()`；表单只在
-   `VoiceCaptureLogic.submit()` 返回 `Delivered` 时打开。
+2. **抬手不结束也不填表**。FAB 松手后录音继续；只有用户点面板「停止」才把 `Listening` 变成 `Review`
+   并 `finishInput()`。表单只在 `VoiceCaptureLogic.submit()` 返回 `Delivered` 时打开。
 3. **一个时刻只有一个会话，且必须放麦克风。** 面板开着时 `voiceSheetOpen` 同时是面板可见标志
    和 FAB 的 `enabled = !voiceBusy`；取消 / 下滑 / 返回键 / `ON_STOP` / 组合销毁五条路径都收敛到
    `cancelSession()`。**任何路径都不 `close()` 引擎**——模型常驻在 `VoiceAsrHolder`，
@@ -372,12 +373,12 @@ CI 只能证明“能编译、能打包、单测过”，下面这些必须在�
 ### 11.4 纯 JVM 单测
 
 `android/app/src/test/java/com/bookkeeping/app/ui/screen/transactions/VoiceCaptureLogicTest.kt`
-共 22 条，覆盖 Partial 丢弃、编辑冻结、Final 替换 chip、松手不交付、空文本不可提交、取消终态等；
+覆盖 Partial 丢弃、编辑冻结、Final 替换 chip、抬手后继续录音 / 点停止进 Review、重说清空且防重复、空文本不可提交、取消终态等；
 逐条说明见 `VOICE_PANEL_EDIT.md` §8。手势分支在
 `android/app/src/test/java/com/bookkeeping/app/QuickEntryRuleTest.kt`。
 
 ### 11.5 真机必测项
 
 引擎相关的必测项见本文 §9（首字延迟、金额准确率、收尾完整、长句、与 OCR 共存、省电/发热）。
-UI 交互相关的必测项（按住即录、松手即停、面板内改字、Final 替换 chip、键盘遮挡、取消路径等）
+UI 交互相关的必测项（按住即录、抬手继续录音 / 点停止才结束、重说无残留、面板内改字、Final 替换 chip、键盘遮挡、取消路径等)
 见 `VOICE_PANEL_EDIT.md` §9。
