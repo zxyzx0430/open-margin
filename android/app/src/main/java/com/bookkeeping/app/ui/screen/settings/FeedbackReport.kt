@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.i18n.tr
 import java.net.URLEncoder
 
 /**
@@ -21,23 +22,23 @@ internal object FeedbackReport {
         sdkInt: Int,
         language: String,
     ): String = buildString {
-        append("版本: ")
+        append(tr("版本: "))
         append(versionName)
         append(" (Build ")
         append(versionCode)
         append(")\n")
-        append("机型: ")
+        append(tr("机型: "))
         append(device)
         append("\n")
-        append("Android: ")
+        append(tr("Android: "))
         append(androidRelease)
         append(" (API ")
         append(sdkInt)
         append(")\n")
-        append("语言: ")
+        append(tr("语言: "))
         append(language)
         append("\n")
-        append("说明: 该报告只含版本与设备信息，不含账单金额、商户、账户或日志内容。")
+        append(tr("说明: 该报告只含版本与设备信息，不含账单金额、商户、账户或日志内容。"))
     }
 
     fun mailtoUri(subject: String, body: String): String =
