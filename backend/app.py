@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, Field, field_validator
 
 from config import DB, PUBLIC_BASE
-from device_status import DEVICE_SYNC_PATHS, read_device_seen, record_device_seen
+from device_status import DEVICE_SYNC_PATHS, is_device_user_agent, read_device_seen, record_device_seen
 DEVICE_TOKEN = os.getenv("FINANCE_DEVICE_TOKEN", "")
 ADMIN_TOKEN = os.getenv("FINANCE_ADMIN_TOKEN", "")
 app = FastAPI(title="Personal Finance API", version="1.5.0", docs_url=None, redoc_url=None)
@@ -309,6 +309,7 @@ async def record_device_sync(request: Request, call_next):
         response.status_code == 200
         and request.url.path in DEVICE_SYNC_PATHS
         and request.headers.get("x-device-token")
+        and is_device_user_agent(request.headers.get("user-agent"))
     ):
         record_device_seen(request.headers.get("user-agent"))
     return response
