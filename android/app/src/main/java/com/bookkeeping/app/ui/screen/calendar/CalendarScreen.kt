@@ -1,13 +1,5 @@
 package com.bookkeeping.app.ui.screen.calendar
 
-import android.view.MotionEvent
-import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.input.pointer.pointerInteropFilter
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.layout.positionOnScreen
-import androidx.compose.ui.platform.LocalView
-import kotlinx.coroutines.delay
 import com.bookkeeping.app.ui.components.MonthPickerDialog
 
 import android.content.Context
@@ -384,8 +376,6 @@ internal fun nextCalendarAmountFontSizeSp(currentFontSizeSp: Float): Float =
 fun CalendarScreen(
     viewModel: CalendarViewModel = hiltViewModel(),
     onOpenDetail: (Long) -> Unit = {},
-    onboardingDemo: Boolean = false,
-    onDemoFinger: (androidx.compose.ui.geometry.Offset?) -> Unit = {},
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val context = LocalContext.current
@@ -739,8 +729,6 @@ fun CalendarScreen(
                 rangeEnd = end
             },
             onRangeDragStateChange = { rangeDragActive = it },
-            onboardingDemo = onboardingDemo,
-            onDemoFinger = onDemoFinger,
             onCrossMonth = { targetKey, anchor ->
                 // 跨月拖动不调用 navigateMonth：它会把区间清空，而这里必须保留
                 // 长按的那个起点，只把终点落到目标月最靠近起点的一天。
@@ -905,7 +893,6 @@ private fun CalendarMetric(
     }
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun CalendarMonthGrid(
     year: Int,
@@ -920,8 +907,6 @@ private fun CalendarMonthGrid(
     rangeEnd: CalendarDate?,
     onSelect: (CalendarDate, CalendarDate) -> Unit,
     onRangeDragStateChange: (Boolean) -> Unit,
-    onboardingDemo: Boolean,
-    onDemoFinger: (androidx.compose.ui.geometry.Offset?) -> Unit,
     onCrossMonth: (targetMonthKey: String, anchor: CalendarDate) -> Unit,
 ) {
     val daysInMonth = daysInMonth(year, month)
@@ -930,51 +915,6 @@ private fun CalendarMonthGrid(
     val rowHeightPx = with(density) { gridRowHeight.toPx() }
     val reverseCrossDragPx = with(density) { 24.dp.toPx() }
     var gridWidthPx by remember { mutableStateOf(0f) }
-    val host = LocalView.current
-    var gridRoot by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    var gridScreen by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    var demoSending by remember { mutableStateOf(false) }
-    var userTouched by remember { mutableStateOf(false) }
-    LaunchedEffect(onboardingDemo, gridWidthPx) {
-        if (!onboardingDemo || gridWidthPx <= 0f || userTouched) return@LaunchedEffect
-        delay(700)
-        if (userTouched) return@LaunchedEffect
-        val downTime = SystemClock.uptimeMillis()
-        fun point(day: Int): androidx.compose.ui.geometry.Offset {
-            val cell = firstOffset + day - 1
-            return androidx.compose.ui.geometry.Offset(
-                gridRoot.x + (cell % 7 + 0.5f) * gridWidthPx / 7f,
-                gridRoot.y + (cell / 7 + 0.5f) * rowHeightPx,
-            )
-        }
-        fun send(action: Int, p: androidx.compose.ui.geometry.Offset) {
-            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, p.x, p.y, 0)
-            demoSending = true
-            try { host.dispatchTouchEvent(event) } finally { demoSending = false; event.recycle() }
-            onDemoFinger(gridScreen + (p - gridRoot))
-        }
-        var current = point(15)
-        var ended = false
-        send(MotionEvent.ACTION_DOWN, current)
-        try {
-            delay(650)
-            for (day in 16..22) {
-                val next = point(day)
-                val from = current
-                repeat(4) { frame ->
-                    if (userTouched) return@LaunchedEffect
-                    current = from + (next - from) * ((frame + 1) / 4f)
-                    send(MotionEvent.ACTION_MOVE, current)
-                    delay(60)
-                }
-            }
-            send(MotionEvent.ACTION_UP, current)
-            ended = true
-        } finally {
-            if (!ended) send(MotionEvent.ACTION_CANCEL, current)
-            onDemoFinger(null)
-        }
-    }
     // 手势协程的 key 只有尺寸：跨月会重组，但手指还没松，协程不能重启。
     // 因此月份、日偏移这些易变值统一从最新状态里读。
     val latestYear = rememberUpdatedState(year)
@@ -1038,14 +978,6 @@ private fun CalendarMonthGrid(
                 .fillMaxWidth()
                 .height(gridRowHeight * 6)
                 .onSizeChanged { gridWidthPx = it.width.toFloat() }
-                .onGloballyPositioned {
-                    gridRoot = it.positionInRoot()
-                    gridScreen = it.positionOnScreen()
-                }
-                .pointerInteropFilter { event ->
-                    if (onboardingDemo && !demoSending && event.actionMasked == MotionEvent.ACTION_DOWN) userTouched = true
-                    false
-                }
                 .pointerInput(gridWidthPx, rowHeightPx, reverseCrossDragPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)

@@ -1,32 +1,21 @@
 package com.bookkeeping.app.ui.navigation
 
 import android.Manifest
-import android.os.Build
 import android.content.pm.PackageManager
-import android.view.View
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionOnScreen
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.core.content.ContextCompat
-import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.NotificationListenerHelper
-import com.bookkeeping.app.onboarding.OnboardingOverlay
-import com.bookkeeping.app.onboarding.OnboardingPermission
-import com.bookkeeping.app.onboarding.OnboardingTarget
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.onboarding.OnboardingViewModel
 import com.bookkeeping.app.onboarding.OnboardingWelcome
 import com.bookkeeping.app.onboarding.TourState
@@ -97,76 +86,50 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 @Composable
 fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val navController = rememberNavController()
+    var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
     val context = LocalContext.current
-    val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val onboarding: OnboardingViewModel = hiltViewModel()
     val tour by onboarding.state.collectAsState()
-    val step = (tour as? TourState.Showing)?.step
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
-    var target by remember(step) { mutableStateOf<OnboardingTarget?>(null) }
-    var pageTarget by remember { mutableStateOf<OnboardingTarget?>(null) }
-    var voiceTry by remember(step) { mutableStateOf(false) }
-    var demoFinger by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
-    var onboardingPulse by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    var waitingForNotificationAccess by remember { mutableStateOf(false) }
-    val english = AppLanguage.current() == AppLanguage.ENGLISH
-    fun finishTour(skip: Boolean) {
-        if (skip) onboarding.skip() else onboarding.complete()
-        onboardingPulse += 1
-        if (currentDestination != null) {
+    var notificationEnabled by remember { mutableStateOf(NotificationListenerHelper.isEnabled(context)) }
+    var waitingForAccess by rememberSaveable { mutableStateOf(false) }
+    var leftForAccess by rememberSaveable { mutableStateOf(false) }
+    val postNotificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    fun finishOnboarding(skipped: Boolean) {
+        onboarding.complete(skipped)
+        if (currentDestination != null && currentDestination.route != BottomNavItem.Transactions.route) {
             navController.navigate(BottomNavItem.Transactions.route) {
-                popUpTo(navController.graph.findStartDestination().id) { saveState = false }
-                launchSingleTop = true
-            }
-        }
-        Toast.makeText(context, if (english) "Try adding a transaction" else "先记一笔试试", Toast.LENGTH_SHORT).show()
-    }
-    val postNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        finishTour(skip = false)
-    }
-    DisposableEffect(lifecycleOwner, waitingForNotificationAccess, step) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME && waitingForNotificationAccess && step == 7) {
-                waitingForNotificationAccess = false
-                if (NotificationListenerHelper.isEnabled(context) && Build.VERSION.SDK_INT >= 33 &&
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                    postNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                } else {
-                    finishTour(skip = false)
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(tour) {
-        if (tour !is TourState.Loading) onOnboardingVisibilityChanged(tour !is TourState.Hidden)
-    }
-    LaunchedEffect(step, currentDestination?.route) {
-        val route = when (step) {
-            3 -> BottomNavItem.Calendar.route
-            4 -> BottomNavItem.Stats.route
-            5 -> BottomNavItem.Budget.route
-            0, 1, 2, 6, 7 -> BottomNavItem.Transactions.route
-            else -> null
-        }
-        if (route != null && currentDestination != null && currentDestination.route != route) {
-            navController.navigate(route) {
                 popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                 launchSingleTop = true
                 restoreState = true
             }
         }
     }
-    BackHandler(enabled = step != null) { onboarding.back() }
-    fun reportPosition(coordinates: LayoutCoordinates, host: View) {
-        target = OnboardingTarget(Rect(coordinates.positionOnScreen(), Size(
-            coordinates.size.width.toFloat(), coordinates.size.height.toFloat(),
-        )), host)
+
+    LaunchedEffect(tour) {
+        if (tour != TourState.Loading) onOnboardingVisibilityChanged(tour == TourState.Showing)
     }
-    var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
+    DisposableEffect(lifecycleOwner, waitingForAccess, leftForAccess) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE && waitingForAccess) leftForAccess = true
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationEnabled = NotificationListenerHelper.isEnabled(context)
+                if (waitingForAccess && leftForAccess) {
+                    waitingForAccess = false
+                    leftForAccess = false
+                    if (notificationEnabled && Build.VERSION.SDK_INT >= 33 &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        postNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // Resolve the static tab list once at the top of composition. Reading it
     // lazily from inside hierarchy.any could observe a nested data object
     // before its class initializer had assigned INSTANCE (null route crash).
@@ -197,11 +160,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
-        pageTarget = OnboardingTarget(Rect(coordinates.positionOnScreen(), Size(
-            coordinates.size.width.toFloat(), coordinates.size.height.toFloat(),
-        )), view)
-    }) {
+    Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
@@ -286,18 +245,13 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         voiceBusy = voiceSheetOpen,
                         voiceRequest = voiceRequest,
                         onVoiceRequestConsumed = { voiceRequest = null },
-                        onboardingAddOpen = step == 1,
-                        onOnboardingPanelPositioned = ::reportPosition,
-                        onOnboardingPanelDismiss = onboarding::back,
-                        onOnboardingSaved = onboarding::next,
-                        onboardingPulse = onboardingPulse,
                     )
                 }
                 composable(
                     route = BottomNavItem.Calendar.route,
                     popEnterTransition = { EnterTransition.None },
                 ) {
-                    CalendarScreen(onboardingDemo = step == 3, onDemoFinger = { demoFinger = it }, onOpenDetail = { id ->
+                    CalendarScreen(onOpenDetail = { id ->
                         navController.navigate(AppRoutes.transactionDetail(id))
                     })
                 }
@@ -375,7 +329,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             }
         }
 
-        if (showBillImportSheet || step == 6) {
+        if (showBillImportSheet) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
                 onDismissRequest = {
@@ -383,7 +337,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         showBillImportSheet = false
                         billImportViewModel.reset()
                         billExportFeedback = null
-                        if (step == 6) onboarding.back()
                     }
                 },
                 sheetState = sheetState,
@@ -394,14 +347,12 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                             showBillImportSheet = false
                             billImportViewModel.reset()
                             billExportFeedback = null
-                            if (step == 6) onboarding.back()
                         }
                     },
                     onExportBills = { billExportLauncher.launch(BillExport.defaultFileName()) },
                     exportFeedback = billExportFeedback,
                     exportInProgress = billExportInProgress,
                     viewModel = billImportViewModel,
-                    onPanelPositioned = if (step == 6) ::reportPosition else null,
                 )
             }
         }
@@ -409,63 +360,37 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         // 录音面板是和 FAB 同一个窗口的覆盖层（不是 Dialog）：达到长按阈值后仍允许
         // 按住时滑出取消；点面板「停止」才结束录音。
         // 面板只铺在 Scaffold 之上，录音期间底下的 tab / FAB 都点不到。
-        if (voiceSheetOpen || step == 2) {
+        if (voiceSheetOpen) {
             VoiceCapturePanel(
                 onCancel = {
                     voiceSheetOpen = false
-                    if (step == 2) onboarding.back()
                 },
                 onSubmit = { text ->
                     voiceSheetOpen = false
                     voiceRequest = VoiceEntryRequest(text)
-                    if (step == 2) onboarding.back()
                 },
-                startRequested = step != 2 || voiceTry,
-                onPanelPositioned = if (step == 2) ::reportPosition else null,
             )
         }
-        when (val current = tour) {
-            is TourState.Resume -> AlertDialog(
-                onDismissRequest = {},
-                title = { Text(if (english) "Continue the tour?" else "继续引导吗？") },
-                confirmButton = { TextButton(onClick = onboarding::resume) { Text(if (english) "Continue" else "继续") } },
-                dismissButton = { TextButton(onClick = { finishTour(true) }) { Text(if (english) "Skip" else "跳过") } },
+        if (tour == TourState.Showing) {
+            BackHandler { finishOnboarding(skipped = true) }
+            OnboardingWelcome(
+                onStart = { finishOnboarding(skipped = false) },
+                onSkip = { finishOnboarding(skipped = true) },
+                onEnableAutomaticEntry = {
+                    if (!notificationEnabled) {
+                        waitingForAccess = true
+                        leftForAccess = false
+                        runCatching { NotificationListenerHelper.openSettings(context) }
+                            .onFailure {
+                                waitingForAccess = false
+                                Toast.makeText(context,
+                                    if (AppLanguage.current() == AppLanguage.ENGLISH) "Unable to open system settings"
+                                    else "无法打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                },
+                notificationAccessEnabled = notificationEnabled,
             )
-            is TourState.Showing -> when (current.step) {
-                0 -> OnboardingWelcome(onStart = onboarding::next, onSkip = { finishTour(true) })
-                7 -> OnboardingPermission(
-                    onOpen = {
-                        if (NotificationListenerHelper.isEnabled(context)) {
-                            if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                                postNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            } else finishTour(false)
-                        } else {
-                            waitingForNotificationAccess = true
-                            NotificationListenerHelper.openSettings(context)
-                        }
-                    },
-                    onLater = { finishTour(false) },
-                )
-                else -> {
-                    val labels = if (english) listOf("", "Add a transaction", "Voice entry", "Calendar", "Statistics", "Budget", "Import bills")
-                                 else listOf("", "新建账单", "语音记账", "日历", "统计", "预算", "导入账单")
-                    val messages = if (english) listOf("", "Write a sentence to fill in the details.", "Try voice entry when you're ready.", "Select a range to see your spending.", "See where your money goes.", "See how much of your budget remains.", "Import WeChat or Alipay CSV / XLSX files.")
-                                   else listOf("", "写一句话，自动填入账单信息。", "准备好了可以试试语音记账。", "拖选日期，查看这段时间的花费。", "看看钱都花在哪里。", "看看离预算上限还有多远。", "导入微信、支付宝 CSV 或 XLSX 账单。")
-                    val selectedTarget = if (current.step in 3..5) pageTarget else target
-                    if (selectedTarget != null) OnboardingOverlay(
-                        step = current.step, target = selectedTarget,
-                        title = labels[current.step], message = messages[current.step],
-                        skipLabel = if (english) "Skip" else "跳过",
-                        nextLabel = if (english) "Next" else "下一步",
-                        dimBackground = current.step !in 3..5,
-                        fingerPosition = if (current.step == 3) demoFinger else null,
-                        tryLabel = if (current.step == 2 && !voiceTry) (if (english) "Try it" else "试一下") else null,
-                        onTry = if (current.step == 2 && !voiceTry) ({ voiceTry = true }) else null,
-                        onSkip = { finishTour(true) }, onNext = onboarding::next,
-                    )
-                }
-            }
-            else -> Unit
         }
     }
 }
