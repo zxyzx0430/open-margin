@@ -1,7 +1,5 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import android.view.View
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -115,9 +113,6 @@ fun AddTransactionDialog(
         account: String,
     ) -> Long,
     onSaved: (TransactionEntity) -> Unit = {},
-    onPanelPositioned: ((LayoutCoordinates, View) -> Unit)? = null,
-    onPanelDismissRequest: (() -> Unit)? = null,
-    onboardingDemo: Boolean = false,
     // 语音识别结果带进来的原文：为空就是普通新建。填了就在打开时先解析一次，
     // 让 ASR 那边只管把文本传进来，不用重复写「填哪个字段」的逻辑。
     initialQuickEntry: String = "",
@@ -168,7 +163,6 @@ fun AddTransactionDialog(
     var showDatePicker by remember { mutableStateOf(false) }
     // 一句话记账的原文：解析失败要能改两个字重提，所以提交后不清空。
     var quickEntry by remember(initial?.id, initialQuickEntry) { mutableStateOf(initialQuickEntry) }
-    var demoInteracted by remember { mutableStateOf(false) }
     var quickEntryNotice by remember(initial?.id) { mutableStateOf<QuickEntryNotice?>(null) }
     var quickEntryPreview by remember(initial?.id) { mutableStateOf<QuickEntryPrefill?>(null) }
     var lastAutoPrefill by remember(initial?.id) { mutableStateOf<QuickEntryPrefill?>(null) }
@@ -222,30 +216,6 @@ fun AddTransactionDialog(
             account = prefill.account.takeUnless { accountTouched },
         )
         prefill
-    }
-    LaunchedEffect(onboardingDemo) {
-        if (!onboardingDemo || initial != null || initialQuickEntry.isNotEmpty()) return@LaunchedEffect
-        delay(350)
-        if (demoInteracted) return@LaunchedEffect
-        quickEntry = if (com.bookkeeping.app.i18n.AppLanguage.current() == com.bookkeeping.app.i18n.AppLanguage.ENGLISH)
-            "Lunch 25 WeChat" else "午饭 25 微信"
-        delay(500)
-        if (demoInteracted) return@LaunchedEffect
-        applyQuickEntry(quickEntry)
-        delay(2200)
-        if (!demoInteracted) {
-            quickEntry = ""
-            amountText = ""
-            selectedType = TransactionType.EXPENSE
-            selectedCategory = TransactionCategory.FOOD
-            merchant = ""
-            note = ""
-            account = ""
-            timestamp = defaultTimestamp
-            quickEntryNotice = null
-            quickEntryPreview = null
-            lastAutoPrefill = null
-        }
     }
 
     // 真正写入：只有持久化成功后才关闭面板；失败时保留表单与原文。
@@ -398,10 +368,8 @@ fun AddTransactionDialog(
 
     EntryPanelLayout(
         title = if (initial == null) tr("新建账单") else tr("编辑账单"),
-        onDismiss = { if (!saving) (onPanelDismissRequest ?: onDismiss)() },
+        onDismiss = { if (!saving) onDismiss() },
         canDismiss = !saving,
-        onPanelPositioned = onPanelPositioned,
-        onUserInteraction = if (onboardingDemo) ({ demoInteracted = true }) else null,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -707,7 +675,7 @@ fun AddTransactionDialog(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TextButton(
-                onClick = { if (!saving) (onPanelDismissRequest ?: onDismiss)() },
+                onClick = { if (!saving) onDismiss() },
                 enabled = !saving,
             ) {
                 Text(tr("取消"), maxLines = 1)

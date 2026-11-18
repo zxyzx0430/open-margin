@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.first
 
 private val Context.onboardingDataStore by preferencesDataStore(name = "onboarding")
 
-internal data class OnboardingState(val completed: Boolean, val step: Int, val locale: String)
+internal data class OnboardingState(val completed: Boolean, val locale: String)
 
 /** Persistent progress is initialized once, after checking the existing ledger. */
 @Singleton
@@ -35,18 +35,15 @@ internal class OnboardingPreferences @Inject constructor(
         val prefs = context.onboardingDataStore.data.first()
         return OnboardingState(
             completed = prefs[COMPLETED] ?: false,
-            step = (prefs[STEP] ?: 0).coerceIn(0, 7),
             locale = prefs[LOCALE] ?: "zh",
         )
     }
 
-    suspend fun setStep(step: Int) {
-        require(step in 0..7)
-        context.onboardingDataStore.edit { it[STEP] = step }
-    }
-
     suspend fun complete() {
-        context.onboardingDataStore.edit { it[COMPLETED] = true }
+        context.onboardingDataStore.edit {
+            it[COMPLETED] = true
+            it[STEP] = 0
+        }
     }
 
     suspend fun restart() {

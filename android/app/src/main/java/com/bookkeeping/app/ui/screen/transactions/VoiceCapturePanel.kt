@@ -1,7 +1,5 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import android.view.View
-import androidx.compose.ui.layout.LayoutCoordinates
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -126,8 +124,6 @@ import kotlin.math.roundToInt
 fun VoiceCapturePanel(
     onCancel: () -> Unit,
     onSubmit: (String) -> Unit,
-    startRequested: Boolean = true,
-    onPanelPositioned: ((LayoutCoordinates, View) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -141,10 +137,7 @@ fun VoiceCapturePanel(
     var engine by remember { mutableStateOf(VoiceAsrHolder.current()) }
 
     var state by remember {
-        mutableStateOf<VoiceCaptureState>(
-            if (startRequested) VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
-            else VoiceCaptureState.Listening(""),
-        )
+        mutableStateOf<VoiceCaptureState>(VoiceCaptureState.Preparing(tr("正在准备语音模型…")))
     }
     // 会话代号：重说后丢弃上一轮可能迟到的 Partial / Final / Error。
     var activeSessionId by remember { mutableStateOf<Long?>(null) }
@@ -164,11 +157,6 @@ fun VoiceCapturePanel(
     /** 点面板「停止」：Listening → Review（面板不关、文本保留），并让引擎补尾部静音。 */
     fun stopRecording() {
         if (state !is VoiceCaptureState.Listening) return
-        if (!startRequested) {
-            val listening = state as VoiceCaptureState.Listening
-            state = VoiceCaptureState.Review(listening.text, autoFollow = listening.autoFollow)
-            return
-        }
         state = VoiceCaptureLogic.stop(state)
         engine?.finishInput()
     }
@@ -207,7 +195,6 @@ fun VoiceCapturePanel(
      * 只有引擎不可用或权限缺失时才重新 acquire / 请求权限。
      */
     fun restart() {
-        if (!startRequested) return
         val freshState = VoiceCaptureLogic.restart(state) ?: return
         val active = engine
         val canStartImmediately = active != null &&
@@ -286,17 +273,8 @@ fun VoiceCapturePanel(
 
     // 懒加载 → 权限 → 开录音。首次可能要拷 71MB 模型，进度直接用引擎给的文案；
     // 预热过之后 acquire() 立即返回，面板基本是秒开。
-    LaunchedEffect(attempt, startRequested) {
+    LaunchedEffect(attempt) {
         if (settled) return@LaunchedEffect
-        if (!startRequested) {
-            delay(800)
-            val current = state as? VoiceCaptureState.Listening
-            if (!settled && current?.autoFollow == true) {
-                val example = if (AppLanguage.current() == AppLanguage.ENGLISH) "Lunch 25 WeChat" else "午饭 25 微信"
-                state = VoiceCaptureState.Review(example)
-            }
-            return@LaunchedEffect
-        }
         if (state !is VoiceCaptureState.Preparing) {
             state = VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
         }
@@ -374,7 +352,6 @@ fun VoiceCapturePanel(
         title = tr("语音记账"),
         onDismiss = { cancel() },
         headerTrailing = { RecordingBadge(state = state) },
-        onPanelPositioned = onPanelPositioned,
     ) {
                     when (val current = state) {
                         is VoiceCaptureState.Preparing -> PreparingBody(
