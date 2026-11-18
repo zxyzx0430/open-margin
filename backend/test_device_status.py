@@ -87,6 +87,17 @@ class DeviceStatusTest(unittest.TestCase):
         status = self.client.get("/api/v1/device-status", headers=self.admin_headers)
         self.assertTrue(status.json()["seen"])
 
+    def test_local_probe_does_not_mark_device_seen(self):
+        response = self.client.get(
+            "/api/v2/sync/changes?since=0&limit=1",
+            headers={
+                "X-Device-Token": "device-test-token",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; PowerShell)",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(self.marker.exists())
+
     def test_rejected_sync_does_not_mark_device_seen(self):
         response = self.client.post(
             "/api/v1/transactions/batch",

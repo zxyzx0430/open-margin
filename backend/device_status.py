@@ -19,6 +19,15 @@ logger = logging.getLogger("finance.device_status")
 
 DEVICE_SEEN_FILE = Path(DATA_DIR) / "device-seen.json"
 
+# The wizard's own self-test and QR check also send X-Device-Token, so the
+# marker must additionally see a phone-like User-Agent.
+DEVICE_UA_MARKERS = ("android", "dalvik", "okhttp", "cfnetwork", "openmargin")
+
+
+def is_device_user_agent(user_agent: str | None) -> bool:
+    text = (user_agent or "").lower()
+    return any(marker in text for marker in DEVICE_UA_MARKERS)
+
 # Endpoints that require X-Device-Token and represent a phone sync.
 DEVICE_SYNC_PATHS = frozenset({
     "/api/v2/sync/changes",
