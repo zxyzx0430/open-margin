@@ -55,6 +55,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
 
 $setupRoot = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $setupRoot '../../..')).Path

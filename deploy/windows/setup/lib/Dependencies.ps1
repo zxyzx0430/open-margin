@@ -14,6 +14,7 @@ function Invoke-OmDependencyCommand {
         # ErrorRecords, so a caller's $ErrorActionPreference='Stop' must not
         # turn an installer warning into a phantom failure.
         $previous = $ErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $false
         $ErrorActionPreference = 'Continue'
         try {
             $output = & $FilePath @Arguments 2>&1 | Out-String

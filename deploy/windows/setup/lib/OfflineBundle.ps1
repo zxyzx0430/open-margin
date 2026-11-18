@@ -138,6 +138,8 @@ function Get-OmOfflineArchiveIssues {
         [Parameter(Mandatory = $true)][string]$Path,
         [string]$TarPath = ''
     )
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
     if (-not $TarPath) { $TarPath = Get-OmOfflineTarPath }
     if (-not $TarPath) {
         return [pscustomobject]@{ ok = $false; code = 'TAR_MISSING'; issues = @('tar was not found'); entries = @() }
@@ -236,6 +238,8 @@ function Expand-OmOfflineArchive {
     if (-not (Test-Path -LiteralPath $Destination)) {
         New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     }
+    $ErrorActionPreference = 'Continue'
+    $PSNativeCommandUseErrorActionPreference = $false
     $output = & $TarPath -xzf $Path -C $Destination 2>&1
     if ($LASTEXITCODE -ne 0) {
         return [pscustomobject]@{ ok = $false; code = 'EXTRACT_FAILED'; issues = @(('tar -xzf failed: ' + (($output | Out-String).Trim()))) }
@@ -294,14 +298,9 @@ function Test-OmOfflineDockerReady {
     if (-not $DockerPath -or -not (Test-Path -LiteralPath $DockerPath -PathType Leaf)) {
         return [pscustomobject]@{ installed = $false; running = $false; path = $null; output = 'docker not found' }
     }
-    $running = $false
-    $output = ''
-    try {
-        $output = & $DockerPath info 2>&1 | Out-String
-        $running = ($LASTEXITCODE -eq 0)
-    } catch {
-        $output = $_.Exception.Message
-    }
+    $command = Invoke-OmDependencyCommand -FilePath $DockerPath -Arguments @('info')
+    $running = ($command.exitCode -eq 0)
+    $output = $command.output
     return [pscustomobject]@{ installed = $true; running = $running; path = $DockerPath; output = (Protect-OmText $output) }
 }
 
@@ -326,12 +325,9 @@ function Invoke-OmOfflineDockerLoad {
     if (-not $DockerPath -or -not (Test-Path -LiteralPath $DockerPath -PathType Leaf)) {
         return [pscustomobject]@{ ok = $false; code = 'DOCKER_MISSING'; exitCode = -1; output = 'docker not found'; arguments = @($arguments); dockerPath = $null }
     }
-    try {
-        $output = & $DockerPath @arguments 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
-    } catch {
-        return [pscustomobject]@{ ok = $false; code = 'DOCKER_LOAD_FAILED'; exitCode = -1; output = $_.Exception.Message; arguments = @($arguments); dockerPath = $DockerPath }
-    }
+    $command = Invoke-OmDependencyCommand -FilePath $DockerPath -Arguments $arguments
+    $output = $command.output
+    $exitCode = $command.exitCode
     return [pscustomobject]@{
         ok        = ($exitCode -eq 0)
         code      = $(if ($exitCode -eq 0) { 'DOCKER_LOADED' } else { 'DOCKER_LOAD_FAILED' })

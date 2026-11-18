@@ -34,16 +34,18 @@ Describe 'Installer custom path and autostart' {
             $_ -match 'postinstall' -and $_ -match 'Launch-Setup\.ps1'
         })
         $runLines.Count | Should -Be 2
-        $elevated = $runLines | Where-Object { $_ -notmatch 'runasoriginaluser' } | Select-Object -First 1
-        $unelevated = $runLines | Where-Object { $_ -match 'runasoriginaluser' } | Select-Object -First 1
+        $elevated = $runLines | Where-Object { $_ -match 'ShouldRunElevatedWizard' } | Select-Object -First 1
+        $unelevated = $runLines | Where-Object { $_ -match 'ShouldRunUnelevatedWizard' } | Select-Object -First 1
         $elevated | Should -Not -BeNullOrEmpty
         $unelevated | Should -Not -BeNullOrEmpty
         foreach ($line in $runLines) {
             $line | Should -Not -Match 'skipifsilent'
             $line | Should -Match 'postinstall'
+            $line | Should -Match 'runasoriginaluser'
             $line | Should -Match 'nowait'
         }
         $elevated | Should -Match 'Check:\s*ShouldRunElevatedWizard'
+        $elevated | Should -Match 'ProvisionOriginalUser'
         $unelevated | Should -Match 'Check:\s*ShouldRunUnelevatedWizard'
         $unelevated | Should -Match '\-NoElevate'
         $script:iss | Should -Match "HasCmdLineParam\('/NOAUTOSTART'\)"
@@ -136,11 +138,13 @@ Describe 'Browser fallback and wizard single-instance' {
         $launch | Should -Match '地址也保存在'
     }
 
-    It 'launcher reuses or clears the existing wizard through Stop-OpenMargin.ps1' {
+    It 'reuses a matching wizard and clears stale state without stopping other wizards' {
         $launch = Get-Content -Path (Join-Path $script:setupRoot 'installer\Launch-Setup.ps1') -Raw -Encoding UTF8
         $launch | Should -Match 'Stop-OpenMargin\.ps1'
         $launch | Should -Match '-Status'
-        $launch | Should -Match '-WizardOnly'
+        $launch | Should -Match 'wizard.stateMatches'
+        $launch | Should -Not -Match '-WizardOnly'
+        $launch | Should -Match 'Remove-Item -LiteralPath'
         $launch | Should -Match 'setup-web-url\.txt'
         $launch | Should -Match 'Show-SetupUrlFallback'
         $launch | Should -Match 'Open-SetupUrl'

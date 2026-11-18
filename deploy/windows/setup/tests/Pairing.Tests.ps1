@@ -44,3 +44,21 @@ Describe 'Pairing payload' {
         $raw | Should -Not -Match 'device-token-value'
     }
 }
+
+Describe 'Pairing identity from local ledger' {
+    It 'uses the running local API identity when the public endpoint is unavailable' {
+        $stateRoot = Join-Path $TestDrive 'local-pair'
+        Initialize-OmPaths -StateRoot $stateRoot -RepoRoot (Join-Path $TestDrive 'repo')
+        Mock -ModuleName OpenMargin.Setup Get-OmHttpStatus {
+            param($Url, $Headers, $TimeoutSec, $ProxyMode)
+            if ($Url -match '^http://127\.0\.0\.1:8767/') {
+                return [pscustomobject]@{ status = 200; body = '{"server_id":"rebuilt-ledger-id"}' }
+            }
+            return [pscustomobject]@{ status = 0; body = $null }
+        }
+        $result = Get-OmServerIdResult -BaseUrl 'https://pc.tailnet.ts.net/finance' -Token 'test-token'
+        $result.ok | Should -BeTrue
+        $result.serverId | Should -Be 'rebuilt-ledger-id'
+        Should -Invoke Get-OmHttpStatus -ModuleName OpenMargin.Setup -Times 1
+    }
+}

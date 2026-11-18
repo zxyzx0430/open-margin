@@ -19,7 +19,8 @@
         $listener.Start()
         try {
             while ($true) {
-                $client = $listener.AcceptTcpClient()
+                if (-not $listener.Pending()) { Start-Sleep -Milliseconds 50; continue }
+                    $client = $listener.AcceptTcpClient()
                 try {
                     $stream = $client.GetStream()
                     $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::ASCII)
@@ -30,8 +31,9 @@
                         if ($line -match '^(?i)x-admin-token:\s*(.+)$') { $token = $matches[1].Trim() }
                     }
                     $code = $status
-                    if ($expectToken -and $token -ne $expectToken) { $code = 401; $body = '{"detail":"Unauthorized"}' }
-                    $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+                    $responseBody = $body
+                    if ($expectToken -and $token -ne $expectToken) { $code = 401; $responseBody = '{"detail":"Unauthorized"}' }
+                    $bytes = [System.Text.Encoding]::UTF8.GetBytes($responseBody)
                     $header = "HTTP/1.1 $code OK`r`nContent-Type: application/json`r`nContent-Length: $($bytes.Length)`r`nConnection: close`r`n`r`n"
                     $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
                     $stream.Write($headerBytes, 0, $headerBytes.Length)
@@ -58,11 +60,16 @@
 Describe 'Phone verification detection' {
     BeforeEach {
         $script:stateRoot = Join-Path $TestDrive ('phone-' + [guid]::NewGuid().ToString('N'))
-        Initialize-OmPaths -StateRoot $script:stateRoot -RepoRoot $script:repoRoot
+        $fixtureRepo = Join-Path $script:stateRoot 'repo'
+        $fixtureSecrets = Join-Path $fixtureRepo 'secrets'
+        New-Item -ItemType Directory -Force -Path $fixtureSecrets | Out-Null
+        Initialize-OmPaths -StateRoot $script:stateRoot -RepoRoot $fixtureRepo
         $state = Read-OmState
         $state.step = 'COMPLETE'
         $state.phoneVerified = $false
         Save-OmState $state
+        $fixtureEnv = Join-Path $fixtureSecrets 'backend.env'
+        Set-Content -LiteralPath $fixtureEnv -Value 'FINANCE_ADMIN_TOKEN=test-admin-token' -Encoding UTF8
         $script:servers = @()
     }
 
@@ -130,7 +137,7 @@ Describe 'Phone verification detection' {
         try {
             Initialize-OmPaths -StateRoot $script:stateRoot -RepoRoot $tempRepo
             $result = Update-OmPhoneVerified -BaseUrl ('http://127.0.0.1:' + $server.Port)
-            $result.ok | Should -BeTrue
+            $result.ok | Should -BeTrue -Because ('device status returned ' + $result.code)
         } finally {
             Initialize-OmPaths -StateRoot $script:stateRoot -RepoRoot $originalRepo
         }

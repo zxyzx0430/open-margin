@@ -16,9 +16,7 @@
     The installing user is resolved from -OriginalUserSid, then -OriginalUser,
     then the current WindowsIdentity. Under normal UAC elevation the elevated
     token keeps the same user SID, so the current identity is a safe fallback.
-    If no identity can be resolved at all, the script falls back to the legacy
-    BUILTIN\Users grant and prints a warning; this is documented as the last
-    resort and is not expected on a real Windows installation.
+    If the requested identity cannot be resolved, the script fails explicitly.
 
     SIDs are used instead of localized group names so this works on Chinese and
     other non-English Windows installations.
@@ -67,6 +65,7 @@ function Resolve-OmAclUserSid {
             } catch { }
         }
     }
+    if ($User) { throw ('Cannot resolve installing user: ' + $User) }
     try {
         return ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
     } catch {
@@ -84,7 +83,7 @@ if (-not $DryRun) {
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         Write-Warning 'ACL 设置需要管理员权限；安装器应以管理员运行。'
-        exit 0
+        exit 1
     }
 }
 
@@ -96,10 +95,8 @@ try {
 }
 $fallbackToUsers = $false
 if (-not $userSidValue) {
-    # Documented last resort only. The current identity almost always resolves.
-    $userSidValue = 'S-1-5-32-545'
-    $fallbackToUsers = $true
-    Write-Warning 'Could not resolve the installing user; falling back to BUILTIN\Users. Re-run with -OriginalUserSid.'
+    Write-Error 'Could not resolve the installing user SID.'
+    exit 2
 }
 
 $installUser = '*' + $userSidValue
@@ -194,6 +191,18 @@ foreach ($item in $plan) {
     }
 }
 
+if ($failures.Count -eq 0) {
+    foreach ($path in @($AppRoot, $secrets)) {
+        try {
+            $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
+            $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+            if ($rules.Count -eq 0) { throw 'DACL is empty' }
+            $allow = @($rules | Where-Object { $_.IdentityReference.Value -eq $userSidValue -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) })
+            $deny = @($rules | Where-Object { $_.IdentityReference.Value -eq $userSidValue -and $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) })
+            if ($allow.Count -eq 0 -or $deny.Count -gt 0) { throw 'installing user has no usable read grant' }
+        } catch { $failures.Add($path + ': ACL verification failed: ' + $_.Exception.Message) }
+    }
+}
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Warning $failure }
     exit 1

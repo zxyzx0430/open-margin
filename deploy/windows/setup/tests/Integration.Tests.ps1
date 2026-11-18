@@ -24,6 +24,13 @@ Describe 'CLI check ignores the wizard setup port' {
         $script:listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
         $script:listener.Start()
         $script:wizardPort = ([System.Net.IPEndPoint]$script:listener.LocalEndpoint).Port
+        $script:freePorts = @()
+        foreach ($i in 1..3) {
+            $probe = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
+            $probe.Start()
+            $script:freePorts += ([System.Net.IPEndPoint]$probe.LocalEndpoint).Port
+            $probe.Stop()
+        }
     }
     AfterAll {
         try { $script:listener.Stop() } catch { }
@@ -32,7 +39,7 @@ Describe 'CLI check ignores the wizard setup port' {
     It 'does not report the listening wizard port as PORT_CONFLICT' {
         $cliState = Join-Path $TestDrive ('cli-state-' + [guid]::NewGuid().ToString('N'))
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:cliPath check -Json -StateRoot $cliState -RepoRoot $repoRoot -SetupPort $script:wizardPort 2>$null | Out-String
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:cliPath check -Json -StateRoot $cliState -RepoRoot $repoRoot -ApiPort $script:freePorts[0] -WallosPort $script:freePorts[1] -GatewayPort $script:freePorts[2] -SetupPort $script:wizardPort 2>$null | Out-String
         $json = $output | ConvertFrom-Json
         $portsCheck = @($json.checks) | Where-Object { $_.id -eq 'ports' }
         $portsCheck | Should -Not -BeNullOrEmpty
@@ -46,7 +53,7 @@ Describe 'CLI check ignores the wizard setup port' {
         [pscustomobject]@{ port = $script:wizardPort; pid = $PID; url = ('http://127.0.0.1:' + $script:wizardPort + '/') } |
             ConvertTo-Json | Set-Content -Path (Join-Path $cliState 'setup-web.json') -Encoding UTF8
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:cliPath check -Json -StateRoot $cliState -RepoRoot $repoRoot 2>$null | Out-String
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:cliPath check -Json -StateRoot $cliState -RepoRoot $repoRoot -ApiPort $script:freePorts[0] -WallosPort $script:freePorts[1] -GatewayPort $script:freePorts[2] 2>$null | Out-String
         $json = $output | ConvertFrom-Json
         $portsCheck = @($json.checks) | Where-Object { $_.id -eq 'ports' }
         $portsCheck.code | Should -Not -Be 'PORT_CONFLICT'

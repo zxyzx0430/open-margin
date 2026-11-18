@@ -10,6 +10,19 @@ function Get-OmServerIdResult {
         [int]$TimeoutSec = 15,
         [int]$Attempts = 3
     )
+    # Query the local service first so public DNS and proxy outages do not
+    # prevent pairing while the local ledger is healthy.
+    $state = Read-OmState
+    if ($state.ports -and $state.ports.api) {
+        $localUrl = 'http://127.0.0.1:' + $state.ports.api + '/api/v2/sync/changes?since=0&limit=1'
+        try {
+            $local = Get-OmHttpStatus -Url $localUrl -Headers @{ 'X-Device-Token' = $Token } -TimeoutSec $TimeoutSec -ProxyMode 'direct'
+            if ($local.status -eq 200 -and $local.body) {
+                $identity = $local.body | ConvertFrom-Json
+                if ($identity.server_id) { return [pscustomobject]@{ ok = $true; serverId = [string]$identity.server_id; error = $null } }
+            }
+        } catch { }
+    }
     $url = $BaseUrl.TrimEnd('/') + '/api/v2/sync/changes?since=0&limit=1'
     $lastError = $null
     $probeMode = Get-OmPublicProbeMode

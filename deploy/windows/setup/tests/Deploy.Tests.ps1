@@ -18,6 +18,8 @@ Describe 'Invoke-OmApproveFunnel watchdog install' {
             param($GatewayPort, $TimeoutSec, [switch]$DryRun)
             return [pscustomobject]@{ ok = $true; url = 'https://pc.tailnet.ts.net/finance' }
         }
+        Mock -ModuleName OpenMargin.Setup Set-OmEnvValueInFile { }
+        Mock -ModuleName OpenMargin.Setup Wait-OmPublicDns { return [pscustomobject]@{ ok = $true } }
         Mock -ModuleName OpenMargin.Setup Get-OmDeviceTokenFromFile { return 'device-token' }
         Mock -ModuleName OpenMargin.Setup Invoke-OmVerify {
             param($BaseUrl, $Token, $ProjectName, $RepoRoot, [switch]$SkipWallosOwner, [switch]$DryRun)

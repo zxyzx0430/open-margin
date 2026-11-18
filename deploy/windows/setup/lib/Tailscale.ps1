@@ -22,12 +22,8 @@ function Invoke-OmTailscale {
         return [pscustomobject]@{ exitCode = 0; output = 'DRY RUN: ' + $display; dryRun = $true }
     }
     Write-OmLog -Level INFO -Message $display
-    try {
-        $output = & $path @Arguments 2>&1 | Out-String
-        return [pscustomobject]@{ exitCode = $LASTEXITCODE; output = $output; dryRun = $false }
-    } catch {
-        return [pscustomobject]@{ exitCode = -1; output = $_.Exception.Message; dryRun = $false }
-    }
+    $result = Invoke-OmDependencyCommand -FilePath $path -Arguments $Arguments
+    return [pscustomobject]@{ exitCode = $result.exitCode; output = $result.output; dryRun = $false }
 }
 
 function Get-OmTailscaleStatusJson {

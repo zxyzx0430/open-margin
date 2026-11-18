@@ -116,11 +116,11 @@ BeforeAll {
         }
         if ($WorkingDirectory) { $params['WorkingDirectory'] = $WorkingDirectory }
         $process = Start-Process @params
+        $null = $process.Handle # Keep a process handle so ExitCode survives a fast exit on Windows PowerShell.
         if (-not $process.WaitForExit($TimeoutSec * 1000)) {
             try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch { }
             throw ('child process timed out after ' + $TimeoutSec + 's: ' + $FilePath)
         }
-        $process.Refresh()
         return [pscustomobject]@{
             ExitCode = $process.ExitCode
             StdOut   = (Get-Content -Path $stdout -Raw -ErrorAction SilentlyContinue)

@@ -80,6 +80,7 @@ Describe 'Get-OmHttpStatus proxy modes' {
             $listener.Start()
             try {
                 while ($true) {
+                    if (-not $listener.Pending()) { Start-Sleep -Milliseconds 50; continue }
                     $client = $listener.AcceptTcpClient()
                     try {
                         $stream = $client.GetStream()

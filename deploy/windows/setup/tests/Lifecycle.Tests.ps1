@@ -58,8 +58,12 @@ exit /b 0
 
     function Invoke-PsFile {
         param([string]$Path, [string[]]$Arguments)
-        $output = & $script:psExe -NoProfile -ExecutionPolicy Bypass -File $Path @Arguments 2>&1 | Out-String
-        return [pscustomobject]@{ Output = $output; ExitCode = $LASTEXITCODE }
+        $previous = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $output = & $script:psExe -NoProfile -ExecutionPolicy Bypass -File $Path @Arguments 2>&1 | Out-String
+            return [pscustomobject]@{ Output = $output; ExitCode = $LASTEXITCODE }
+        } finally { $ErrorActionPreference = $previous }
     }
 
     function New-TestApp {
@@ -485,6 +489,16 @@ Describe 'ACL hardening' {
         $plan = Get-JsonPlan -Output $result.Output -Prefix 'OPENMARGIN_ACL_PLAN='
         $plan.fallbackToUsers | Should -BeFalse
         $plan.originalUserSid | Should -Match '^S-1-5-'
+    }
+
+    It 'fails clearly for unresolved account names containing spaces, Chinese and domain separators' {
+        foreach ($account in @('No Such Account 83275', '不存在 用户 83275', 'NO-SUCH-DOMAIN\不存在 用户')) {
+            $result = Invoke-PsFile $script:setAclScript @(
+                '-AppRoot', $script:aclApp, '-OriginalUser', $account, '-DryRun'
+            )
+            $result.ExitCode | Should -Be 2
+            $result.Output | Should -Match 'Cannot resolve installing user'
+        }
     }
 
     It 'rejects an invalid SID instead of silently using Users' {

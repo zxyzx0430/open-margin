@@ -18,6 +18,8 @@ Describe 'Watchdog installation artifacts' {
         $config.workingDirectory | Should -Be $script:repoRoot
         $vbs = Get-Content -Path (Join-Path $dir 'Watchdog.vbs') -Raw -Encoding UTF8
         $vbs | Should -Match 'CurrentDirectory'
+        $vbs | Should -Match ([regex]::Escape('-StateRoot'))
+        $vbs | Should -Match ([regex]::Escape($stateRoot))
     }
 
     It 'does not contain volume-destroying compose commands' {

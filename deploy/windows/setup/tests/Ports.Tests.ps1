@@ -28,7 +28,7 @@ Describe 'Port helpers' {
         $listener.Start()
         try {
             $port = $listener.LocalEndpoint.Port
-            $ports = [pscustomobject]@{ api = 8767; wallos = 18082; gateway = 18768; setup = $port }
+            $ports = [pscustomobject]@{ api = $port; wallos = $port; gateway = $port; setup = $port }
             $resolved = Resolve-OmPorts -Ports $ports -IgnorePorts @($port)
             $resolved.conflicts.Count | Should -Be 0
         } finally {

@@ -78,6 +78,7 @@ function Resolve-OmUrlAclUserSid {
             } catch { }
         }
     }
+    if ($User) { throw ('Cannot resolve installing user: ' + $User) }
     try {
         return ([System.Security.Principal.WindowsIdentity]::GetCurrent()).User.Value
     } catch {
@@ -87,7 +88,7 @@ function Resolve-OmUrlAclUserSid {
 
 if (-not $DryRun -and -not (Test-OmUrlAclAdmin)) {
     Write-Warning 'URL ACL 需要管理员权限。请用管理员 PowerShell 运行本脚本；安装器已自动提权。'
-    exit 0
+    exit 1
 }
 
 try {
@@ -98,10 +99,8 @@ try {
 }
 $fallbackToUsers = $false
 if (-not $userSidValue) {
-    # Documented last resort only; normally the current identity resolves.
-    $userSidValue = 'S-1-5-32-545'
-    $fallbackToUsers = $true
-    Write-Warning 'Could not resolve the installing user; falling back to BUILTIN\Users. Re-run with -OriginalUserSid.'
+    Write-Error 'Could not resolve the installing user SID.'
+    exit 2
 }
 
 $adminsSid = 'S-1-5-32-544'

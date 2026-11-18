@@ -69,9 +69,29 @@ function New-OmSecretValue {
 
 function Set-OmFileAcl {
     param([Parameter(Mandatory = $true)][string]$Path)
+    $sid = $env:OPENMARGIN_ORIGINAL_USER_SID
+    if (-not $sid) { $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+    $sid = (New-Object Security.Principal.SecurityIdentifier($sid)).Value
+    $inherit = if ((Get-Item -LiteralPath $Path).PSIsContainer) { '(OI)(CI)' } else { '' }
+    $previous = $ErrorActionPreference
     try {
-        & icacls.exe $Path /inheritance:r /grant:r ("$env:USERNAME:(OI)(CI)F") /grant:r 'SYSTEM:(OI)(CI)F' /grant:r 'Administrators:(OI)(CI)F' *> $null
-    } catch { }
+        $ErrorActionPreference = 'Continue'
+        $output = & icacls.exe $Path /inheritance:r /grant:r (('*' + $sid + ':' + $inherit + 'F')) /grant:r ('*S-1-5-18:' + $inherit + 'F') /grant:r ('*S-1-5-32-544:' + $inherit + 'F') 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw ('icacls failed: ' + $output) }
+    } finally { $ErrorActionPreference = $previous }
+    $acl = Get-Acl -LiteralPath $Path
+    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -eq 0) { throw ('empty DACL: ' + $Path) }
+    $reader = @($rules | Where-Object {
+        $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Allow' -and
+        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData)
+    })
+    $denied = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) })
+    if ($reader.Count -eq 0 -or $denied.Count -gt 0) { throw ('installing user has no usable read grant: ' + $Path) }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        $stream = [IO.File]::OpenRead($Path)
+        $stream.Dispose()
+    }
 }
 
 function New-OmSecrets {
@@ -90,6 +110,7 @@ function New-OmSecrets {
     if ((Test-Path $backend) -xor (Test-Path $ledger)) {
         throw 'Only one secret file exists. Stop to avoid overwriting existing data.'
     }
+    Set-OmFileAcl -Path $secrets
     $created = $false
     if (-not (Test-Path $backend)) {
         $device = New-OmSecretValue
@@ -115,9 +136,10 @@ function New-OmSecrets {
         $utf8 = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($backend, $be + $nl, $utf8)
         [System.IO.File]::WriteAllText($ledger, $wl + $nl, $utf8)
-        Set-OmFileAcl -Path $secrets
         $created = $true
     }
+    Set-OmFileAcl -Path $backend
+    Set-OmFileAcl -Path $ledger
     $envFile = Join-Path $RepoRoot '.env'
     $envLines = @(
         'FINANCE_API_PORT=' + $Ports.api
@@ -151,6 +173,7 @@ function Invoke-OmDockerCompose {
     # $ErrorActionPreference=Stop turns the first such line into a terminating
     # error and aborts compose mid-build.
     $previous = $ErrorActionPreference
+    $PSNativeCommandUseErrorActionPreference = $false
     try {
         $ErrorActionPreference = 'Continue'
         $output = & $docker @allArgs 2>&1 | Out-String
@@ -231,7 +254,27 @@ function Invoke-OmComposeUp {
     } elseif (-not $SkipBuild) {
         $composeArgs += '--build'
     }
+    if (-not $NoBuild -and -not $SkipBuild) {
+        $docker = Get-OmCommandPath 'docker'
+        if (-not $docker) { return [pscustomobject]@{ ok = $false; output = 'Docker 未安装或不可用；请先安装并启动 Docker Desktop。'; step = 'pull' } }
+        foreach ($image in @('python:3.11-slim', 'nginx:1.28-alpine', 'bellamy/wallos@sha256:0006879778f31a962a3873f7682514b92a3c7665dcbc4764fcc241ad968eaccd')) {
+            $pull = Invoke-OmDependencyCommand -FilePath $docker -Arguments @('pull', $image)
+            if ($pull.exitCode -ne 0 -and $pull.output -match '(?i)(cannot connect to the docker daemon|error during connect|docker desktop is unable to start|the system cannot find the file specified.*docker)') {
+                if (Wait-OmDockerReady) {
+                    $pull = Invoke-OmDependencyCommand -FilePath $docker -Arguments @('pull', $image)
+                }
+            }
+            if ($pull.exitCode -ne 0) {
+                return [pscustomobject]@{ ok = $false; output = ('镜像拉取失败，请检查网络或在依赖检查页面导入离线镜像包后重试。 ' + (Protect-OmText $pull.output)); step = 'pull' }
+            }
+        }
+    }
     $result = Invoke-OmDockerCompose -Arguments $composeArgs -ProjectName $ProjectName -RepoRoot $RepoRoot
+    if ($result.exitCode -ne 0 -and $result.output -match '(?i)(cannot connect to the docker daemon|error during connect|docker desktop is unable to start|the system cannot find the file specified.*docker)') {
+        if (Wait-OmDockerReady) {
+            $result = Invoke-OmDockerCompose -Arguments $composeArgs -ProjectName $ProjectName -RepoRoot $RepoRoot
+        }
+    }
     if ($result.exitCode -ne 0) {
         return [pscustomobject]@{ ok = $false; output = $result.output; step = 'compose' }
     }

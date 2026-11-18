@@ -205,9 +205,7 @@ function Start-OmWebJob {
     $resultPath = Join-Path $jobDir ($id + '.result.json')
     $progressPath = Join-Path $jobDir ($id + '.progress.json')
     Write-OmAtomicJson -Path $paramsPath -Value $Params
-    try {
-        & icacls.exe $paramsPath /inheritance:r /grant:r ("$env:USERNAME:F") *> $null
-    } catch { }
+    Set-OmFileAcl -Path $paramsPath
     Set-OmJobStatus -Path $statusPath -Status 'running'
     Start-Job -Name ('om-' + $id) -ScriptBlock {
         param($ModulePath, $ActionName, $ParamsPath, $StatusPath, $ResultPath, $StateRootArg, $RepoRootArg, $SetupPortArg, $DryRunArg, $JobIdArg)

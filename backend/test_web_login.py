@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 import app as core
 import oauth_support as oauth
 from web_login import COOKIE_NAME
+from config import PUBLIC_ORIGIN
 
 class WebLoginTests(unittest.TestCase):
     def setUp(self):
@@ -22,8 +23,8 @@ class WebLoginTests(unittest.TestCase):
             c.execute("CREATE TABLE user(id INTEGER PRIMARY KEY,username TEXT UNIQUE,password TEXT NOT NULL)")
             c.execute("INSERT INTO user (username, password) VALUES (?,?)",("owner",
                   bcrypt.hashpw(b"example-test-password",bcrypt.gensalt()).decode()))
-        self.client=TestClient(core.app,base_url="https://finance.example.com")
-        self.headers={"Origin":"https://finance.example.com"}
+        self.client=TestClient(core.app,base_url=PUBLIC_ORIGIN)
+        self.headers={"Origin":PUBLIC_ORIGIN}
     def tearDown(self):
         self.client.close()
         core.DB,oauth.WALLOS_DB=self.original_db,self.original_user_db

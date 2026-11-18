@@ -33,12 +33,13 @@ function Install-OmWatchdog {
     [System.IO.File]::WriteAllText($stateFile, ($config | ConvertTo-Json -Depth 6), $utf8)
     $vbs = Join-Path $dir 'Watchdog.vbs'
     $vbsRoot = ([string]$RepoRoot).Replace('"', '""')
+    $vbsStateRoot = ([string]$StateRoot).Replace('"', '""')
     $vbsContent = @"
 Set sh = CreateObject("WScript.Shell")
 sh.CurrentDirectory = "$vbsRoot"
-sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""$target""", 0, False
+sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""$target"" -StateRoot ""$vbsStateRoot""", 0, False
 "@
-    [System.IO.File]::WriteAllText($vbs, $vbsContent, [System.Text.Encoding]::ASCII)
+    [System.IO.File]::WriteAllText($vbs, $vbsContent, [System.Text.Encoding]::Unicode)
     if ($DryRun) {
         return [pscustomobject]@{ ok = $true; code = 'DRY_RUN'; task = $TaskName; script = $target }
     }
@@ -46,7 +47,9 @@ sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -F
         $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"' + $vbs + '"') -WorkingDirectory $RepoRoot
         $trigger = New-ScheduledTaskTrigger -AtLogOn
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -Hidden
-        $principal = New-ScheduledTaskPrincipal -UserId ($env:USERDOMAIN + '\' + $env:USERNAME) -LogonType Interactive -RunLevel Limited
+        $taskUser = $env:OPENMARGIN_ORIGINAL_USER_SID
+        if (-not $taskUser) { $taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+        $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel Limited
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
         return [pscustomobject]@{ ok = $true; code = 'WATCHDOG_INSTALLED'; task = $TaskName; script = $target }
     } catch {

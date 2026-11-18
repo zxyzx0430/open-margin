@@ -119,7 +119,7 @@ function Invoke-OmRemoteDeploy {
 
         $compose = Invoke-OmComposeUp -RepoRoot $RepoRoot -Ports $Ports -ProjectName $ProjectName -NoBuild:$NoBuild
         if (-not $compose.ok) {
-            return (New-OmDeployFailure -Step 'compose' -Code 'COMPOSE_FAILED' -Message '启动清衡服务失败。' -Detail $compose.output -Retryable)
+            return (New-OmDeployFailure -Step 'compose' -Code 'COMPOSE_FAILED' -Message $(if ($compose.step -eq 'pull') { '镜像拉取失败，请在依赖检查页面导入离线镜像包后重试。' } else { '启动清衡服务失败。' }) -Detail $compose.output -Retryable)
         }
 
         $null = Set-OmProgress -Stage 'owner' -Percent 35 -Message '检查 Wallos 管理员'
@@ -233,10 +233,19 @@ function Invoke-OmApproveFunnel {
     $state.publicSyncUrl = $wait.url
     Save-OmState $state
     $null = Set-OmProgress -Stage 'funnel' -Percent 75 -Message 'Funnel 已授权'
+    if (-not $DryRun) {
+        Set-OmEnvValueInFile -Name 'FINANCE_SYNC_PUBLIC_URL' -Value $wait.url -Path (Get-OmBackendEnvPath)
+        $dns = Wait-OmPublicDns -Url ($wait.url.TrimEnd('/') + '/health') -TimeoutSec 600
+        if (-not $dns.ok) { return (New-OmDeployFailure -Step 'dns' -Code $dns.code -Message $dns.message -Detail $dns.detail -Retryable) }
+    }
     $token = Get-OmDeviceTokenFromFile
+    if (-not $token) { return (New-OmDeployFailure -Step 'verify' -Code 'NO_DEVICE_TOKEN' -Message 'secrets/backend.env 缺少设备密钥。') }
     $verify = Invoke-OmVerify -BaseUrl $wait.url -Token $token -ProjectName $ProjectName -RepoRoot $RepoRoot -DryRun:$DryRun
     if (-not $verify.ok) {
         return [pscustomobject]@{ ok = $false; code = 'VERIFY_FAILED'; message = 'Funnel 已开启，但自测未通过。'; checks = $verify.checks; retryable = $true }
+    }
+    if ([string]::IsNullOrWhiteSpace($verify.serverId)) {
+        return (New-OmDeployFailure -Step 'pairing' -Code 'SERVER_ID_UNAVAILABLE' -Message '无法从同步接口读取账本身份。' -Retryable)
     }
     # The funnel-approval resume path must leave the same watchdog behind as a
     # full deploy; otherwise a deployment finished here has no logon recovery.
@@ -248,8 +257,10 @@ function Invoke-OmApproveFunnel {
             Write-OmLog -Level WARN -Message ('watchdog install failed after funnel approval: ' + $watchdog.code)
         }
     }
-    $null = Set-OmStep 'COMPLETE' -Force
+    $null = Set-OmStateValue -Name phoneVerified -Value $false
     $null = Set-OmStateValue -Name mode -Value 'remote_sync'
+    $null = Set-OmProgress -Stage 'complete' -Percent 100 -Message '部署完成'
+    $null = Set-OmStep 'COMPLETE' -Force
     $null = Update-OmPhoneVerified -BaseUrl ('http://127.0.0.1:' + $Ports.api)
     return [pscustomobject]@{
         ok = $true; code = 'FUNNEL_READY'; message = 'Funnel 已开启，自测通过。';

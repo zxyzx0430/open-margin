@@ -44,3 +44,48 @@ Describe 'Wallos owner check command' {
         $line | Should -Match "SELECT COUNT\(\*\) FROM user"
     }
 }
+
+Describe 'Image pull preflight' {
+    BeforeEach {
+        Mock -ModuleName OpenMargin.Setup New-OmSecrets { return [pscustomobject]@{} }
+        Mock -ModuleName OpenMargin.Setup Get-OmCommandPath { return 'docker.exe' }
+        Mock -ModuleName OpenMargin.Setup Invoke-OmDockerCompose { return [pscustomobject]@{ exitCode = 0; output = 'ok' } }
+    }
+    It 'stops before compose and suggests offline import after a registry failure' {
+        Mock -ModuleName OpenMargin.Setup Invoke-OmDependencyCommand { return [pscustomobject]@{ exitCode = 1; output = 'registry unreachable' } }
+        $result = Invoke-OmComposeUp -RepoRoot $script:repoRoot -SkipHealth
+        $result.ok | Should -BeFalse
+        $result.step | Should -Be 'pull'
+        $result.output | Should -Match '离线'
+        Should -Invoke Invoke-OmDockerCompose -ModuleName OpenMargin.Setup -Times 0
+    }
+    It 'waits and retries a daemon failure only once' {
+        $script:pullCalls = 0
+        Mock -ModuleName OpenMargin.Setup Wait-OmDockerReady { return $true }
+        Mock -ModuleName OpenMargin.Setup Invoke-OmDependencyCommand {
+            $script:pullCalls++
+            return [pscustomobject]@{ exitCode = 1; output = 'cannot connect to the docker daemon' }
+        }
+        $result = Invoke-OmComposeUp -RepoRoot $script:repoRoot -SkipHealth
+        $result.ok | Should -BeFalse
+        Should -Invoke Wait-OmDockerReady -ModuleName OpenMargin.Setup -Times 1 -Exactly
+        Should -Invoke Invoke-OmDependencyCommand -ModuleName OpenMargin.Setup -Times 2 -Exactly
+    }
+}
+
+Describe 'Secrets ACL verification' {
+    It 'restricts existing secret files in a path with spaces and Chinese characters' {
+        $repo = Join-Path $TestDrive '用户 数据'
+        New-Item -ItemType Directory -Force -Path $repo | Out-Null
+        $first = New-OmSecrets -RepoRoot $repo
+        $second = New-OmSecrets -RepoRoot $repo
+        $first.created | Should -BeTrue
+        $second.created | Should -BeFalse
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        foreach ($path in @($first.secretsPath, $first.backendEnv, $first.ledgerEnv)) {
+            $rules = @((Get-Acl -LiteralPath $path).GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+            $rules.Count | Should -BeGreaterThan 0
+            @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Allow' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) }).Count | Should -BeGreaterThan 0
+        }
+    }
+}

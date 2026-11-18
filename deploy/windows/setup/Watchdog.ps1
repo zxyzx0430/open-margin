@@ -11,6 +11,7 @@
 # never approves Funnel, never opens a window and never removes volumes.
 
 $ErrorActionPreference = 'Continue'
+$PSNativeCommandUseErrorActionPreference = $false
 $logDir = Join-Path $StateRoot 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
 $logPath = Join-Path $logDir 'watchdog.log'

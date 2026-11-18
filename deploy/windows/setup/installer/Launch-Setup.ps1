@@ -17,11 +17,16 @@ param(
     [int[]]$Ports = @(18770, 18771, 18772, 18773, 18774, 18775, 18776, 18777, 18778, 18779),
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'OpenMargin'),
     [string]$AppRoot = '',
+    [string]$OriginalUserSid = '',
+    [switch]$ProvisionOriginalUser,
     [switch]$NoBrowser,
     [switch]$NoElevate
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $OriginalUserSid) { $OriginalUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+$OriginalUserSid = (New-Object Security.Principal.SecurityIdentifier($OriginalUserSid)).Value
+$env:OPENMARGIN_ORIGINAL_USER_SID = $OriginalUserSid
 
 $setupRoot = Split-Path -Parent $PSScriptRoot
 $setupScript = Join-Path $setupRoot 'Start-OpenMarginSetupWeb.ps1'
@@ -169,14 +174,14 @@ $stopScript = Join-Path $PSScriptRoot 'Stop-OpenMargin.ps1'
 $handoffPath = Join-Path $StateRoot 'setup-web-url.txt'
 $isElevated = Test-LaunchElevated
 
-# The installer's postinstall entry already runs elevated. A Start Menu launch
-# does not, so self-elevate with one UAC (matching the installer's one-UAC
-# design) unless the caller explicitly chose the /NOELEVATE path.
+# Capture the original identity and state path before requesting elevation.
+# The installer and Start Menu both launch this process as the original user.
 if (-not $isElevated -and -not $NoElevate) {
     try {
         $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $argumentLine = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
-            $PSCommandPath + '" -AppRoot "' + $AppRoot + '" -StateRoot "' + $StateRoot + '"'
+            $PSCommandPath + '" -AppRoot "' + $AppRoot + '" -StateRoot "' + $StateRoot + '" -OriginalUserSid "' + $OriginalUserSid + '"'
+        if ($ProvisionOriginalUser) { $argumentLine += ' -ProvisionOriginalUser' }
         if ($NoBrowser) { $argumentLine += ' -NoBrowser' }
         Write-LaunchLog 'launcher is not elevated; requesting UAC and relaunching'
         Start-Process -FilePath $powershellExe -ArgumentList $argumentLine -Verb RunAs -ErrorAction Stop | Out-Null
@@ -187,6 +192,17 @@ if (-not $isElevated -and -not $NoElevate) {
 }
 
 try {
+    if ($ProvisionOriginalUser -and $isElevated) {
+        foreach ($helper in @('Set-AppAcl.ps1', 'Install-UrlAcl.ps1')) {
+            $helperPath = Join-Path $PSScriptRoot $helper
+            $helperArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $helperPath + '"'), '-OriginalUserSid', $OriginalUserSid)
+            if ($helper -eq 'Set-AppAcl.ps1') { $helperArgs += @('-AppRoot', ('"' + $AppRoot + '"')) }
+            $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $helperArgs -WindowStyle Hidden -PassThru
+            $null = $process.Handle
+            $process.WaitForExit()
+            if ($process.ExitCode -ne 0) { throw ($helper + ' failed with exit code ' + $process.ExitCode) }
+        }
+    }
     if (-not (Test-Path $setupScript)) {
         throw ('找不到向导脚本：' + $setupScript)
     }
@@ -197,7 +213,7 @@ try {
     $wizardStatus = Get-LaunchWizardStatus -StopScript $stopScript -AppRoot $AppRoot -StateRoot $StateRoot
     if ($wizardStatus -and $wizardStatus.wizard) {
         $wizard = $wizardStatus.wizard
-        if ([bool]$wizard.running -and [string]$wizard.url) {
+        if ([bool]$wizard.running -and [bool]$wizard.stateMatches -and [string]$wizard.url) {
             $reuseUrl = $null
             if (Test-Path $handoffPath) {
                 try { $reuseUrl = (Get-Content -Path $handoffPath -Raw -Encoding UTF8).Trim() } catch { }
@@ -223,7 +239,8 @@ try {
         if ($wizard.statePid -and -not [bool]$wizard.stateMatches) {
             Write-LaunchLog ('clearing stale setup-web.json (recorded pid ' + $wizard.statePid + ')')
             try {
-                & $stopScript -WizardOnly -AppRoot $AppRoot -StateRoot $StateRoot -Json | Out-Null
+                Remove-Item -LiteralPath (Join-Path $StateRoot 'setup-web.json') -Force -ErrorAction Stop
+                if (Test-Path -LiteralPath $handoffPath) { Remove-Item -LiteralPath $handoffPath -Force -ErrorAction Stop }
             } catch {
                 Write-LaunchLog ('stale wizard state cleanup failed: ' + $_.Exception.Message)
             }

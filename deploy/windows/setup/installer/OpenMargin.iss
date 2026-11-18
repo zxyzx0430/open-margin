@@ -127,13 +127,12 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 ; A one-time URL ACL lets the un-elevated wizard bind 127.0.0.1 setup ports.
 ; The reservation is narrowed to the installing user + Administrators.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\deploy\windows\setup\installer\Install-UrlAcl.ps1"" -OriginalUser ""{username}"""; StatusMsg: "正在配置本机向导端口..."; Flags: runhidden waituntilterminated
-; Start the wizard elevated so Docker/Tailscale/URL ACL setup needs only the
-; installer's one UAC. Launch-Setup opens the browser through explorer.exe so
-; the browser itself stays at the original user's integrity level.
+; Start as the original user so the launcher can preserve its SID and state path
+; across UAC elevation, including elevation with a different administrator.
 ; /NOELEVATE selects the original user-level wizard instead; /NOAUTOSTART
 ; disables both postinstall entries for automation. skipifsilent is deliberately
 ; not set: a silent install still opens the wizard unless /NOAUTOSTART is passed.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"""; Description: "立即打开清衡设置向导"; Flags: postinstall nowait runhidden; Check: ShouldRunElevatedWizard
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -ProvisionOriginalUser"; Description: "立即打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunElevatedWizard
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -NoElevate"; Description: "以当前用户权限打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunUnelevatedWizard
 
 [UninstallRun]
