@@ -180,7 +180,7 @@ internal fun PairingQrScanAction(
 private fun scanOptions(): ScanOptions = ScanOptions().apply {
     setCaptureActivity(PairingQrCaptureActivity::class.java)
     setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-    setPrompt(tr("对准电脑上的配对二维码"))
+    setPrompt(tr("对准服务器上的配对二维码"))
     setBeepEnabled(false)
     setOrientationLocked(false)
     setBarcodeImageEnabled(false)

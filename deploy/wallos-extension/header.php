@@ -221,6 +221,7 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
               <?php include "images/siteicons/svg/mobile-menu/profile.php"; ?>
               <?= translate('profile', $i18n) ?></a>
             <?php if ($isAdmin): ?>
+              <a href="pairing.php">手机配对</a>
               <a href="admin.php">
                 <?php include "images/siteicons/svg/mobile-menu/admin.php"; ?>
                 <?= translate('admin', $i18n) ?>

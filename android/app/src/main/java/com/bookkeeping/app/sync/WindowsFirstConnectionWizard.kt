@@ -120,25 +120,25 @@ internal fun WindowsFirstConnectionWizard(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(tr("Windows 首次连接向导"), style = MaterialTheme.typography.titleMedium)
-            Text(tr("3 步连接自己的电脑。已使用 VPS 的用户无需运行此向导。"))
+            Text(tr("清衡服务器配对"), style = MaterialTheme.typography.titleMedium)
+            Text(tr("扫码连接 VPS 或 Windows 上的清衡服务器。"))
             OutlinedButton(onClick = { expanded = !expanded }) {
-                Text(if (expanded) tr("收起向导") else tr("开始连接 Windows"))
+                Text(if (expanded) tr("收起向导") else tr("开始配对"))
             }
             if (!expanded && message.isNotBlank()) Text(message)
             if (expanded) {
                 Text("${tr("步骤")} ${step + 1}/3", style = MaterialTheme.typography.titleSmall)
                 when (step) {
                     0 -> {
-                        Text(tr("① 电脑已安装 Docker Desktop，清衡服务已启动。"))
-                        Text(tr("② 电脑已开启 Tailscale Funnel，手机不需要安装 Tailscale。"))
-                        Text(tr("③ 手机用自己的网络或常用 VPN 即可访问 https://电脑名.网络名.ts.net/finance。"))
-                        Text(tr("④ 在电脑完成页点「扫码连接」，或手动填写显示的地址和设备同步密钥。"))
-                        Text(tr("电脑关机时仍可在手机离线记账，但暂时不能同步。"))
+                        Text(tr("① 在 VPS 或 Windows 上完成清衡服务器部署。"))
+                        Text(tr("② 在服务器管理后台打开「手机配对」，显示二维码。"))
+                        Text(tr("③ 手机能够通过 HTTPS 访问自己的 /finance 服务器地址。"))
+                        Text(tr("④ 扫码读取连接信息，或手动填写地址与设备密钥。"))
+                        Text(tr("服务器暂时离线时，手机仍可本地记账，恢复网络后继续同步。"))
                         Button(onClick = { step = 1 }) { Text(tr("下一步：连接服务器")) }
                     }
                     1 -> {
-                        Text(tr("最快的方式：扫描电脑完成页上的配对二维码，会自动填入地址和密钥，再经只读验证后才允许启用。"))
+                        Text(tr("扫描服务器管理后台的配对二维码，自动填写地址和密钥，经过只读验证后再启用同步。"))
                         QrPairingControls(
                             enabled = !testing,
                             onPayload = { payload, _ ->
@@ -169,8 +169,8 @@ internal fun WindowsFirstConnectionWizard(
                                 url = it; testResult = null; verifiedServer = ""
                                 scannedServerId = null; message = ""
                             },
-                            label = { Text(tr("Tailscale HTTPS 地址")) },
-                            placeholder = { Text(tr("https://电脑名.网络名.ts.net/finance")) },
+                            label = { Text(tr("服务器 HTTPS 地址")) },
+                            placeholder = { Text(tr("https://你的域名/finance")) },
                             singleLine = true,
                             enabled = !testing,
                             modifier = Modifier.fillMaxWidth()
@@ -207,7 +207,7 @@ internal fun WindowsFirstConnectionWizard(
                         Text(tr("不会同步 Wallos 的订阅配置和预算设置。"))
                         Row {
                             Checkbox(checked = confirmed, onCheckedChange = { confirmed = it })
-                            Text(tr("我确认这是自己的 Windows 账本，并同意开始双向同步。"))
+                            Text(tr("我确认这是自己的清衡账本，并同意开始双向同步。"))
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { step = 1 }, enabled = !testing) { Text(tr("返回")) }
@@ -252,22 +252,22 @@ internal fun WindowsFirstConnectionWizard(
 
 private fun connectionExplanation(result: WindowsConnectionPolicy.Result): String = when (result) {
     WindowsConnectionPolicy.Result.READY -> tr("连接成功：HTTPS、设备密钥和账本身份均已验证。")
-    WindowsConnectionPolicy.Result.INVALID_ADDRESS -> tr("请输入完整的 Tailscale HTTPS 地址，格式为 https://设备名.网络名.ts.net/finance")
-    WindowsConnectionPolicy.Result.INVALID_TOKEN -> tr("设备密钥至少需要 16 位，请从 Windows secrets/backend.env 读取。")
+    WindowsConnectionPolicy.Result.INVALID_ADDRESS -> tr("请输入完整的 HTTPS 服务器地址，例如 https://你的域名/finance")
+    WindowsConnectionPolicy.Result.INVALID_TOKEN -> tr("设备密钥至少需要 16 位，请从服务器安全配置或配对二维码获取。")
     WindowsConnectionPolicy.Result.UNAUTHORIZED -> tr("服务器拒绝访问。请检查设备密钥是否正确。")
-    WindowsConnectionPolicy.Result.ROUTE_MISSING -> tr("找不到同步接口。请检查 Windows API-only 网关和 Tailscale Serve。")
+    WindowsConnectionPolicy.Result.ROUTE_MISSING -> tr("找不到同步接口。请检查 HTTPS 反向代理和 Finance API。")
     WindowsConnectionPolicy.Result.WRONG_LEDGER -> tr("服务器账本与手机已同步账本不符，已阻止连接；请核对迁移。")
     WindowsConnectionPolicy.Result.INVALID_RESPONSE -> tr("服务器返回的账本身份不完整，请确认清衡后端版本。")
-    WindowsConnectionPolicy.Result.UNAVAILABLE -> tr("无法连接服务器。请检查电脑、Docker、Tailscale 和手机 VPN 状态。")
+    WindowsConnectionPolicy.Result.UNAVAILABLE -> tr("无法连接服务器。请检查服务器状态、HTTPS 域名和手机网络。")
 }
 
 private fun pairingRejectMessage(reason: PairingRejectReason): String = when (reason) {
     PairingRejectReason.EMPTY -> tr("二维码内容为空，请重新扫描。")
-    PairingRejectReason.OVERSIZED -> tr("二维码内容过长，已拒绝。请扫描电脑完成页上的配对二维码。")
+    PairingRejectReason.OVERSIZED -> tr("二维码内容过长，已拒绝。请扫描清衡服务器上的配对二维码。")
     PairingRejectReason.MALFORMED -> tr("这不是清衡配对二维码（内容格式不正确）。")
     PairingRejectReason.UNSUPPORTED_VERSION -> tr("配对二维码版本不受支持，请把手机 App 更新到最新版本。")
     PairingRejectReason.WRONG_KIND -> tr("这不是清衡的配对二维码。")
-    PairingRejectReason.INVALID_URL -> tr("二维码里的服务器地址无效：需要 https://设备名.网络名.ts.net/finance，且不能带端口、参数或用户名。")
+    PairingRejectReason.INVALID_URL -> tr("二维码里的服务器地址无效：需要 https://域名/finance，不能带端口、参数或用户名。")
     PairingRejectReason.INVALID_TOKEN -> tr("二维码里的设备密钥无效（至少 16 位，不能包含空白字符）。")
     PairingRejectReason.INVALID_SERVER_ID -> tr("二维码里的账本身份无效（至少 16 位）。")
 }

@@ -1090,6 +1090,31 @@ internal object EnglishUiText {
         "二维码里的账本身份无效（至少 16 位）。" to
             "The QR ledger identity is invalid (at least 16 characters).",
 
+        // === 统一 VPS / Windows 服务器扫码配对 ===
+        "清衡服务器配对" to "Pair Open Margin server",
+        "扫码连接 VPS 或 Windows 上的清衡服务器。" to "Scan to connect to an Open Margin VPS or Windows server.",
+        "开始配对" to "Start pairing",
+        "① 在 VPS 或 Windows 上完成清衡服务器部署。" to "① Set up Open Margin on your VPS or Windows computer.",
+        "② 在服务器管理后台打开「手机配对」，显示二维码。" to "② Open Phone pairing in your server dashboard to display the QR code.",
+        "③ 手机能够通过 HTTPS 访问自己的 /finance 服务器地址。" to "③ Make sure your phone can reach your server's HTTPS /finance address.",
+        "④ 扫码读取连接信息，或手动填写地址与设备密钥。" to "④ Scan the QR or manually enter the server URL and device key.",
+        "服务器暂时离线时，手机仍可本地记账，恢复网络后继续同步。" to "You can record transactions offline; sync resumes when the server is available.",
+        "扫描服务器管理后台的配对二维码，自动填写地址和密钥，经过只读验证后再启用同步。" to "Scan the pairing QR in the server dashboard to fill in the address and key. Sync begins only after read-only verification and confirmation.",
+        "服务器 HTTPS 地址" to "Server HTTPS address",
+        "https://你的域名/finance" to "https://your-domain/finance",
+        "我确认这是自己的清衡账本，并同意开始双向同步。" to "I confirm this is my Open Margin ledger and agree to enable two-way sync.",
+        "请输入完整的 HTTPS 服务器地址，例如 https://你的域名/finance" to "Enter the full HTTPS server address, e.g. https://your-domain/finance",
+        "设备密钥至少需要 16 位，请从服务器安全配置或配对二维码获取。" to "Device key must be at least 16 characters. Get it from the server configuration or pairing QR.",
+        "找不到同步接口。请检查 HTTPS 反向代理和 Finance API。" to "Sync API not found. Check the HTTPS reverse proxy and Finance API.",
+        "无法连接服务器。请检查服务器状态、HTTPS 域名和手机网络。" to "Cannot reach the server. Check server status, HTTPS domain and your phone's network.",
+        "二维码内容过长，已拒绝。请扫描清衡服务器上的配对二维码。" to "QR payload too large. Scan the pairing QR displayed by your Open Margin server.",
+        "二维码里的服务器地址无效：需要 https://域名/finance，不能带端口、参数或用户名。" to "Invalid QR server URL. Use https://domain/finance without an explicit port, query or username.",
+        "配对服务器" to "Pair server",
+        "扫描服务器上的配对二维码" to "Scan the pairing QR code on your server",
+        "扫码或手动填写服务器地址与设备密钥。" to "Scan a pairing QR or manually enter the server address and device key.",
+        "二维码无效，请扫描清衡服务器上的配对二维码。" to "Invalid QR. Scan the pairing code displayed by your Open Margin server.",
+        "对准服务器上的配对二维码" to "Point the camera at the QR code on your server",
+
         // === 一句话记账 / 长按 FAB 说话记账 ===
         // 占位示例给具体日期和钟点：相对时间（"昨天中午"）会让用户照着说不出可解析的时间。
         "比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐" to

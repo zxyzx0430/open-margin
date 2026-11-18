@@ -2,7 +2,7 @@ package com.bookkeeping.app.sync
 
 import java.net.URI
 
-/** Validation and read-only server probe decisions for Windows private onboarding. */
+/** Validation and read-only server probe decisions for any self-hosted HTTPS endpoint. */
 internal object WindowsConnectionPolicy {
     enum class Result {
         READY, INVALID_ADDRESS, INVALID_TOKEN, UNAUTHORIZED, UNAVAILABLE,
@@ -12,8 +12,17 @@ internal object WindowsConnectionPolicy {
     fun validateAddress(raw: String): Boolean {
         val uri = runCatching { URI(raw.trim()) }.getOrNull() ?: return false
         val host = uri.host?.lowercase() ?: return false
+        // Ordinary VPS domains and Tailscale hosts follow the same pairing protocol.
+        // Accept DNS names only; reject local addresses and URL tricks that could
+        // redirect a long-lived device credential to the wrong destination.
+        val labels = host.split('.')
+        val labelRule = Regex("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+        val isDnsName = host.length <= 253 && labels.size >= 2 &&
+            labels.all { labelRule.matches(it) } &&
+            !host.endsWith(".local") &&
+            !Regex("(?:[0-9]+\\.){3}[0-9]+").matches(host)
         return uri.scheme.equals("https", ignoreCase = true) &&
-            host.endsWith(".ts.net") && host.length > ".ts.net".length &&
+            isDnsName &&
             uri.port == -1 && uri.rawUserInfo == null &&
             uri.rawQuery == null && uri.rawFragment == null &&
             uri.rawPath?.trimEnd('/') == "/finance"
