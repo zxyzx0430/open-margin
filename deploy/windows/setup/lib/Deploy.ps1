@@ -205,6 +205,7 @@ function Invoke-OmRemoteDeploy {
         Save-OmState $state
         $null = Set-OmProgress -Stage 'complete' -Percent 100 -Message '部署完成'
         $null = Set-OmStep 'COMPLETE'
+        $null = Update-OmPhoneVerified -BaseUrl ('http://127.0.0.1:' + $Ports.api)
         return [pscustomobject]@{
             ok = $true; step = 'complete';
             publicSyncUrl = $publicUrl;
@@ -237,8 +238,19 @@ function Invoke-OmApproveFunnel {
     if (-not $verify.ok) {
         return [pscustomobject]@{ ok = $false; code = 'VERIFY_FAILED'; message = 'Funnel 已开启，但自测未通过。'; checks = $verify.checks; retryable = $true }
     }
+    # The funnel-approval resume path must leave the same watchdog behind as a
+    # full deploy; otherwise a deployment finished here has no logon recovery.
+    if (-not $DryRun) {
+        $watchdog = Install-OmWatchdog -StateRoot (Get-OmStateRoot) -RepoRoot $RepoRoot -Ports $Ports -ProjectName $ProjectName
+        if ($watchdog.ok) {
+            $null = Set-OmStateValue -Name watchdogInstalled -Value $true
+        } else {
+            Write-OmLog -Level WARN -Message ('watchdog install failed after funnel approval: ' + $watchdog.code)
+        }
+    }
     $null = Set-OmStep 'COMPLETE' -Force
     $null = Set-OmStateValue -Name mode -Value 'remote_sync'
+    $null = Update-OmPhoneVerified -BaseUrl ('http://127.0.0.1:' + $Ports.api)
     return [pscustomobject]@{
         ok = $true; code = 'FUNNEL_READY'; message = 'Funnel 已开启，自测通过。';
         publicSyncUrl = $wait.url; serverId = $verify.serverId; checks = $verify.checks

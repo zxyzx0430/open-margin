@@ -147,11 +147,19 @@ function Invoke-OmDockerCompose {
     }
     $allArgs = @('compose', '--project-name', $ProjectName, '--project-directory', $RepoRoot, '-f', $composeFile) + $Arguments
     Write-OmLog -Level INFO -Message ('docker ' + ($allArgs -join ' '))
+    # docker writes progress to stderr; Windows PowerShell 5.1 with
+    # $ErrorActionPreference=Stop turns the first such line into a terminating
+    # error and aborts compose mid-build.
+    $previous = $ErrorActionPreference
     try {
+        $ErrorActionPreference = 'Continue'
         $output = & $docker @allArgs 2>&1 | Out-String
-        return [pscustomobject]@{ exitCode = $LASTEXITCODE; output = $output }
+        $exitCode = $LASTEXITCODE
+        return [pscustomobject]@{ exitCode = $exitCode; output = $output }
     } catch {
         return [pscustomobject]@{ exitCode = -1; output = $_.Exception.Message }
+    } finally {
+        $ErrorActionPreference = $previous
     }
 }
 

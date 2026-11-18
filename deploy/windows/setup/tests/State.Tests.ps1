@@ -80,3 +80,32 @@ Describe 'State file' {
         $raw | Should -Not -Match 'password'
     }
 }
+
+Describe 'Public probe mode state' {
+    It 'defaults to auto' {
+        (New-OmDefaultState -RepoRoot $script:repoRoot).publicProbeMode | Should -Be 'auto'
+    }
+
+    It 'adds the default to an older state file that lacks the field' {
+        $state = Read-OmState
+        Save-OmState $state
+        $raw = Get-Content -Path (Get-OmStatePath) -Raw -Encoding UTF8 | ConvertFrom-Json
+        $raw.PSObject.Properties.Remove('publicProbeMode')
+        $raw | ConvertTo-Json -Depth 12 | Set-Content -Path (Get-OmStatePath) -Encoding UTF8
+        (Read-OmState).publicProbeMode | Should -Be 'auto'
+    }
+
+    It 'persists a chosen mode and falls back to auto for unknown values' {
+        $null = Set-OmPublicProbeMode -Mode 'system'
+        (Read-OmState).publicProbeMode | Should -Be 'system'
+        Get-OmPublicProbeMode | Should -Be 'system'
+
+        $null = Set-OmStateValue -Name publicProbeMode -Value 'bogus'
+        Get-OmPublicProbeMode | Should -Be 'auto'
+
+        $null = Set-OmPublicProbeMode -Mode 'direct'
+        (Read-OmState).publicProbeMode | Should -Be 'direct'
+        Get-OmPublicProbeMode | Should -Be 'direct'
+        $null = Set-OmPublicProbeMode -Mode 'auto'
+    }
+}
