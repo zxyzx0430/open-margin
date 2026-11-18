@@ -193,6 +193,7 @@ $allowedWebActions = @(
     'approve-funnel', 'verify', 'disable', 'enable', 'repair', 'backup',
     'pair-qr', 'rotate-token', 'pause-watchdog', 'resume-watchdog',
     'install-watchdog', 'uninstall-watchdog', 'watchdog-status',
+    'set-public-probe-mode', 'phone-status',
     'select-offline-file', 'import-offline'
 )
 
