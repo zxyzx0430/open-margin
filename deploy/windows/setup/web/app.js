@@ -81,7 +81,14 @@ function closeLedgerHandoff(tab) {
   if (target === pendingLedgerTab) pendingLedgerTab = null;
 }
 
-function navigateLedgerHandoff(tab) {
+function getLedgerHomeUrl() {
+  const port = currentState && currentState.ports && Number(currentState.ports.wallos) > 0
+    ? Number(currentState.ports.wallos)
+    : 18082;
+  return 'http://127.0.0.1:' + port + '/';
+}
+
+function navigateLedgerHandoff(tab, destination) {
   const target = arguments.length > 0 ? tab : pendingLedgerTab;
   if (target === pendingLedgerTab) pendingLedgerTab = null;
   if (!target || target.closed) {
@@ -89,7 +96,7 @@ function navigateLedgerHandoff(tab) {
     return false;
   }
   try {
-    target.location.replace(new URL('/api/ledger-login', window.location.href).toString());
+    target.location.replace(destination || new URL('/api/ledger-login', window.location.href).toString());
     return true;
   } catch (error) {
     closeLedgerHandoff(target);
@@ -108,7 +115,7 @@ async function savePendingDeploymentCredential() {
     savedOk = !!saved.ok;
     if (!savedOk) toast(saved.message || '部署已完成，但无法保存自动登录凭据。', true);
   } catch (error) {
-    toast('部署已完成，但自动登录凭据保存失败。账本会打开登录页。', true);
+    toast('部署已完成，但自动登录凭据保存失败。账本将打开普通登录页。', true);
   }
   $('admin-password').value = '';
   $('admin-password2').value = '';
@@ -120,13 +127,17 @@ async function completeDeploymentLedgerHandoff() {
   if (deploymentLedgerHandoffDone) return;
   deploymentLedgerHandoffDone = true;
   const savedOk = await savePendingDeploymentCredential();
-  if (savedOk) toast('部署和自测已完成，正在打开并登录本机账本。');
-  navigateLedgerHandoff();
+  if (savedOk) {
+    toast('部署和自测已完成，正在打开并登录本机账本。');
+    navigateLedgerHandoff();
+  } else {
+    navigateLedgerHandoff(pendingLedgerTab, getLedgerHomeUrl());
+  }
 }
 
 async function completeRepairLedgerHandoff(tab) {
-  await savePendingDeploymentCredential();
-  navigateLedgerHandoff(tab);
+  const savedOk = await savePendingDeploymentCredential();
+  navigateLedgerHandoff(tab, savedOk ? undefined : getLedgerHomeUrl());
 }
 
 function showScreen(name) {

@@ -61,6 +61,11 @@ while (-not $stopped) {
     $pipe = $null
     $reader = $null
     $writer = $null
+    $line = $null
+    $request = $null
+    $username = $null
+    $password = $null
+    $response = $null
     try {
         $pipe = New-OmCredentialPipeServer -Security $pipeSecurity -Name $PipeName
         $connect = $pipe.WaitForConnectionAsync()
@@ -121,6 +126,13 @@ while (-not $stopped) {
         }
         if ($serverPid -gt 0 -and -not (Get-Process -Id $serverPid -ErrorAction SilentlyContinue)) { $stopped = $true }
     } finally {
+        if ($request -and $request.PSObject.Properties['password']) { $request.password = $null }
+        if ($response -and $response.PSObject.Properties['password']) { $response.password = $null }
+        $line = $null
+        $request = $null
+        $username = $null
+        $password = $null
+        $response = $null
         if ($reader) { try { $reader.Dispose() } catch { } }
         if ($writer) { try { $writer.Dispose() } catch { } }
         if ($pipe) { try { $pipe.Dispose() } catch { } }

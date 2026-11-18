@@ -105,6 +105,9 @@ Describe 'Wallos credential storage' {
         }
         $bridge = Get-Content -Path $script:bridgePath -Raw -Encoding UTF8
         $bridge | Should -Match 'BuiltinAdministratorsSid'
+        $bridge | Should -Match ([regex]::Escape('$request.password = $null'))
+        $bridge | Should -Match ([regex]::Escape('$response.password = $null'))
+        $bridge | Should -Match ([regex]::Escape('$line = $null'))
         $bridge | Should -Match 'SetAccessRuleProtection\(\$true, \$false\)'
     }
 }
@@ -134,6 +137,8 @@ Describe 'Automatic ledger login handoff' {
         $js | Should -Match "window\.open\('about:blank', '_blank'\)"
         $js | Should -Match "'/api/ledger-login'"
         $js | Should -Match 'autoLedgerError'
+        $js | Should -Match ([regex]::Escape('navigateLedgerHandoff(pendingLedgerTab, getLedgerHomeUrl())'))
+        $js | Should -Match ([regex]::Escape('navigateLedgerHandoff(tab, savedOk ? undefined : getLedgerHomeUrl())'))
         $js | Should -Match 'closeLedgerHandoff\(\)'
     }
 
