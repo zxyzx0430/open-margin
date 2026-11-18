@@ -81,6 +81,15 @@ Calendar range totals, category breakdown, seven-day trend, monthly budget, reco
   <img src="docs/assets/sync-architecture.en.png" width="640" alt="The phone app syncs over HTTPS with the Finance API; the API serves the Wallos UI and the MCP service">
 </p>
 
+| Component | Runs on | Talks to |
+|---|---|---|
+| Open Margin app (local ledger) | Android phone | Finance API, HTTPS two-way sync |
+| Finance API (SQLite ledger) | Your server | phone, Wallos, MCP |
+| Wallos UI (subscriptions & reports) | Your server | Finance API; you open it in a desktop browser |
+| MCP service (18 tools) | Your server | Finance API; ChatGPT and other clients connect over OAuth 2.1 |
+
+The phone talks only to the API, the browser only to Wallos, the AI only to MCP. All three share one ledger.
+
 **On a VPS**, the server stays up, so the phone syncs from any network.
 
 **On Windows**, the service and the ledger run on your own machine and the phone syncs over Tailscale Funnel — no domain needed, and the phone does not install Tailscale. With the PC off, the phone keeps recording and catches up later. WorkManager retries at a 15-minute minimum under Android's battery rules.

@@ -81,6 +81,15 @@ Android 对读取其他应用账单有系统限制。完整获取需要 ROOT 或
   <img src="docs/assets/sync-architecture.png" width="640" alt="手机 App 通过 HTTPS 双向同步到 Finance API；API 连接 Wallos 界面与 MCP 服务">
 </p>
 
+| 组件 | 跑在哪 | 连到谁 |
+|---|---|---|
+| 清衡 App（本地账本） | Android 手机 | Finance API，HTTPS 双向同步 |
+| Finance API（SQLite 账本） | 你的服务器 | 手机、Wallos、MCP |
+| Wallos 界面（订阅与报表） | 你的服务器 | Finance API；你用电脑浏览器访问 |
+| MCP 服务（18 个工具） | 你的服务器 | Finance API；ChatGPT 等客户端用 OAuth 2.1 连入 |
+
+手机只跟 API 说话，浏览器只跟 Wallos 说话，AI 只跟 MCP 说话。三者共用同一份账本。
+
 **VPS 部署**：服务器常开，手机在任何网络下都能同步。
 
 **Windows 部署**：服务和账本运行在自己的电脑上，手机通过 Tailscale Funnel 同步，不需要额外域名，手机也不用装 Tailscale。电脑关机期间手机照常记账，联网后补同步。WorkManager 重试间隔最短 15 分钟，受 Android 省电策略限制。
