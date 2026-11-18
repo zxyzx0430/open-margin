@@ -8,7 +8,7 @@
 ; Runtime secrets are created by the setup engine under {app}\secrets.
 
 #ifndef AppVersion
-  #define AppVersion "1.3.0"
+  #define AppVersion "1.3.1"
 #endif
 
 #ifndef BuildOutputDir
@@ -16,7 +16,7 @@
 #endif
 
 #ifndef VersionInfoVersion
-  #define VersionInfoVersion "1.3.0.0"
+  #define VersionInfoVersion "1.3.1.0"
 #endif
 
 #define RepoRoot "..\..\..\.."
@@ -104,7 +104,7 @@ Source: "{#RepoRoot}\THIRD_PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\SECURITY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#RepoRoot}\docs\DEPLOY_WINDOWS.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "{#RepoRoot}\docs\WINDOWS_PRIVATE_FIRST_CONNECTION.md"; DestDir: "{app}\docs"; Flags: ignoreversion
-Source: "{#RepoRoot}\docs\V1_3_0_WINDOWS_SETUP_RELEASE_NOTES.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "{#RepoRoot}\docs\V1_3_1_WINDOWS_SETUP_RELEASE_NOTES.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Dirs]
 ; The engine creates secrets/ at runtime; never remove it on uninstall.

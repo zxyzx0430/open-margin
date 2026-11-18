@@ -13,6 +13,10 @@ $script:OmOfflineKnownReleases = @{
         sha256    = 'd74f570191302c023639fa2eeb52526f53a49a6a6212e26c3e185e026f543783'
         sizeBytes = 161126294
     }
+    '1.3.1' = [pscustomobject]@{
+        sha256    = '9b0982e7398eba36d0db86d4d2628442381767dbaed9aed284879bb47725e844'
+        sizeBytes = 161124859
+    }
 }
 
 $script:OmOfflineReleaseBase = 'https://github.com/zxyzx0430/open-margin/releases/download/'
@@ -28,7 +32,7 @@ function Resolve-OmOfflineBundleVersion {
             return ([string]$state.engineVersion).TrimStart('v')
         }
     } catch { }
-    return '1.3.0'
+    return '1.3.1'
 }
 
 function Get-OmOfflineBundleInfo {

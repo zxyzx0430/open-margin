@@ -65,7 +65,7 @@ function New-OmDefaultState {
     param([string]$RepoRoot = $script:OmRepoRoot)
     return [pscustomobject]@{
         schema             = 1
-        engineVersion      = '1.3.0'
+        engineVersion      = '1.3.1'
         appRoot            = $RepoRoot
         mode               = 'remote_sync'
         step               = 'UNINITIALIZED'

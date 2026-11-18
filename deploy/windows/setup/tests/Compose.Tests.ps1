@@ -89,3 +89,14 @@ Describe 'Secrets ACL verification' {
         }
     }
 }
+
+Describe 'ACL verification when PowerShell Security autoload is unavailable' {
+    It 'still verifies a secrets file beneath a Chinese spaced path' {
+        $dir = Join-Path $TestDrive '中文 用户 数据'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $path = Join-Path $dir 'private secrets.txt'
+        [IO.File]::WriteAllText($path, 'test')
+        Mock -ModuleName OpenMargin.Setup Get-Acl { throw 'Microsoft.PowerShell.Security is unavailable in this scope' }
+        { Set-OmFileAcl -Path $path } | Should -Not -Throw
+    }
+}

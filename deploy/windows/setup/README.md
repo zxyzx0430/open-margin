@@ -131,7 +131,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -D
 # Exercise the portable YAML fallback used when --format json is unavailable:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -DryRun -ForceLegacyComposeConfig
 
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -Version 1.3.0
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Build-OfflineBundle.ps1 -Version 1.3.1
 ```
 
 Safety: it never runs `docker compose down`, never deletes volumes, and only
@@ -153,7 +153,7 @@ version-matched Release asset, prints the expected SHA256, and offers “我已�
   If the picker cannot open (for example `-DryRun`), the UI exposes a manual path input.
 - `import-offline` is a normal background job because `docker load` can take minutes.
   `lib/OfflineBundle.ps1` verifies the `.tar.gz` SHA256 (sibling `.sha256` first, then
-  the known release value for v1.3.0), lists the archive with `tar -tvzf` and rejects
+  the known release value for v1.3.1), lists the archive with `tar -tvzf` and rejects
   absolute/traversal/ADS names plus symlink and hardlink entries before extracting to
   a private temp directory. It then validates `manifest.json` (`kind`, `schema`,
   `version`, non-empty `images`) and `images.tar`, runs `docker load -i images.tar`,
@@ -168,8 +168,8 @@ Example CLI-style check without touching the real bundle:
 ```powershell
 Import-Module .\OpenMargin.Setup.psd1 -Force -DisableNameChecking
 Initialize-OmPaths -StateRoot $env:TEMP\om-offline-state -RepoRoot (Get-Location).Path
-Get-OmOfflineBundleInfo -Version 1.3.0 | Format-List
-Import-OmOfflineBundle -Path D:\Downloads\OpenMargin-Offline-1.3.0.tar.gz -Version 1.3.0 -DryRun
+Get-OmOfflineBundleInfo -Version 1.3.1 | Format-List
+Import-OmOfflineBundle -Path D:\Downloads\OpenMargin-Offline-1.3.1.tar.gz -Version 1.3.1 -DryRun
 ```
 
 Tests: `tests/OfflineBundle.Tests.ps1` covers SHA verification, safe extraction

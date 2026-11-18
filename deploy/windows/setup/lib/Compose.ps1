@@ -67,33 +67,92 @@ function New-OmSecretValue {
     return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
+function Test-OmDaclRightsIncludesRead {
+    param([string]$Rights)
+    $value = $Rights.ToUpperInvariant()
+    if ($value -match '(FA|FR|GA|GR|RX)' -or $value -eq 'M' -or $value -eq 'R') { return $true }
+    if ($value -match '^0X([0-9A-F]+)$') {
+        $mask = [Convert]::ToUInt32($Matches[1], 16)
+        $readData = [Convert]::ToUInt32('00000001', 16)
+        $genericRead = [Convert]::ToUInt32('80000000', 16)
+        $genericAll = [Convert]::ToUInt32('10000000', 16)
+        return (($mask -band $readData) -ne 0 -or ($mask -band $genericRead) -ne 0 -or ($mask -band $genericAll) -ne 0)
+    }
+    return $false
+}
+
+function Test-OmDaclSecurityDescriptor {
+    param(
+        [Parameter(Mandatory = $true)][string]$SecurityDescriptor,
+        [Parameter(Mandatory = $true)][string]$Sid
+    )
+    $daclMatch = [regex]::Match($SecurityDescriptor, 'D:(?<Dacl>.*?)(?=S:|\z)', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if (-not $daclMatch.Success) {
+        return [pscustomobject]@{ HasDacl = $false; HasUserRead = $false; HasUserReadDeny = $false }
+    }
+    $aces = [regex]::Matches($daclMatch.Groups['Dacl'].Value, '\(([^()]*)\)')
+    $allowRead = $false
+    $denyRead = $false
+    foreach ($match in $aces) {
+        $fields = $match.Groups[1].Value.Split(';')
+        if ($fields.Count -lt 6 -or $fields[5] -ine $Sid) { continue }
+        if (-not (Test-OmDaclRightsIncludesRead -Rights $fields[2])) { continue }
+        if ($fields[0] -ieq 'A') { $allowRead = $true }
+        elseif ($fields[0] -ieq 'D') { $denyRead = $true }
+    }
+    return [pscustomobject]@{
+        HasDacl = ($aces.Count -gt 0)
+        HasUserRead = ($allowRead -and -not $denyRead)
+        HasUserReadDeny = $denyRead
+    }
+}
+
 function Set-OmFileAcl {
     param([Parameter(Mandatory = $true)][string]$Path)
     $sid = $env:OPENMARGIN_ORIGINAL_USER_SID
     if (-not $sid) { $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
     $sid = (New-Object Security.Principal.SecurityIdentifier($sid)).Value
-    $inherit = if ((Get-Item -LiteralPath $Path).PSIsContainer) { '(OI)(CI)' } else { '' }
+    $item = Get-Item -LiteralPath $Path
+    $inherit = if ($item.PSIsContainer) { '(OI)(CI)' } else { '' }
+    $tempRoot = $env:TEMP
+    if (-not $tempRoot) { $tempRoot = [IO.Path]::GetTempPath() }
+    $aclSavePath = Join-Path $tempRoot ('openmargin-acl-' + [guid]::NewGuid().ToString('N') + '.txt')
     $previous = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        $output = & icacls.exe $Path /inheritance:r /grant:r (('*' + $sid + ':' + $inherit + 'F')) /grant:r ('*S-1-5-18:' + $inherit + 'F') /grant:r ('*S-1-5-32-544:' + $inherit + 'F') 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) { throw ('icacls failed: ' + $output) }
-    } finally { $ErrorActionPreference = $previous }
-    $acl = Get-Acl -LiteralPath $Path
-    $rules = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
-    if ($rules.Count -eq 0) { throw ('empty DACL: ' + $Path) }
-    $reader = @($rules | Where-Object {
-        $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Allow' -and
-        ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData)
-    })
-    $denied = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) })
-    if ($reader.Count -eq 0 -or $denied.Count -gt 0) { throw ('installing user has no usable read grant: ' + $Path) }
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
-        $stream = [IO.File]::OpenRead($Path)
-        $stream.Dispose()
+        $applyOutput = @(& icacls.exe $Path /inheritance:r /grant:r (('*' + $sid + ':' + $inherit + 'F')) /grant:r ('*S-1-5-18:' + $inherit + 'F') /grant:r ('*S-1-5-32-544:' + $inherit + 'F') 2>&1)
+        $applyExitCode = $LASTEXITCODE
+        if ($applyExitCode -ne 0) {
+            $summary = ($applyOutput | ForEach-Object { [string]$_ }) -join ' '
+            throw ('icacls failed (exit ' + $applyExitCode + '): ' + $summary)
+        }
+        $verifyOutput = @(& icacls.exe $Path /save $aclSavePath 2>&1)
+        $verifyExitCode = $LASTEXITCODE
+        if ($verifyExitCode -ne 0 -or -not (Test-Path -LiteralPath $aclSavePath -PathType Leaf)) {
+            $summary = ($verifyOutput | ForEach-Object { [string]$_ }) -join ' '
+            throw ('icacls DACL verification failed (exit ' + $verifyExitCode + '): ' + $summary)
+        }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    try {
+        $savedAcls = [IO.File]::ReadAllText($aclSavePath, [Text.Encoding]::Unicode)
+        $descriptors = @($savedAcls -split '\r?\n' | Where-Object { $_ -match 'D:' })
+        if ($descriptors.Count -eq 0) { throw ('empty DACL: ' + $Path) }
+        $verification = @($descriptors | ForEach-Object { Test-OmDaclSecurityDescriptor -SecurityDescriptor $_ -Sid $sid })
+        $nonEmpty = @($verification | Where-Object { $_.HasDacl })
+        if ($nonEmpty.Count -eq 0) { throw ('empty DACL: ' + $Path) }
+        $reader = @($nonEmpty | Where-Object { $_.HasUserRead })
+        $denied = @($nonEmpty | Where-Object { $_.HasUserReadDeny })
+        if ($reader.Count -eq 0 -or $denied.Count -gt 0) { throw ('installing user has no usable read grant: ' + $Path) }
+        if (-not $item.PSIsContainer) {
+            $stream = [IO.File]::OpenRead($Path)
+            $stream.Dispose()
+        }
+    } finally {
+        Remove-Item -LiteralPath $aclSavePath -Force -ErrorAction SilentlyContinue
     }
 }
-
 function New-OmSecrets {
     param(
         [string]$RepoRoot = (Get-OmRepoRoot),

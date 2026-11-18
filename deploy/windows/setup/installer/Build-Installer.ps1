@@ -83,13 +83,13 @@ function Resolve-BuildVersion {
             if ($LASTEXITCODE -eq 0 -and $tag) { return ([string]$tag).Trim().TrimStart('v') }
         } catch { }
     }
-    return '1.3.0'
+    return '1.3.1'
 }
 
 function ConvertTo-NumericVersion {
     param([string]$Value)
     $match = [regex]::Match($Value, '(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?')
-    if (-not $match.Success) { return '1.3.0.0' }
+    if (-not $match.Success) { return '1.3.1.0' }
     $parts = @(
         [int]$match.Groups[1].Value,
         [int]$match.Groups[2].Value,
@@ -97,7 +97,7 @@ function ConvertTo-NumericVersion {
         $(if ($match.Groups[4].Success) { [int]$match.Groups[4].Value } else { 0 })
     )
     foreach ($part in $parts) {
-        if ($part -lt 0 -or $part -gt 65535) { return '1.3.0.0' }
+        if ($part -lt 0 -or $part -gt 65535) { return '1.3.1.0' }
     }
     return ($parts -join '.')
 }

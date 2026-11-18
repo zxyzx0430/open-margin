@@ -78,7 +78,7 @@ function Resolve-BundleVersion {
             if ($LASTEXITCODE -eq 0 -and $tag) { return ([string]$tag).Trim().TrimStart('v') }
         } catch { }
     }
-    return '1.3.0'
+    return '1.3.1'
 }
 
 function Invoke-Docker {

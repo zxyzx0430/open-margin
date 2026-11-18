@@ -122,9 +122,18 @@ Describe 'Offline bundle release info' {
         $info.sizeBytes | Should -Be 161126294
     }
 
-    It 'falls back to 1.3.0 and still builds a URL for unknown versions' {
+    It 'returns the v1.3.1 asset URL and published SHA256' {
+        $info = Get-OmOfflineBundleInfo -Version 'v1.3.1'
+        $info.version | Should -Be '1.3.1'
+        $info.assetName | Should -Be 'OpenMargin-Offline-1.3.1.tar.gz'
+        $info.url | Should -Be 'https://github.com/zxyzx0430/open-margin/releases/download/v1.3.1/OpenMargin-Offline-1.3.1.tar.gz'
+        $info.sha256 | Should -Be '9b0982e7398eba36d0db86d4d2628442381767dbaed9aed284879bb47725e844'
+        $info.knownRelease | Should -BeTrue
+        $info.sizeBytes | Should -Be 161124859
+    }
+    It 'defaults to 1.3.1 and still builds a URL for unknown versions' {
         $fallback = Get-OmOfflineBundleInfo
-        $fallback.version | Should -Be '1.3.0'
+        $fallback.version | Should -Be '1.3.1'
         $unknown = Get-OmOfflineBundleInfo -Version '9.9.9'
         $unknown.version | Should -Be '9.9.9'
         $unknown.url | Should -Match '/v9\.9\.9/OpenMargin-Offline-9\.9\.9\.tar\.gz$'

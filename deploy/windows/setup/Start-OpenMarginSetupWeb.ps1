@@ -419,7 +419,7 @@ try {
                         Write-OmJson -Context $context -Value @{ ok = $false; code = 'METHOD_NOT_ALLOWED' } -Status 405
                         break
                     }
-                    Write-OmJson -Context $context -Value @{ ok = $true; service = 'open-margin-setup'; version = '1.3.0'; dryRun = [bool]$DryRun }
+                    Write-OmJson -Context $context -Value @{ ok = $true; service = 'open-margin-setup'; version = '1.3.1'; dryRun = [bool]$DryRun }
                 }
                 '^/api/config$' {
                     if ($method -ne 'GET') {
