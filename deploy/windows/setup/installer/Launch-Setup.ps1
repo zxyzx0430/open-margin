@@ -18,7 +18,9 @@ param(
     [string]$StateRoot = (Join-Path $env:LOCALAPPDATA 'OpenMargin'),
     [string]$AppRoot = '',
     [string]$OriginalUserSid = '',
+    [string]$CredentialPipeName = '',
     [switch]$ProvisionOriginalUser,
+    [switch]$AutoOpenLedgerAfterInstall,
     [switch]$NoBrowser,
     [switch]$NoElevate
 )
@@ -142,6 +144,62 @@ function Open-SetupUrl {
     return $false
 }
 
+function New-CredentialPipeName {
+    $bytes = New-Object byte[] 24
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return ([BitConverter]::ToString($bytes).Replace('-', '').ToLowerInvariant())
+}
+
+function Test-CompletedDeployment {
+    $statePath = Join-Path $StateRoot 'setup-state.json'
+    if (-not (Test-Path -LiteralPath $statePath)) { return $false }
+    try {
+        $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        return ([string]$state.step -in @('COMPLETE', 'PHONE_VERIFIED'))
+    } catch { return $false }
+}
+
+function Wait-UpgradeServices {
+    param([int]$TimeoutSeconds = 240)
+    $apiPort = 8767
+    $wallosPort = 18082
+    $statePath = Join-Path $StateRoot 'setup-state.json'
+    if (Test-Path -LiteralPath $statePath) {
+        try {
+            $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([int]$state.ports.api -gt 0) { $apiPort = [int]$state.ports.api }
+            if ([int]$state.ports.wallos -gt 0) { $wallosPort = [int]$state.ports.wallos }
+        } catch { }
+    }
+    try {
+        Start-ScheduledTask -TaskName 'OpenMarginWatchdog' -ErrorAction Stop
+        Write-LaunchLog 'started OpenMarginWatchdog after installer upgrade'
+    } catch {
+        Write-LaunchLog ('could not start OpenMarginWatchdog after installer upgrade: ' + $_.Exception.Message)
+    }
+    $apiUrl = 'http://127.0.0.1:' + $apiPort + '/health'
+    $wallosUrl = 'http://127.0.0.1:' + $wallosPort + '/login.php'
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $apiReady = $false
+        $wallosReady = $false
+        try { $apiReady = ([int](Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 4 -ErrorAction Stop).StatusCode -eq 200) } catch { }
+        try { $wallosReady = ([int](Invoke-WebRequest -Uri $wallosUrl -UseBasicParsing -TimeoutSec 4 -ErrorAction Stop).StatusCode -eq 200) } catch { }
+        if ($apiReady -and $wallosReady) { return $true }
+        Start-Sleep -Seconds 3
+    } while ((Get-Date) -lt $deadline)
+    return $false
+}
+
+function Add-AutoLedgerFlag {
+    param([string]$Url, [string]$Name = 'autoLedger')
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $Url }
+    if ($Url -match ('[?&]' + [regex]::Escape($Name) + '=1(?:&|$)')) { return $Url }
+    if ($Url.Contains('?')) { return ($Url + '&' + $Name + '=1') }
+    return ($Url + '?' + $Name + '=1')
+}
+
 function Show-SetupUrlFallback {
     param([string]$Url, [string]$UrlPath)
     $lines = @(
@@ -179,10 +237,27 @@ $isElevated = Test-LaunchElevated
 if (-not $isElevated -and -not $NoElevate) {
     try {
         $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not $CredentialPipeName -and -not $NoBrowser) {
+            $bridgeScript = Join-Path $setupRoot 'lib\CredentialVaultBridge.ps1'
+            if (Test-Path -LiteralPath $bridgeScript) {
+                $CredentialPipeName = New-CredentialPipeName
+                $bridgeArguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $bridgeScript + '" -PipeName ' + $CredentialPipeName + ' -OriginalUserSid ' + $OriginalUserSid
+                try {
+                    Start-Process -FilePath $powershellExe -ArgumentList $bridgeArguments -WindowStyle Hidden -ErrorAction Stop | Out-Null
+                    Start-Sleep -Milliseconds 250
+                    Write-LaunchLog 'started original-user credential bridge'
+                } catch {
+                    Write-LaunchLog ('could not start original-user credential bridge: ' + $_.Exception.Message)
+                    $CredentialPipeName = ''
+                }
+            }
+        }
         $argumentLine = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
             $PSCommandPath + '" -AppRoot "' + $AppRoot + '" -StateRoot "' + $StateRoot + '" -OriginalUserSid "' + $OriginalUserSid + '"'
         if ($ProvisionOriginalUser) { $argumentLine += ' -ProvisionOriginalUser' }
         if ($NoBrowser) { $argumentLine += ' -NoBrowser' }
+        if ($CredentialPipeName) { $argumentLine += ' -CredentialPipeName ' + $CredentialPipeName }
+        if ($AutoOpenLedgerAfterInstall) { $argumentLine += ' -AutoOpenLedgerAfterInstall' }
         Write-LaunchLog 'launcher is not elevated; requesting UAC and relaunching'
         Start-Process -FilePath $powershellExe -ArgumentList $argumentLine -Verb RunAs -ErrorAction Stop | Out-Null
         return
@@ -223,6 +298,10 @@ try {
             if ($NoBrowser) {
                 Write-Output ('Open Margin setup wizard already running: ' + $reuseUrl)
             } else {
+                if ($AutoOpenLedgerAfterInstall -and (Test-CompletedDeployment)) {
+                    if (Wait-UpgradeServices) { $reuseUrl = Add-AutoLedgerFlag -Url $reuseUrl }
+                    else { $reuseUrl = Add-AutoLedgerFlag -Url $reuseUrl -Name 'autoLedgerError'; Write-LaunchLog 'ledger not auto-opened after upgrade because services did not become healthy' }
+                }
                 $opened = Open-SetupUrl -Url $reuseUrl -Elevated $isElevated
                 if ($opened) {
                     # Keep the ACL-restricted handoff file while the wizard is
@@ -261,7 +340,8 @@ try {
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     # The launcher owns the token-URL browser handoff, so the hidden server must
     # never open a second browser of its own.
-    $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1} -StateRoot "{2}" -NoBrowser' -f $setupScript, $port, $StateRoot
+    $arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -Port {1} -StateRoot "{2}" -NoBrowser -OriginalUserSid "{3}"' -f $setupScript, $port, $StateRoot, $OriginalUserSid
+    if ($CredentialPipeName) { $arguments += ' -CredentialPipeName ' + $CredentialPipeName }
 
     Write-LaunchLog ('starting setup wizard on port ' + $port)
     $process = Start-Process -FilePath $powershell -ArgumentList $arguments -WorkingDirectory $AppRoot -WindowStyle Hidden -PassThru
@@ -284,6 +364,10 @@ try {
         } while (-not $url -and (Get-Date) -lt $deadline)
         if (-not $url) { $url = 'http://127.0.0.1:' + $port + '/' }
 
+        if ($AutoOpenLedgerAfterInstall -and (Test-CompletedDeployment)) {
+            if (Wait-UpgradeServices) { $url = Add-AutoLedgerFlag -Url $url }
+            else { $url = Add-AutoLedgerFlag -Url $url -Name 'autoLedgerError'; Write-LaunchLog 'ledger not auto-opened after upgrade because services did not become healthy' }
+        }
         $opened = Open-SetupUrl -Url $url -Elevated $isElevated
         if ($opened) {
             # Keep the ACL-restricted handoff file while the wizard is running;

@@ -132,8 +132,8 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 ; /NOELEVATE selects the original user-level wizard instead; /NOAUTOSTART
 ; disables both postinstall entries for automation. skipifsilent is deliberately
 ; not set: a silent install still opens the wizard unless /NOAUTOSTART is passed.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -ProvisionOriginalUser"; Description: "立即打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunElevatedWizard
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -NoElevate"; Description: "以当前用户权限打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunUnelevatedWizard
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -ProvisionOriginalUser {code:GetUpgradeLedgerArgument}"; Description: "立即打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunElevatedWizard
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\deploy\windows\setup\installer\Launch-Setup.ps1"" -AppRoot ""{app}"" -NoElevate {code:GetUpgradeLedgerArgument}"; Description: "以当前用户权限打开清衡设置向导"; Flags: postinstall nowait runhidden runasoriginaluser; Check: ShouldRunUnelevatedWizard
 
 [UninstallRun]
 ; Inno Setup executes [UninstallRun] entries as the first uninstallation step,
@@ -148,6 +148,7 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 [Code]
 var
   PreviousInstallStopped: Boolean;
+  WasInPlaceUpgrade: Boolean;
   DockerNoticePage: TWizardPage;
   DockerNoticeMemo: TNewMemo;
   DockerNoticeCheck: TNewCheckBox;
@@ -221,6 +222,23 @@ begin
     else if RegQueryStringValue(HKCU, Key, 'Inno Setup: App Path', Value) and (Value <> '') then
       Result := Value;
   end;
+end;
+
+function GetUpgradeLedgerArgument(Param: String): String;
+var
+  PreviousDir: String;
+  CurrentDir: String;
+begin
+  { Evaluate the selected directory at launch time as well, so silent installs
+    with /DIR cannot inherit an in-place-upgrade flag from InitializeSetup. }
+  PreviousDir := NormalizeDir(GetPreviousInstallDir());
+  CurrentDir := NormalizeDir(ExpandConstant('{app}'));
+  WasInPlaceUpgrade := (PreviousDir <> '') and DirExists(PreviousDir) and
+    (CompareText(CurrentDir, PreviousDir) = 0);
+  if WasInPlaceUpgrade then
+    Result := '-AutoOpenLedgerAfterInstall'
+  else
+    Result := '';
 end;
 
 procedure LogLifecycle(const Message: string);
@@ -347,8 +365,11 @@ var
   FreeBytes: Int64;
   TotalBytes: Int64;
   MessageText: String;
+  PreviousDir: String;
 begin
   Result := True;
+  PreviousDir := NormalizeDir(GetPreviousInstallDir());
+  WasInPlaceUpgrade := (PreviousDir <> '') and DirExists(PreviousDir);
   GetWindowsVersionEx(Version);
 
   if not IsWin64 then
@@ -411,6 +432,7 @@ begin
     ChosenDir := NormalizeDir(WizardDirValue);
     PreviousDir := NormalizeDir(GetPreviousInstallDir());
     DefaultDir := NormalizeDir(GetDefaultInstallDir(''));
+    WasInPlaceUpgrade := (PreviousDir <> '') and DirExists(PreviousDir) and (CompareText(ChosenDir, PreviousDir) = 0);
 
     if (PreviousDir <> '') and (CompareText(ChosenDir, PreviousDir) <> 0) and DirExists(PreviousDir) then
     begin

@@ -10,6 +10,9 @@ let pairTimer = null;
 let pollFailures = 0;
 let homeRequested = false;
 let dockerLicenseRecorded = false;
+let pendingLedgerTab = null;
+let pendingDeploymentCredential = null;
+let deploymentLedgerHandoffDone = false;
 
 const STEP_LABELS = {
   UNINITIALIZED: '未开始',
@@ -54,6 +57,76 @@ async function api(path, options) {
 
 function postAction(name, body) {
   return api('/api/actions/' + name, { method: 'POST', body: JSON.stringify(body || {}) });
+}
+
+function beginLedgerHandoff() {
+  closeLedgerHandoff();
+  let tab = null;
+  try { tab = window.open('about:blank', '_blank'); } catch (error) { }
+  if (tab) {
+    try {
+      tab.opener = null;
+      tab.document.open();
+      tab.document.write('<!doctype html><meta charset="utf-8"><title>清衡账本</title><p style="font:16px sans-serif;padding:24px">操作成功后将自动打开本机账本…</p>');
+      tab.document.close();
+    } catch (error) { }
+  }
+  pendingLedgerTab = tab;
+  return tab;
+}
+
+function closeLedgerHandoff(tab) {
+  const target = arguments.length > 0 ? tab : pendingLedgerTab;
+  try { if (target && !target.closed) target.close(); } catch (error) { }
+  if (target === pendingLedgerTab) pendingLedgerTab = null;
+}
+
+function navigateLedgerHandoff(tab) {
+  const target = arguments.length > 0 ? tab : pendingLedgerTab;
+  if (target === pendingLedgerTab) pendingLedgerTab = null;
+  if (!target || target.closed) {
+    toast('操作已成功。浏览器拦截了自动打开，请点“打开本机账本”。', true);
+    return false;
+  }
+  try {
+    target.location.replace(new URL('/api/ledger-login', window.location.href).toString());
+    return true;
+  } catch (error) {
+    closeLedgerHandoff(target);
+    toast('操作已成功，但账本页没有打开。请点“打开本机账本”。', true);
+    return false;
+  }
+}
+
+async function savePendingDeploymentCredential() {
+  const credential = pendingDeploymentCredential;
+  if (!credential) return true;
+  pendingDeploymentCredential = null;
+  let savedOk = false;
+  try {
+    const saved = await api('/api/credentials', { method: 'POST', body: JSON.stringify(credential) });
+    savedOk = !!saved.ok;
+    if (!savedOk) toast(saved.message || '部署已完成，但无法保存自动登录凭据。', true);
+  } catch (error) {
+    toast('部署已完成，但自动登录凭据保存失败。账本会打开登录页。', true);
+  }
+  $('admin-password').value = '';
+  $('admin-password2').value = '';
+  credential.password = '';
+  return savedOk;
+}
+
+async function completeDeploymentLedgerHandoff() {
+  if (deploymentLedgerHandoffDone) return;
+  deploymentLedgerHandoffDone = true;
+  const savedOk = await savePendingDeploymentCredential();
+  if (savedOk) toast('部署和自测已完成，正在打开并登录本机账本。');
+  navigateLedgerHandoff();
+}
+
+async function completeRepairLedgerHandoff(tab) {
+  await savePendingDeploymentCredential();
+  navigateLedgerHandoff(tab);
 }
 
 function showScreen(name) {
@@ -354,6 +427,9 @@ function showVerify(checks, serverId) {
   $('verify-state').textContent = ok ? '通过' : '需要处理';
   $('verify-state').className = 'om-pill ' + (ok ? 'om-pill-ok' : 'om-pill-error');
   $('btn-verify-continue').disabled = !ok;
+  if (ok && checks && checks.length > 0 && pendingDeploymentCredential && !deploymentLedgerHandoffDone) {
+    void completeDeploymentLedgerHandoff();
+  }
   if (homeRequested) {
     // The user returned to the main screen; keep the job running but do not
     // yank them away from where they are.
@@ -367,6 +443,9 @@ function handleDeployResult(data) {
   $('btn-deploy').disabled = false;
   $('btn-deploy-retry').disabled = false;
   if (data.ok && data.dryRun) {
+    pendingDeploymentCredential = null;
+    deploymentLedgerHandoffDone = true;
+    closeLedgerHandoff();
     renderProgress('complete');
     $('deploy-state').textContent = '演练完成';
     $('deploy-state').className = 'om-pill om-pill-ok';
@@ -394,6 +473,8 @@ function handleDeployResult(data) {
     return;
   }
   renderProgress('failed');
+  pendingDeploymentCredential = null;
+  closeLedgerHandoff();
   $('deploy-state').textContent = '需要处理';
   $('deploy-state').className = 'om-pill om-pill-error';
   toast(data.message || '部署失败，请查看日志。', true);
@@ -412,6 +493,9 @@ async function startDeploy() {
   const user = $('admin-user').value.trim();
   const password = $('admin-password').value;
   if (!user || password.length < 8) { toast('请先完成管理员账号设置。', true); showScreen('admin'); return; }
+  pendingDeploymentCredential = { username: user, password };
+  deploymentLedgerHandoffDone = false;
+  beginLedgerHandoff();
   $('btn-deploy').disabled = true;
   $('btn-deploy-retry').disabled = true;
   $('btn-approve-funnel').classList.add('om-hidden');
@@ -437,6 +521,8 @@ async function startDeploy() {
     });
   } catch (error) {
     stopPolling();
+    pendingDeploymentCredential = null;
+    closeLedgerHandoff();
     $('btn-deploy').disabled = false;
     $('btn-deploy-retry').disabled = false;
     $('deploy-state').textContent = '失败';
@@ -539,11 +625,13 @@ async function loadQr(force, target) {
 }
 
 async function repairAndReloadQr(button, ids) {
+  const ledgerTab = beginLedgerHandoff();
   button.disabled = true;
   button.textContent = '正在修复服务…';
   try {
     const result = await postAction('repair');
     if (!result.jobId) {
+      closeLedgerHandoff(ledgerTab);
       button.disabled = false;
       button.textContent = '一键修复并重试';
       toast(result.message || '修复任务没有启动。', true);
@@ -552,15 +640,18 @@ async function repairAndReloadQr(button, ids) {
     pollJob(result.jobId, (jobResult) => {
       if (jobResult.ok) {
         toast('服务已修复，正在重新生成二维码。');
+        void completeRepairLedgerHandoff(ledgerTab);
         refreshState().catch(() => {});
         loadQr(true, ids);
       } else {
+        closeLedgerHandoff(ledgerTab);
         button.disabled = false;
         button.textContent = '一键修复并重试';
         toast(jobResult.message || '修复失败，请查看运行状态。', true);
       }
     });
   } catch (error) {
+    closeLedgerHandoff(ledgerTab);
     button.disabled = false;
     button.textContent = '一键修复并重试';
     toast(error.message || '修复失败。', true);
@@ -647,16 +738,23 @@ async function refreshLogs() {
 }
 
 async function runSimpleAction(name, successMessage) {
+  const ledgerTab = name === 'repair' ? beginLedgerHandoff() : null;
   try {
     const result = await postAction(name);
-    if (!result.jobId) { toast(result.message || '操作没有启动。', true); return; }
+    if (!result.jobId) { closeLedgerHandoff(ledgerTab); toast(result.message || '操作没有启动。', true); return; }
     pollJob(result.jobId, (data) => {
-      if (data.ok) toast(successMessage || '完成。');
-      else toast(data.message || '操作失败。', true);
+      if (data.ok) {
+        toast(successMessage || '完成。');
+        if (name === 'repair') void completeRepairLedgerHandoff(ledgerTab);
+      } else {
+        closeLedgerHandoff(ledgerTab);
+        toast(data.message || '操作失败。', true);
+      }
       refreshState().catch(() => {});
       if (name === 'disable' || name === 'enable' || name === 'repair') showStatus();
     });
   } catch (error) {
+    closeLedgerHandoff(ledgerTab);
     toast(error.message || '操作失败。', true);
   }
 }
@@ -866,6 +964,14 @@ async function boot() {
       showScreen('complete');
       loadAppQr();
       loadQr();
+      const query = new URLSearchParams(window.location.search);
+      if (query.get('autoLedger') === '1') {
+        window.location.replace('/api/ledger-login');
+        return;
+      }
+      if (query.get('autoLedgerError') === '1') {
+        toast('升级已完成，但服务暂未恢复。请到运行状态页查看并修复。', true);
+      }
       return;
     }
     if (state.step === 'DISABLED') {
@@ -922,8 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('btn-pair-qr-refresh').addEventListener('click', () => loadQr(true));
   $('btn-backup').addEventListener('click', backup);
   $('btn-open-ledger').addEventListener('click', () => {
-    const port = currentState && currentState.ports ? currentState.ports.wallos : 18082;
-    window.open('http://127.0.0.1:' + port + '/', '_blank', 'noopener');
+    window.open('/api/ledger-login', '_blank', 'noopener');
   });
   $('btn-disable').addEventListener('click', async () => {
     if (!window.confirm('关闭后公网入口会消失，手机将无法在外网同步。数据不会删除。继续吗？')) return;

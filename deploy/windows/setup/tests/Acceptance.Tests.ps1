@@ -585,6 +585,8 @@ Describe 'Wizard browser handoff' -Tag 'Acceptance' {
 param(
     [int]$Port,
     [string]$StateRoot = '',
+    [string]$OriginalUserSid = '',
+    [string]$CredentialPipeName = '',
     [switch]$NoBrowser,
     [switch]$Dev,
     [switch]$DryRun,

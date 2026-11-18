@@ -6,6 +6,7 @@ $script:OmRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 
 . (Join-Path $PSScriptRoot 'lib\Log.ps1')
 . (Join-Path $PSScriptRoot 'lib\State.ps1')
+. (Join-Path $PSScriptRoot 'lib\CredentialManager.ps1')
 . (Join-Path $PSScriptRoot 'lib\Ports.ps1')
 . (Join-Path $PSScriptRoot 'lib\Probes.ps1')
 . (Join-Path $PSScriptRoot 'lib\Compose.ps1')

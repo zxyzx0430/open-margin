@@ -115,6 +115,15 @@ Describe 'Installer compliance and lifecycle hooks' {
         $script:iss | Should -Match 'Set-AppAcl\.ps1.*-OriginalUser ""\{username\}""'
         $script:iss | Should -Match 'Install-UrlAcl\.ps1.*-OriginalUser ""\{username\}""'
     }
+
+    It 'marks only an in-place upgrade for automatic ledger opening' {
+        $script:iss | Should -Match 'WasInPlaceUpgrade := \(PreviousDir <> ''''\) and DirExists\(PreviousDir\)'
+        $script:iss | Should -Match 'CompareText\(ChosenDir, PreviousDir\) = 0'
+        $script:iss | Should -Match 'GetUpgradeLedgerArgument'
+        $script:iss | Should -Match '\-AutoOpenLedgerAfterInstall'
+        $script:iss | Should -Match "CurrentDir := NormalizeDir\(ExpandConstant\('\{app\}'\)\)"
+        $script:iss | Should -Match 'CompareText\(CurrentDir, PreviousDir\) = 0'
+    }
 }
 
 Describe 'Browser fallback and wizard single-instance' {
@@ -123,6 +132,17 @@ Describe 'Browser fallback and wizard single-instance' {
         $launch | Should -Match 'if \(-not \$isElevated -and -not \$NoElevate\)'
         $launch | Should -Match '-Verb RunAs'
         $launch | Should -Match 'elevation was cancelled or failed'
+    }
+
+    It 'starts the credential bridge as the original user before requesting elevation' {
+        $launch = Get-Content -Path (Join-Path $script:setupRoot 'installer\Launch-Setup.ps1') -Raw -Encoding UTF8
+        $launch | Should -Match 'CredentialVaultBridge\.ps1'
+        $launch | Should -Match 'OriginalUserSid'
+        $launch | Should -Match 'CredentialPipeName'
+        $launch.IndexOf('CredentialVaultBridge.ps1') | Should -BeLessThan $launch.IndexOf('-Verb RunAs')
+        $server = Get-Content -Path (Join-Path $script:setupRoot 'Start-OpenMarginSetupWeb.ps1') -Raw -Encoding UTF8
+        $server | Should -Match '\[string\]\$CredentialPipeName'
+        $server | Should -Match 'CredentialPipeName\)'
     }
 
     It 'keeps the token handoff file while the wizard runs' {

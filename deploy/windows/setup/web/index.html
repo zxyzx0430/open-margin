@@ -156,11 +156,11 @@
       </div>
       <div class="om-form">
         <label>用户名<input id="admin-user" autocomplete="username" maxlength="60" placeholder="例如 alex"></label>
-        <label>密码<input id="admin-password" type="password" autocomplete="new-password" minlength="8" placeholder="至少 8 位"></label>
-        <label>确认密码<input id="admin-password2" type="password" autocomplete="new-password" minlength="8"></label>
+        <label>密码<input id="admin-password" type="password" autocomplete="new-password" minlength="8" maxlength="256" placeholder="8–256 位"></label>
+        <label>确认密码<input id="admin-password2" type="password" autocomplete="new-password" minlength="8" maxlength="256"></label>
         <label>邮箱（可选）<input id="admin-email" type="email" autocomplete="email" placeholder="用于密码找回"></label>
       </div>
-      <p class="om-hint">这是以后登录网页版清衡的账号。密码只用于本地创建管理员，不会写进日志。</p>
+      <p class="om-hint">这是以后登录网页版清衡的账号。部署成功后，密码会保存到当前 Windows 用户的凭据管理器，用于自动登录本机账本；不会写进清衡状态或日志。</p>
       <div class="om-actions">
         <button id="btn-admin-next" class="om-btn om-btn-primary">下一步</button>
       </div>

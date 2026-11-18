@@ -3,6 +3,8 @@ param(
     [int]$Port = 18770,
     [string]$StateRoot = '',
     [string]$RepoRoot = '',
+    [string]$OriginalUserSid = '',
+    [string]$CredentialPipeName = '',
     [switch]$NoBrowser,
     [switch]$Dev,
     [switch]$DryRun,
@@ -13,9 +15,17 @@ $ErrorActionPreference = 'Stop'
 $modulePath = Join-Path $PSScriptRoot 'OpenMargin.Setup.psd1'
 Import-Module $modulePath -Force -DisableNameChecking
 
+if (-not $OriginalUserSid) { $OriginalUserSid = [string]$env:OPENMARGIN_ORIGINAL_USER_SID }
+if (-not $OriginalUserSid) { $OriginalUserSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
+$OriginalUserSid = (New-Object Security.Principal.SecurityIdentifier($OriginalUserSid)).Value
+$env:OPENMARGIN_ORIGINAL_USER_SID = $OriginalUserSid
 if (-not $StateRoot) { $StateRoot = Join-Path $env:LOCALAPPDATA 'OpenMargin' }
 if (-not $RepoRoot) { $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 Initialize-OmPaths -StateRoot $StateRoot -RepoRoot $RepoRoot
+if ($CredentialPipeName) {
+    $attached = Invoke-OmCredentialManager -Command 'attach' -ServerPid $PID -OriginalUserSid $OriginalUserSid -PipeName $CredentialPipeName
+    if (-not $attached.ok) { Write-OmLog -Level WARN -Message 'original-user credential bridge was not available' }
+}
 if ($Resume) {
     $null = Unregister-OmResumeRunOnce
     Write-OmLog -Level INFO -Message 'resumed after reboot'
@@ -133,6 +143,31 @@ function Write-OmStatic {
         $headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
     }
     Write-OmResponse -Context $Context -Status 200 -ContentType $allowed[$name] -Bytes $bytes -Headers $headers
+}
+
+function Write-OmLedgerLoginPage {
+    param($Context)
+    $state = Read-OmState
+    $wallosPort = 18082
+    if ($state.ports -and [int]$state.ports.wallos -gt 0) { $wallosPort = [int]$state.ports.wallos }
+    $baseUrl = 'http://127.0.0.1:' + $wallosPort
+    $credential = Invoke-OmCredentialManager -Command 'get' -OriginalUserSid $OriginalUserSid -PipeName $CredentialPipeName
+    if (-not $credential.ok -or [string]::IsNullOrEmpty([string]$credential.username) -or [string]::IsNullOrEmpty([string]$credential.password)) {
+        Write-OmResponse -Context $Context -Status 302 -Text 'Opening the local ledger.' -Headers @{ Location = ($baseUrl + '/') }
+        return
+    }
+
+    $nonceBytes = New-Object byte[] 18
+    $nonceRng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $nonceRng.GetBytes($nonceBytes) } finally { $nonceRng.Dispose() }
+    $nonce = [Convert]::ToBase64String($nonceBytes)
+    $page = New-OmLedgerLoginPagePayload -Username ([string]$credential.username) -Password ([string]$credential.password) -WallosPort $wallosPort -Nonce $nonce
+    $headers = @{
+        'Content-Security-Policy' = $page.contentSecurityPolicy
+        'Pragma' = 'no-cache'
+    }
+    Write-OmResponse -Context $Context -ContentType 'text/html; charset=utf-8' -Text $page.html -Headers $headers
+    $credential.password = $null
 }
 
 function Read-OmRequestBody {
@@ -385,7 +420,12 @@ try {
                         $cookie.HttpOnly = $true
                         try { $cookie.SameSite = [System.Net.SameSiteMode]::Strict } catch { }
                         $context.Response.SetCookie($cookie)
-                        $context.Response.Redirect('/')
+                        $redirectPath = '/'
+                        $redirectFlags = @()
+                        if ([string]$context.Request.QueryString['autoLedger'] -eq '1') { $redirectFlags += 'autoLedger=1' }
+                        if ([string]$context.Request.QueryString['autoLedgerError'] -eq '1') { $redirectFlags += 'autoLedgerError=1' }
+                        if ($redirectFlags.Count -gt 0) { $redirectPath += '?' + ($redirectFlags -join '&') }
+                        $context.Response.Redirect($redirectPath)
                         $context.Response.Close()
                         continue
                     }
@@ -420,6 +460,37 @@ try {
                         break
                     }
                     Write-OmJson -Context $context -Value @{ ok = $true; service = 'open-margin-setup'; version = '1.3.1'; dryRun = [bool]$DryRun }
+                }
+                '^/api/credentials$' {
+                    if ($method -ne 'POST') {
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'METHOD_NOT_ALLOWED' } -Status 405
+                        break
+                    }
+                    if ($DryRun) {
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'DRY_RUN'; message = '演练模式不会保存登录凭据。' }
+                        break
+                    }
+                    try { $body = Read-OmRequestBody -Context $context } catch {
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'BAD_JSON'; message = '凭据请求格式无效。' } -Status 400
+                        break
+                    }
+                    $username = [string]$body.username
+                    $password = [string]$body.password
+                    if ([string]::IsNullOrWhiteSpace($username) -or $username.Length -gt 60 -or $password.Length -lt 8 -or $password.Length -gt 256) {
+                        $password = $null
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'CREDENTIAL_INPUT_INVALID'; message = '账号或密码不符合保存条件。' } -Status 400
+                        break
+                    }
+                    $saved = Invoke-OmCredentialManager -Command 'set' -Username $username -Password $password -OriginalUserSid $OriginalUserSid -PipeName $CredentialPipeName
+                    $password = $null
+                    Write-OmJson -Context $context -Value $saved
+                }
+                '^/api/ledger-login$' {
+                    if ($method -ne 'GET') {
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'METHOD_NOT_ALLOWED' } -Status 405
+                        break
+                    }
+                    Write-OmLedgerLoginPage -Context $context
                 }
                 '^/api/config$' {
                     if ($method -ne 'GET') {
@@ -539,6 +610,9 @@ try {
         }
     }
 } finally {
+    if ($CredentialPipeName) {
+        $null = Invoke-OmCredentialManager -Command 'stop' -OriginalUserSid $OriginalUserSid -PipeName $CredentialPipeName
+    }
     try { $listener.Stop(); $listener.Close() } catch { }
     Remove-Item -Force $pidPath -ErrorAction SilentlyContinue
     Remove-Item -Force $launchUrlPath -ErrorAction SilentlyContinue
