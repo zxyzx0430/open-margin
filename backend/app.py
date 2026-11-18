@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, Field, field_validator
 
 from config import DB, PUBLIC_BASE
+from device_status import DEVICE_SYNC_PATHS, read_device_seen, record_device_seen
 DEVICE_TOKEN = os.getenv("FINANCE_DEVICE_TOKEN", "")
 ADMIN_TOKEN = os.getenv("FINANCE_ADMIN_TOKEN", "")
 app = FastAPI(title="Personal Finance API", version="1.5.0", docs_url=None, redoc_url=None)
@@ -177,6 +178,11 @@ def transaction_split(tx_id:int, item:dict):
 def health():
     return {"ok": True, "service": "finance-api", "version": "1.5.0"}
 
+@app.get("/api/v1/device-status", dependencies=[Depends(admin_auth)])
+def device_status():
+    data = read_device_seen()
+    return {"ok": True, "seen": data is not None, "at": data["at"] if data else None}
+
 @app.post("/api/v1/transactions/batch", dependencies=[Depends(device_auth)])
 def ingest(batch: Batch):
     inserted, existed = 0, 0
@@ -295,6 +301,17 @@ async def finance_lifespan(application):
         yield
 
 app.router.lifespan_context = finance_lifespan
+
+@app.middleware("http")
+async def record_device_sync(request: Request, call_next):
+    response = await call_next(request)
+    if (
+        response.status_code == 200
+        and request.url.path in DEVICE_SYNC_PATHS
+        and request.headers.get("x-device-token")
+    ):
+        record_device_seen(request.headers.get("user-agent"))
+    return response
 
 @app.middleware("http")
 async def mcp_authentication(request: Request, call_next):
