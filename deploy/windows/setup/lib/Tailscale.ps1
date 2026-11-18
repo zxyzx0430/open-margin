@@ -376,8 +376,9 @@ function Wait-OmPublicDns {
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $lastError = $null
+    $probeMode = Get-OmPublicProbeMode
     do {
-        $probe = Get-OmHttpStatus -Url $Url -TimeoutSec 10
+        $probe = Get-OmHttpStatus -Url $Url -TimeoutSec 10 -ProxyMode $probeMode
         if ($probe.status -eq 200) {
             return [pscustomobject]@{ ok = $true; code = 'PUBLIC_DNS_READY'; status = 200 }
         }

@@ -12,13 +12,22 @@ function Get-OmServerIdResult {
     )
     $url = $BaseUrl.TrimEnd('/') + '/api/v2/sync/changes?since=0&limit=1'
     $lastError = $null
+    $probeMode = Get-OmPublicProbeMode
     for ($attempt = 1; $attempt -le [Math]::Max(1, $Attempts); $attempt++) {
         try {
-            $response = Invoke-RestMethod -Uri $url -Headers @{ 'X-Device-Token' = $Token } -TimeoutSec $TimeoutSec -ErrorAction Stop
-            if ($response.PSObject.Properties['server_id'] -and $response.server_id) {
-                return [pscustomobject]@{ ok = $true; serverId = [string]$response.server_id; error = $null }
+            # Reuse the self-test HTTP helper so the public *.ts.net probe
+            # follows the same direct/proxy choice and skips a system proxy
+            # that would break its TLS handshake.
+            $probe = Get-OmHttpStatus -Url $url -Headers @{ 'X-Device-Token' = $Token } -TimeoutSec $TimeoutSec -ProxyMode $probeMode
+            if ($probe.status -eq 200 -and $probe.body) {
+                $response = $probe.body | ConvertFrom-Json
+                if ($response.PSObject.Properties['server_id'] -and $response.server_id) {
+                    return [pscustomobject]@{ ok = $true; serverId = [string]$response.server_id; error = $null }
+                }
+                $lastError = 'server_id missing in sync response'
+            } else {
+                $lastError = $(if ($probe.error) { $probe.error } else { 'HTTP ' + $probe.status })
             }
-            $lastError = 'server_id missing in sync response'
         } catch {
             $lastError = $_.Exception.Message
         }

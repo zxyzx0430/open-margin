@@ -69,6 +69,30 @@ function goHome() {
   showScreen('welcome');
 }
 
+function applyProbeMode(mode) {
+  const value = (mode === 'direct' || mode === 'system') ? mode : 'auto';
+  document.querySelectorAll('[data-probe-mode]').forEach((btn) => {
+    const active = btn.getAttribute('data-probe-mode') === value;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+async function setProbeMode(mode) {
+  try {
+    const data = await postAction('set-public-probe-mode', { mode });
+    if (data.ok) {
+      applyProbeMode(mode);
+      if (currentState) currentState.publicProbeMode = mode;
+      toast('已切换，下次自测生效。');
+    } else {
+      toast(data.message || '切换失败。', true);
+    }
+  } catch (error) {
+    toast('切换失败：' + error.message, true);
+  }
+}
+
 function updateSteps(screen) {
   const order = ['env', 'tailscale', 'admin', 'deploy', 'verify', 'complete'];
   let activeIndex = -1;
@@ -89,7 +113,8 @@ function setHeader(state) {
   const el = $('header-state');
   if (!state) { el.textContent = '正在检查'; el.className = 'om-pill om-pill-neutral'; return; }
   const step = state.step || '';
-  if (step === 'COMPLETE' || step === 'PHONE_VERIFIED' || (state.publicSyncUrl && step !== 'DISABLED')) {
+  if (step === 'PHONE_VERIFIED') { el.textContent = '手机已验证'; el.className = 'om-pill om-pill-ok'; return; }
+  if (step === 'COMPLETE' || (state.publicSyncUrl && step !== 'DISABLED')) {
     el.textContent = '已部署'; el.className = 'om-pill om-pill-ok'; return;
   }
   if (step === 'DISABLED') { el.textContent = '已关闭'; el.className = 'om-pill om-pill-warn'; return; }
@@ -176,6 +201,7 @@ async function refreshState(full) {
   if (data && data.state) {
     currentState = data.state;
     setHeader(currentState);
+    applyProbeMode(currentState.publicProbeMode);
   }
   return data;
 }
@@ -321,6 +347,10 @@ function showVerify(checks, serverId) {
   renderChecks('verify-checks', checks);
   $('verify-server-id').textContent = serverId || '尚未读取';
   const ok = statusOk(checks);
+  const httpZero = !ok && (checks || []).some((check) => /HTTP 0/.test(check.detail || ''));
+  if (httpZero) {
+    toast('公网访问不通：可在“公网自测网络”里切换到“系统代理”后重新自测。', true);
+  }
   $('verify-state').textContent = ok ? '通过' : '需要处理';
   $('verify-state').className = 'om-pill ' + (ok ? 'om-pill-ok' : 'om-pill-error');
   $('btn-verify-continue').disabled = !ok;
@@ -466,14 +496,17 @@ function loadAppQr() {
   }
 }
 
-async function loadQr(force) {
+async function loadQr(force, target) {
   if (force) { clearTimeout(pairTimer); pairTimer = null; }
-  const container = $('pair-qr');
+  const ids = target || { container: 'pair-qr', hint: 'pair-qr-hint' };
+  const container = $(ids.container);
+  if (!container) return;
   container.innerHTML = '';
   container.classList.remove('is-hidden');
-  $('pair-qr-hint').textContent = '二维码 10 分钟后自动隐藏，只在本机显示。';
+  $(ids.hint).textContent = '二维码 10 分钟后自动隐藏，只在本机显示。';
   try {
     const data = await api('/api/qr');
+    if (ids.serverId) $(ids.serverId).textContent = data.serverId || '尚未读取';
     if (!data.ok || !data.payload) {
       container.textContent = data.message || '还没有配对信息。';
       return;
@@ -488,11 +521,34 @@ async function loadQr(force) {
     pairTimer = setTimeout(() => {
       container.innerHTML = '';
       container.classList.add('is-hidden');
-      $('pair-qr-hint').textContent = '二维码已隐藏。需要时点“重新显示二维码”。';
+      $(ids.hint).textContent = '二维码已隐藏。需要时点“重新显示二维码”。';
     }, 10 * 60 * 1000);
   } catch (error) {
     container.textContent = '无法读取配对信息。';
   }
+}
+
+function statusQrDeployed() {
+  const step = currentState && currentState.step;
+  return ['COMPLETE', 'PHONE_VERIFIED', 'DISABLED'].indexOf(step) >= 0;
+}
+
+function updateStatusQr(force) {
+  const state = currentState || {};
+  $('status-public-url').textContent = state.publicSyncUrl || '未开启';
+  const container = $('status-pair-qr');
+  const hint = $('status-pair-qr-hint');
+  if (!statusQrDeployed()) {
+    clearTimeout(pairTimer);
+    container.innerHTML = '';
+    container.classList.add('is-hidden');
+    hint.textContent = '还没有配对信息。完成部署后这里会显示二维码。';
+    $('status-server-id').textContent = '尚未读取';
+    $('btn-status-qr-refresh').classList.add('om-hidden');
+    return;
+  }
+  $('btn-status-qr-refresh').classList.remove('om-hidden');
+  loadQr(!!force, { container: 'status-pair-qr', hint: 'status-pair-qr-hint', serverId: 'status-server-id' });
 }
 
 function statusLines(data) {
@@ -511,6 +567,9 @@ function statusLines(data) {
 async function showStatus() {
   showScreen('status');
   try {
+    // Ask the local API whether a phone has synced since the last check; a
+    // failure here must not block the status screen.
+    try { await postAction('phone-status'); } catch (e) { }
     const data = await refreshState(true);
     const summary = $('status-summary');
     summary.innerHTML = '';
@@ -531,6 +590,7 @@ async function showStatus() {
       body.appendChild(title); body.appendChild(detail); row.appendChild(body); summary.appendChild(row);
     });
     await refreshLogs();
+    updateStatusQr();
   } catch (error) {
     $('status-summary').textContent = '无法读取状态。';
   }
@@ -790,6 +850,10 @@ async function boot() {
 
 document.addEventListener('DOMContentLoaded', () => {
   $('btn-home').addEventListener('click', goHome);
+  document.querySelectorAll('[data-probe-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => setProbeMode(btn.getAttribute('data-probe-mode')));
+  });
+  applyProbeMode('auto');
   $('btn-start').addEventListener('click', () => { showScreen('env'); runCheck('env'); });
   $('btn-status').addEventListener('click', showStatus);
   $('btn-recheck').addEventListener('click', () => runCheck('env'));
@@ -827,13 +891,18 @@ document.addEventListener('DOMContentLoaded', () => {
     await runSimpleAction('disable', '远程同步已关闭。');
   });
   $('btn-status-refresh').addEventListener('click', showStatus);
+  $('btn-status-qr-refresh').addEventListener('click', () => updateStatusQr(true));
   $('btn-status-repair').addEventListener('click', () => runSimpleAction('repair', '修复完成。'));
   $('btn-watchdog-pause').addEventListener('click', () => runSimpleAction('pause-watchdog', '看门狗已暂停 1 小时。'));
   $('btn-watchdog-resume').addEventListener('click', () => runSimpleAction('resume-watchdog', '看门狗已恢复。'));
   $('btn-rotate-token').addEventListener('click', async () => {
     if (!window.confirm('重新生成后，旧二维码立即失效，手机需要重新扫码。继续吗？')) return;
     await runSimpleAction('rotate-token', '设备密钥已更新，请重新扫码。');
-    loadQr(true);
+    if ($('screen-status').classList.contains('is-active')) {
+      updateStatusQr();
+    } else {
+      loadQr(true);
+    }
   });
   $('btn-status-enable').addEventListener('click', () => runSimpleAction('enable', '远程同步已重新开启。'));
   initOffline(); // offline bundle card (thread E)
