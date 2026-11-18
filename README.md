@@ -4,13 +4,14 @@
 
 支持 MCP 的自托管记账工具。交易自动入账，账本保存在自己的设备中，数据隐私和调用自由由你掌握。
 
+下面的截图展示手机端账单、记账、日历与统计，以及桌面端总览、日历、统计和订阅管理。
+
 <p align="center">
   <img src="docs/assets/mobile-screens.jpg" width="860" alt="账单列表 / 一句话记账 / 日历 / 统计">
 </p>
 
 <p align="center">
-  <img src="docs/assets/desktop-overview.jpg" width="440" alt="财务总览">
-  <img src="docs/assets/desktop-subscriptions.jpg" width="440" alt="订阅管理">
+  <img src="docs/assets/desktop-screens.jpg" width="860" alt="桌面端总览、日历、统计和订阅管理">
 </p>
 
 > **状态：预发布，单用户部署。** 真实微信/支付宝通知的覆盖率取决于手机和 ROM，采集到的通知不能当作银行对账单，重要支出请与官方账单核对。不连接银行凭据，不代替你付款。

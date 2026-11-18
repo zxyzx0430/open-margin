@@ -4,13 +4,14 @@
 
 Self-hosted bookkeeping with MCP. Transactions record themselves, and the ledger lives on your own devices — you keep both the privacy and the keys.
 
+The screenshots below show capture and bookkeeping on mobile, plus desktop views for the overview, calendar, statistics and subscription management.
+
 <p align="center">
   <img src="docs/assets/mobile-screens.jpg" width="860" alt="Bills / Quick entry / Calendar / Stats">
 </p>
 
 <p align="center">
-  <img src="docs/assets/desktop-overview.jpg" width="440" alt="Overview">
-  <img src="docs/assets/desktop-subscriptions.jpg" width="440" alt="Subscriptions">
+  <img src="docs/assets/desktop-screens.jpg" width="860" alt="Desktop overview, calendar, statistics and subscriptions">
 </p>
 
 > **Status: pre-release, single-owner deployment.** Real WeChat/Alipay notification coverage depends on the phone and ROM. Captured notifications are not bank statements — check important spending against official records. No banking credentials, and nothing is paid on your behalf.
