@@ -85,7 +85,6 @@ fun SyncSettingsScreen(onBack: () -> Unit) {
     var feedback by remember { mutableStateOf("") }
     var copyFeedback by remember { mutableStateOf("") }
     var serverScanMessage by remember { mutableStateOf("") }
-    var pairingScanMessage by remember { mutableStateOf("") }
     var confirmReset by remember { mutableStateOf(false) }
     var showConflictDetails by remember { mutableStateOf(false) }
     var wizardOpen by remember { mutableStateOf(false) }
@@ -126,7 +125,6 @@ fun SyncSettingsScreen(onBack: () -> Unit) {
     }
     fun openWizard(payload: PairingPayload?, manual: Boolean) {
         serverScanMessage = ""
-        pairingScanMessage = ""
         wizardPayload = payload
         manualEntry = manual
         wizardOpen = true
@@ -232,20 +230,11 @@ fun SyncSettingsScreen(onBack: () -> Unit) {
                             }
                         },
                         feedback = copyFeedback,
+                        onManualEntry = { openWizard(payload = null, manual = true) },
                         onScan = { payload -> openWizard(payload, manual = false) },
                         onRejected = { serverScanMessage = invalidQrMessage() },
                         onFailure = { serverScanMessage = cameraPermissionMessage() },
                         scanMessage = serverScanMessage,
-                    )
-                }
-                item { SyncSectionTitle(tr("配对电脑")) }
-                item {
-                    PairComputerCard(
-                        scanMessage = pairingScanMessage,
-                        onScan = { payload -> openWizard(payload, manual = false) },
-                        onRejected = { pairingScanMessage = invalidQrMessage() },
-                        onFailure = { pairingScanMessage = cameraPermissionMessage() },
-                        onManualEntry = { openWizard(payload = null, manual = true) },
                     )
                 }
                 item {
@@ -440,6 +429,7 @@ private fun SyncServerCard(
     onToggleTokenVisibility: () -> Unit,
     onCopyAddress: () -> Unit,
     onCopyToken: () -> Unit,
+    onManualEntry: () -> Unit,
     feedback: String,
     onScan: (PairingPayload) -> Unit,
     onRejected: () -> Unit,
@@ -447,81 +437,118 @@ private fun SyncServerCard(
     scanMessage: String,
 ) {
     SyncSettingsCard {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(tr("服务器地址"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    text = snapshot.url.takeIf { it.isNotBlank() }?.let(::middleEllipsize)
-                        ?: tr("尚未配置服务器"),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        if (snapshot.configured) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tr("服务器地址"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = snapshot.url.takeIf { it.isNotBlank() }?.let(::middleEllipsize)
+                            ?: tr("尚未配置服务器"),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = onCopyAddress, enabled = snapshot.url.isNotBlank()) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = tr("复制地址"))
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tr("密钥"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        text = when {
+                            snapshot.token.isBlank() -> tr("未配置")
+                            tokenVisible -> snapshot.token
+                            else -> "••••••"
+                        },
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = onToggleTokenVisibility, enabled = snapshot.token.isNotBlank()) {
+                    Icon(
+                        imageVector = if (tokenVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = tr(if (tokenVisible) "隐藏密钥" else "显示密钥"),
+                    )
+                }
+                IconButton(onClick = onCopyToken, enabled = snapshot.token.isNotBlank()) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = tr("复制密钥"))
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
+        if (snapshot.configured) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(tr("重新配对"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        tr("扫描电脑上的配对二维码"),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                PairingQrScanAction(
+                    buttonLabel = "重新配对",
+                    onPayload = onScan,
+                    onRejected = { onRejected() },
+                    onFailure = { onFailure() },
                 )
             }
-            IconButton(onClick = onCopyAddress, enabled = snapshot.url.isNotBlank()) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = tr("复制地址"))
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    tr("扫码或手动填写电脑上的服务器地址与设备密钥。"),
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        tr("配对电脑"),
+                        modifier = Modifier.weight(1f),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    PairingQrScanAction(
+                        buttonLabel = "扫一扫",
+                        onPayload = onScan,
+                        onRejected = { onRejected() },
+                        onFailure = { onFailure() },
+                    )
+                }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        TextButton(
+            onClick = onManualEntry,
+            contentPadding = PaddingValues(horizontal = 16.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(tr("密钥"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    text = when {
-                        snapshot.token.isBlank() -> tr("未配置")
-                        tokenVisible -> snapshot.token
-                        else -> "••••••"
-                    },
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            IconButton(onClick = onToggleTokenVisibility, enabled = snapshot.token.isNotBlank()) {
-                Icon(
-                    imageVector = if (tokenVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                    contentDescription = tr(if (tokenVisible) "隐藏密钥" else "显示密钥"),
-                )
-            }
-            IconButton(onClick = onCopyToken, enabled = snapshot.token.isNotBlank()) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = tr("复制密钥"))
-            }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(tr("重新配对"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    tr("扫描电脑上的配对二维码"),
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            PairingQrScanAction(
-                buttonLabel = "重新配对",
-                onPayload = onScan,
-                onRejected = { onRejected() },
-                onFailure = { onFailure() },
-            )
+            Text(tr("手动填写地址与密钥"))
         }
         if (feedback.isNotBlank()) {
             Text(
@@ -538,58 +565,6 @@ private fun SyncServerCard(
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.error,
             )
-        }
-    }
-}
-
-@Composable
-private fun PairComputerCard(
-    scanMessage: String,
-    onScan: (PairingPayload) -> Unit,
-    onRejected: () -> Unit,
-    onFailure: () -> Unit,
-    onManualEntry: () -> Unit,
-) {
-    SyncSettingsCard {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                tr("扫码或手动填写电脑上的服务器地址与设备密钥。"),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    tr("配对电脑"),
-                    modifier = Modifier.weight(1f),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                PairingQrScanAction(
-                    buttonLabel = "扫一扫",
-                    onPayload = onScan,
-                    onRejected = { onRejected() },
-                    onFailure = { onFailure() },
-                )
-            }
-            TextButton(onClick = onManualEntry, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                Text(tr("手动填写地址与密钥"))
-            }
-            if (scanMessage.isNotBlank()) {
-                Text(
-                    text = scanMessage,
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.error,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
     }
 }
