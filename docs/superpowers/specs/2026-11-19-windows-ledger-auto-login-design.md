@@ -16,7 +16,7 @@ The setup process can be elevated under a different administrator account. When 
 
 The deploy button opens a temporary tab synchronously to satisfy browser popup rules. After a real deployment succeeds and its verification checks pass, the wizard stores the credentials and points that tab at a local one-time login endpoint. The endpoint retrieves the credential and returns a no-store HTML form that POSTs to Wallos `login.php`; credentials never appear in the URL. Wallos redirects the tab to its local home page. Dry runs and unsuccessful deployments close the temporary tab and never save credentials.
 
-If Credential Manager storage or retrieval fails, deployment remains complete and the wizard opens the ordinary Wallos page with a visible message. It does not claim that sign-in succeeded.
+If Credential Manager storage fails during deployment, deployment remains complete and the wizard opens Wallos with a visible message. It does not claim that sign-in succeeded. For an older installation without a saved entry, the protected setup page asks once for the existing Wallos credentials, stores them under the original Windows user, then continues through the automatic login form. Future deployments, repairs, and upgrades use that entry without asking again.
 
 ### User-triggered repair
 
@@ -28,7 +28,7 @@ The installer marks only an in-place upgrade of an already completed deployment 
 
 ## Login endpoint and secret handling
 
-The local setup server exposes a same-origin, setup-token-protected endpoint for the browser handoff. It HTML-escapes form fields, sets `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and a restrictive content security policy, and auto-submits a POST to `http://127.0.0.1:<wallos-port>/login.php`. Only username, password, and Wallos's `remember` field are submitted. The endpoint uses the configured Wallos port and falls back to the ordinary local home page if no stored credential is available.
+The local setup server exposes same-origin, setup-token-protected endpoints for credential capture and browser handoff. The capture page posts only to the setup server and uses the existing credential validation and Credential Manager bridge. The login page HTML-escapes form fields, sets `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and a restrictive content security policy, and auto-submits a POST to `http://127.0.0.1:<wallos-port>/login.php`. Only username, password, and Wallos's `remember` field are submitted. The endpoint uses the configured Wallos port; when no stored credential exists it shows the one-time capture page instead of pretending an automatic login is possible.
 
 Credential Manager errors are returned as generic status codes; native error detail and credential material are not logged. The setup page clears its password inputs after successful persistence. A later manual deployment replaces the saved credential only after owner creation succeeds.
 

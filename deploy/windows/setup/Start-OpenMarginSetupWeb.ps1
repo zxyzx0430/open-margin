@@ -145,6 +145,13 @@ function Write-OmStatic {
     Write-OmResponse -Context $Context -Status 200 -ContentType $allowed[$name] -Bytes $bytes -Headers $headers
 }
 
+function New-OmPageNonce {
+    $nonceBytes = New-Object byte[] 18
+    $nonceRng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $nonceRng.GetBytes($nonceBytes) } finally { $nonceRng.Dispose() }
+    return [Convert]::ToBase64String($nonceBytes)
+}
+
 function Write-OmLedgerLoginPage {
     param($Context)
     $state = Read-OmState
@@ -153,18 +160,24 @@ function Write-OmLedgerLoginPage {
     $baseUrl = 'http://127.0.0.1:' + $wallosPort
     $credential = Invoke-OmCredentialManager -Command 'get' -OriginalUserSid $OriginalUserSid -PipeName $CredentialPipeName
     if (-not $credential.ok -or [string]::IsNullOrEmpty([string]$credential.username) -or [string]::IsNullOrEmpty([string]$credential.password)) {
-        Write-OmResponse -Context $Context -Status 302 -Text 'Opening the local ledger.' -Headers @{ Location = ($baseUrl + '/') }
+        $page = New-OmCredentialBootstrapPagePayload -Nonce (New-OmPageNonce)
+        $headers = @{
+            'Content-Security-Policy' = $page.contentSecurityPolicy
+            'Cache-Control' = 'no-store, no-cache, must-revalidate'
+            'Pragma' = 'no-cache'
+            'Referrer-Policy' = 'no-referrer'
+        }
+        Write-OmResponse -Context $Context -ContentType 'text/html; charset=utf-8' -Text $page.html -Headers $headers
         return
     }
 
-    $nonceBytes = New-Object byte[] 18
-    $nonceRng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $nonceRng.GetBytes($nonceBytes) } finally { $nonceRng.Dispose() }
-    $nonce = [Convert]::ToBase64String($nonceBytes)
+    $nonce = New-OmPageNonce
     $page = New-OmLedgerLoginPagePayload -Username ([string]$credential.username) -Password ([string]$credential.password) -WallosPort $wallosPort -Nonce $nonce
     $headers = @{
         'Content-Security-Policy' = $page.contentSecurityPolicy
+        'Cache-Control' = 'no-store, no-cache, must-revalidate'
         'Pragma' = 'no-cache'
+        'Referrer-Policy' = 'no-referrer'
     }
     Write-OmResponse -Context $Context -ContentType 'text/html; charset=utf-8' -Text $page.html -Headers $headers
     $credential.password = $null

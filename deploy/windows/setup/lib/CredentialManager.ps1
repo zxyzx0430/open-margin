@@ -168,6 +168,49 @@ function New-OmLedgerLoginPagePayload {
     }
 }
 
+function New-OmCredentialBootstrapPagePayload {
+    param([Parameter(Mandatory = $true)][string]$Nonce)
+    $html = @"
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>启用清衡自动登录</title>
+<body><h1>启用清衡自动登录</h1>
+<p>此安装还没有保存账本登录凭据。输入现有 Wallos 账号和密码一次，保存到当前 Windows 用户的凭据管理器。</p>
+<form id="credential-setup">
+<label>用户名 <input id="username" name="username" autocomplete="username" maxlength="60" required></label>
+<label>密码 <input id="password" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="256" required></label>
+<button id="save" type="submit">保存并打开账本</button><p id="status" role="status" aria-live="polite"></p></form>
+<script nonce="$Nonce">
+const form = document.getElementById('credential-setup');
+const usernameInput = document.getElementById('username');
+const passwordInput = document.getElementById('password');
+const saveButton = document.getElementById('save');
+const statusText = document.getElementById('status');
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  saveButton.disabled = true;
+  statusText.textContent = '正在保存到 Windows 凭据管理器…';
+  let body = JSON.stringify({ username: usernameInput.value.trim(), password: passwordInput.value });
+  passwordInput.value = '';
+  try {
+    const response = await fetch('/api/credentials', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    body = '';
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.message || '保存失败，请检查凭据管理器或稍后重试。');
+    statusText.textContent = '已保存，正在打开账本…';
+    window.location.replace('/api/ledger-login');
+  } catch (error) {
+    body = '';
+    statusText.textContent = error.message || '保存失败，请重试。';
+    saveButton.disabled = false;
+  }
+});
+</script></body></html>
+"@
+    return [pscustomobject]@{
+        html = $html
+        contentSecurityPolicy = ("default-src 'none'; script-src 'nonce-" + $Nonce + "'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+    }
+}
+
 function Invoke-OmCredentialBridgeRequest {
     param(
         [Parameter(Mandatory = $true)][string]$PipeName,

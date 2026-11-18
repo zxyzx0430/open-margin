@@ -57,6 +57,18 @@ Describe 'Wallos credential storage' {
         $page.contentSecurityPolicy | Should -Match 'form-action http://127\.0\.0\.1:18123'
     }
 
+    It 'provides a one-time local credential capture page when an older install has no saved entry' {
+        $page = New-OmCredentialBootstrapPagePayload -Nonce 'bootstrap-nonce'
+        $page.html | Should -Match 'autocomplete="username"'
+        $page.html | Should -Match 'autocomplete="current-password"'
+        $page.html | Should -Match "fetch\('/api/credentials'"
+        $page.html | Should -Match "window\.location\.replace\('/api/ledger-login'\)"
+        $page.html | Should -Match '保存到当前 Windows 用户的凭据管理器'
+        $page.contentSecurityPolicy | Should -Match "script-src 'nonce-bootstrap-nonce'"
+        $page.contentSecurityPolicy | Should -Match "connect-src 'self'"
+        $page.contentSecurityPolicy | Should -Match "form-action 'self'"
+    }
+
     It 'uses a random, ACL-protected bridge under Windows PowerShell 5.1 for the original user' {
         $pipe = [guid]::NewGuid().ToString('N')
         $target = 'OpenMargin.Test.' + [guid]::NewGuid().ToString('N')
@@ -107,6 +119,8 @@ Describe 'Automatic ledger login handoff' {
         $server | Should -Match 'Cache-Control'
         $server | Should -Match 'Content-Security-Policy'
         $server | Should -Match 'credential\.password = \$null'
+        $server | Should -Match 'New-OmCredentialBootstrapPagePayload'
+        $server | Should -Match "'Cache-Control' = 'no-store, no-cache, must-revalidate'"
         $launch = Get-Content -Path (Join-Path $PSScriptRoot '..\installer\Launch-Setup.ps1') -Raw -Encoding UTF8
         $launch | Should -Match 'CredentialVaultBridge\.ps1'
         $launch | Should -Match 'OriginalUserSid'
