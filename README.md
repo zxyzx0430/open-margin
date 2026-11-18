@@ -77,28 +77,25 @@ Android 对读取其他应用账单有系统限制。完整获取需要 ROOT 或
 
 ## 同步架构
 
-```mermaid
-flowchart LR
-    subgraph Phone["Android 手机"]
-        App["清衡 App<br/>本地账本"]
-    end
-    subgraph Server["自建服务器（VPS 或 Windows）"]
-        API["Finance API<br/>SQLite 账本"]
-        Wallos["Wallos 界面<br/>订阅与报表"]
-        MCP["MCP 服务<br/>18 个工具"]
-        API <--> Wallos
-        API <--> MCP
-    end
-    Desktop["电脑浏览器<br/>查账、管理订阅"]
-    AI["ChatGPT 等<br/>MCP 客户端"]
-    App <-->|"HTTPS 双向同步"| API
-    Wallos <-->|"浏览器访问"| Desktop
-    MCP <-->|"OAuth 2.1"| AI
-```
+<p align="center">
+  <img src="docs/assets/sync-architecture.png" width="640" alt="手机 App 通过 HTTPS 双向同步到 Finance API；API 连接 Wallos 界面与 MCP 服务">
+</p>
 
 **VPS 部署**：服务器常开，手机在任何网络下都能同步。
 
 **Windows 部署**：服务和账本运行在自己的电脑上，手机通过 Tailscale Funnel 同步，不需要额外域名，手机也不用装 Tailscale。电脑关机期间手机照常记账，联网后补同步。WorkManager 重试间隔最短 15 分钟，受 Android 省电策略限制。
+
+## 手机配对
+
+两种部署共用同一套扫码流程，不区分普通域名和 Tailscale 域名。
+
+**VPS**：账本所有者登录 Wallos 后台 → 头像菜单 →「手机配对」→「生成配对二维码」，手机打开清衡 App → 同步 → 重新配对，直接扫码。
+
+二维码只在你点击后由后端接口临时生成，不写进静态页面、日志或浏览器缓存；页面 5 分钟后自动隐藏，刷新即失效。只有账本所有者能生成，普通账号看不到入口。
+
+**Windows**：安装向导最后一步会显示同一个格式的二维码，手机用同一台扫码页扫描。
+
+二维码里是**长期有效的设备密钥**：隐藏不等于过期，别截图外发。真泄露了需要在服务器轮换 `FINANCE_DEVICE_TOKEN` 并重新配对，这会断开已连接的手机。
 
 ## 安装
 
