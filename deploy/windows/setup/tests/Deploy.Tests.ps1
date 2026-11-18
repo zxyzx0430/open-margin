@@ -18,7 +18,7 @@ Describe 'Invoke-OmApproveFunnel watchdog install' {
             param($GatewayPort, $TimeoutSec, [switch]$DryRun)
             return [pscustomobject]@{ ok = $true; url = 'https://pc.tailnet.ts.net/finance' }
         }
-        Mock -ModuleName OpenMargin.Setup Set-OmEnvValueInFile { }
+        Mock -ModuleName OpenMargin.Setup Set-OmRunningSyncPublicUrl { }
         Mock -ModuleName OpenMargin.Setup Wait-OmPublicDns { return [pscustomobject]@{ ok = $true } }
         Mock -ModuleName OpenMargin.Setup Get-OmDeviceTokenFromFile { return 'device-token' }
         Mock -ModuleName OpenMargin.Setup Invoke-OmVerify {
@@ -58,5 +58,17 @@ Describe 'Invoke-OmApproveFunnel watchdog install' {
         $result = Invoke-OmApproveFunnel -Ports $script:ports -ProjectName 'test' -RepoRoot $script:repoRoot -DryRun
         $result.ok | Should -BeTrue
         Should -Invoke Install-OmWatchdog -ModuleName OpenMargin.Setup -Times 0
+    }
+}
+
+Describe 'Refreshing the sync URL in the running server' {
+    It 'recreates only finance-api and waits for its health' {
+        Mock -ModuleName OpenMargin.Setup Set-OmEnvValueInFile { }
+        Mock -ModuleName OpenMargin.Setup Get-OmBackendEnvPath { return 'backend.env' }
+        Mock -ModuleName OpenMargin.Setup Invoke-OmDockerCompose { return [pscustomobject]@{ exitCode = 0; output = 'ok' } }
+        Mock -ModuleName OpenMargin.Setup Wait-OmHttpOk { return $true }
+        Set-OmRunningSyncPublicUrl -Url 'https://pc.tailnet.ts.net/finance' -Ports $script:ports -ProjectName 'test' -RepoRoot $script:repoRoot
+        Should -Invoke Invoke-OmDockerCompose -ModuleName OpenMargin.Setup -Times 1 -ParameterFilter { $Arguments -contains '--force-recreate' -and $Arguments -contains '--no-deps' -and $Arguments -contains 'finance-api' }
+        Should -Invoke Wait-OmHttpOk -ModuleName OpenMargin.Setup -Times 1
     }
 }

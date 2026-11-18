@@ -54,8 +54,9 @@ def pairing_payload():
         server_id = row["value"] if row else ""
     if not server_id:
         raise HTTPException(status_code=503, detail="Ledger identity is unavailable")
+    sync_url = os.getenv("FINANCE_SYNC_PUBLIC_URL", "").strip().rstrip("/") or PUBLIC_BASE
     return JSONResponse(
-        {"v": 1, "kind": "open-margin-pair", "url": PUBLIC_BASE,
+        {"v": 1, "kind": "open-margin-pair", "url": sync_url,
          "token": core.DEVICE_TOKEN, "server_id": server_id},
         headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache",
                  "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"},

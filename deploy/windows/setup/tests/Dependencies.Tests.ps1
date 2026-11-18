@@ -394,3 +394,15 @@ Describe 'Docker installer exit codes' {
         $result.exitCode | Should -Be 3010
     }
 }
+
+Describe 'Native dependency command handling' {
+    It 'preserves stderr and a nonzero exit code with a spaced executable path' {
+        $dir = Join-Path $TestDrive 'native path'
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+        $command = Join-Path $dir 'fixture.cmd'
+        Set-Content -LiteralPath $command -Encoding Ascii -Value @('@echo off', 'echo diagnostic 1>&2', 'exit /b 7')
+        $result = Invoke-OmDependencyCommand -FilePath $command
+        $result.exitCode | Should -Be 7
+        $result.output | Should -Match 'diagnostic'
+    }
+}

@@ -305,7 +305,9 @@ function Install-OmDockerDesktop {
         if ($trust.authenticode -ne 'Valid') {
             throw ('invalid Authenticode signature: ' + $trust.authenticode)
         }
-        $process = Start-Process -FilePath $installer -ArgumentList @('install', '--quiet', '--accept-license') -Wait -PassThru
+        $process = Start-Process -FilePath $installer -ArgumentList @('install', '--quiet', '--accept-license') -PassThru
+        $null = $process.Handle
+        $process.WaitForExit()
         if ($process.ExitCode -in @(0, 3010)) {
             return [pscustomobject]@{ ok = $true; code = 'DOCKER_INSTALLED'; message = 'Docker Desktop 安装完成。'; sha256 = $trust.sha256; exitCode = $process.ExitCode }
         }
@@ -343,7 +345,9 @@ function Install-OmTailscale {
         if ($trust.authenticode -ne 'Valid') {
             throw ('invalid Authenticode signature: ' + $trust.authenticode)
         }
-        $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -Wait -PassThru
+        $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', ('"' + $msi + '"'), '/qn', '/norestart') -PassThru
+        $null = $process.Handle
+        $process.WaitForExit()
         if ($process.ExitCode -in @(0, 3010)) {
             return [pscustomobject]@{ ok = $true; code = 'TAILSCALE_INSTALLED'; message = 'Tailscale 安装完成。'; sha256 = $trust.sha256; exitCode = $process.ExitCode }
         }
@@ -541,9 +545,11 @@ function Invoke-OmElevatedScript {
         [string[]]$Arguments = @()
     )
     $exe = Get-OmPowerShellExe
-    $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + $Arguments
+    $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $ScriptPath + '"')) + $Arguments
     try {
-        $process = Start-Process -FilePath $exe -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
+        $process = Start-Process -FilePath $exe -ArgumentList $argumentList -Verb RunAs -PassThru
+        $null = $process.Handle
+        $process.WaitForExit()
         return [pscustomobject]@{ ok = ($process.ExitCode -eq 0); exitCode = $process.ExitCode }
     } catch {
         return [pscustomobject]@{ ok = $false; exitCode = -1; message = $_.Exception.Message; code = 'ADMIN_DENIED' }
@@ -581,12 +587,14 @@ try {
     $exe = Get-OmPowerShellExe
     try {
         $arguments = @(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath,
-            '-ModulePath', $ModulePath, '-SetupPort', $SetupPort, '-ResultPath', $resultPath
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $scriptPath + '"'),
+            '-ModulePath', ('"' + $ModulePath + '"'), '-SetupPort', $SetupPort, '-ResultPath', ('"' + $resultPath + '"')
         )
-        if ($ProgressPath) { $arguments += @('-ProgressPath', $ProgressPath) }
+        if ($ProgressPath) { $arguments += @('-ProgressPath', ('"' + $ProgressPath + '"')) }
         if ($LicenseAcknowledged) { $arguments += '-LicenseAcknowledged' }
-        $process = Start-Process -FilePath $exe -ArgumentList $arguments -Verb RunAs -Wait -PassThru
+        $process = Start-Process -FilePath $exe -ArgumentList $arguments -Verb RunAs -PassThru
+        $null = $process.Handle
+        $process.WaitForExit()
         if (Test-Path $resultPath) {
             return (Get-Content -Path $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json)
         }

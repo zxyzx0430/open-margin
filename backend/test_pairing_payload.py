@@ -1,8 +1,12 @@
 """Owner-only VPS pairing payload and secrecy regression tests."""
 import os
+import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -57,6 +61,38 @@ class PairingPayloadTests(unittest.TestCase):
                                headers={"X-Device-Token": core.DEVICE_TOKEN})
         self.assertEqual(sync.status_code, 200)
         self.assertEqual(body["server_id"], sync.json()["server_id"])
+
+    def test_windows_pairing_uses_configured_sync_url(self):
+        sync_url = "https://pc.tailnet.ts.net/finance"
+        with patch.dict(os.environ, {"FINANCE_SYNC_PUBLIC_URL": sync_url}):
+            response = self.client.post("/api/v1/wallos-ledger/pairing", headers=self.headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["url"], sync_url)
+
+    def test_identity_survives_fresh_server_process_with_existing_ledger(self):
+        db = str(Path(self.tmp.name) / "process-ledger.sqlite3")
+        env = dict(os.environ, FINANCE_DB=db,
+                   FINANCE_DEVICE_TOKEN="test-device-key-abcdef123456",
+                   FINANCE_WALLOS_LEDGER_TOKEN="test-wall-owner-private-token-long-enough",
+                   FINANCE_SYNC_PUBLIC_URL="https://pc.tailnet.ts.net/finance")
+        code = """import json
+from fastapi.testclient import TestClient
+import app
+client = TestClient(app.app)
+r = client.post('/api/v1/wallos-ledger/pairing', headers={'X-Wallos-Ledger-Token':'test-wall-owner-private-token-long-enough'})
+r.raise_for_status()
+s = client.get('/api/v2/sync/changes?since=0&limit=1', headers={'X-Device-Token':'test-device-key-abcdef123456'})
+s.raise_for_status()
+print(json.dumps([r.json()['server_id'], s.json()['server_id'], r.json()['url']]))
+"""
+        results = []
+        for _ in range(2):
+            result = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).parent,
+                                    env=env, text=True, capture_output=True, check=True)
+            results.append(json.loads(result.stdout.strip().splitlines()[-1]))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0][0], results[0][1])
+        self.assertEqual(results[0][2], "https://pc.tailnet.ts.net/finance")
 
     def test_never_issues_empty_device_credential(self):
         core.DEVICE_TOKEN = ""

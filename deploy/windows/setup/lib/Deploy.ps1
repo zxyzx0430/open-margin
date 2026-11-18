@@ -67,6 +67,16 @@ function New-OmDeployWaitingResult {
     return [pscustomobject]$result
 }
 
+function Set-OmRunningSyncPublicUrl {
+    param([string]$Url, $Ports, [string]$ProjectName, [string]$RepoRoot)
+    Set-OmEnvValueInFile -Name 'FINANCE_SYNC_PUBLIC_URL' -Value $Url -Path (Get-OmBackendEnvPath)
+    $result = Invoke-OmDockerCompose -Arguments @('--profile', 'windows-public-sync', 'up', '-d', '--no-deps', '--no-build', '--force-recreate', 'finance-api') -ProjectName $ProjectName -RepoRoot $RepoRoot
+    if ($result.exitCode -ne 0) { throw ('更新同步地址后服务重启失败: ' + (Protect-OmText $result.output)) }
+    if (-not (Wait-OmHttpOk -Url ('http://127.0.0.1:' + $Ports.api + '/health') -TimeoutSec 240)) {
+        throw '更新同步地址后服务未恢复健康。'
+    }
+}
+
 function Invoke-OmRemoteDeploy {
     param(
         [string]$RepoRoot = (Get-OmRepoRoot),
@@ -158,9 +168,7 @@ function Invoke-OmRemoteDeploy {
             $state.publicSyncUrl = $publicUrl
             Save-OmState $state
             if ($publicUrl) {
-                try {
-                    Set-OmEnvValueInFile -Name 'FINANCE_SYNC_PUBLIC_URL' -Value $publicUrl -Path (Get-OmBackendEnvPath)
-                } catch { }
+                Set-OmRunningSyncPublicUrl -Url $publicUrl -Ports $Ports -ProjectName $ProjectName -RepoRoot $RepoRoot
             }
             $null = Set-OmProgress -Stage 'dns' -Percent 72 -Message '等待公网地址生效'
             $dns = Wait-OmPublicDns -Url ($publicUrl.TrimEnd('/') + '/health') -TimeoutSec 600
@@ -234,7 +242,7 @@ function Invoke-OmApproveFunnel {
     Save-OmState $state
     $null = Set-OmProgress -Stage 'funnel' -Percent 75 -Message 'Funnel 已授权'
     if (-not $DryRun) {
-        Set-OmEnvValueInFile -Name 'FINANCE_SYNC_PUBLIC_URL' -Value $wait.url -Path (Get-OmBackendEnvPath)
+        Set-OmRunningSyncPublicUrl -Url $wait.url -Ports $Ports -ProjectName $ProjectName -RepoRoot $RepoRoot
         $dns = Wait-OmPublicDns -Url ($wait.url.TrimEnd('/') + '/health') -TimeoutSec 600
         if (-not $dns.ok) { return (New-OmDeployFailure -Step 'dns' -Code $dns.code -Message $dns.message -Detail $dns.detail -Retryable) }
     }
@@ -323,6 +331,7 @@ function Invoke-OmEnableRemote {
     if (-not $funnel.ok) {
         return (New-OmDeployFailure -Step 'funnel' -Code $funnel.code -Message $funnel.message -Detail $funnel.detail -Retryable:([bool]$funnel.retryable) -Action $funnel.action -Extra ([pscustomobject]@{ approvalUrl = $funnel.approvalUrl }))
     }
+    Set-OmRunningSyncPublicUrl -Url $funnel.url -Ports $Ports -ProjectName $ProjectName -RepoRoot $RepoRoot
     $null = Set-OmProgress -Stage 'dns' -Percent 70 -Message '等待公网地址生效'
     $dns = Wait-OmPublicDns -Url ($funnel.url.TrimEnd('/') + '/health') -TimeoutSec 600
     if (-not $dns.ok) {

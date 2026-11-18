@@ -491,6 +491,23 @@ Describe 'ACL hardening' {
         $plan.originalUserSid | Should -Match '^S-1-5-'
     }
 
+    It 'resolves the current domain-qualified account to its SID' {
+        $account = $env:USERDOMAIN + '\' + $env:USERNAME
+        $result = Invoke-PsFile $script:setAclScript @('-AppRoot', $script:aclApp, '-OriginalUser', $account, '-DryRun')
+        $result.ExitCode | Should -Be 0
+        $plan = Get-JsonPlan -Output $result.Output -Prefix 'OPENMARGIN_ACL_PLAN='
+        $plan.originalUserSid | Should -Be ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+    }
+
+    It 'resolves a real account name containing spaces' {
+        $sid = New-Object Security.Principal.SecurityIdentifier('S-1-5-19')
+        $account = $sid.Translate([Security.Principal.NTAccount]).Value
+        $result = Invoke-PsFile $script:setAclScript @('-AppRoot', $script:aclApp, '-OriginalUser', $account, '-DryRun')
+        $result.ExitCode | Should -Be 0
+        $plan = Get-JsonPlan -Output $result.Output -Prefix 'OPENMARGIN_ACL_PLAN='
+        $plan.originalUserSid | Should -Be $sid.Value
+    }
+
     It 'fails clearly for unresolved account names containing spaces, Chinese and domain separators' {
         foreach ($account in @('No Such Account 83275', '不存在 用户 83275', 'NO-SUCH-DOMAIN\不存在 用户')) {
             $result = Invoke-PsFile $script:setAclScript @(
