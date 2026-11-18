@@ -1,132 +1,140 @@
 # 清衡 · Open Margin
 
-**Open Margin** (清衡) is a self-hosted personal finance system. Based on Wallos and Seamless Bookkeeping, it combines Android transaction capture, budgets, expenses, subscriptions and MCP.
+[中文](README.md) · [English](README.en.md)
 
-**System architecture:** Android payment-notification collector → HTTPS → SQLite → Wallos subscriptions & daily expenses → ChatGPT / MCP.
+支持 MCP 的自托管记账工具。交易自动入账，账本保存在自己的设备中，数据隐私和调用自由由你掌握。
 
-This is an **integration project**, built on existing open-source software. The goal is to own your transaction data, avoid manually retyping payments, and make spending and subscriptions queryable from an AI client.
+<p align="center">
+  <img src="docs/assets/mobile-screens.jpg" width="860" alt="账单列表 / 一句话记账 / 日历 / 统计">
+</p>
 
-> **Status: pre-release / single-owner.** Real WeChat/Alipay notification coverage depends on the phone/ROM and requires reconciliation with official statements. Do not treat captured notifications as confirmed bank statements. No banking credentials or real payment actions are supported.
+<p align="center">
+  <img src="docs/assets/desktop-overview.jpg" width="440" alt="财务总览">
+  <img src="docs/assets/desktop-subscriptions.jpg" width="440" alt="订阅管理">
+</p>
 
-## Product iteration roadmap
+> **状态：预发布，单用户部署。** 真实微信/支付宝通知的覆盖率取决于手机和 ROM，采集到的通知不能当作银行对账单，重要支出请与官方账单核对。不连接银行凭据，不代替你付款。
 
-The proposed, **not-yet-approved** version-by-version goals, release safety gates, and acceptance criteria are in [Product Iteration Roadmap](docs/PRODUCT_ITERATION_ROADMAP.md). This roadmap preserves the tentative OM-03 → OM-05 → OM-02 feature sequence while requiring real-device/data-integrity validation first. It is not a release announcement or an engineering schedule.
+## 自动采集与导入补全
 
-## Architecture
+微信、支付宝和银行的付款通知、短信可以生成账单；通知覆盖不到的页面，可以用无障碍读屏和截图 OCR 补充。
 
-```text
-Android (opt-in, Room SQLite)
-  Payment notifications / optional bank SMS / manual entries
-     └─ exact cents + stable event ID + immediate WorkManager upload
-             └─ HTTPS reverse proxy
-                 └─ FastAPI /api/v1/transactions/batch → private SQLite ledger
-                                   ├─ Wallos /expenses.php (daily/monthly reports)
-                                   ├─ CSV export, optional budget, review
-                                   └─ MCP (OAuth 2.1 / PKCE; read, authorized writes)
+Android 对读取其他应用账单有系统限制。完整获取需要 ROOT 或系统补丁，清衡暂不采用。未自动记录的交易可以定期导入微信、支付宝账单：
 
-Wallos upstream Docker image → separate Wallos SQLite for subscriptions
-                                ↕ native PHP page and secure backend API
+- 导入 CSV / XLSX，入账前先预览
+- 与自动记录按时间、金额和商户比对，避免重复
+- 无法匹配的记录进入对账队列，逐条确认
+
+采集策略是宁可留疑，不静默丢弃：
+
+| 情况 | 处理 |
+|---|---|
+| 同来源、商户、方向、币种、金额，8 秒内 | 判为高置信重复，跳过 |
+| 同金额、方向、币种，3 分钟内 | 保存并标记「疑似重复」，由你在账单页决定保留还是删除 |
+| 已存在的记录 | 永不自动删除 |
+
+## 一句话记账
+
+```
+午饭 25 微信
+昨天 星巴克 32 支付宝
+工资 8000 银行卡 收入
 ```
 
-- **Wallos** manages subscriptions and future renewal estimates. An expected subscription charge is *not* treated as an actual completed payment.
-- The **transaction ledger** records observed payments, keeps independent currencies, and supports review/exclusion. It is not a second subscription database.
-- This project is a **single-owner design**. The daily ledger, OAuth, and MCP are restricted to the configured Wallos owner ID; additional Wallos accounts must not be given access to private ledger data.
-- Android v1.2.0 ↔ server sync supports versioned additions, edits and deletion tombstones. Earlier v1.1.3 builds upload only; notification capture may still be incomplete or duplicate.
-- Android settings offer **简体中文 / English** under **Settings → Language** and **About & updates** with a local build number and manual GitHub signed-APK update check. Bottom navigation labels remain on one line. See [language](docs/ANDROID_LANGUAGE.md) and [updates](docs/ANDROID_UPDATES.md).
-- The optional persistent notification shows notification-capture health: a green/red dot, current connection uptime, disconnect time and the last successful automatic capture. It contains no amounts, merchants or notification text.
+金额、分类、账户、日期和收支方向自动解析，不需要逐项填写。也可以用语音记账，识别在手机本地完成。金额一律按整数分存储，解析不出的字段留空并标记，不猜。
 
-## Deployment choices
+## MCP：AI 读取和管理账目
 
-The same application runs in either environment (no feature fork):
+清衡提供 18 个 MCP 工具，8 个只读、10 个写入。连接并授权后，AI 可以查询支出、添加账单、修改分类、设置预算、管理订阅和处理对账。
 
-- **Windows local host:** Docker Desktop / WSL2; Tailscale private HTTPS is optional when you want phone sync. See [Windows deployment](docs/DEPLOY_WINDOWS.md). The phone stores transactions offline while the computer is shut down.
-- **VPS / Linux host:** Docker Engine + Docker Compose with a valid HTTPS domain; see [VPS deployment](docs/DEPLOY_VPS.md).
+| 只读 | 写入 |
+|---|---|
+| `list_recent_transactions` | `add_record` |
+| `spending_summary` | `edit_record` |
+| `personal_finance_long_term_trends` | `exclude_record` |
+| `get_subscription_list` | `delete_record` |
+| `get_recurring_expense_candidates` | `register_merchant_rule` |
+| `get_monthly_budget` | `link_refund` |
+| `finance_reconciliation_queue` | `add_subscription` |
+| `finance_duplicate_review` | `edit_subscription` |
+| | `delete_subscription` |
+| | `set_monthly_budget` |
 
-Android v2 transaction sync supports pull + push (including edits and deletion tombstones) and cross-device conflict handling; Wallos subscription schedules and server-side budgets remain managed by the website. An old pre-v2 phone deletion cannot be reconstructed retroactively.
+鉴权使用 OAuth 2.1 动态客户端注册 + S256 PKCE 和作用域，未申请作用域的客户端只能读。账本仍由你管理，AI 的操作使用同一套数据和权限。只把访问权授予你信任的客户端。
 
-## Requirements
+## 数据主权
 
-- Windows with Docker Desktop or Linux with Docker Engine, plus Docker Compose v2.
-- For remote Android sync: a valid HTTPS endpoint (a VPS domain or optional private Tailscale Serve on Windows). Local-only Windows does not require a domain or Nginx.
-- Android 8+ with notification listener support to use the optional collector.
-- Optional: ChatGPT-compatible OAuth/MCP client.
+账本保存在手机和你自己的服务器，手机、电脑都能访问。新增、修改和删除双向同步；两端同时修改同一笔时，逐条选择保留哪一版。数据不经过清衡开发者的服务器。
 
-## Windows one-click setup (v1.3.0, remote sync)
+## 订阅管理
 
-Download `OpenMargin-Setup.exe` from [GitHub Releases](https://github.com/zxyzx0430/open-margin/releases). The v1 installer is unsigned by design: verify the published SHA256 first, and use SmartScreen's **更多信息 → 仍要运行** only for a file you trust. It installs to `%ProgramData%\OpenMargin\app` and creates Start Menu items **清衡设置** (local wizard) and **清衡账本** (`http://127.0.0.1:18082/`).
+记录订阅名称、金额、周期和下次扣款日，设置到期提醒，并查看月均和年度支出。订阅账目与日常消费分开管理——**预估的订阅扣款不会被当成本月已付支出**。
 
-v1 ships **remote Tailscale Funnel sync only**; the wizard has no mode selection. The phone does not need Tailscale and may keep a commercial VPN, provided that VPN can reach `https://<pc>.<tailnet>.ts.net/finance`. Docker images are not inside the installer; a separate `OpenMargin-Offline-<version>.tar.gz` Release asset exists for blocked/slow networks. See [Windows deployment](docs/DEPLOY_WINDOWS.md) for SmartScreen, SHA256, UAC, reboot, Funnel limits and the list of items **not yet verified on real hardware**.
+## 其他功能
 
-## Windows quick start (local-only)
+日历区间统计、分类占比、近七日趋势、月度预算、账单拆分、退款关联、商户规则、CSV 导出。多币种各自独立汇总，不做隐含汇率换算。
 
-Install Git and Docker Desktop (Linux containers / WSL2), then in PowerShell:
+## 同步架构
 
-~~~powershell
-git clone https://github.com/zxyzx0430/open-margin.git
-cd open-margin
-powershell -ExecutionPolicy Bypass -File .\deploy\windows\Install-OpenMargin.ps1
-~~~
+```mermaid
+flowchart LR
+    subgraph Phone["Android 手机"]
+        App["清衡 App<br/>本地账本"]
+    end
+    subgraph Server["自建服务器（VPS 或 Windows）"]
+        API["Finance API<br/>SQLite 账本"]
+        Wallos["Wallos 界面<br/>订阅与报表"]
+        MCP["MCP 服务<br/>18 个工具"]
+        API <--> Wallos
+        API <--> MCP
+    end
+    Desktop["电脑浏览器<br/>查账、管理订阅"]
+    AI["ChatGPT 等<br/>MCP 客户端"]
+    App <-->|"HTTPS 双向同步"| API
+    Wallos <-->|"浏览器访问"| Desktop
+    MCP <-->|"OAuth 2.1"| AI
+```
 
-Open **http://127.0.0.1:18082** and register your first Wallos account, then log in. Data persists in named Docker volumes; do not run destructive volume removal commands. The Wallos UI binds to loopback by default. To sync a phone, use the optional **Windows first-connection wizard** (Start-OpenMarginSetup.ps1); it defaults to the Tailscale **API-only** gateway, not remote Wallos. See [Windows Android-sync instructions](docs/DEPLOY_WINDOWS.md) and [three-step onboarding guide](docs/WINDOWS_PRIVATE_FIRST_CONNECTION.md).
+**VPS 部署**：服务器常开，手机在任何网络下都能同步。
 
-## VPS/Linux quick start (clean installation)
+**Windows 部署**：服务和账本运行在自己的电脑上，手机通过 Tailscale Funnel 同步，不需要额外域名，手机也不用装 Tailscale。电脑关机期间手机照常记账，联网后补同步。WorkManager 重试间隔最短 15 分钟，受 Android 省电策略限制。
 
-1. Clone this repository. Copy `.env.example` to `.env` and adjust host-local ports if needed.
-2. Generate new deployment credentials **locally** (no built-in shared tokens):
-   ```sh
-   python3 scripts/init-config.py --url https://finance.example.com/finance --owner-id 1
-   ```
-   Replace `finance.example.com` with **your real HTTPS domain**. The example Nginx routing currently uses the `/finance` URL prefix.
-3. Build and start private services:
-   ```sh
-   docker compose config -q
-   docker compose up -d --build
-   docker compose ps
-   curl http://127.0.0.1:8767/health
-   ```
-   The services listen only on `127.0.0.1`; do **not** expose port 8767 or 18082 directly to the Internet.
-4. Place the Nginx routing from `deploy/nginx-locations.conf.example` inside your existing **HTTPS** server block; update your domain/ports, test Nginx and reload it. Obtain your TLS certificate separately.
-5. **Secure initial registration:** temporarily restrict the public Wallos URL to your IP (or use a local SSH tunnel) until you register the first owner; otherwise anyone who reaches the fresh site first could claim it. Visit `https://YOUR_DOMAIN/finance/wallos/` and register the owner. The initial owner ID is normally `1`; check that registration is closed afterward. The ledger page is `https://YOUR_DOMAIN/finance/wallos/expenses.php`.
-6. Verify `https://YOUR_DOMAIN/finance/health` and `https://YOUR_DOMAIN/finance/.well-known/oauth-protected-resource`. An **unauthorized** request to `/finance/api/v1/transactions` must return 401; do not disable auth for troubleshooting.
-7. Optional Android: build APK from `android/`, install, grant notification listener, enable HTTPS sync, enter `https://YOUR_DOMAIN/finance` and the device token from **your** `secrets/backend.env`. Keep this token private. Run a *real* low-value transaction and check its amount, time, merchant and deduplication against the Wallos ledger.
+## 安装
 
-**Credentials:** `secrets/` is mode **0700**, `secrets/backend.env` is **0600**, and `secrets/wallos-ledger.env` is **0644 inside that non-traversable directory**, because the non-root PHP worker must be able to read the file inside its container. All are ignored by Git. Keep the private parent directory restricted and never commit/share these files. Changing a device upload token requires updating the phone. The Wallos browser never receives the backend ledger token.
+**VPS**：按 [部署文档](docs/DEPLOY_VPS.md) 配置服务器和域名，再把手机连接到你的账本。
 
-## Subscriptions and actual expenses
+**Windows**：下载 `OpenMargin-Setup.exe`，运行安装向导，按步骤完成配置。安装包未签名，请先核对 Release 页公布的 SHA256，详见 [Windows 部署](docs/DEPLOY_WINDOWS.md)。
 
-- Wallos manages subscription plans and renewal reminders; the Finance ledger records real transaction events separately. A planned subscription charge is **never** counted as a completed payment.
-- The daily spending screen lives at `/finance/wallos/expenses.php` and supports month/day filtering, manual entries, classification, review, export, budget tracking, and an interactive CNY daily bar chart.
-- Click or tap a day to highlight its bar and show the exact date, amount, and a link to that day's recorded transactions; keyboard selection and a daily table remain available.
-- The old **subscription-to-payment reconciliation** dashboard was retired on 2026-10-11. Its page and payment-cycle matching entry points are no longer available. Wallos's normal subscription management, ledger editing and refund controls remain in the underlying system.
+**Android**：从[下载页](https://zxyzx.me/open-margin/installer/)安装 APK，支持 Android 7.0 及以上版本。
 
-[Preview: daily expense selection on mobile (synthetic data)](docs/assets/selected-day-390-light.png)
+## 备份
 
-## Daily workflow
-
-- Android queues new structured transaction events immediately; WorkManager retries and schedules additional sync at **minimum 15-minute intervals** subject to Android battery restrictions.
-- Automatic capture silently skips only high-confidence duplicates (same source, merchant, direction, currency and amount within 8 seconds). Other close matches (same amount/direction/currency within 3 minutes) are saved with a local review marker and shown in **Records** as possible duplicates; the user decides **Keep both** or **Delete new record**. Existing records are never deleted automatically.
-- Optional success notifications can show amount, merchant and time after a real save. Toggle them in **Settings → 自动记账提醒**; they use a low-priority silent channel and are separate from permission/failure alerts. Android 13+ requires notification permission.
-- Wallos opens the current ledger from live SQLite, then checks for changes around once per minute while the page is visible.
-- Today, seven-day, monthly and per-day CNY summaries; category/merchant/date filters; status review; optional monthly spending budget; CSV export.
-- Currency summaries remain independent without assumed FX rates; the daily bar chart currently displays CNY only.
-- ChatGPT/MCP uses OAuth DCR + S256 PKCE and scopes. Only grant access to trusted clients.
-- MCP exposes 18 tools (8 read, 10 write); unscoped OAuth requests are read-only. For permissions and tests see [MCP v1.2.0](docs/MCP_V120_COMPATIBILITY.md).
-
-## Backups and recovery
-
-The two databases must be backed up separately: Wallos **subscriptions** and Finance **transactions**.
-
-After registering the Wallos owner and initializing the ledger, run a verified on-demand snapshot:
+两份数据库需要分别备份：Wallos 的**订阅**和 Finance 的**交易**。
 
 ```sh
 docker compose --profile maintenance run --rm backup
 ```
 
-The maintenance service mounts the two named SQLite volumes and writes verified snapshots to its dedicated backup volume. SQLite WAL access requires the source volume to permit shared-memory journal files; the Python connection itself is read-only. Schedule this command **daily** using your host scheduler (or a dedicated cron container). Snapshots have integrity checks, atomic writes and 30-day daily retention. Backups on the same host do not survive a disk or provider failure: also maintain **encrypted off-VPS backups**.
+快照带完整性校验、原子写入和 30 天保留，用宿主机的计划任务每天跑一次。同机备份经不起磁盘或服务商故障，请另外维护**加密的异地备份**。
 
-Never delete or reset the live SQLite database to fix an app problem. Keep immutable snapshots and verify restores against **copies** before relying on them.
+不要为了修问题去删除或重置线上 SQLite 数据库。保留不可变快照，恢复前先在副本上验证。
 
-## Tests
+## 安全须知
+
+- 服务默认只监听 `127.0.0.1`，不要把 8767 或 18082 直接暴露到公网。
+- 全新实例在注册第一个账号前要限制访问来源，否则先到的人会成为账本所有者。
+- `secrets/` 权限 0700，`secrets/backend.env` 0600，两者都在 `.gitignore` 内。设备令牌泄露要立刻更换并重配手机。
+- 这是**单用户**设计。每日账本、OAuth 和 MCP 都限定在配置的所有者 ID 上，多租户隔离没有实现。
+
+## 已知限制
+
+- 旧版手机上的账本不能自动导入新安装，**卸载旧 APK 前先备份未同步的交易**。
+- 支付通知格式因渠道而异，转账、拆分支付和退款可能漏记。
+- Wallos 的 `header.php` 和 `index.php` 覆盖层基于固定的上游版本，升级上游镜像前需要重新比对。
+- 不内置云 TLS、异地备份、支付通道对接和实时银行对账。
+- 无法保证在所有国产 ROM 上无人值守采集。
+
+## 测试
 
 ```sh
 python3 -m pip install -r backend/requirements.txt "httpx>=0.27,<1"
@@ -134,21 +142,8 @@ cd backend && FINANCE_PUBLIC_URL=https://finance.example.com/finance python3 -m 
 cd .. && python3 scripts/check-public-ready.py
 ```
 
-A clean-room HTTP integration script is included at `scripts/smoke_clean_install.py`. It requires a **throwaway**, empty staging stack bound to ports 18767 and 18083 with `https://finance.example.com/finance` in the staging secrets. It deliberately creates synthetic Wallos and transaction records. See [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) for the full reproducible test and results; **never run it against live data**.
+`scripts/smoke_clean_install.py` 是空环境集成脚本，需要一套绑定 18767 和 18083 端口的临时空栈，会写入合成数据。**不要对着线上数据跑。** 完整验收流程见 [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md)。
 
-CI also runs Android tests and outputs **unsigned** release APKs. Never store signing keys in this repository. If publishing signed binaries, create a dedicated permanent signing key privately and use a repeatable offline process.
+## 许可
 
-## Known limitations
-
-- No automatic import of an old on-device ledger into a new installation. **Do not uninstall** an old Android APK until its unsynced transactions are backed up.
-- Payment-notification formats vary and may miss transfers, split payments or refunds.
-- The Wallos `header.php` and `index.php` overlays are based on a pinned upstream release; **rebase and review** these files before any upstream image upgrade.
-- Single-owner deployment only; multi-tenant ledger isolation is *not* implemented.
-- No bundled cloud TLS, remote backups, payment connections, or live bank reconciliation.
-- No guarantee of unattended mobile collection on all Android OEM ROMs.
-
-## Acknowledgements and license
-
-This repository combines an Android fork of **[Seamless Bookkeeping](https://github.com/DykiSensei/seamless-bookkeeping)** (MIT; attribution in `android/LICENSE`) and a **[Wallos](https://github.com/ellite/Wallos)** derivative (GPL-3.0; license in root `LICENSE`). See `THIRD_PARTY.md` for details. We do not claim authorship of the upstream implementations.
-
-The root GPL-3.0 license covers the Wallos-derived distribution; it does not erase the Android project's existing MIT license. Check all components' upstream license terms when redistributing.
+根目录 GPL-3.0 覆盖 Wallos 衍生的分发部分。Android 部分是 [Seamless Bookkeeping](https://github.com/DykiSensei/seamless-bookkeeping)（MIT）的衍生作品，保留原有 MIT 许可，署名见 `android/LICENSE`；订阅与报表基于 [Wallos](https://github.com/ellite/Wallos)（GPL-3.0）。第三方组件细节见 `THIRD_PARTY.md`，上游实现的著作权归原作者。
