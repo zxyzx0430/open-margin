@@ -129,7 +129,7 @@ fun SyncSettingsScreen(onBack: () -> Unit) {
         manualEntry = manual
         wizardOpen = true
     }
-    fun invalidQrMessage() = tr("二维码无效，请扫描电脑上的清衡配对二维码。")
+    fun invalidQrMessage() = tr("二维码无效，请扫描清衡服务器上的配对二维码。")
     fun cameraPermissionMessage() = tr("未获得相机权限，无法扫码，请在系统设置中允许相机权限。")
     fun setAutoSync(enabled: Boolean) {
         if (enabled && !snapshot.configured) {
@@ -159,7 +159,7 @@ fun SyncSettingsScreen(onBack: () -> Unit) {
             TopAppBar(
                 title = {
                     Text(
-                        tr(if (wizardOpen) "配对电脑" else "同步"),
+                        tr(if (wizardOpen) "配对服务器" else "同步"),
                         fontSize = 22.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -502,7 +502,7 @@ private fun SyncServerCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(tr("重新配对"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     Text(
-                        tr("扫描电脑上的配对二维码"),
+                        tr("扫描服务器上的配对二维码"),
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -524,13 +524,13 @@ private fun SyncServerCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    tr("扫码或手动填写电脑上的服务器地址与设备密钥。"),
+                    tr("扫码或手动填写服务器地址与设备密钥。"),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        tr("配对电脑"),
+                        tr("配对服务器"),
                         modifier = Modifier.weight(1f),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,

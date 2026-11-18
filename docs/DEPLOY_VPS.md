@@ -17,6 +17,16 @@
 
 把 deploy/nginx-locations.conf.example 的示例添加到已启用 HTTPS 的 server 块里。**不要把明文端口 8767 和 18082 暴露到公网。** 安全地注册首位 Wallos 用户后再允许外部访问登录页。
 
+### 手机扫码配对（新版）
+
+账本所有者登录 VPS 的清衡 Wallos 管理页面后，通过头像菜单 →「手机配对」→「生成配对二维码」显示二维码。安卓清衡 App 的「同步 → 重新配对」直接扫描；二维码使用 Windows 已有的 v1 格式（HTTPS URL、设备密钥、`server_id`）。手机先做只读身份验证，用户确认后才开始同步。
+
+二维码仅在所有者点击后通过后端接口生成，不写入静态 HTML、日志或浏览器持久存储；页面 5 分钟后隐藏。但现有 v1 二维码携带**长期有效设备密钥**，隐藏不等于令牌过期，勿截图/分享，泄露时需安全轮换密钥并重新配对。此轮不自动轮换已有密钥以免断开已连接手机。
+
+后台通过 Wallos 的服务器端密钥访问受保护的 Finance API；不得将密钥或配对 JSON 暴露到公开页面或 CDN 缓存。生产升级需重建 Finance API 和 Wallos 镜像，但不能重建数据库卷。
+
+**手动备用方式：**
+
 Android 设置 → 双向同步：
 - **服务器 HTTPS 地址：** https://your-finance-domain.example/finance
 - **设备密钥：** secrets/backend.env 内的 FINANCE_DEVICE_TOKEN

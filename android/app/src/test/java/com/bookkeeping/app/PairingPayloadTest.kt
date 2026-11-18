@@ -61,7 +61,6 @@ class PairingPayloadTest {
     fun enforcesTheSameUrlRulesAsWindowsConnectionPolicy() {
         listOf(
             "http://my-pc.my-tailnet.ts.net/finance",
-            "https://finance.example.com/finance",
             "https://my-pc.my-tailnet.ts.net/finance/extra",
             "https://my-pc.my-tailnet.ts.net/finance?token=exposed",
             "https://my-pc.my-tailnet.ts.net/finance#fragment",
@@ -77,6 +76,7 @@ class PairingPayloadTest {
             )
         }
         assertTrue(PairingPayload.parse(json(url = "$url/")) is PairingParseResult.Success)
+        assertTrue(PairingPayload.parse(json(url = "https://zxyzx.bbroot.com/finance")) is PairingParseResult.Success)
     }
 
     @Test

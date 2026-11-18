@@ -13,6 +13,8 @@ class WindowsConnectionPolicyTest {
     @Test fun validPrivateHttpsAddress() {
         assertTrue(WindowsConnectionPolicy.validateAddress(address))
         assertTrue(WindowsConnectionPolicy.validateAddress("$address/"))
+        assertTrue(WindowsConnectionPolicy.validateAddress("https://zxyzx.bbroot.com/finance"))
+        assertTrue(WindowsConnectionPolicy.validateAddress("https://finance.example.com/finance"))
         assertEquals(WindowsConnectionPolicy.Result.READY,
             WindowsConnectionPolicy.preflight(address, "private-credential-123456"))
     }
@@ -20,11 +22,13 @@ class WindowsConnectionPolicyTest {
     @Test fun rejectUntrustedEndpoints() {
         listOf(
             "http://my-pc.my-tailnet.ts.net/finance",
-            "https://finance.example.com/finance",
             "https://my-pc.my-tailnet.ts.net/finance/extra",
             "https://my-pc.my-tailnet.ts.net/finance?token=exposed",
             "https://user:pass@my-pc.my-tailnet.ts.net/finance",
-            "https://my-pc.my-tailnet.ts.net:8080/finance"
+            "https://my-pc.my-tailnet.ts.net:8080/finance",
+            "https://localhost/finance",
+            "https://127.0.0.1/finance",
+            "https://finance.example.com/finance#secret"
         ).forEach { assertFalse(WindowsConnectionPolicy.validateAddress(it)) }
     }
 

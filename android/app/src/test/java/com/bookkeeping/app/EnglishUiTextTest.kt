@@ -132,6 +132,23 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun unifiedVpsAndWindowsPairingLabelsTranslate() {
+        val expected = mapOf(
+            "清衡服务器配对" to "Pair Open Margin server",
+            "配对服务器" to "Pair server",
+            "扫描服务器上的配对二维码" to "Scan the pairing QR code on your server",
+            "扫码或手动填写服务器地址与设备密钥。" to "Scan a pairing QR or manually enter the server address and device key.",
+            "服务器 HTTPS 地址" to "Server HTTPS address",
+            "请输入完整的 HTTPS 服务器地址，例如 https://你的域名/finance" to "Enter the full HTTPS server address, e.g. https://your-domain/finance",
+            "对准服务器上的配对二维码" to "Point the camera at the QR code on your server",
+        )
+        expected.forEach { (source, english) ->
+            assertTrue("Missing pairing translation: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(english, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun windowsQrPairingLabelsTranslate() {
         val expected = mapOf(
             "配对电脑" to "Pair computer",

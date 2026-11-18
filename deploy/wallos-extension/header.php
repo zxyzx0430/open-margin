@@ -59,6 +59,16 @@ if (isset($themeValue)) {
 
 $isAdmin = $_SESSION['userId'] == 1;
 
+// The pairing page authorizes the configured ledger owner, which can differ
+// from Wallos's hard-coded user 1. Keep a separate flag so we do not widen
+// Wallos admin rights when FINANCE_WALLOS_OWNER_ID is not 1.
+$ledgerOwnerId = 1;
+$ledgerOwnerOptions = @parse_ini_file('/run/secrets/wallos-ledger.env', false, INI_SCANNER_RAW);
+if (is_array($ledgerOwnerOptions) && isset($ledgerOwnerOptions['FINANCE_WALLOS_OWNER_ID'])) {
+  $ledgerOwnerId = (int)$ledgerOwnerOptions['FINANCE_WALLOS_OWNER_ID'];
+}
+$isLedgerOwner = $ledgerOwnerId >= 1 && isset($_SESSION['userId']) && (int)$_SESSION['userId'] === $ledgerOwnerId;
+
 $locale = isset($_COOKIE['user_locale']) ? $_COOKIE['user_locale'] : 'en_US';
 $formatter = new IntlDateFormatter(
   $locale,
@@ -220,6 +230,9 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
             <a href="profile.php">
               <?php include "images/siteicons/svg/mobile-menu/profile.php"; ?>
               <?= translate('profile', $i18n) ?></a>
+            <?php if ($isLedgerOwner): ?>
+              <a href="pairing.php">手机配对</a>
+            <?php endif; ?>
             <?php if ($isAdmin): ?>
               <a href="admin.php">
                 <?php include "images/siteicons/svg/mobile-menu/admin.php"; ?>

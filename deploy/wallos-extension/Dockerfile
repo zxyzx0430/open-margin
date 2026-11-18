@@ -18,6 +18,9 @@ COPY expenses.php /var/www/html/expenses.php
 COPY daily-spend-chart-v2.js /var/www/html/daily-spend-chart-v2.js
 COPY expenses-action.php /var/www/html/expenses-action.php
 COPY expenses-export.php /var/www/html/expenses-export.php
+COPY pairing.php /var/www/html/pairing.php
+COPY pairing-action.php /var/www/html/pairing-action.php
+COPY pairing-qrcode.min.js /var/www/html/pairing-qrcode.min.js
 COPY ledger-common.php /var/www/html/ledger-common.php
 COPY header.php /var/www/html/includes/header.php
 COPY manifest.php /var/www/html/manifest.php
@@ -33,7 +36,8 @@ RUN chmod 0644 /var/www/html/finance-unified.css \
                /var/www/html/dashboard-refresh.css \
                /var/www/html/dashboard-carousel.js \
                /var/www/html/ui-unified.css \
-               /var/www/html/ui-unified.js
+               /var/www/html/ui-unified.js \
+               /var/www/html/pairing-qrcode.min.js
 
 LABEL org.opencontainers.image.title="Open Margin (清衡) · Wallos-powered finance" \
       org.opencontainers.image.description="Wallos vendor UI with custom expense ledger endpoint. Two separate databases."

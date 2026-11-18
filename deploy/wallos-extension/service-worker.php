@@ -243,7 +243,8 @@ self.addEventListener('fetch', function (event) {
 
     // Financial records are sensitive, user-specific and change mid-month.
     // Never cache ledger HTML or return a stale zero-spend page offline.
-    if (url.pathname.endsWith('/expenses.php') ||
+    if (url.pathname.endsWith('/pairing.php') ||
+        url.pathname.endsWith('/expenses.php') ||
         url.pathname.endsWith('/integration.php') ||
         url.pathname.endsWith('/expenses-export.php') ||
         url.pathname.endsWith('/finance-unified-data.php') ||

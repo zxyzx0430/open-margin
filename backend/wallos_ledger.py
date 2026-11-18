@@ -33,6 +33,35 @@ def require_wallos_token(x_wallos_ledger_token: str | None = Header(default=None
     if not expected or not x_wallos_ledger_token or not hmac.compare_digest(expected,x_wallos_ledger_token):
         raise HTTPException(status_code=401,detail="Not authorized")
 
+@router.post("/pairing", dependencies=[Depends(require_wallos_token)])
+def pairing_payload():
+    """Owner-only Wallos bridge for displaying a locally generated pairing QR.
+
+    This is the established v1 protocol used by the Windows installer. Its
+    token is long-lived: hiding a QR does NOT revoke a copied credential.
+    The browser may receive this only after an explicit authenticated click.
+    """
+    from fastapi.responses import JSONResponse
+    from config import PUBLIC_BASE
+    import app as core
+
+    if not core.DEVICE_TOKEN or len(core.DEVICE_TOKEN) < 16:
+        raise HTTPException(status_code=503, detail="Device pairing is not configured")
+    with core.db_connection() as db:
+        row = db.execute(
+            "SELECT value FROM ledger_settings WHERE key='sync_v2_server_id'"
+        ).fetchone()
+        server_id = row["value"] if row else ""
+    if not server_id:
+        raise HTTPException(status_code=503, detail="Ledger identity is unavailable")
+    return JSONResponse(
+        {"v": 1, "kind": "open-margin-pair", "url": PUBLIC_BASE,
+         "token": core.DEVICE_TOKEN, "server_id": server_id},
+        headers={"Cache-Control": "no-store, max-age=0", "Pragma": "no-cache",
+                 "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 class NewEntry(BaseModel):
     idempotency_key: str = Field(pattern=r"^[0-9a-fA-F-]{36}$",max_length=36)
     timestamp_ms: int = Field(gt=946684800000,lt=4102444800000)
