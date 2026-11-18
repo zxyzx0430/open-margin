@@ -68,6 +68,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.bookkeeping.app.sync.PendingConflictsScreen
 import com.bookkeeping.app.sync.SyncSettingsScreen
 import com.bookkeeping.app.ui.screen.billimport.BillImportScreen
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
@@ -282,6 +283,15 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     BillImportScreen(onClose = { navController.popBackStack() })
                 }
                 composable(
+                    route = AppRoutes.PENDING_CONFLICTS,
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
+                ) {
+                    PendingConflictsScreen(onBack = { navController.popBackStack() })
+                }
+                composable(
                     route = AppRoutes.SYNC_SETTINGS,
                     enterTransition = { EnterTransition.None },
                     exitTransition = { ExitTransition.None },
@@ -323,6 +333,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     SettingsScreen(
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
                         onOpenSyncSettings = { navController.navigate(AppRoutes.SYNC_SETTINGS) },
+                        onOpenPendingConflicts = { navController.navigate(AppRoutes.PENDING_CONFLICTS) },
                         onReplayOnboarding = onboarding::restart,
                     )
                 }

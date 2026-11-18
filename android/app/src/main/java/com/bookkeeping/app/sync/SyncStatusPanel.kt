@@ -441,7 +441,7 @@ private val SyncStateKind.tone: StatusTone
  * 两侧各一行（来源 · 日期时间 · 商户 · 金额），下面逐条列出不一致的字段。
  */
 @Composable
-private fun ConflictCard(
+internal fun ConflictCard(
     entry: ConflictEntry,
     index: Int,
     total: Int,
@@ -602,7 +602,7 @@ private data class SyncSnapshot(
     val kind: SyncStateKind get() = SyncState.of(enabled, configured, code, lastSuccessMs)
 }
 
-private fun readSyncSnapshot(prefs: SharedPreferences): SyncSnapshot {
+internal fun readSyncSnapshot(prefs: SharedPreferences): SyncSnapshot {
     val counts = readPendingCounts(prefs)
     return SyncSnapshot(
         enabled = prefs.getBoolean("enabled", false),
@@ -622,7 +622,7 @@ private fun readSyncSnapshot(prefs: SharedPreferences): SyncSnapshot {
     )
 }
 
-private data class ConflictEntry(
+internal data class ConflictEntry(
     val eventId: String,
     val row: TransactionEntity?,
     val phone: SyncConflictSide?,
@@ -634,7 +634,7 @@ private data class ConflictEntry(
     val canResolve: Boolean get() = row != null && revision >= 0L
 }
 
-private fun buildConflictEntry(
+internal fun buildConflictEntry(
     eventId: String,
     prefs: SharedPreferences,
     pendingRows: List<TransactionEntity>,
@@ -686,7 +686,7 @@ private fun buildConflictEntry(
  * 与 SyncConflictApproval 的校验字段一一对应：revision、本机修改时间、mutation id。
  * 服务器内容在用户点按钮前又变过的话，同步端会拒绝这次选择，不会把旧决定套到新内容上。
  */
-private fun applyConflictChoice(
+internal fun applyConflictChoice(
     prefs: SharedPreferences,
     entry: ConflictEntry,
     keepPhone: Boolean,

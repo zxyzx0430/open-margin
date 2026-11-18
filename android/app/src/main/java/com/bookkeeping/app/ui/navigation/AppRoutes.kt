@@ -17,6 +17,9 @@ object AppRoutes {
     /** 同步状态与配置使用同一独立页面，返回回到原设置页。 */
     const val SYNC_SETTINGS = "sync-settings"
 
+    /** 待处理冲突独立页：只列冲突，可逐笔处理。 */
+    const val PENDING_CONFLICTS = "pending-conflicts"
+
     const val TRANSACTION_DETAIL = "transaction/{id}"
     const val TRANSACTION_ID = "id"
 

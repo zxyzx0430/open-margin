@@ -132,6 +132,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onOpenMerchantRules: () -> Unit = {},
     onOpenSyncSettings: () -> Unit = {},
+    onOpenPendingConflicts: () -> Unit = {},
     onReplayOnboarding: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
@@ -333,17 +334,8 @@ fun SettingsScreen(
                     lastSuccessMs = lastSyncMs,
                     lastResultCode = lastSyncCode,
                     onOpenSyncStatus = onOpenSyncSettings,
+                    onOpenPendingConflicts = onOpenPendingConflicts,
                 )
-            }
-            item {
-                SettingsGroupCard {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Cloud,
-                        title = tr("同步设置"),
-                        subtitle = syncHost.ifBlank { tr("未配置服务器") },
-                        onClick = onOpenSyncSettings,
-                    )
-                }
             }
 
             item { SectionHeader(tr("账单导入")) }
@@ -582,6 +574,7 @@ private fun SyncOverviewGroup(
     lastSuccessMs: Long,
     lastResultCode: String?,
     onOpenSyncStatus: () -> Unit,
+    onOpenPendingConflicts: () -> Unit,
 ) {
     val kind = SyncState.of(
         enabled = enabled,
@@ -617,7 +610,7 @@ private fun SyncOverviewGroup(
     SettingsGroupCard {
         SettingsStatusRow(
             icon = Icons.Filled.Cloud,
-            title = tr("最近同步"),
+            title = tr("同步状态"),
             subtitle = lastSyncSubtitle,
             statusText = tr(kind.label),
             tone = syncTone,
@@ -630,7 +623,7 @@ private fun SyncOverviewGroup(
             subtitle = pendingSubtitle,
             statusText = pendingBadge,
             tone = if (conflicts > 0) StatusTone.WARNING else StatusTone.NEUTRAL,
-            onClick = onOpenSyncStatus,
+            onClick = onOpenPendingConflicts,
         )
     }
 }
@@ -1539,31 +1532,6 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit)
     }
 
     SettingsGroupCard {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SettingsIconBubble(Icons.Filled.Info, StatusTone.NEUTRAL)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    tr("当前版本") + ": " + BuildConfig.VERSION_NAME +
-                        " (Build " + BuildConfig.VERSION_CODE + ")",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(
-                    tr("发布标识") + ": " + UpdateVersionPolicy.CURRENT_TAG,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        SettingsRowDivider()
         SettingsActionRow(
             icon = Icons.Filled.Info,
             title = tr("关于清衡"),

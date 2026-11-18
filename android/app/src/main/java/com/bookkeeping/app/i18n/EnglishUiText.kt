@@ -949,6 +949,7 @@ internal object EnglishUiText {
             "Resetting only clears the address and key; local transactions and server ledger identity are retained.",
         "连接已重置" to "Connection reset",
         "待处理" to "Pending",
+        "暂无冲突" to "No conflicts",
         "操作" to "Actions",
         "重新连接" to "Reconnect",
         "最近一次结果" to "Last result",
