@@ -100,3 +100,38 @@ Describe 'ACL verification when PowerShell Security autoload is unavailable' {
         { Set-OmFileAcl -Path $path } | Should -Not -Throw
     }
 }
+
+Describe 'DACL security descriptor verification' {
+    It 'rejects a missing or empty DACL' {
+        $module = Get-Module -Name OpenMargin.Setup -ErrorAction Stop
+        $sid = 'S-1-5-21-1-2-3-1001'
+        $missing = & $module {
+            param($descriptor, $targetSid)
+            Test-OmDaclSecurityDescriptor -SecurityDescriptor $descriptor -Sid $targetSid
+        } 'O:SYG:SY' $sid
+        $missing.HasDacl | Should -BeFalse
+        $empty = & $module {
+            param($descriptor, $targetSid)
+            Test-OmDaclSecurityDescriptor -SecurityDescriptor $descriptor -Sid $targetSid
+        } 'O:SYG:SYD:' $sid
+        $empty.HasDacl | Should -BeFalse
+    }
+
+    It 'requires read permission for the installing SID and rejects a matching read deny' {
+        $module = Get-Module -Name OpenMargin.Setup -ErrorAction Stop
+        $sid = 'S-1-5-21-1-2-3-1001'
+        $inspect = {
+            param($descriptor, $targetSid)
+            Test-OmDaclSecurityDescriptor -SecurityDescriptor $descriptor -Sid $targetSid
+        }
+        $allowed = & $module $inspect ('D:(A;;FR;;;' + $sid + ')') $sid
+        $allowed.HasDacl | Should -BeTrue
+        $allowed.HasUserRead | Should -BeTrue
+        $writeOnly = & $module $inspect ('D:(A;;FW;;;' + $sid + ')') $sid
+        $writeOnly.HasDacl | Should -BeTrue
+        $writeOnly.HasUserRead | Should -BeFalse
+        $denied = & $module $inspect ('D:(A;;FR;;;' + $sid + ')(D;;FR;;;' + $sid + ')') $sid
+        $denied.HasUserRead | Should -BeFalse
+        $denied.HasUserReadDeny | Should -BeTrue
+    }
+}
