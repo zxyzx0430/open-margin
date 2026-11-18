@@ -11,7 +11,10 @@ function Test-OmWallosOwner {
     if ($DryRun) {
         return [pscustomobject]@{ ok = $true; count = 1; output = 'DRY RUN: owner assumed present' }
     }
-    $php = '$db=new SQLite3("/var/www/html/db/wallos.db");$n=$db->querySingle("SELECT COUNT(*) FROM user");echo $n;'
+    # Windows PowerShell 5.1 strips double quotes from native arguments, so the
+    # PHP snippet uses single quotes only; otherwise php -r receives a broken
+    # SQLite3(...) call and the owner check never succeeds.
+    $php = '$db=new SQLite3(''/var/www/html/db/wallos.db'');$n=$db->querySingle(''SELECT COUNT(*) FROM user'');echo $n;'
     $result = Invoke-OmDockerCompose -Arguments @('exec', '-T', 'wallos', 'php', '-r', $php) -ProjectName $ProjectName -RepoRoot $RepoRoot
     if ($result.exitCode -ne 0) {
         return [pscustomobject]@{ ok = $false; count = $null; output = Protect-OmText $result.output }

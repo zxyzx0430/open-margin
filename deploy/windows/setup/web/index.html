@@ -188,6 +188,15 @@
         <button id="btn-deploy-logs" class="om-btn om-btn-ghost">查看日志</button>
       </div>
       <p class="om-hint">部署过程中可能会弹出 Tailscale 授权页，点“允许”即可。不要关闭这个页面。</p>
+      <div class="om-card">
+        <h3>公网自测网络</h3>
+        <p class="om-hint">本机访问公网地址的方式。自动：先直连，直连失败再用系统代理。</p>
+        <div class="om-seg" role="group" aria-label="公网自测网络">
+          <button type="button" class="om-seg-btn" data-probe-mode="auto">自动</button>
+          <button type="button" class="om-seg-btn" data-probe-mode="direct">直连</button>
+          <button type="button" class="om-seg-btn" data-probe-mode="system">系统代理</button>
+        </div>
+      </div>
     </section>
 
     <section id="screen-verify" class="om-screen">
@@ -264,6 +273,24 @@
         <button id="btn-status-refresh" class="om-btn om-btn-ghost">刷新</button>
       </div>
       <div id="status-summary" class="om-card"></div>
+      <div id="status-qr-card" class="om-card om-qr-card">
+        <h3>配对二维码</h3>
+        <p class="om-hint">手机 App → 扫码连接。二维码只在本机显示，10 分钟后自动隐藏。</p>
+        <div id="status-pair-qr" class="om-qr"></div>
+        <p id="status-pair-qr-hint" class="om-hint">还没有配对信息。</p>
+        <p class="om-hint">公网地址：<span id="status-public-url" class="om-mono">未开启</span></p>
+        <p class="om-hint">账本身份：<span id="status-server-id" class="om-mono">尚未读取</span></p>
+        <button id="btn-status-qr-refresh" class="om-btn om-btn-ghost">重新显示二维码</button>
+      </div>
+      <div class="om-card">
+        <h3>公网自测网络</h3>
+        <p class="om-hint">本机访问公网地址的方式。自动：先直连，直连失败再用系统代理。</p>
+        <div class="om-seg" role="group" aria-label="公网自测网络">
+          <button type="button" class="om-seg-btn" data-probe-mode="auto">自动</button>
+          <button type="button" class="om-seg-btn" data-probe-mode="direct">直连</button>
+          <button type="button" class="om-seg-btn" data-probe-mode="system">系统代理</button>
+        </div>
+      </div>
       <div class="om-actions">
         <button id="btn-status-repair" class="om-btn om-btn-primary">一键修复</button>
         <button id="btn-watchdog-pause" class="om-btn om-btn-ghost">暂停看门狗 1 小时</button>

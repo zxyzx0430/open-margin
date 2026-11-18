@@ -72,3 +72,42 @@ Describe 'Web action contract' {
         $result.state | Should -BeIn @('running', 'paused', 'not_installed')
     }
 }
+
+Describe 'Public probe mode action and UI' {
+    It 'persists every valid mode through the fixed action' {
+        foreach ($mode in @('direct', 'system', 'auto')) {
+            $result = Invoke-OmWebAction -Action 'set-public-probe-mode' -Params ([pscustomobject]@{ mode = $mode }) -Ports $script:ports -StateRoot $script:stateRoot -RepoRoot $script:repoRoot
+            $result.ok | Should -BeTrue
+            $result.mode | Should -Be $mode
+            (Read-OmState).publicProbeMode | Should -Be $mode
+        }
+    }
+
+    It 'rejects an unknown mode without changing state' {
+        $null = Set-OmPublicProbeMode -Mode 'direct'
+        $result = Invoke-OmWebAction -Action 'set-public-probe-mode' -Params ([pscustomobject]@{ mode = 'vpn' }) -Ports $script:ports -StateRoot $script:stateRoot -RepoRoot $script:repoRoot
+        $result.ok | Should -BeFalse
+        $result.code | Should -Be 'INVALID_PROBE_MODE'
+        (Read-OmState).publicProbeMode | Should -Be 'direct'
+        $null = Set-OmPublicProbeMode -Mode 'auto'
+    }
+
+    It 'does not persist during a dry run' {
+        $null = Set-OmPublicProbeMode -Mode 'auto'
+        $result = Invoke-OmWebAction -Action 'set-public-probe-mode' -Params ([pscustomobject]@{ mode = 'system'; dryRun = $true }) -Ports $script:ports -StateRoot $script:stateRoot -RepoRoot $script:repoRoot
+        $result.ok | Should -BeTrue
+        $result.code | Should -Be 'DRY_RUN'
+        (Read-OmState).publicProbeMode | Should -Be 'auto'
+    }
+
+    It 'offers the three choices on the deploy and status screens' {
+        $html = Get-Content -Path (Join-Path $PSScriptRoot '..\web\index.html') -Raw -Encoding UTF8
+        foreach ($mode in @('auto', 'direct', 'system')) {
+            ([regex]::Matches($html, 'data-probe-mode="' + $mode + '"')).Count | Should -BeGreaterOrEqual 2
+        }
+        $html | Should -Match '公网自测网络'
+        $js = Get-Content -Path (Join-Path $PSScriptRoot '..\web\app.js') -Raw -Encoding UTF8
+        $js | Should -Match 'set-public-probe-mode'
+        $js | Should -Match '已切换，下次自测生效'
+    }
+}

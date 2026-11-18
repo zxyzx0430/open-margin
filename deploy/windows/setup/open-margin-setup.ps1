@@ -4,11 +4,13 @@ param(
     [ValidateSet(
         'status', 'check', 'install-deps', 'deploy', 'verify', 'disable', 'enable', 'repair',
         'logs', 'rotate-token', 'pair-qr', 'approve-funnel', 'create-owner',
-        'pause-watchdog', 'resume-watchdog', 'install-watchdog', 'uninstall-watchdog', 'watchdog-status'
+        'pause-watchdog', 'resume-watchdog', 'install-watchdog', 'uninstall-watchdog', 'watchdog-status',
+        'set-probe-mode'
     )]
     [string]$Command = 'status',
 
     [string]$Mode = 'remote_sync',
+    [string]$ProbeMode = 'auto',
     [string]$AdminUser = '',
     [string]$AdminPassword = '',
     [string]$AdminPasswordFile = '',
@@ -52,6 +54,7 @@ function Set-OmCliOption {
         'install-watchdog' { $script:InstallWatchdog = $true }
         'no-build' { $script:NoBuild = $true }
         'mode' { if ($Value) { $script:Mode = $Value } }
+        'probe-mode' { if ($Value) { $script:ProbeMode = $Value } }
         'admin-user' { if ($Value) { $script:AdminUser = $Value } }
         'admin-password-file' { if ($Value) { $script:AdminPasswordFile = $Value } }
         'admin-email' { if ($Value) { $script:AdminEmail = $Value } }
@@ -283,6 +286,18 @@ try {
             }
             $result = New-OmWallosOwner -WallosPort $ports.wallos -Username $AdminUser -Password $password -Email $AdminEmail -DryRun:$DryRun
             Write-OmCliResult $result $(if ($result.ok) { 0 } elseif ($result.retryable) { 20 } else { 30 })
+        }
+        'set-probe-mode' {
+            if ($ProbeMode -notin @('auto', 'direct', 'system')) {
+                Write-OmCliResult ([pscustomobject]@{
+                    ok = $false; code = 'INVALID_PROBE_MODE';
+                    message = '公网自测网络只支持 auto、direct 或 system。'; retryable = $false
+                }) 30
+            }
+            if ($DryRun) {
+                Write-OmCliResult ([pscustomobject]@{ ok = $true; code = 'DRY_RUN'; mode = $ProbeMode }) 0
+            }
+            Write-OmCliResult (Set-OmPublicProbeMode -Mode $ProbeMode) 0
         }
         'pause-watchdog' {
             Write-OmCliResult (Set-OmWatchdogPaused -Paused $true -Minutes 60) 0

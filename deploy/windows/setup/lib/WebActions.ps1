@@ -76,6 +76,22 @@ function Invoke-OmWebAction {
             Save-OmState $state
             return [pscustomobject]@{ ok = $summary.ok; checks = $checks; summary = $summary; dryRun = $false }
         }
+        'set-public-probe-mode' {
+            $mode = [string]$Params.mode
+            if ($mode -notin @('auto', 'direct', 'system')) {
+                return [pscustomobject]@{
+                    ok = $false; code = 'INVALID_PROBE_MODE';
+                    message = '公网自测网络只支持 auto、direct 或 system。'; retryable = $false
+                }
+            }
+            if ($dryRunRequested) {
+                return [pscustomobject]@{ ok = $true; code = 'DRY_RUN'; mode = $mode; message = 'DRY RUN: probe mode not saved' }
+            }
+            return (Set-OmPublicProbeMode -Mode $mode)
+        }
+        'phone-status' {
+            return (Update-OmPhoneVerified -BaseUrl ('http://127.0.0.1:' + $Ports.api) -DryRun:$dryRunRequested)
+        }
         'install-deps' {
             $licenseAcknowledged = $false
             if ($Params.PSObject.Properties['licenseAcknowledged']) {
