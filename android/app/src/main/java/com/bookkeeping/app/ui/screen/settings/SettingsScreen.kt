@@ -132,6 +132,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onOpenMerchantRules: () -> Unit = {},
     onOpenSyncSettings: () -> Unit = {},
+    onReplayOnboarding: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
 ) {
@@ -411,6 +412,17 @@ fun SettingsScreen(
                 }
             }
             item { LanguageCard() }
+
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("重看引导"),
+                        subtitle = tr("再次查看清衡的主要功能"),
+                        onClick = onReplayOnboarding,
+                    )
+                }
+            }
 
             item { SectionHeader(tr("关于与更新")) }
             item { AboutUpdateCard(

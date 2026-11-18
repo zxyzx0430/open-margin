@@ -1,5 +1,24 @@
 package com.bookkeeping.app.ui.navigation
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.bookkeeping.app.notification.NotificationListenerHelper
+import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.onboarding.OnboardingViewModel
+import com.bookkeeping.app.onboarding.OnboardingWelcome
+import com.bookkeeping.app.onboarding.TourState
 import com.bookkeeping.app.i18n.tr
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -65,11 +84,52 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 // 根 NavHost：底部 tab 切换
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun RootNavigation() {
+fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val navController = rememberNavController()
     var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val onboarding: OnboardingViewModel = hiltViewModel()
+    val tour by onboarding.state.collectAsState()
+    var notificationEnabled by remember { mutableStateOf(NotificationListenerHelper.isEnabled(context)) }
+    var waitingForAccess by rememberSaveable { mutableStateOf(false) }
+    var leftForAccess by rememberSaveable { mutableStateOf(false) }
+    val postNotificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    fun finishOnboarding(skipped: Boolean) {
+        onboarding.complete(skipped)
+        if (currentDestination != null && currentDestination.route != BottomNavItem.Transactions.route) {
+            navController.navigate(BottomNavItem.Transactions.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    LaunchedEffect(tour) {
+        if (tour != TourState.Loading) onOnboardingVisibilityChanged(tour == TourState.Showing)
+    }
+    DisposableEffect(lifecycleOwner, waitingForAccess, leftForAccess) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE && waitingForAccess) leftForAccess = true
+            if (event == Lifecycle.Event.ON_RESUME) {
+                notificationEnabled = NotificationListenerHelper.isEnabled(context)
+                if (waitingForAccess && leftForAccess) {
+                    waitingForAccess = false
+                    leftForAccess = false
+                    if (notificationEnabled && Build.VERSION.SDK_INT >= 33 &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        postNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // Resolve the static tab list once at the top of composition. Reading it
     // lazily from inside hierarchy.any could observe a nested data object
     // before its class initializer had assigned INSTANCE (null route crash).
@@ -263,6 +323,7 @@ fun RootNavigation() {
                     SettingsScreen(
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
                         onOpenSyncSettings = { navController.navigate(AppRoutes.SYNC_SETTINGS) },
+                        onReplayOnboarding = onboarding::restart,
                     )
                 }
             }
@@ -308,6 +369,27 @@ fun RootNavigation() {
                     voiceSheetOpen = false
                     voiceRequest = VoiceEntryRequest(text)
                 },
+            )
+        }
+        if (tour == TourState.Showing) {
+            BackHandler { finishOnboarding(skipped = true) }
+            OnboardingWelcome(
+                onStart = { finishOnboarding(skipped = false) },
+                onSkip = { finishOnboarding(skipped = true) },
+                onEnableAutomaticEntry = {
+                    if (!notificationEnabled) {
+                        waitingForAccess = true
+                        leftForAccess = false
+                        runCatching { NotificationListenerHelper.openSettings(context) }
+                            .onFailure {
+                                waitingForAccess = false
+                                Toast.makeText(context,
+                                    if (AppLanguage.current() == AppLanguage.ENGLISH) "Unable to open system settings"
+                                    else "无法打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                },
+                notificationAccessEnabled = notificationEnabled,
             )
         }
     }

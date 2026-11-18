@@ -29,6 +29,10 @@ object AppLanguage {
     fun read(context: Context): String =
         normalize(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, CHINESE))
 
+    /** Whether the user or first-run initialization has persisted a language. */
+    fun hasStoredChoice(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains(KEY)
+
     fun set(context: Context, language: String): Boolean {
         val selected = normalize(language)
         // Persist first so startup restoration always agrees with AndroidX/system state.

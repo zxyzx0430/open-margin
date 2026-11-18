@@ -66,11 +66,15 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             BookkeepingAppTheme {
-                RootNavigation()
                 var showPermissionIntro by remember {
                     mutableStateOf(showNotificationPermissionIntro)
                 }
-                if (showPermissionIntro) {
+                var onboardingResolved by remember { mutableStateOf(false) }
+                RootNavigation(onOnboardingVisibilityChanged = { visible ->
+                    onboardingResolved = true
+                    if (visible) showPermissionIntro = false
+                })
+                if (onboardingResolved && showPermissionIntro) {
                     AlertDialog(
                         onDismissRequest = { showPermissionIntro = false },
                         title = { Text(tr("通知权限说明")) },
