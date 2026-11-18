@@ -5,6 +5,8 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "重看引导" to "Replay the tour",
+        "再次查看清衡的主要功能" to "See the main features again",
         "待更新组件：" to "Update components: ",
         "仅 Android APP 更新" to "Android app only",
         "仅 Windows / VPS 更新" to "Windows / VPS only",

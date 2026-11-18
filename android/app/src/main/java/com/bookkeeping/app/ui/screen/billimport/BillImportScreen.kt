@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.billimport
 
+import android.view.View
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -211,8 +215,10 @@ internal fun BillImportExportSheet(
     exportFeedback: String?,
     exportInProgress: Boolean,
     viewModel: BillImportViewModel,
+    onPanelPositioned: ((LayoutCoordinates, View) -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsState()
+    val host = LocalView.current
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::load)
     }
@@ -221,6 +227,9 @@ internal fun BillImportExportSheet(
 
     Column(
         modifier = Modifier
+            .then(if (onPanelPositioned != null) Modifier.onGloballyPositioned {
+                onPanelPositioned(it, host)
+            } else Modifier)
             .fillMaxWidth()
             .heightIn(max = 720.dp)
             .padding(horizontal = 20.dp)
