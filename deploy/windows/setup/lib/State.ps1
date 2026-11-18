@@ -19,7 +19,7 @@ $script:OmStepTransitions = @{
     'WAITING_USER'    = @('DEPLOYING', 'VERIFYING', 'READY', 'COMPLETE', 'FAILED')
     'VERIFYING'       = @('COMPLETE', 'PHONE_VERIFIED', 'READY', 'FAILED')
     'PHONE_VERIFIED'  = @('COMPLETE', 'DISABLING', 'FAILED')
-    'COMPLETE'        = @('DISABLING', 'SWITCHING', 'DEPLOYING', 'VERIFYING', 'FAILED')
+    'COMPLETE'        = @('PHONE_VERIFIED', 'DISABLING', 'SWITCHING', 'DEPLOYING', 'VERIFYING', 'FAILED')
     'DISABLING'       = @('DISABLED', 'FAILED')
     'DISABLED'        = @('SWITCHING', 'READY', 'FAILED')
     'SWITCHING'       = @('READY', 'COMPLETE', 'VERIFYING', 'FAILED')
@@ -79,6 +79,9 @@ function New-OmDefaultState {
         financePublicUrl   = 'https://local.openmargin.invalid/finance'
         publicSyncUrl      = $null
         gatewayProfile     = 'windows-public-sync'
+        # How the wizard reaches the public *.ts.net address from this machine:
+        # auto = direct first, system proxy only on a transport-level failure.
+        publicProbeMode    = 'auto'
         ownerCreated       = $false
         pendingReboot      = $false
         phoneVerified      = $false
@@ -222,6 +225,22 @@ function Set-OmStateValue {
         }
         $state
     }.GetNewClosure())
+}
+
+function Get-OmPublicProbeMode {
+    $mode = 'auto'
+    try { $mode = [string](Read-OmState).publicProbeMode } catch { }
+    if ($mode -notin @('auto', 'direct', 'system')) { return 'auto' }
+    return $mode
+}
+
+function Set-OmPublicProbeMode {
+    param([Parameter(Mandatory = $true)][ValidateSet('auto', 'direct', 'system')][string]$Mode)
+    $null = Set-OmStateValue -Name publicProbeMode -Value $Mode
+    return [pscustomobject]@{
+        ok = $true; code = 'PROBE_MODE_SET'; mode = $Mode;
+        message = '已切换公网自测网络方式，下次自测生效。'
+    }
 }
 
 function Set-OmStep {
