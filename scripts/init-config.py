@@ -20,6 +20,10 @@ if parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.pa
     parser.error("Use a public HTTPS URL without credentials, query or fragment")
 if parsed.path not in ("/finance",""):
     parser.error("The provided Nginx example currently supports only the /finance path")
+# Pairing QR URLs must match the Android validator: standard HTTPS port and
+# the /finance prefix. Accepting anything else produces a QR the app rejects.
+if parsed.port not in (None, 443):
+    parser.error("The pairing URL must use the standard HTTPS port (no explicit port)")
 if args.owner_id<1:parser.error("Owner ID must be positive")
 
 folder=root/"secrets"

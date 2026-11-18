@@ -28,7 +28,7 @@ $csrf = $_SESSION['finance_csrf'];
 .om-pair-warning{font-size:13px;opacity:.8;margin-top:18px}
 #om-pair-status{min-height:1.5em;margin:12px 0}
 </style>
-<main class="om-pairing">
+<section class="om-pairing">
   <h1>手机配对</h1>
   <p>打开清衡 App → 同步 → 重新配对，扫描这里生成的二维码。VPS 普通 HTTPS 域名和 Windows Tailscale 域名均使用同一套配对流程。</p>
   <div class="om-pair-card">
@@ -39,7 +39,7 @@ $csrf = $_SESSION['finance_csrf'];
     <p class="om-pair-warning">二维码包含具有同步权限的设备密钥，请勿截图分享。二维码将在本页面显示 5 分钟后自动隐藏，但截图中的密钥不会自动失效；如已泄露，请在服务器端轮换设备密钥。</p>
     <p><a href="settings.php">返回设置</a></p>
   </div>
-</main>
+</section>
 <script src="pairing-qrcode.min.js"></script>
 <script>
 (() => {
