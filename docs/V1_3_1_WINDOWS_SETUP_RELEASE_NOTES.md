@@ -13,6 +13,6 @@
 - PowerShell 7：Compose、离线包、Tailscale、看门狗定向测试共 38 项通过。
 - 后端：设置 `FINANCE_PUBLIC_URL=https://local.openmargin.invalid/finance` 后执行 unittest discover，114 项通过。
 - Docker Desktop 引擎可用；实际拉取 `python:3.11-slim` 时镜像层大小校验失败，未验证完整在线部署。失败原因尚未确定。
-- `Build-Installer.ps1 -Version 1.3.1 -NoAutoInstall`：未找到 Inno Setup，安装包构建未验证。
+- 使用本机 Inno Setup 6.3.3 执行 `Build-Installer.ps1 -Version 1.3.1 -NoAutoInstall`：安装包编译成功；尚未进行干净机安装验证。
 
 两个独立服务进程读取同一临时账本的回归通过，身份一致。仍需在可交互的干净 Windows 环境验证跨账号 UAC、原安装用户实际访问、真实 Tailscale Funnel 授权与 DNS、容器重建后的扫码配对，以及安装包安装和离线包导入。以上测试结果不代表这些端到端场景已验证。
