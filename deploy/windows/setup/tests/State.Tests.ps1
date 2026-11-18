@@ -51,6 +51,21 @@ Describe 'State machine transitions' {
 }
 
 Describe 'State file' {
+    It 'upgrades an older engine version without changing completed deployment state' {
+        $state = Read-OmState
+        $state.engineVersion = '1.3.0'
+        $state.step = 'COMPLETE'
+        $state.publicSyncUrl = 'https://pc.tailnet.ts.net/finance'
+        Save-OmState $state
+
+        $upgraded = Read-OmState
+
+        $upgraded.engineVersion | Should -Be '1.3.1'
+        $upgraded.step | Should -Be 'COMPLETE'
+        $upgraded.publicSyncUrl | Should -Be 'https://pc.tailnet.ts.net/finance'
+        ((Get-Content -Path (Get-OmStatePath) -Raw -Encoding UTF8) | ConvertFrom-Json).engineVersion | Should -Be '1.3.1'
+    }
+
     It 'writes atomically without a leftover temp file' {
         $state = Read-OmState
         $state.publicSyncUrl = 'https://pc.tailnet.ts.net/finance'

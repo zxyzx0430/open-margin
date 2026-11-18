@@ -121,6 +121,23 @@ function Merge-OmStateDefaults {
     return $State
 }
 
+function Get-OmCurrentEngineVersion {
+    return [string](New-OmDefaultState).engineVersion
+}
+
+function Resolve-OmEngineVersion {
+    param([AllowNull()][string]$Version)
+    $currentVersion = [string]$Version
+    $targetVersion = Get-OmCurrentEngineVersion
+    if ([string]::IsNullOrWhiteSpace($currentVersion)) { return $targetVersion }
+    try {
+        $currentParsed = [version]::Parse($currentVersion.TrimStart('v'))
+        $targetParsed = [version]::Parse($targetVersion.TrimStart('v'))
+        if ($currentParsed -lt $targetParsed) { return $targetVersion }
+    } catch { }
+    return $currentVersion
+}
+
 function Read-OmState {
     if (-not $script:OmStatePath) { throw 'Initialize-OmPaths must be called first' }
     if (-not (Test-Path $script:OmStatePath)) {
@@ -135,7 +152,17 @@ function Read-OmState {
                 if ([string]::IsNullOrWhiteSpace($raw)) { return New-OmDefaultState }
                 $state = $raw | ConvertFrom-Json
                 if (-not $state.PSObject.Properties['schema']) { throw 'missing schema' }
-                return (Merge-OmStateDefaults $state)
+                $storedEngineVersion = ''
+                if ($state.PSObject.Properties['engineVersion']) {
+                    $storedEngineVersion = [string]$state.engineVersion
+                }
+                $state = Merge-OmStateDefaults $state
+                $currentEngineVersion = Resolve-OmEngineVersion -Version $storedEngineVersion
+                if ($currentEngineVersion -ne $storedEngineVersion) {
+                    $state.engineVersion = $currentEngineVersion
+                    Save-OmState -State $state -SkipLock
+                }
+                return $state
             } catch {
                 $lastError = $_
                 Start-Sleep -Milliseconds 100

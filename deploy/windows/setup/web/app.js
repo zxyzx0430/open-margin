@@ -508,7 +508,17 @@ async function loadQr(force, target) {
     const data = await api('/api/qr');
     if (ids.serverId) $(ids.serverId).textContent = data.serverId || '尚未读取';
     if (!data.ok || !data.payload) {
-      container.textContent = data.message || '还没有配对信息。';
+      const message = document.createElement('p');
+      message.textContent = data.message || '还没有配对信息。';
+      container.appendChild(message);
+      if (data.code === 'SERVER_ID_UNAVAILABLE') {
+        const repair = document.createElement('button');
+        repair.type = 'button';
+        repair.className = 'om-btn om-btn-ghost';
+        repair.textContent = '一键修复并重试';
+        repair.addEventListener('click', () => repairAndReloadQr(repair, ids));
+        container.appendChild(repair);
+      }
       return;
     }
     if (typeof QRCode === 'function') {
@@ -525,6 +535,35 @@ async function loadQr(force, target) {
     }, 10 * 60 * 1000);
   } catch (error) {
     container.textContent = '无法读取配对信息。';
+  }
+}
+
+async function repairAndReloadQr(button, ids) {
+  button.disabled = true;
+  button.textContent = '正在修复服务…';
+  try {
+    const result = await postAction('repair');
+    if (!result.jobId) {
+      button.disabled = false;
+      button.textContent = '一键修复并重试';
+      toast(result.message || '修复任务没有启动。', true);
+      return;
+    }
+    pollJob(result.jobId, (jobResult) => {
+      if (jobResult.ok) {
+        toast('服务已修复，正在重新生成二维码。');
+        refreshState().catch(() => {});
+        loadQr(true, ids);
+      } else {
+        button.disabled = false;
+        button.textContent = '一键修复并重试';
+        toast(jobResult.message || '修复失败，请查看运行状态。', true);
+      }
+    });
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = '一键修复并重试';
+    toast(error.message || '修复失败。', true);
   }
 }
 

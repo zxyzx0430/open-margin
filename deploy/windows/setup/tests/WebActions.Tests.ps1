@@ -111,3 +111,12 @@ Describe 'Public probe mode action and UI' {
         $js | Should -Match '已切换，下次自测生效'
     }
 }
+
+Describe 'Pairing QR recovery UI' {
+    It 'offers an in-place service repair when the server identity is unavailable' {
+        $js = Get-Content -Path (Join-Path $PSScriptRoot '..\web\app.js') -Raw -Encoding UTF8
+        $js | Should -Match 'SERVER_ID_UNAVAILABLE'
+        $js | Should -Match 'repairAndReloadQr'
+        $js | Should -Match '一键修复并重试'
+    }
+}
