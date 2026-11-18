@@ -77,28 +77,34 @@ Calendar range totals, category breakdown, seven-day trend, monthly budget, reco
 
 ## Sync architecture
 
-```mermaid
-flowchart LR
-    subgraph Phone["Android phone"]
-        App["清衡 app<br/>local ledger"]
-    end
-    subgraph Server["Your server (VPS or Windows)"]
-        API["Finance API<br/>SQLite ledger"]
-        Wallos["Wallos UI<br/>subscriptions & reports"]
-        MCP["MCP service<br/>18 tools"]
-        API <--> Wallos
-        API <--> MCP
-    end
-    Desktop["Desktop browser<br/>bills, subscriptions"]
-    AI["ChatGPT and other<br/>MCP clients"]
-    App <-->|"HTTPS two-way sync"| API
-    Wallos <-->|"browser"| Desktop
-    MCP <-->|"OAuth 2.1"| AI
-```
+<p align="center">
+  <img src="docs/assets/sync-architecture.en.png" width="640" alt="The phone app syncs over HTTPS with the Finance API; the API serves the Wallos UI and the MCP service">
+</p>
+
+| Component | Runs on | Talks to |
+|---|---|---|
+| Open Margin app (local ledger) | Android phone | Finance API, HTTPS two-way sync |
+| Finance API (SQLite ledger) | Your server | phone, Wallos, MCP |
+| Wallos UI (subscriptions & reports) | Your server | Finance API; you open it in a desktop browser |
+| MCP service (18 tools) | Your server | Finance API; ChatGPT and other clients connect over OAuth 2.1 |
+
+The phone talks only to the API, the browser only to Wallos, the AI only to MCP. All three share one ledger.
 
 **On a VPS**, the server stays up, so the phone syncs from any network.
 
 **On Windows**, the service and the ledger run on your own machine and the phone syncs over Tailscale Funnel — no domain needed, and the phone does not install Tailscale. With the PC off, the phone keeps recording and catches up later. WorkManager retries at a 15-minute minimum under Android's battery rules.
+
+## Phone pairing
+
+Both deployments share one QR flow — an ordinary domain and a Tailscale host behave identically.
+
+**VPS** — the ledger owner signs in to Wallos, opens the avatar menu → "Phone pairing" → "Generate pairing QR", then on the phone goes to Sync → Re-pair and scans it.
+
+The QR is generated on demand by an authenticated backend call. It never lands in static HTML, logs or the browser cache; the page hides it after five minutes and a refresh discards it. Only the ledger owner can generate one — other accounts do not see the entry point.
+
+**Windows** — the installer's last step shows a QR in the same format, scanned from the same screen in the app.
+
+The QR carries a **long-lived device key**: hiding it is not expiry, so do not screenshot or share it. If it leaks, rotate `FINANCE_DEVICE_TOKEN` on the server and pair again — that disconnects the phones currently linked.
 
 ## Install
 
