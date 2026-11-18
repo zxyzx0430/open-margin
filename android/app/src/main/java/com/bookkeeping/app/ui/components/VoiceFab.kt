@@ -2,6 +2,8 @@ package com.bookkeeping.app.ui.components
 
 import android.os.SystemClock
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -78,6 +80,7 @@ fun VoiceFab(
     ringGap: Dp = 3.dp,
     // 录音会话进行中由调用方置 false：不允许再起一段；已经按住的那一段不受影响。
     enabled: Boolean = true,
+    onboardingPulse: Int = 0,
 ) {
     val haptics = rememberUpdatedState(LocalHapticFeedback.current)
     val tapAction = rememberUpdatedState(onTap)
@@ -98,6 +101,13 @@ fun VoiceFab(
         targetValue = if (pressing) 0.94f else 1f,
         label = "voiceFabPressScale",
     )
+    val tourScale = remember { Animatable(1f) }
+    LaunchedEffect(onboardingPulse) {
+        if (onboardingPulse > 0) repeat(2) {
+            tourScale.animateTo(1.12f, tween(250))
+            tourScale.animateTo(1f, tween(250))
+        }
+    }
 
     // 计时与进度弧：用真实时钟推进，掉帧也不会把「按满 0.75 秒」拖成更久。
     // 满 0.75 秒这一帧就回调 onLongPressStart（开始录音 + 开面板），然后退出循环把进度留在满格。
@@ -177,7 +187,7 @@ fun VoiceFab(
         Box(
             modifier = Modifier
                 .size(fabSize)
-                .scale(pressScale)
+                .scale(pressScale * tourScale.value)
                 .alpha(if (enabled || pressing) 1f else 0.5f)
                 .shadow(6.dp, CircleShape)
                 .clip(CircleShape)

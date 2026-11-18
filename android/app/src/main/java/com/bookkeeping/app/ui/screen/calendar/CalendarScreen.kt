@@ -376,6 +376,8 @@ internal fun nextCalendarAmountFontSizeSp(currentFontSizeSp: Float): Float =
 fun CalendarScreen(
     viewModel: CalendarViewModel = hiltViewModel(),
     onOpenDetail: (Long) -> Unit = {},
+    onboardingDemo: Boolean = false,
+    onDemoFinger: (androidx.compose.ui.geometry.Offset?) -> Unit = {},
 ) {
     val transactions by viewModel.transactions.collectAsState()
     val context = LocalContext.current

@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import android.view.View
+import androidx.compose.ui.layout.LayoutCoordinates
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -156,6 +159,11 @@ fun TransactionListScreen(
     // 语音面板确认交付的文本。非 null 就打开新建表单并预填。
     voiceRequest: VoiceEntryRequest? = null,
     onVoiceRequestConsumed: () -> Unit = {},
+    onboardingAddOpen: Boolean = false,
+    onOnboardingPanelPositioned: ((LayoutCoordinates, View) -> Unit)? = null,
+    onOnboardingPanelDismiss: () -> Unit = {},
+    onOnboardingSaved: () -> Unit = {},
+    onboardingPulse: Int = 0,
 ) {
     val transactions by viewModel.displayedTransactions.collectAsState()
     val ledgerLoadState by viewModel.ledgerLoadState.collectAsState()
@@ -182,8 +190,19 @@ fun TransactionListScreen(
     }
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var openedForOnboarding by remember { mutableStateOf(false) }
     // 新建表单顶部「一句话记账」的预填：语音 Final 或空（点 FAB 手填）。
     var addDialogQuickEntry by remember { mutableStateOf("") }
+    LaunchedEffect(onboardingAddOpen) {
+        if (onboardingAddOpen) {
+            addDialogQuickEntry = ""
+            openedForOnboarding = true
+            showAddDialog = true
+        } else if (openedForOnboarding) {
+            showAddDialog = false
+            openedForOnboarding = false
+        }
+    }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
     var showVoiceHint by remember { mutableStateOf(false) }
@@ -380,6 +399,7 @@ fun TransactionListScreen(
                         onAbort = { if (!voiceBusy) onVoiceCancelled() },
                         // 录音会话进行中（面板开着）禁用新的按压：不能开第二个会话。
                         enabled = !voiceBusy,
+                        onboardingPulse = onboardingPulse,
                     )
                     if (showVoiceHint) {
                         VoiceHintBubble(
@@ -730,6 +750,12 @@ fun TransactionListScreen(
                 showAddDialog = false
                 addDialogQuickEntry = ""
             },
+            onPanelPositioned = if (openedForOnboarding) onOnboardingPanelPositioned else null,
+            onboardingDemo = openedForOnboarding,
+            onPanelDismissRequest = if (openedForOnboarding) ({
+                showAddDialog = false
+                onOnboardingPanelDismiss()
+            }) else null,
             initialQuickEntry = addDialogQuickEntry,
             // 手动新建和语音预填共用这一条保存路径：先查疑似重复，再入账。
             // 方向/币种/时间精度都一起传下去：不同方向的同金额、不同币种的同数字金额
@@ -756,6 +782,7 @@ fun TransactionListScreen(
                 )
             },
             onSaved = { saved ->
+                if (openedForOnboarding) onOnboardingSaved()
                 saveRequestSequence += 1
                 val requestSequence = saveRequestSequence
                 scope.launch {
