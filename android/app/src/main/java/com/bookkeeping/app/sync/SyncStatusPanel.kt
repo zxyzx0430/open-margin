@@ -586,7 +586,7 @@ private fun conflictFieldLine(
 }
 
 /** 状态页需要的一次性快照；prefs 是唯一数据源，不新增数据库表。 */
-private data class SyncSnapshot(
+internal data class SyncSnapshot(
     val enabled: Boolean,
     val url: String,
     val token: String,
