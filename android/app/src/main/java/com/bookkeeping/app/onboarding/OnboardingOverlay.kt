@@ -13,15 +13,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.roundToInt
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -116,10 +120,9 @@ internal fun OnboardingOverlay(
             onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) }
         }
         var origin by remember { mutableStateOf(Offset.Zero) }
-        var contentOrigin by remember { mutableStateOf(Offset.Zero) }
         var bubbleHeight by remember { mutableStateOf(0) }
+        var contentHeight by remember { mutableStateOf(0) }
         val density = androidx.compose.ui.platform.LocalDensity.current
-        val gapPx = with(density) { 8.dp.roundToPx() }
         val headerPx = with(density) { 56.dp.roundToPx() }
         Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionOnScreen() }) {
             Canvas(
@@ -161,8 +164,8 @@ internal fun OnboardingOverlay(
                     IntOffset((point.x - origin.x).roundToInt(), (point.y - origin.y).roundToInt())
                 })
             }
-            Box(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)
-                .onGloballyPositioned { contentOrigin = it.positionOnScreen() }) {
+            Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(16.dp)
+                .onSizeChanged { contentHeight = it.height }) {
                 Row(Modifier.fillMaxWidth().align(Alignment.TopCenter), horizontalArrangement = Arrangement.SpaceBetween) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         repeat(8) { index ->
@@ -174,21 +177,42 @@ internal fun OnboardingOverlay(
                     }
                     TextButton(onClick = onSkip) { Text(skipLabel, color = Color.White) }
                 }
-                Surface(
+                Box(
                     modifier = (if (dimBackground) Modifier.align(Alignment.TopCenter).offset {
-                        val top = ((target?.bounds?.top ?: contentOrigin.y) - contentOrigin.y).roundToInt()
-                        IntOffset(0, (top - bubbleHeight - gapPx).coerceAtLeast(headerPx))
-                    } else Modifier.align(Alignment.BottomCenter)).onSizeChanged { bubbleHeight = it.height },
-                    shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface,
+                        IntOffset(0, onboardingBubbleTop(0, bubbleHeight, contentHeight, headerPx, 0))
+                    } else Modifier.align(Alignment.BottomCenter))
+                        .then(if (contentHeight > 0) Modifier.heightIn(max = with(density) {
+                            (contentHeight - headerPx).coerceAtLeast(1).toDp()
+                        }) else Modifier)
+                        .onSizeChanged { bubbleHeight = it.height }
+                        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(20.dp)),
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(title, style = MaterialTheme.typography.titleLarge)
-                        Text(message, style = MaterialTheme.typography.bodyMedium)
-                        Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (dimBackground) {
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis)
+                                Text(message, style = MaterialTheme.typography.bodySmall, maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis)
+                            }
                             if (tryLabel != null && onTry != null) {
                                 TextButton(onClick = onTry) { Text(tryLabel) }
                             }
-                            Button(onClick = onNext) { Text(nextLabel) }
+                            Button(onClick = onNext) { Text(nextLabel, maxLines = 1) }
+                        }
+                    } else {
+                        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(title, style = MaterialTheme.typography.titleLarge)
+                            Text(message, style = MaterialTheme.typography.bodyMedium)
+                            Button(onClick = onNext, modifier = Modifier.align(Alignment.End)) {
+                                Text(nextLabel)
+                            }
                         }
                     }
                 }

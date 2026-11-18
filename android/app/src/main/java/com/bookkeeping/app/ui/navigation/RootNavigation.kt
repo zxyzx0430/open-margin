@@ -103,6 +103,8 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val onboarding: OnboardingViewModel = hiltViewModel()
     val tour by onboarding.state.collectAsState()
     val step = (tour as? TourState.Showing)?.step
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
     var target by remember(step) { mutableStateOf<OnboardingTarget?>(null) }
     var pageTarget by remember { mutableStateOf<OnboardingTarget?>(null) }
     var voiceTry by remember(step) { mutableStateOf(false) }
@@ -113,9 +115,11 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     fun finishTour(skip: Boolean) {
         if (skip) onboarding.skip() else onboarding.complete()
         onboardingPulse += 1
-        navController.navigate(BottomNavItem.Transactions.route) {
-            popUpTo(navController.graph.findStartDestination().id) { saveState = false }
-            launchSingleTop = true
+        if (currentDestination != null) {
+            navController.navigate(BottomNavItem.Transactions.route) {
+                popUpTo(navController.graph.findStartDestination().id) { saveState = false }
+                launchSingleTop = true
+            }
         }
         Toast.makeText(context, if (english) "Try adding a transaction" else "先记一笔试试", Toast.LENGTH_SHORT).show()
     }
@@ -140,7 +144,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     LaunchedEffect(tour) {
         if (tour !is TourState.Loading) onOnboardingVisibilityChanged(tour !is TourState.Hidden)
     }
-    LaunchedEffect(step) {
+    LaunchedEffect(step, currentDestination?.route) {
         val route = when (step) {
             3 -> BottomNavItem.Calendar.route
             4 -> BottomNavItem.Stats.route
@@ -148,7 +152,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             0, 1, 2, 6, 7 -> BottomNavItem.Transactions.route
             else -> null
         }
-        if (route != null && navController.currentDestination?.route != route) {
+        if (route != null && currentDestination != null && currentDestination.route != route) {
             navController.navigate(route) {
                 popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                 launchSingleTop = true
@@ -163,8 +167,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         )), host)
     }
     var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
     // Resolve the static tab list once at the top of composition. Reading it
     // lazily from inside hierarchy.any could observe a nested data object
     // before its class initializer had assigned INSTANCE (null route crash).

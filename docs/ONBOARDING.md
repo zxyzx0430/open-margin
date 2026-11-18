@@ -30,4 +30,4 @@
 - `android/app/src/test/java/com/bookkeeping/app/onboarding/OnboardingProgressTest.kt`：进度边界测试。
 - `android/app/src/androidTest/java/com/bookkeeping/app/onboarding/OnboardingOverlayTest.kt`：真实新建账单面板上的遮罩输入测试。
 
-现有面板没有增加引导专用控件。遮罩点击转发、输入法及无障碍交互需要在设备上检查。
+现有面板没有增加引导专用控件。面板步骤的提示收在顶部紧凑条，提示背景和文字区域的触摸继续转发给真实面板，按钮单独响应；位置限定在安全显示区域。遮罩点击转发、输入法及无障碍交互需要在设备上检查。
