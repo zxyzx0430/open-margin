@@ -133,6 +133,7 @@ fun SettingsScreen(
     onOpenMerchantRules: () -> Unit = {},
     onOpenSyncSettings: () -> Unit = {},
     onOpenPendingConflicts: () -> Unit = {},
+    onOpenTransactionDiagnostics: () -> Unit = {},
     onReplayOnboarding: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
@@ -372,6 +373,18 @@ fun SettingsScreen(
                             merchantRules.size.toString() + " " + tr("个商户")
                         },
                         onClick = onOpenMerchantRules,
+                    )
+                }
+            }
+
+            item { SectionHeader(tr("诊断日志")) }
+            item {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("账单诊断日志"),
+                        subtitle = tr("本机保存 7 天"),
+                        onClick = onOpenTransactionDiagnostics,
                     )
                 }
             }

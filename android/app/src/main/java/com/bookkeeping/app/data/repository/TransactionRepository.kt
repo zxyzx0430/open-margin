@@ -2,6 +2,8 @@ package com.bookkeeping.app.data.repository
 
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.CaptureNotifier
@@ -28,6 +30,7 @@ class TransactionRepository @Inject constructor(
     private val dao: TransactionDao,
     private val processedNoticeDao: ProcessedNoticeDao,
     private val settings: SettingsPreferences,
+    private val diagnostics: TransactionDiagnostics,
     @ApplicationContext private val context: Context,
 ) {
     private val duplicateMutex = Mutex()
@@ -46,8 +49,64 @@ class TransactionRepository @Inject constructor(
     fun observeTotalIncomeBetween(startMs: Long, endMs: Long): Flow<Long> =
         dao.observeTotalIncomeBetween(startMs, endMs)
 
-    suspend fun insert(transaction: TransactionEntity, notifySuccess: Boolean = false): Long {
-        val id = dao.insert(transaction)
+    suspend fun insert(
+        transaction: TransactionEntity,
+        notifySuccess: Boolean = false,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+    ): Long {
+        val operationStage = if (transaction.source == "MANUAL") {
+            TransactionDiagnostics.STAGE_ENTRY
+        } else {
+            TransactionDiagnostics.STAGE_CAPTURE
+        }
+        if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = operationStage,
+                result = TransactionDiagnostics.RESULT_STARTED,
+                details = "Transaction save requested",
+            )
+        }
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_STARTED,
+        )
+        val id = try {
+            dao.insert(transaction)
+        } catch (failure: Exception) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SAVE,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+            )
+            if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = operationStage,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = diagnosticError(failure),
+                )
+            }
+            throw failure
+        }
+        val saved = transaction.copy(id = id)
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            details = "Transaction row inserted",
+            transactionId = id,
+        )
+        if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = operationStage,
+                result = TransactionDiagnostics.RESULT_SUCCESS,
+                transactionId = id,
+            )
+        }
         // Only a real insert reaches this point. Notification failures must
         // never affect the ledger or sync path.
         val possibleDuplicate = transaction.duplicateOfId != null ||
@@ -59,17 +118,23 @@ class TransactionRepository @Inject constructor(
                 if (possibleDuplicate || settings.successNotificationsEnabledNow()) {
                     CaptureNotifier.notifySaved(
                         context = context,
-                        transaction = transaction.copy(id = id),
+                        transaction = saved,
                         possibleDuplicate = possibleDuplicate,
                     )
                 }
             } catch (failure: CancellationException) {
                 throw failure
-            } catch (_: Exception) {
-                // A notification failure must never affect the saved ledger.
+            } catch (failure: Exception) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = operationStage,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Transaction saved but success notification failed",
+                    transactionId = id,
+                )
             }
         }
-        TransactionSyncWorker.requestImmediate(context)
+        requestSync(diagnosticInput, saved)
         return id
     }
 
@@ -84,29 +149,89 @@ class TransactionRepository @Inject constructor(
         transaction: TransactionEntity,
         windowMs: Long = 8_000L,
         notifySuccess: Boolean = true,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
     ): Long? = duplicateMutex.withLock {
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_DEDUP,
+            result = TransactionDiagnostics.RESULT_STARTED,
+        )
         transaction.sourceTransactionId?.let { orderId ->
-            if (dao.findBySourceTransactionId(transaction.source, orderId) != null) {
+            val matched = try {
+                dao.findBySourceTransactionId(transaction.source, orderId)
+            } catch (failure: Exception) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = diagnosticError(failure),
+                )
+                throw failure
+            }
+            if (matched != null) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Existing source transaction ID; candidate not inserted",
+                    transactionId = matched.id,
+                )
                 return@withLock null
             }
         }
-        val existing = dao.findRecentSameAmount(
-            source = transaction.source,
-            merchant = transaction.merchant,
-            amountCents = transaction.amountCents,
-            type = transaction.type,
-            currency = transaction.currency,
-            windowStartMs = transaction.timestamp - windowMs,
-            windowEndMs = transaction.timestamp + windowMs,
-        )
-        if (existing != null) return@withLock null
+        val existing = try {
+            dao.findRecentSameAmount(
+                source = transaction.source,
+                merchant = transaction.merchant,
+                amountCents = transaction.amountCents,
+                type = transaction.type,
+                currency = transaction.currency,
+                windowStartMs = transaction.timestamp - windowMs,
+                windowEndMs = transaction.timestamp + windowMs,
+            )
+        } catch (failure: Exception) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+            )
+            throw failure
+        }
+        if (existing != null) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "Exact duplicate candidate skipped",
+                transactionId = existing.id,
+            )
+            return@withLock null
+        }
 
         // 同一笔支付被两条采集路径各扫一次（通知文本缺商户、支付成功页有商户）：
         // 合成一条，写回先入库的行，不再让用户确认。
-        val mergeTarget = findAutoMergeTarget(transaction)
+        val mergeTarget = try {
+            findAutoMergeTarget(transaction)
+        } catch (failure: Exception) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+            )
+            throw failure
+        }
         if (mergeTarget != null) {
             val merged = CaptureMergePolicy.mergeInto(mergeTarget, transaction)
-            update(merged)
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "Candidate merged into existing transaction",
+                transactionId = merged.id,
+            )
+            update(merged, diagnosticInput, operationStage = TransactionDiagnostics.STAGE_CAPTURE)
             CaptureHealth.onTransactionSaved(context)
             KeepAliveService.refreshStatus(context)
             if (notifySuccess) {
@@ -121,20 +246,36 @@ class TransactionRepository @Inject constructor(
                     }
                 } catch (failure: CancellationException) {
                     throw failure
-                } catch (_: Exception) {
-                    // A notification failure must never affect the merged ledger.
+                } catch (failure: Exception) {
+                    diagnostics.record(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                        result = TransactionDiagnostics.RESULT_WARNING,
+                        details = "Merged transaction notification failed",
+                        transactionId = merged.id,
+                    )
                 }
             }
             return@withLock merged.id
         }
 
-        val similar = dao.findRecentSimilar(
-            amountCents = transaction.amountCents,
-            type = transaction.type,
-            currency = transaction.currency,
-            windowStartMs = transaction.timestamp - POSSIBLE_DUPLICATE_WINDOW_MS,
-            windowEndMs = transaction.timestamp + POSSIBLE_DUPLICATE_WINDOW_MS,
-        )
+        val similar = try {
+            dao.findRecentSimilar(
+                amountCents = transaction.amountCents,
+                type = transaction.type,
+                currency = transaction.currency,
+                windowStartMs = transaction.timestamp - POSSIBLE_DUPLICATE_WINDOW_MS,
+                windowEndMs = transaction.timestamp + POSSIBLE_DUPLICATE_WINDOW_MS,
+            )
+        } catch (failure: Exception) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+            )
+            throw failure
+        }
         val candidate = if (DuplicateReviewPolicy.shouldFlag(similar, transaction)) {
             transaction.copy(
                 duplicateOfId = similar!!.id,
@@ -143,7 +284,21 @@ class TransactionRepository @Inject constructor(
         } else {
             transaction
         }
-        val id = insert(candidate, notifySuccess = notifySuccess)
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_DEDUP,
+            result = if (candidate.duplicateOfId != null) {
+                TransactionDiagnostics.RESULT_WARNING
+            } else {
+                TransactionDiagnostics.RESULT_SUCCESS
+            },
+            details = if (candidate.duplicateOfId != null) {
+                "Possible duplicate retained for review"
+            } else {
+                "No duplicate found"
+            },
+        )
+        val id = insert(candidate, notifySuccess = notifySuccess, diagnosticInput = diagnosticInput)
         if (id > 0L) {
             CaptureHealth.onTransactionSaved(context)
             KeepAliveService.refreshStatus(context)
@@ -227,11 +382,77 @@ class TransactionRepository @Inject constructor(
         }
     }
 
-    suspend fun update(transaction: TransactionEntity) {
-        dao.update(transaction.copy(syncDirty = true, syncModifiedMs = System.currentTimeMillis(),
-                                    syncMutationId = UUID.randomUUID().toString()))
-        TransactionSyncWorker.requestImmediate(context)
+    suspend fun update(
+        transaction: TransactionEntity,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+        operationStage: String = TransactionDiagnostics.STAGE_EDIT,
+    ) {
+        val updated = transaction.copy(
+            syncDirty = true,
+            syncModifiedMs = System.currentTimeMillis(),
+            syncMutationId = UUID.randomUUID().toString(),
+        )
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = operationStage,
+            result = TransactionDiagnostics.RESULT_STARTED,
+            details = "Transaction edit requested",
+            transactionId = transaction.id,
+        )
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_STARTED,
+            transactionId = transaction.id,
+        )
+        try {
+            dao.update(updated)
+        } catch (failure: Exception) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SAVE,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+                transactionId = transaction.id,
+            )
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = operationStage,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+                transactionId = transaction.id,
+            )
+            throw failure
+        }
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            details = "Transaction row updated",
+            transactionId = transaction.id,
+        )
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = operationStage,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            transactionId = transaction.id,
+        )
+        requestSync(diagnosticInput, updated)
     }
+
+    suspend fun recordDiagnostic(
+        attemptId: String,
+        stage: String,
+        result: String,
+        details: String = "",
+        transactionId: Long? = null,
+    ) = diagnostics.record(
+        attemptId = attemptId,
+        stage = stage,
+        result = result,
+        details = details,
+        transactionId = transactionId,
+    )
 
     /**
      * Official bill imports are all-or-nothing. New rows are inserted and
@@ -241,8 +462,16 @@ class TransactionRepository @Inject constructor(
     suspend fun importBillBatch(
         inserts: List<TransactionEntity>,
         updates: List<TransactionEntity> = emptyList(),
+        insertDiagnostics: List<TransactionDiagnosticInput> = emptyList(),
+        updateDiagnostics: Map<Long, TransactionDiagnosticInput> = emptyMap(),
     ): Pair<Int, Int> {
         if (inserts.isEmpty() && updates.isEmpty()) return 0 to 0
+        val insertInputs = inserts.mapIndexed { index, _ ->
+            insertDiagnostics.getOrNull(index) ?: TransactionDiagnosticInput()
+        }
+        val updateInputs = updates.associate { entity ->
+            entity.id to (updateDiagnostics[entity.id] ?: TransactionDiagnosticInput())
+        }
         val now = System.currentTimeMillis()
         val markedUpdates = updates.map {
             it.copy(
@@ -252,21 +481,159 @@ class TransactionRepository @Inject constructor(
             )
         }
         val ids = dao.importBatch(inserts, markedUpdates)
-        TransactionSyncWorker.requestImmediate(context)
+        val saved = mutableListOf<Pair<TransactionDiagnosticInput, TransactionEntity>>()
+        inserts.forEachIndexed { index, transaction ->
+            val id = ids.getOrNull(index) ?: 0L
+            val input = insertInputs[index]
+            if (id > 0L) {
+                val inserted = transaction.copy(id = id)
+                saved += input to inserted
+                diagnostics.record(
+                    attemptId = input.attemptId,
+                    stage = TransactionDiagnostics.STAGE_SAVE,
+                    result = TransactionDiagnostics.RESULT_SUCCESS,
+                    details = "Imported transaction row inserted",
+                    transactionId = id,
+                )
+                diagnostics.record(
+                    attemptId = input.attemptId,
+                    stage = TransactionDiagnostics.STAGE_IMPORT,
+                    result = TransactionDiagnostics.RESULT_SUCCESS,
+                    transactionId = id,
+                )
+            }
+        }
+        markedUpdates.forEach { updated ->
+            val input = updateInputs.getValue(updated.id)
+            saved += input to updated
+            diagnostics.record(
+                attemptId = input.attemptId,
+                stage = TransactionDiagnostics.STAGE_SAVE,
+                result = TransactionDiagnostics.RESULT_SUCCESS,
+                details = "Imported fields added to existing transaction",
+                transactionId = updated.id,
+            )
+            diagnostics.record(
+                attemptId = input.attemptId,
+                stage = TransactionDiagnostics.STAGE_IMPORT,
+                result = TransactionDiagnostics.RESULT_SUCCESS,
+                transactionId = updated.id,
+            )
+        }
+        requestSyncForTransactions(saved)
         return ids.count { it > 0L } to markedUpdates.size
     }
 
     suspend fun insertImportedBatch(transactions: List<TransactionEntity>): Int =
         importBillBatch(inserts = transactions).first
 
-    suspend fun delete(transaction: TransactionEntity) {
-        // Tombstone remains until the server acknowledges deletion; no stale
-        // offline device may resurrect it on the next network reconnect.
-        dao.update(transaction.copy(syncDeleted = true, syncDirty = true,
-                                    syncModifiedMs = System.currentTimeMillis(),
-                                    syncMutationId = UUID.randomUUID().toString()))
-        TransactionSyncWorker.requestImmediate(context)
+    suspend fun delete(
+        transaction: TransactionEntity,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+    ) {
+        // Keep a local trace even though the ledger row becomes a sync tombstone.
+        val tombstone = transaction.copy(
+            syncDeleted = true,
+            syncDirty = true,
+            syncModifiedMs = System.currentTimeMillis(),
+            syncMutationId = UUID.randomUUID().toString(),
+        )
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_DELETE,
+            result = TransactionDiagnostics.RESULT_STARTED,
+            details = "Transaction deletion requested",
+            transactionId = transaction.id,
+        )
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_STARTED,
+            transactionId = transaction.id,
+        )
+        try {
+            dao.update(tombstone)
+        } catch (failure: Exception) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SAVE,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+                transactionId = transaction.id,
+            )
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DELETE,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+                transactionId = transaction.id,
+            )
+            throw failure
+        }
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            details = "Transaction tombstone saved",
+            transactionId = transaction.id,
+        )
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_DELETE,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            transactionId = transaction.id,
+        )
+        requestSync(diagnosticInput, tombstone)
     }
+
+    private suspend fun requestSync(
+        input: TransactionDiagnosticInput,
+        transaction: TransactionEntity,
+    ) = requestSyncForTransactions(listOf(input to transaction))
+
+    private suspend fun requestSyncForTransactions(
+        items: List<Pair<TransactionDiagnosticInput, TransactionEntity>>,
+    ) {
+        if (items.isEmpty()) return
+        val enabled = context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE)
+            .getBoolean("enabled", false)
+        items.forEach { (input, transaction) ->
+            diagnostics.record(
+                attemptId = input.attemptId,
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = TransactionDiagnostics.RESULT_STARTED,
+                details = if (enabled) "Sync work requested" else "Sync is disabled; transaction remains local",
+                transactionId = transaction.id.takeIf { it > 0L },
+            )
+        }
+        try {
+            TransactionSyncWorker.requestImmediate(context)
+            items.forEach { (input, transaction) ->
+                diagnostics.record(
+                    attemptId = input.attemptId,
+                    stage = TransactionDiagnostics.STAGE_SYNC,
+                    result = if (enabled) TransactionDiagnostics.RESULT_SUCCESS
+                    else TransactionDiagnostics.RESULT_WARNING,
+                    details = if (enabled) "Sync work queued" else "No network upload scheduled",
+                    transactionId = transaction.id.takeIf { it > 0L },
+                )
+            }
+        } catch (failure: Exception) {
+            items.forEach { (input, transaction) ->
+                diagnostics.record(
+                    attemptId = input.attemptId,
+                    stage = TransactionDiagnostics.STAGE_SYNC,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = diagnosticError(failure),
+                    transactionId = transaction.id.takeIf { it > 0L },
+                )
+            }
+        }
+    }
+
+    private fun diagnosticError(failure: Exception): String =
+        if (failure is android.database.sqlite.SQLiteException) "Database operation failed"
+        else "Operation failed"
 
     companion object {
         const val POSSIBLE_DUPLICATE_WINDOW_MS: Long = DuplicateReviewPolicy.WINDOW_MS

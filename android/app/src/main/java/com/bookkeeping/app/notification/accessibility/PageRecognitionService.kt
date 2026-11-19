@@ -12,6 +12,8 @@ import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.capture.success.PaymentPage
 import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
@@ -260,79 +262,131 @@ open class PageRecognitionService : AccessibilityService() {
         allowAuto: Boolean,
         windowId: Int,
     ) {
-        try {
-            takeScreenshotCompat(
-                windowId,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
-                        val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
-                        if (bitmap == null) {
-                            capturing.set(false)
-                            return
-                        }
-                        val height = bitmap.height
-                        scope.launch {
-                            try {
-                                val bytes = encodeScreenshot(bitmap)
-                                val engine = ocrEngine ?: PaddleOcrEngine(
-                                    applicationContext,
-                                    fallback = MlKitOcrEngine(),
-                                ).also { ocrEngine = it }
-                                val result = withContext(Dispatchers.Default) {
-                                    engine.recognize(bitmap)
-                                }
-                                val lines = result.lines.mapNotNull { line ->
-                                    line.bounds?.let {
-                                        BillTextLine(
-                                            text = line.text,
-                                            top = it.top,
-                                            bottom = it.bottom,
-                                            left = it.left,
-                                            right = it.right,
-                                        )
-                                    }
-                                }
-                                val cards = PaymentCardDetector.fromLines(
-                                    packageName = packageName,
-                                    lines = lines,
-                                    capturedAtMs = now,
-                                    screenHeightPx = height,
-                                    pageIdentity = pageIdentity,
-                                )
-                                val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
-                                if (candidates.size != 1) {
-                                    // Zero: the screenshot worked; do not retry the
-                                    // same page until its content changes.
-                                    // Several: a history list, never bulk-book it.
-                                    lastPageIdentity = pageIdentity
-                                    lastCaptureAtMs = System.currentTimeMillis()
-                                    capturing.set(false)
-                                } else {
-                                    processCandidates(
-                                        candidates,
-                                        bytes,
-                                        allowAuto,
-                                        contextText = lines.joinToString(" ") { it.text },
+        val attemptId = TransactionDiagnostics.newAttemptId()
+        scope.launch(Dispatchers.Main) {
+            repository.recordDiagnostic(
+                attemptId = attemptId,
+                stage = TransactionDiagnostics.STAGE_CAPTURE,
+                result = TransactionDiagnostics.RESULT_STARTED,
+                details = "OCR payment-page capture started",
+            )
+            try {
+                takeScreenshotCompat(
+                    windowId,
+                    object : AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
+                            val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
+                            if (bitmap == null) {
+                                scope.launch {
+                                    repository.recordDiagnostic(
+                                        attemptId = attemptId,
+                                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                        result = TransactionDiagnostics.RESULT_FAILURE,
+                                        details = "Screenshot could not be decoded",
                                     )
                                 }
-                            } catch (failure: Exception) {
-                                Log.e(TAG, "OCR capture failed: ${failure.javaClass.simpleName}")
                                 capturing.set(false)
-                            } finally {
-                                bitmap.recycle()
+                                return
+                            }
+                            val height = bitmap.height
+                            scope.launch {
+                                var recognizedText: String? = null
+                                try {
+                                    val bytes = encodeScreenshot(bitmap)
+                                    val engine = ocrEngine ?: PaddleOcrEngine(
+                                        applicationContext,
+                                        fallback = MlKitOcrEngine(),
+                                    ).also { ocrEngine = it }
+                                    val result = withContext(Dispatchers.Default) {
+                                        engine.recognize(bitmap)
+                                    }
+                                    recognizedText = result.rawText.ifBlank {
+                                        result.lines.joinToString("\n") { it.text }
+                                    }
+                                    val lines = result.lines.mapNotNull { line ->
+                                        line.bounds?.let {
+                                            BillTextLine(
+                                                text = line.text,
+                                                top = it.top,
+                                                bottom = it.bottom,
+                                                left = it.left,
+                                                right = it.right,
+                                            )
+                                        }
+                                    }
+                                    val cards = PaymentCardDetector.fromLines(
+                                        packageName = packageName,
+                                        lines = lines,
+                                        capturedAtMs = now,
+                                        screenHeightPx = height,
+                                        pageIdentity = pageIdentity,
+                                    )
+                                    val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
+                                    if (candidates.size != 1) {
+                                        // Zero: the screenshot worked; do not retry the
+                                        // same page until its content changes.
+                                        // Several: a history list, never bulk-book it.
+                                        lastPageIdentity = pageIdentity
+                                        lastCaptureAtMs = System.currentTimeMillis()
+                                        repository.recordDiagnostic(
+                                            attemptId = attemptId,
+                                            stage = TransactionDiagnostics.STAGE_PARSE,
+                                            result = TransactionDiagnostics.RESULT_WARNING,
+                                            details = if (candidates.isEmpty()) {
+                                                "OCR did not identify one completed bill"
+                                            } else {
+                                                "OCR page contained multiple bill candidates"
+                                            },
+                                        )
+                                        capturing.set(false)
+                                    } else {
+                                        processCandidates(
+                                            candidates,
+                                            bytes,
+                                            allowAuto,
+                                            contextText = recognizedText,
+                                            diagnosticAttemptId = attemptId,
+                                        )
+                                    }
+                                } catch (failure: Exception) {
+                                    repository.recordDiagnostic(
+                                        attemptId = attemptId,
+                                        stage = TransactionDiagnostics.STAGE_PARSE,
+                                        result = TransactionDiagnostics.RESULT_FAILURE,
+                                        details = "Payment page processing failed",
+                                    )
+                                    Log.e(TAG, "OCR capture failed: ${failure.javaClass.simpleName}")
+                                    capturing.set(false)
+                                } finally {
+                                    bitmap.recycle()
+                                }
                             }
                         }
-                    }
 
-                    override fun onFailure(errorCode: Int) {
-                        Log.e(TAG, "OCR screenshot failed: $errorCode")
-                        capturing.set(false)
-                    }
-                },
-            )
-        } catch (failure: RuntimeException) {
-            Log.e(TAG, "OCR screenshot start failed: ${failure.javaClass.simpleName}")
-            capturing.set(false)
+                        override fun onFailure(errorCode: Int) {
+                            scope.launch {
+                                repository.recordDiagnostic(
+                                    attemptId = attemptId,
+                                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                    result = TransactionDiagnostics.RESULT_FAILURE,
+                                    details = "Screenshot capture failed",
+                                )
+                            }
+                            Log.e(TAG, "OCR screenshot failed: $errorCode")
+                            capturing.set(false)
+                        }
+                    },
+                )
+            } catch (failure: RuntimeException) {
+                repository.recordDiagnostic(
+                    attemptId = attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = "Payment page processing failed",
+                )
+                Log.e(TAG, "OCR screenshot start failed: ${failure.javaClass.simpleName}")
+                capturing.set(false)
+            }
         }
     }
 
@@ -411,33 +465,82 @@ open class PageRecognitionService : AccessibilityService() {
         windowId: Int,
         contextText: String? = null,
     ) {
-        try {
-            takeScreenshotCompat(
-                windowId,
-                object : AccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
-                        val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
-                        val bytes = bitmap?.let(::compressScreenshot)
-                        processCandidates(candidates, bytes, allowAuto, contextText)
-                    }
+        val attemptId = TransactionDiagnostics.newAttemptId()
+        scope.launch(Dispatchers.Main) {
+            repository.recordDiagnostic(
+                attemptId = attemptId,
+                stage = TransactionDiagnostics.STAGE_CAPTURE,
+                result = TransactionDiagnostics.RESULT_STARTED,
+                details = "Payment-page candidate capture started",
+            )
+            try {
+                takeScreenshotCompat(
+                    windowId,
+                    object : AccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
+                            val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
+                            val bytes = bitmap?.let(::compressScreenshot)
+                            if (bitmap == null || bytes == null) {
+                                scope.launch {
+                                    repository.recordDiagnostic(
+                                        attemptId = attemptId,
+                                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                        result = TransactionDiagnostics.RESULT_WARNING,
+                                        details = "Screenshot unavailable; parsed text will be used",
+                                    )
+                                    processCandidates(
+                                        candidates,
+                                        null,
+                                        allowAuto,
+                                        contextText,
+                                        diagnosticAttemptId = attemptId,
+                                    )
+                                }
+                            } else {
+                                processCandidates(
+                                    candidates,
+                                    bytes,
+                                    allowAuto,
+                                    contextText,
+                                    diagnosticAttemptId = attemptId,
+                                )
+                            }
+                        }
 
-                    override fun onFailure(errorCode: Int) {
-                        processCandidates(
-                            candidates.map { it.copy(reason = "screenshot error $errorCode") },
-                            null,
-                            allowAuto,
-                            contextText,
-                        )
-                    }
-                },
-            )
-        } catch (failure: RuntimeException) {
-            processCandidates(
-                candidates.map { it.copy(reason = "screenshot start failed") },
-                null,
-                allowAuto,
-                contextText,
-            )
+                        override fun onFailure(errorCode: Int) {
+                            scope.launch {
+                                repository.recordDiagnostic(
+                                    attemptId = attemptId,
+                                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                    result = TransactionDiagnostics.RESULT_WARNING,
+                                    details = "Screenshot capture failed",
+                                )
+                                processCandidates(
+                                    candidates.map { it.copy(reason = "screenshot error $errorCode") },
+                                    null,
+                                    allowAuto,
+                                    contextText,
+                                    diagnosticAttemptId = attemptId,
+                                )
+                            }
+                        }
+                    },
+                )
+            } catch (failure: RuntimeException) {
+                repository.recordDiagnostic(
+                    attemptId = attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Payment page processing failed",
+                )
+                processCandidates(
+                    candidates.map { it.copy(reason = "screenshot start failed") },
+                    null,
+                    allowAuto,
+                    contextText,
+                    diagnosticAttemptId = attemptId,
+                )
+            }
         }
     }
 
@@ -484,61 +587,106 @@ open class PageRecognitionService : AccessibilityService() {
         screenshot: ByteArray?,
         allowAuto: Boolean = true,
         contextText: String? = null,
+        diagnosticAttemptId: String? = null,
     ) {
         scope.launch {
             try {
-                candidates.forEach { candidate ->
-                    val stored = store.save(candidate, screenshot) ?: return@forEach
-                    val now = System.currentTimeMillis()
-                    val dedupKey = stored.dedupKey()
-                    val recentlyCaptured = synchronized(recentCaptureKeys) {
-                        val firstSeen = recentCaptureKeys[dedupKey]
-                        if (firstSeen != null && now - firstSeen < CAPTURE_KEY_TTL_MS) {
-                            true
-                        } else {
-                            recentCaptureKeys[dedupKey] = now
-                            recentCaptureKeys.entries.removeAll {
-                                now - it.value > CAPTURE_KEY_TTL_MS
-                            }
-                            false
+                candidates.forEachIndexed { index, candidate ->
+                    val input = TransactionDiagnosticInput(
+                        attemptId = if (index == 0 && diagnosticAttemptId != null) diagnosticAttemptId
+                        else TransactionDiagnostics.newAttemptId(),
+                    )
+                    var transaction: TransactionEntity? = null
+                    try {
+                        if (index > 0 || diagnosticAttemptId == null) {
+                            repository.recordDiagnostic(
+                                attemptId = input.attemptId,
+                                stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                result = TransactionDiagnostics.RESULT_STARTED,
+                                details = "Payment page capture started",
+                            )
                         }
-                    }
-                    if (recentlyCaptured) {
-                        store.mark(stored, CaptureCandidate.STATUS_IGNORED)
-                        return@forEach
-                    }
-
-                    val result = runCatching {
-                        val merchant = stored.merchantCandidates.firstOrNull().orEmpty()
-                        repository.insertIfNotDuplicate(
-                            CaptureReviewMapping.toTransactionEntity(
-                                candidate = stored,
+                        val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
+                        val mappedTransaction = CaptureReviewMapping.toTransactionEntity(
+                            candidate = candidate,
+                            merchant = merchant,
+                            category = CaptureReviewMapping.classificationFor(
+                                candidate = candidate,
                                 merchant = merchant,
-                                category = CaptureReviewMapping.classificationFor(
-                                    candidate = stored,
-                                    merchant = merchant,
-                                    contextText = contextText.orEmpty(),
-                                ).category,
-                            ),
+                                contextText = contextText.orEmpty(),
+                            ).category,
+                        )
+                        transaction = mappedTransaction
+                        repository.recordDiagnostic(
+                            attemptId = input.attemptId,
+                            stage = TransactionDiagnostics.STAGE_PARSE,
+                            result = TransactionDiagnostics.RESULT_SUCCESS,
+                            details = "Payment page parsed",
+                        )
+                        val stored = store.save(
+                            candidate.copy(diagnosticAttemptId = input.attemptId),
+                            screenshot,
+                        )
+                        if (stored == null) {
+                            repository.recordDiagnostic(
+                                attemptId = input.attemptId,
+                                stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                result = TransactionDiagnostics.RESULT_FAILURE,
+                                details = "Capture candidate could not be stored",
+                            )
+                            return@forEachIndexed
+                        }
+                        val now = System.currentTimeMillis()
+                        val dedupKey = stored.dedupKey()
+                        val recentlyCaptured = synchronized(recentCaptureKeys) {
+                            val firstSeen = recentCaptureKeys[dedupKey]
+                            if (firstSeen != null && now - firstSeen < CAPTURE_KEY_TTL_MS) {
+                                true
+                            } else {
+                                recentCaptureKeys[dedupKey] = now
+                                recentCaptureKeys.entries.removeAll {
+                                    now - it.value > CAPTURE_KEY_TTL_MS
+                                }
+                                false
+                            }
+                        }
+                        if (recentlyCaptured) {
+                            store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+                            repository.recordDiagnostic(
+                                attemptId = input.attemptId,
+                                stage = TransactionDiagnostics.STAGE_DEDUP,
+                                result = TransactionDiagnostics.RESULT_WARNING,
+                                details = "Recent page-capture fingerprint suppressed",
+                            )
+                            return@forEachIndexed
+                        }
+
+                        val inserted = repository.insertIfNotDuplicate(
+                            mappedTransaction,
                             windowMs = PAGE_DEDUP_WINDOW_MS,
                             notifySuccess = false,
+                            diagnosticInput = input,
+                        )
+                        store.mark(
+                            stored,
+                            if (inserted != null && inserted > 0L) {
+                                CaptureCandidate.STATUS_APPROVED
+                            } else {
+                                CaptureCandidate.STATUS_IGNORED
+                            },
+                        )
+                    } catch (failure: Exception) {
+                        transaction?.let {
+                            // Preserve retryability after a transient database error.
+                            synchronized(recentCaptureKeys) { recentCaptureKeys.remove(candidate.dedupKey()) }
+                        }
+                        repository.recordDiagnostic(
+                            attemptId = input.attemptId,
+                            stage = TransactionDiagnostics.STAGE_CAPTURE,
+                            result = TransactionDiagnostics.RESULT_FAILURE,
+                            details = "Payment page processing failed",
                         )
                     }
-                    if (result.isFailure) {
-                        // Allow a later accessibility event to retry a transient
-                        // DB failure; a duplicate result stays deduplicated.
-                        synchronized(recentCaptureKeys) { recentCaptureKeys.remove(dedupKey) }
-                        return@forEach
-                    }
-                    val inserted = result.getOrNull()
-                    store.mark(
-                        stored,
-                        if (inserted != null && inserted > 0L) {
-                            CaptureCandidate.STATUS_APPROVED
-                        } else {
-                            CaptureCandidate.STATUS_IGNORED
-                        },
-                    )
                 }
                 lastPageIdentity = candidates.firstOrNull()?.pageIdentity
                 lastCaptureAtMs = System.currentTimeMillis()

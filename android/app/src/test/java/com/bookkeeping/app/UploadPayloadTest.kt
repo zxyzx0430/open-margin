@@ -76,6 +76,13 @@ class UploadPayloadTest {
         assertEquals("excluded", fields.reviewStatus)
         // event_id is supplied by the sync operation, not the record payload.
         assertFalse(fields.toString().contains("installation"))
+        assertFalse(fields.toString().contains("local note"))
+        assertFalse(fields.toString().contains("bank card"))
+        assertFalse(fields.javaClass.declaredFields.any {
+            it.name.contains("diagnostic", ignoreCase = true) ||
+                it.name.contains("rawInput", ignoreCase = true) ||
+                it.name.contains("transactionSnapshot", ignoreCase = true)
+        })
     }
 
     @Test fun v2DropsUnknownReviewStatus() {

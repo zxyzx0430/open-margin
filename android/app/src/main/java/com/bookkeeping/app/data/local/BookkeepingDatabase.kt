@@ -7,16 +7,18 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
+import com.bookkeeping.app.data.local.dao.TransactionDiagnosticDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
+import com.bookkeeping.app.data.local.entity.TransactionDiagnosticEventEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 
 // Room 数据库本体。
 // entities = 这个库里有哪些"表"
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
-    entities = [TransactionEntity::class, ProcessedNoticeEntity::class],
-    version = 8,
+    entities = [TransactionEntity::class, ProcessedNoticeEntity::class, TransactionDiagnosticEventEntity::class],
+    version = 9,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -24,6 +26,8 @@ abstract class BookkeepingDatabase : RoomDatabase() {
     abstract fun transactionDao(): TransactionDao
 
     abstract fun processedNoticeDao(): ProcessedNoticeDao
+
+    abstract fun transactionDiagnosticDao(): TransactionDiagnosticDao
 
     companion object {
         const val DB_NAME = "bookkeeping.db"
@@ -35,8 +39,28 @@ abstract class BookkeepingDatabase : RoomDatabase() {
          */
         fun build(context: Context): BookkeepingDatabase =
             Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
+
+        // v9: device-private, seven-day bill diagnostics. No FK is intentional:
+        // tombstoning/deleting a ledger row must leave its short-lived audit trace.
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS `transaction_diagnostic_events` (
+                    `eventId` TEXT NOT NULL,
+                    `attemptId` TEXT NOT NULL,
+                    `transactionId` INTEGER,
+                    `occurredAtMs` INTEGER NOT NULL,
+                    `stage` TEXT NOT NULL,
+                    `result` TEXT NOT NULL,
+                    `details` TEXT NOT NULL,
+                    PRIMARY KEY(`eventId`)
+                )""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transaction_diagnostic_events_occurredAtMs` ON `transaction_diagnostic_events` (`occurredAtMs`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transaction_diagnostic_events_transactionId_occurredAtMs` ON `transaction_diagnostic_events` (`transactionId`, `occurredAtMs`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_transaction_diagnostic_events_attemptId_occurredAtMs` ON `transaction_diagnostic_events` (`attemptId`, `occurredAtMs`)")
+            }
+        }
 
         // v8: local-only scan metadata. Existing rows keep null.
         val MIGRATION_7_8 = object : Migration(7, 8) {

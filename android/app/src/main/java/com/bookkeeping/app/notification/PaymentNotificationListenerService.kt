@@ -9,6 +9,8 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CancellationException
@@ -137,12 +139,49 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         // Notification bodies can contain transaction and identity details;
         // do not print them to logcat even in debug builds.
 
-        val parsed = NotificationParser.parse(
-            packageName = packageName,
-            title = title,
-            text = body,
-            timestampMs = originalTime,
-        ) ?: return
+        if (packageName !in setOf("com.eg.android.AlipayGphone", "com.tencent.mm")) return
+        val diagnosticInput = TransactionDiagnosticInput()
+        val parsed = try {
+            NotificationParser.parse(
+                packageName = packageName,
+                title = title,
+                text = body,
+                timestampMs = originalTime,
+            )
+        } catch (failure: Exception) {
+            scope.launch {
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_STARTED,
+                    details = "Payment notification capture started",
+                )
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_PARSE,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = "Payment notification operation failed",
+                )
+            }
+            throw failure
+        }
+        if (parsed == null) {
+            scope.launch {
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_STARTED,
+                    details = "Payment notification capture started",
+                )
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_PARSE,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Notification did not parse as a completed bill",
+                )
+            }
+            return
+        }
 
         // 在后台协程里入库（IO 不能在主线程）。
         // D05 影子模式：先持久记录通知指纹。重放只计数并写 debug 日志，
@@ -151,6 +190,18 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         val fingerprint = NoticeFingerprint.of(packageName, title, body, originalTime)
         scope.launch {
             try {
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_STARTED,
+                    details = "Payment notification capture started",
+                )
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_PARSE,
+                    result = TransactionDiagnostics.RESULT_SUCCESS,
+                    details = "Payment notification parsed",
+                )
                 val replay = repository.recordNoticeFingerprint(
                     fingerprint = fingerprint,
                     source = packageName,
@@ -161,7 +212,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                 }
                 // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
                 // 不跨来源自动合并，避免把独立的支付误删。
-                val id = repository.insertIfNotDuplicate(parsed)
+                val id = repository.insertIfNotDuplicate(parsed, diagnosticInput = diagnosticInput)
                 if (id == null) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate notification")
                 } else {
@@ -170,6 +221,12 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = "Payment notification operation failed",
+                )
                 CaptureHealth.onFailure(applicationContext, "persist", failure)
                 KeepAliveService.refreshStatus(applicationContext)
                 Log.e(TAG, "Notification persist failed: ${failure.javaClass.simpleName}")

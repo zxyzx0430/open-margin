@@ -6,6 +6,8 @@ import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -41,17 +43,78 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         // 不在 release 构建中记录短信内容（含 PII：银行/卡尾号/金额）
         // Never write raw SMS or card details to logcat (including debug builds).
 
+        val bankSignal = listOf(
+            "工商银行", "招商银行", "建设银行", "中国银行", "农业银行", "交通银行",
+            "邮政储蓄银行", "邮储银行", "中信银行", "光大银行", "民生银行", "浦发银行",
+            "平安银行", "广发银行", "兴业银行", "华夏银行", "工行", "招行", "建行", "中行",
+            "农行", "交行",
+        ).any(fullBody::contains)
+        if (!bankSignal) return
+        val diagnosticInput = TransactionDiagnosticInput()
         val parsed = try {
             SmsParser.parse(sender, fullBody, timestamp)
         } catch (failure: Exception) {
+            val pending = goAsync()
+            scope.launch {
+                try {
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                        result = TransactionDiagnostics.RESULT_STARTED,
+                        details = "Bank SMS capture started",
+                    )
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_PARSE,
+                        result = TransactionDiagnostics.RESULT_FAILURE,
+                        details = "Bank SMS operation failed",
+                    )
+                } finally {
+                    pending.finish()
+                }
+            }
             Log.e(TAG, "SMS parse failed: ${failure.javaClass.simpleName}")
             return
-        } ?: return
+        }
+        if (parsed == null) {
+            val pending = goAsync()
+            scope.launch {
+                try {
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                        result = TransactionDiagnostics.RESULT_STARTED,
+                        details = "Bank SMS capture started",
+                    )
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_PARSE,
+                        result = TransactionDiagnostics.RESULT_WARNING,
+                        details = "Bank SMS did not parse as a transaction",
+                    )
+                } finally {
+                    pending.finish()
+                }
+            }
+            return
+        }
 
         val pending = goAsync()
         scope.launch {
             try {
-                val id = repository.insertIfNotDuplicate(parsed)
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_STARTED,
+                    details = "Bank SMS capture started",
+                )
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_PARSE,
+                    result = TransactionDiagnostics.RESULT_SUCCESS,
+                    details = "Bank SMS parsed",
+                )
+                val id = repository.insertIfNotDuplicate(parsed, diagnosticInput = diagnosticInput)
                 if (id == null) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate SMS")
                 } else {
@@ -60,6 +123,12 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = "Bank SMS operation failed",
+                )
                 Log.e(TAG, "SMS processing failed: ${failure.javaClass.simpleName}")
             } finally {
                 pending.finish()

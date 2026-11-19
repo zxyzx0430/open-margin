@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticRetentionWorker
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
@@ -32,6 +34,7 @@ import javax.inject.Inject
 class BookkeepingApplication : Application() {
     @Inject lateinit var settings: SettingsPreferences
     @Inject lateinit var transactionRepository: TransactionRepository
+    @Inject lateinit var transactionDiagnostics: TransactionDiagnostics
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -49,8 +52,10 @@ class BookkeepingApplication : Application() {
             // 一次性纠正升级前已经各插一条的重复采集（prefs 版本标记保证只跑一次）。
             // 纯本地写，失败不影响启动。
             runCatching { transactionRepository.repairCapturedDuplicatesOnce() }
+            runCatching { transactionDiagnostics.pruneExpired() }
         }
         scheduleCaptureHealthRecovery()
+        scheduleDiagnosticRetention()
     }
 
     /**
@@ -101,6 +106,20 @@ class BookkeepingApplication : Application() {
         runCatching {
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 "capture-health-recovery",
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        }
+    }
+
+    private fun scheduleDiagnosticRetention() {
+        val request = PeriodicWorkRequestBuilder<TransactionDiagnosticRetentionWorker>(
+            15,
+            TimeUnit.MINUTES,
+        ).build()
+        runCatching {
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "transaction-diagnostic-retention",
                 ExistingPeriodicWorkPolicy.KEEP,
                 request,
             )

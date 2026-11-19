@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
@@ -63,7 +65,14 @@ class CaptureReviewViewModel @Inject constructor(
                         merchant = merchant,
                         category = category,
                     )
-                    repository.insertIfNotDuplicate(entity, notifySuccess = false)
+                    repository.insertIfNotDuplicate(
+                        entity,
+                        notifySuccess = false,
+                        diagnosticInput = TransactionDiagnosticInput(
+                            attemptId = candidate.diagnosticAttemptId
+                                ?: TransactionDiagnostics.newAttemptId(),
+                        ),
+                    )
                 }
             }
             val insertedId = result.getOrNull()

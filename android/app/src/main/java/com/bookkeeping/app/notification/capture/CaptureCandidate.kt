@@ -25,6 +25,7 @@ data class CaptureCandidate(
     val kind: String = KIND_PAYMENT,
     val eventTimeMs: Long = capturedAtMs,
     val direction: String = DIRECTION_EXPENSE,
+    val diagnosticAttemptId: String? = null,
 ) {
     fun isValid(): Boolean {
         if (packageName != WECHAT && packageName != ALIPAY) return false
@@ -86,6 +87,7 @@ data class CaptureCandidate(
         put("kind", kind)
         put("eventTimeMs", eventTimeMs)
         put("direction", direction)
+        put("diagnosticAttemptId", diagnosticAttemptId ?: JSONObject.NULL)
     }
 
     companion object {
@@ -147,6 +149,9 @@ data class CaptureCandidate(
                 eventTimeMs = json.optLong("eventTimeMs", capturedAt),
                 direction = json.optString("direction", DIRECTION_EXPENSE)
                     .takeIf { it in DIRECTIONS } ?: DIRECTION_EXPENSE,
+                diagnosticAttemptId = json.optString("diagnosticAttemptId").takeIf {
+                    it.isNotBlank() && it != "null"
+                },
             )
             candidate.takeIf { it.isValid() }
         }.getOrNull()

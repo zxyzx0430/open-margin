@@ -87,6 +87,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.voice.asr.AsrErrorCode
@@ -123,7 +124,9 @@ import kotlin.math.roundToInt
 @Composable
 fun VoiceCapturePanel(
     onCancel: () -> Unit,
-    onSubmit: (String) -> Unit,
+    onSubmit: (text: String, diagnosticAttemptId: String) -> Unit,
+    onDiagnostic: suspend (attemptId: String, result: String, details: String) -> Unit =
+        { _, _, _ -> },
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -132,6 +135,7 @@ fun VoiceCapturePanel(
     // 回调可能在生命周期观察者 / 协程里被调用，用最新引用，避免拿到旧 composition 的 lambda。
     val latestCancel by rememberUpdatedState(onCancel)
     val latestSubmit by rememberUpdatedState(onSubmit)
+    val latestDiagnostic by rememberUpdatedState(onDiagnostic)
 
     // 引擎是进程级常驻的：这里只是拿引用，不负责它的生死。
     var engine by remember { mutableStateOf(VoiceAsrHolder.current()) }
@@ -141,6 +145,7 @@ fun VoiceCapturePanel(
     }
     // 会话代号：重说后丢弃上一轮可能迟到的 Partial / Final / Error。
     var activeSessionId by remember { mutableStateOf<Long?>(null) }
+    var diagnosticAttemptId by remember { mutableStateOf(TransactionDiagnostics.newAttemptId()) }
     // 输入框自己的状态：文本与光标。文本的真源是 state（沿用 Logic 的冻结规则），
     // 这里只镜像一份给 TextField，保证 Partial 刷新时光标落在末尾。
     var field by remember { mutableStateOf(TextFieldValue("")) }
@@ -153,6 +158,17 @@ fun VoiceCapturePanel(
     // 下滑关闭：拖动过程中整体上移，超过阈值就取消。
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val dismissThresholdPx = with(density) { 72.dp.toPx() }
+
+    fun recordDiagnostic(result: String, details: String) {
+        val attemptId = diagnosticAttemptId
+        scope.launch {
+            latestDiagnostic(attemptId, result, details)
+        }
+    }
+
+    suspend fun recordDiagnosticNow(result: String, details: String) {
+        latestDiagnostic(diagnosticAttemptId, result, details)
+    }
 
     /** 点面板「停止」：Listening → Review（面板不关、文本保留），并让引擎补尾部静音。 */
     fun stopRecording() {
@@ -178,6 +194,12 @@ fun VoiceCapturePanel(
             sessionId != null -> VoiceCaptureState.Listening("")
             else -> VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
         }
+        if (started.isFailure) {
+            recordDiagnostic(
+                TransactionDiagnostics.RESULT_FAILURE,
+                "Unable to start voice transcription",
+            )
+        }
     }
 
     /** 取消：丢弃本次，绝不填表；引擎只结束会话，模型留在内存里。 */
@@ -196,6 +218,7 @@ fun VoiceCapturePanel(
      */
     fun restart() {
         val freshState = VoiceCaptureLogic.restart(state) ?: return
+        diagnosticAttemptId = TransactionDiagnostics.newAttemptId()
         val active = engine
         val canStartImmediately = active != null &&
             active === VoiceAsrHolder.current() &&
@@ -207,7 +230,15 @@ fun VoiceCapturePanel(
         state = freshState
         active?.cancelSession()
         if (canStartImmediately) {
-            startListening(active)
+            val attemptId = diagnosticAttemptId
+            scope.launch {
+                latestDiagnostic(
+                    attemptId,
+                    TransactionDiagnostics.RESULT_STARTED,
+                    "Voice transcription attempt started",
+                )
+                startListening(active)
+            }
         } else {
             state = VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
             attempt += 1
@@ -223,7 +254,7 @@ fun VoiceCapturePanel(
         // 可能还在收尾：结束会话，避免引擎继续占用麦克风。
         activeSessionId = null
         engine?.cancelSession()
-        latestSubmit(delivered.request.text.orEmpty())
+        latestSubmit(delivered.request.text.orEmpty(), diagnosticAttemptId)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -236,6 +267,10 @@ fun VoiceCapturePanel(
         } else {
             // 被拒不是静默失败：面板留在失败态，给「重试」和「去设置」。
             state = VoiceCaptureLogic.permissionDenied()
+            recordDiagnostic(
+                TransactionDiagnostics.RESULT_FAILURE,
+                "Microphone permission denied",
+            )
         }
     }
 
@@ -257,12 +292,20 @@ fun VoiceCapturePanel(
                     VoiceCaptureLogic.isCurrentSession(event.sessionId, activeSessionId)
                 ) {
                     state = VoiceCaptureLogic.onFinal(state, event.text)
+                    recordDiagnosticNow(
+                        TransactionDiagnostics.RESULT_SUCCESS,
+                        "Voice transcription completed",
+                    )
                 }
                 is AsrEvent.Error -> {
                     if (!VoiceCaptureLogic.isCurrentSession(event.sessionId, activeSessionId)) {
                         return@collect
                     }
                     state = VoiceCaptureLogic.onError(state, event.code)
+                    recordDiagnosticNow(
+                        TransactionDiagnostics.RESULT_FAILURE,
+                        "Voice transcription failed",
+                    )
                     activeSessionId = null
                     // 采集已经出错：顺手把麦克风放掉，别让失败的会话一直占着。
                     engine?.cancelSession()
@@ -275,6 +318,10 @@ fun VoiceCapturePanel(
     // 预热过之后 acquire() 立即返回，面板基本是秒开。
     LaunchedEffect(attempt) {
         if (settled) return@LaunchedEffect
+        recordDiagnosticNow(
+            TransactionDiagnostics.RESULT_STARTED,
+            "Voice transcription attempt started",
+        )
         if (state !is VoiceCaptureState.Preparing) {
             state = VoiceCaptureState.Preparing(tr("正在准备语音模型…"))
         }
@@ -290,6 +337,10 @@ fun VoiceCapturePanel(
         val failure = acquired.exceptionOrNull()
         if (failure != null) {
             state = VoiceCaptureLogic.forError((failure as? AsrModelException)?.code)
+            recordDiagnosticNow(
+                TransactionDiagnostics.RESULT_FAILURE,
+                "Voice model preparation failed",
+            )
             return@LaunchedEffect
         }
         val ready = acquired.getOrThrow()
@@ -308,7 +359,16 @@ fun VoiceCapturePanel(
         val current = state
         if (current !is VoiceCaptureState.Review || !current.waitingFinal) return@LaunchedEffect
         delay(VoiceCaptureLogic.FINISH_TIMEOUT_MS)
-        if (!settled) state = VoiceCaptureLogic.finishTimedOut(state)
+        if (!settled) {
+            val timedOut = VoiceCaptureLogic.finishTimedOut(state)
+            if (timedOut != state) {
+                state = timedOut
+                recordDiagnosticNow(
+                    TransactionDiagnostics.RESULT_WARNING,
+                    "Voice transcription final result timed out",
+                )
+            }
+        }
     }
 
     // 输入框跟随 state 的文本：用户没编辑时每个 Partial 都会替换它，光标放到末尾。

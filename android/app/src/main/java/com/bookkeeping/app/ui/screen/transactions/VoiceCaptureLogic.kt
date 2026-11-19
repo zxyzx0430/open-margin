@@ -62,7 +62,10 @@ sealed interface VoiceCaptureState {
  * [text] 一律非空（[VoiceCaptureLogic.submit] 已经把它 trim 过并挡掉纯标点），
  * 保留可空是为了兼容上层既有的「不预填」分支。
  */
-data class VoiceEntryRequest(val text: String?)
+data class VoiceEntryRequest(
+    val text: String?,
+    val diagnosticAttemptId: String? = null,
+)
 
 /**
  * 录音面板的纯逻辑：状态迁移 + 文本冻结/替换规则 + 交付判定。

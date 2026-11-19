@@ -3,7 +3,9 @@ package com.bookkeeping.app.sync
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.work.*
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.BookkeepingDatabase
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.MoneyAmount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -55,6 +57,25 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         } catch (_: Exception) {
             return finish(prefs, SyncResultCode.RETRY, "同步异常，将自动重试", Result.retry())
         }
+        val diagnostics = TransactionDiagnostics(db.transactionDiagnosticDao())
+        val diagnosticAttemptIds = mutableMapOf<Long, String>()
+        suspend fun recordSyncEvent(transaction: TransactionEntity, result: String, details: String) {
+            val attemptId = diagnosticAttemptIds.getOrPut(transaction.id) {
+                TransactionDiagnostics.newAttemptId()
+            }
+            diagnostics.record(
+                attemptId = attemptId,
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = result,
+                details = details,
+                transactionId = transaction.id.takeIf { it > 0L },
+            )
+        }
+        suspend fun recordBatchFailure(batch: List<TransactionEntity>, details: String) {
+            batch.forEach { transaction ->
+                recordSyncEvent(transaction, TransactionDiagnostics.RESULT_FAILURE, details)
+            }
+        }
         try {
             val sync=BidirectionalSyncClient(db,prefs,base,token,installation)
             // Do not write even legacy v1 batches to a new/reset server at the
@@ -88,8 +109,18 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     if (!ok) {
                         val blocker = prefs.getString("sync_security_blocker", null)
                         if (blocker != null) {
+                            diagnostics.record(
+                                stage = TransactionDiagnostics.STAGE_SYNC,
+                                result = TransactionDiagnostics.RESULT_FAILURE,
+                                details = "Sync blocked by security state",
+                            )
                             return finish(prefs, SyncResultCode.BLOCKED, blocker, Result.failure())
                         }
+                        diagnostics.record(
+                            stage = TransactionDiagnostics.STAGE_SYNC,
+                            result = TransactionDiagnostics.RESULT_FAILURE,
+                            details = "Bidirectional sync failed",
+                        )
                         return finish(
                             prefs, SyncResultCode.RETRY,
                             "双向同步暂不可用，将自动重试", Result.retry()
@@ -102,11 +133,28 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 val events = JSONArray()
                 for (t in batch) {
                     if (!UploadPayload.isUploadable(t)) {
+                        recordSyncEvent(
+                            t,
+                            TransactionDiagnostics.RESULT_FAILURE,
+                            "Transaction is not uploadable; batch stopped",
+                        )
+                        batch.filterNot { it.id == t.id }.forEach { blocked ->
+                            recordSyncEvent(
+                                blocked,
+                                TransactionDiagnostics.RESULT_WARNING,
+                                "Upload not attempted because another transaction is invalid",
+                            )
+                        }
                         return finish(
                             prefs, SyncResultCode.BLOCKED,
                             "本地交易 ${t.id} 数据异常，无法同步", Result.failure()
                         )
                     }
+                    recordSyncEvent(
+                        t,
+                        TransactionDiagnostics.RESULT_STARTED,
+                        "Transaction upload started",
+                    )
                     val event = UploadPayload.v1Event(t, installation)
                     events.put(JSONObject().apply {
                         put("event_id", event.eventId)
@@ -121,12 +169,14 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 }
                 val response = postBatch("$base/api/v1/transactions/batch", token, events)
                 if (response == null) {
+                    recordBatchFailure(batch, "Upload request failed or returned no response")
                     return finish(
                         prefs, SyncResultCode.RETRY,
                         "网络或服务器异常，将自动重试", Result.retry()
                     )
                 }
                 if (response.first == 401 || response.first == 403) {
+                    recordBatchFailure(batch, "Upload authorization failed")
                     return finish(
                         prefs, SyncResultCode.AUTH,
                         "同步授权失败，请核对设备密钥", Result.failure()
@@ -134,6 +184,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 }
                 if (response.first != 200) {
                     val rejected = response.first in 400..499
+                    recordBatchFailure(batch, "Upload rejected by server")
                     return finish(
                         prefs,
                         if (rejected) SyncResultCode.BLOCKED else SyncResultCode.RETRY,
@@ -150,6 +201,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     events.length(), confirmation.optInt("accepted", -1), ignoredBeforeStart
                 )) {
                     LegacyUploadAckPolicy.Decision.RETRY -> {
+                        recordBatchFailure(batch, "Server acknowledgement count did not match upload")
                         return finish(
                             prefs, SyncResultCode.RETRY,
                             "服务器确认条数不一致，将重试", Result.retry()
@@ -166,17 +218,34 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     .putLong(LAST_RESULT_MS, System.currentTimeMillis())
                     .putString(LAST_RESULT_CODE, SyncResultCode.RETRY.preferenceValue)
                     .commit()) {
+                    recordBatchFailure(batch, "Server acknowledged upload, but local sync cursor save failed")
                     return finish(
                         prefs, SyncResultCode.RETRY,
                         "同步异常，将自动重试", Result.retry()
                     )
                 }
+                val batchResult = if (ignoredBeforeStart > 0) {
+                    TransactionDiagnostics.RESULT_WARNING
+                } else {
+                    TransactionDiagnostics.RESULT_SUCCESS
+                }
+                val batchDetails = if (ignoredBeforeStart > 0) {
+                    "Upload batch acknowledged; historical rows were ignored by the remote server"
+                } else {
+                    "Server acknowledged transaction upload"
+                }
+                batch.forEach { transaction -> recordSyncEvent(transaction, batchResult, batchDetails) }
             }
             return finish(
                 prefs, SyncResultCode.RETRY,
                 "同步异常，将自动重试", Result.retry()
             )
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            diagnostics.record(
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = "Transaction sync operation failed",
+            )
             return finish(
                 prefs, SyncResultCode.RETRY,
                 "同步异常，将自动重试", Result.retry()

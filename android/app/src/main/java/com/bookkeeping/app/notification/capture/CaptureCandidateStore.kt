@@ -1,6 +1,7 @@
 package com.bookkeeping.app.notification.capture
 
 import android.content.Context
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import java.io.File
 import kotlin.math.abs
 
@@ -27,7 +28,11 @@ class CaptureCandidateStore(context: Context) {
                     )
                     if (runCatching { file.writeBytes(bytes) }.isSuccess) file.absolutePath else null
                 }
-            val stored = candidate.copy(screenshotPath = screenshotPath)
+            val stored = candidate.copy(
+                screenshotPath = screenshotPath,
+                diagnosticAttemptId = candidate.diagnosticAttemptId
+                    ?: TransactionDiagnostics.newAttemptId(),
+            )
             runCatching {
                 indexFile.appendText(stored.toJson().toString() + "\n")
                 trimIndex()
