@@ -1037,7 +1037,6 @@ object PaymentCardDetector {
             val text = line.text.trim()
             if (!text.any { it.isDigit() }) continue
             if (parseAmount(text) != null) continue
-            if (!EXPLICIT_EVENT_DATE.containsMatchIn(text)) continue
             val parsed = parseTime(text, fallbackMs)
             if (parsed != null) return parsed
         }

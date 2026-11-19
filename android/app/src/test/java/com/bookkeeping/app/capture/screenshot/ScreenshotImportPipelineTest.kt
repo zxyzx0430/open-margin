@@ -307,17 +307,22 @@ class ScreenshotImportPipelineTest {
 
     @Test
     fun `same amount same merchant within two minutes links to the notification row`() {
+        // No order id on this page, so the merchant + amount + 2 minute window
+        // rule is what decides.
+        val page = alipayMedium() + block("2026-11-19 12:40", 160)
+        val pageTime = ScreenshotPageInterpreter.interpret(page, capturedAt, zone)
+            .drafts.first().eventTimeMs!!
         val existing = listOf(
             LedgerFingerprint(
                 transactionId = 99,
-                platform = CaptureCandidate.PLATFORM_WECHAT,
-                amountCents = 3650,
+                platform = CaptureCandidate.PLATFORM_ALIPAY,
+                amountCents = 2800,
                 direction = CaptureCandidate.DIRECTION_EXPENSE,
-                merchant = "张三",
-                eventTimeMs = parsedEventTime() + 30_000,
+                merchant = "星巴克",
+                eventTimeMs = pageTime + 30_000,
             ),
         )
-        val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), existing, timeZone = zone)
+        val plan = ScreenshotImportPipeline.plan(request(), page, existing, timeZone = zone)
         assertEquals(Action.LINK_EXISTING, plan.decisions.single().action)
         assertEquals(99L, plan.decisions.single().matchedTransactionId)
     }
