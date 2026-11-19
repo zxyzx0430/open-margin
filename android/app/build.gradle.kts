@@ -22,12 +22,12 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 主动截图监听（MediaStore 新截图）默认开启，仅 GitHub 实验版对外提供；
-        // Google Play 渠道构建时传 -PopenMarginScreenshotWatcher=false。分享与选图不受影响。
+        // 主动截图监听（MediaStore 新截图）默认关闭；GitHub 实验版构建显式开启；
+        // Play 不传该参数。分享与选图不受影响。
         buildConfigField(
             "boolean",
             "SCREENSHOT_WATCHER_AVAILABLE",
-            (project.findProperty("openMarginScreenshotWatcher") as String? ?: "true"),
+            (project.findProperty("openMarginScreenshotWatcher") as String? ?: "false"),
         )
 
         // 只打 arm64-v8a。真机只有 arm64；paddle-ocr/opencv 的预编译库也只有 arm64。

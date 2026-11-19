@@ -45,7 +45,8 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease
+          # GitHub 实验版显式开启主动截图监听；默认 false，Play 构建不传该参数。
+          ./gradlew --no-daemon -PopenMarginScreenshotWatcher=true testDebugUnitTest assembleDebug assembleRelease
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
       - name: Verify ASR payload inside the APK
         working-directory: android
