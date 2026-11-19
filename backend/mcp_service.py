@@ -43,7 +43,9 @@ def list_recent_transactions(limit:int=30) -> dict:
     import app as core
     limit=max(1,min(100,limit))
     with core.db_connection() as db:
-        return {"items":[dict(r) for r in db.execute("SELECT * FROM transactions ORDER BY timestamp_ms DESC LIMIT ?",(limit,)).fetchall()]}
+        return {"items":[{**dict(r),
+                           "event_time_needs_confirmation":bool(r["event_time_needs_confirmation"])}
+                         for r in db.execute("SELECT * FROM transactions ORDER BY timestamp_ms DESC LIMIT ?",(limit,)).fetchall()]}
 
 @mcp.tool(annotations=READ_ONLY)
 def spending_summary(start_ms:int,end_ms:int) -> dict:
@@ -407,7 +409,9 @@ def finance_duplicate_review(limit:int=50) -> dict:
     limit=max(1,min(100,limit))
     with core.db_connection() as db:
         rows=db.execute("SELECT * FROM transactions WHERE review_status='possible_duplicate' ORDER BY timestamp_ms DESC LIMIT ?",(limit,)).fetchall()
-    return {"items":[dict(r) for r in rows]}
+    return {"items":[{**dict(r),
+                       "event_time_needs_confirmation":bool(r["event_time_needs_confirmation"])}
+                     for r in rows]}
 
 def _month_key(value:str) -> str:
     if not isinstance(value,str) or len(value)!=7:raise ValueError("month must be YYYY-MM")

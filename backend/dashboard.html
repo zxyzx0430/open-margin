@@ -14,6 +14,7 @@ label{display:block;font-size:.83rem;color:#586880;margin:10px 0 4px}
 table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{border-bottom:1px solid #edf0f5;padding:10px 6px;text-align:left}th{color:#627086;font-weight:600}
 .scroller{overflow:auto}.pill{border-radius:15px;background:#e8f1ff;color:#1258ce;padding:4px 8px;white-space:nowrap}
 .warning{border:1px solid #f3d991;background:#fff9e8;padding:12px;border-radius:10px;font-size:.88rem;color:#6d5305}
+.event-time-pending{display:inline-block;margin-left:5px;padding:2px 6px;border-radius:5px;background:#fff3cd;color:#795b00;font-size:.78em;white-space:nowrap}
 #message{white-space:pre-wrap} .hide{display:none} .num{font-variant-numeric:tabular-nums;font-weight:700;font-size:1.2rem}
 </style></head><body>
 <header><div><h1>个人消费流水 <span class="pill">V1 RC · 自托管</span></h1><small>实际交易与预计订阅分开统计 · 以本地记录为准</small></div><button class="gray" onclick="lock()">退出登录</button></header>
@@ -81,7 +82,7 @@ async function refresh(){
  for(const r of data.totals){const k=r.currency+' / '+(r.direction==='EXPENSE'?'支出':'收入');curr[k]=(curr[k]||0)+r.cents;}
  document.getElementById('totals').innerHTML=Object.keys(curr).length?Object.entries(curr).map(([k,v])=>'<div>'+escapeHtml(k)+'：'+(v/100).toFixed(2)+'</div>').join(''):'尚无本月数据';
  document.getElementById('status').textContent='API 可用';
- document.getElementById('transactions').innerHTML=data.recent.map(t=>'<tr><td>'+date(t.timestamp_ms)+'</td><td>'+escapeHtml(t.merchant)+'</td><td>'+money(t.amount_cents,escapeHtml(t.currency))+'</td><td>'+escapeHtml(t.source)+'</td><td>'+escapeHtml(t.category)+'</td><td>'+escapeHtml(t.review_status)+'<select data-id="'+Number(t.id)+'" onchange="reviewRow(this)"><option value="">操作</option><option value="confirmed">确认</option><option value="excluded">排除</option></select></td></tr>').join('')||'<tr><td colspan="6">暂无交易</td></tr>';
+ document.getElementById('transactions').innerHTML=data.recent.map(t=>'<tr><td>'+date(t.timestamp_ms)+(t.event_time_needs_confirmation?'<strong class="event-time-pending">时间待确认</strong>':'')+'</td><td>'+escapeHtml(t.merchant)+'</td><td>'+money(t.amount_cents,escapeHtml(t.currency))+'</td><td>'+escapeHtml(t.source)+'</td><td>'+escapeHtml(t.category)+'</td><td>'+escapeHtml(t.review_status)+'<select data-id="'+Number(t.id)+'" onchange="reviewRow(this)"><option value="">操作</option><option value="confirmed">确认</option><option value="excluded">排除</option></select></td></tr>').join('')||'<tr><td colspan="6">暂无交易</td></tr>';
 }
 async function reviewRow(el){const id=Number(el.dataset.id),status=el.value;if(!status)return;if(status==='excluded'&&!confirm('确认从消费统计中排除本条记录？'))return;try{await request('transactions/'+id+'/review',{method:'PATCH',body:JSON.stringify({status})});await refresh();}catch(err){alert(err.message);}}
 async function candidates(){try{const r=await request('candidates');document.getElementById('candidateList').innerHTML=r.items.map(x=>'<p>'+escapeHtml(x.merchant)+' · '+money(x.amount_cents,escapeHtml(x.currency))+' / '+escapeHtml(x.cadence)+' （待确认）</p>').join('')||'<p>尚未发现候选订阅</p>';}catch(err){alert(err.message);}}

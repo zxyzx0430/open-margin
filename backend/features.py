@@ -167,7 +167,9 @@ def attach(api, core):
                 "subscription_service_available":wallos_available,
                 "monthly_equivalent_cents":{k:round(v) for k,v in equivalents.items()},
                 "upcoming_7d":upcoming,
-                "recent":[dict(r) for r in recent]}
+                "recent":[{**dict(r),
+                           "event_time_needs_confirmation":bool(r["event_time_needs_confirmation"])}
+                          for r in recent]}
 
     @api.get("/api/v1/export/standard-csv",dependencies=[Depends(core.admin_auth)])
     def export_standard_csv():

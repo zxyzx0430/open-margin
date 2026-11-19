@@ -162,6 +162,7 @@ $notice=$_GET['notice'] ?? '';
 .wallos-ledger .ledger-entry .ledger-text{flex:1;min-width:0}
 .wallos-ledger .ledger-entry .ledger-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wallos-ledger .ledger-entry .ledger-details{font-size:13px;color:var(--text-muted);margin-top:4px}
+.wallos-ledger .ledger-time-pending{display:inline-block;padding:2px 6px;border-radius:5px;background:color-mix(in srgb,var(--main-color) 12%,var(--box-background-color));color:var(--main-color);font-weight:700}
 .wallos-ledger .ledger-entry .ledger-amount{font-size:19px;flex:0 0 auto}
 .wallos-ledger .ledger-entry .ledger-review{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-left:60px}
 .wallos-ledger .ledger-entry .ledger-review small{color:var(--text-muted);font-size:12px}
@@ -481,6 +482,8 @@ $notice=$_GET['notice'] ?? '';
          $status=(string)($entry['review_status']??'unverified');
          $id=intval($entry['id']);
          $date=date('m-d H:i',intdiv(intval($entry['timestamp_ms']),1000));
+         $needsTimeConfirmation=!empty($entry['event_time_needs_confirmation']);
+         $editDate=date('Y-m-d\\TH:i',intdiv(intval($entry['timestamp_ms']),1000));
          $category=(string)($entry['category']??'OTHER');
          $icon=match($category) {
            'FOOD'=>'fa-utensils','TRANSPORT'=>'fa-train-subway',
@@ -496,14 +499,14 @@ $notice=$_GET['notice'] ?? '';
               <div class="ledger-mark"><i class="fa-solid <?= ledger_escape($icon) ?>"></i></div>
               <div class="ledger-text">
                 <div class="ledger-name"><?= ledger_escape($entry['merchant']?:($sourceNames[$entry['source']]??'交易记录')) ?></div>
-                <div class="ledger-details"><?= ledger_escape($date) ?> · <?= ledger_escape($labels[$category]??$category) ?> · <?= ledger_escape($sourceNames[$entry['source']]??$entry['source']) ?></div>
+                <div class="ledger-details"><?= ledger_escape($date) ?> · <?= ledger_escape($labels[$category]??$category) ?> · <?= ledger_escape($sourceNames[$entry['source']]??$entry['source']) ?><?php if($needsTimeConfirmation): ?> · <strong class="ledger-time-pending">时间待确认</strong><?php endif; ?></div>
               </div>
               <div class="ledger-amount ledger-money">
                 <?= $entry['direction']==='INCOME'?'+':'−' ?><?= ledger_escape(ledger_money(intval($entry['amount_cents']),$entry['currency'])) ?>
               </div>
             </div>
             <details class="ledger-section-message ledger-edit-details">
-              <summary>调整分类、金额或排除重复</summary>
+              <summary>调整分类、金额<?= $needsTimeConfirmation?'、交易时间':'' ?>或排除重复</summary>
               <form method="post" action="expenses-action.php" class="ledger-budget-form" style="margin-bottom:10px">
                 <input type="hidden" name="csrf" value="<?=ledger_escape($csrf)?>">
                 <input type="hidden" name="month" value="<?=ledger_escape($month)?>">
@@ -515,6 +518,10 @@ $notice=$_GET['notice'] ?? '';
                 <input type="hidden" name="entry_id" value="<?=$id?>">
                 <label>金额（元）<input name="amount" value="<?=ledger_escape(number_format(intval($entry['amount_cents'])/100,2,'.',''))?>" pattern="[0-9]+(\.[0-9]{1,2})?" required></label>
                 <label>商户<input name="merchant" maxlength="140" value="<?=ledger_escape($entry['merchant'])?>"></label>
+                <?php if($needsTimeConfirmation): ?>
+                <label>实际交易时间<input type="datetime-local" name="spent_at" value="<?=ledger_escape($editDate)?>" required></label>
+                <input type="hidden" name="original_spent_at" value="<?=ledger_escape($editDate)?>">
+                <?php endif; ?>
                 <select name="category"><?php foreach($labels as $k=>$label): ?><option value="<?=ledger_escape($k)?>" <?=$category===$k?'selected':''?>><?=ledger_escape($label)?></option><?php endforeach; ?></select>
                 <button type="submit" class="button secondary-button tiny">保存修正</button>
               </form>

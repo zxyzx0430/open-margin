@@ -23,7 +23,9 @@ RECORD_JSON = """json_object(
  'amount_cents',NEW.amount_cents,'currency',NEW.currency,
  'direction',NEW.direction,'source',NEW.source,
  'category',NEW.category,'merchant',NEW.merchant,
- 'review_status',NEW.review_status)"""
+ 'review_status',NEW.review_status,
+ 'event_time_needs_confirmation',json(CASE WHEN NEW.event_time_needs_confirmation=1
+   THEN 'true' ELSE 'false' END))"""
 
 
 def schema(db: sqlite3.Connection) -> None:
@@ -53,26 +55,32 @@ def schema(db: sqlite3.Connection) -> None:
     # online SQLite backups and does not change pre-existing ledger rows.
     if db.execute("SELECT 1 FROM ledger_settings WHERE key='sync_v2_seeded'").fetchone() is None:
         for row in db.execute("SELECT * FROM transactions ORDER BY id").fetchall():
+            payload={key:row[key] for key in ("event_id","timestamp_ms","amount_cents","currency",
+                                              "direction","source","category","merchant","review_status")}
+            payload["event_time_needs_confirmation"] = bool(row["event_time_needs_confirmation"])
             db.execute("""INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
-              VALUES(?,'upsert',?,?)""", (row["event_id"], json.dumps({
-                key:row[key] for key in ("event_id","timestamp_ms","amount_cents","currency",
-                                       "direction","source","category","merchant","review_status")
-            }, ensure_ascii=False),0))  # old records have no trustworthy last-edit time
+              VALUES(?,'upsert',?,?)""", (row["event_id"], json.dumps(payload,ensure_ascii=False),0))
         db.execute("INSERT INTO ledger_settings(key,value) VALUES('sync_v2_seeded','1')")
 
-    db.execute(f"""CREATE TRIGGER IF NOT EXISTS sync_journal_insert
+    # Replace the journal triggers, rather than CREATE IF NOT EXISTS: existing
+    # databases keep their pre-field trigger bodies otherwise and would silently
+    # omit this field from future changes.
+    db.execute("DROP TRIGGER IF EXISTS sync_journal_insert")
+    db.execute("DROP TRIGGER IF EXISTS sync_journal_update")
+    db.execute(f"""CREATE TRIGGER sync_journal_insert
       AFTER INSERT ON transactions BEGIN
        INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
        VALUES(NEW.event_id,'upsert',{RECORD_JSON},(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
       END""")
-    db.execute(f"""CREATE TRIGGER IF NOT EXISTS sync_journal_update
+    db.execute(f"""CREATE TRIGGER sync_journal_update
       AFTER UPDATE OF timestamp_ms,amount_cents,currency,direction,source,
-        category,merchant,review_status ON transactions
+        category,merchant,review_status,event_time_needs_confirmation ON transactions
       WHEN OLD.timestamp_ms<>NEW.timestamp_ms
         OR OLD.amount_cents<>NEW.amount_cents OR OLD.currency<>NEW.currency
         OR OLD.direction<>NEW.direction OR OLD.source<>NEW.source
         OR OLD.category<>NEW.category OR OLD.merchant<>NEW.merchant
         OR OLD.review_status<>NEW.review_status
+        OR OLD.event_time_needs_confirmation<>NEW.event_time_needs_confirmation
       BEGIN
        INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
        VALUES(NEW.event_id,'upsert',{RECORD_JSON},(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
@@ -92,9 +100,19 @@ def latest(db: sqlite3.Connection, event_id: str):
 def current_change(row):
     return {
         "revision": row["revision"], "action": row["action"],
-        "record": json.loads(row["payload"]) if row["payload"] else None,
+        "record": record_from_payload(row["payload"]),
         "changed_at_ms": row["changed_at_ms"]
     }
+
+
+def record_from_payload(payload):
+    if not payload:
+        return None
+    record=json.loads(payload)
+    # Historical journal entries predate the flag and represent the false default.
+    record["event_time_needs_confirmation"] = bool(
+        record.get("event_time_needs_confirmation",False))
+    return record
 
 
 class Record(BaseModel):
@@ -105,6 +123,7 @@ class Record(BaseModel):
     source: Literal["WECHAT","ALIPAY","BANK_SMS","MANUAL","OTHER"]
     category: str = Field(min_length=1,max_length=45)
     merchant: str = Field(default="",max_length=140)
+    event_time_needs_confirmation: bool = False
     # Refund links are managed by the dedicated server workflow, not a naked flag.
     review_status: Literal["unverified","confirmed","excluded","transfer","possible_duplicate"] | None = None
 
@@ -137,7 +156,7 @@ def changes(since: int=Query(0,ge=0),limit:int=Query(100,ge=1,le=500)):
             "items":[{
                 "revision":row["revision"],"event_id":row["event_id"],
                 "action":row["action"],
-                "record":json.loads(row["payload"]) if row["payload"] else None,
+                "record":record_from_payload(row["payload"]),
                 "changed_at_ms":row["changed_at_ms"]
             } for row in page],
             "cursor":page[-1]["revision"] if page else since,
@@ -147,7 +166,13 @@ def changes(since: int=Query(0,ge=0),limit:int=Query(100,ge=1,le=500)):
 
 def mutation_hash(operation:Mutation) -> str:
     """Bind a retry ID to exactly one operation and payload."""
-    canonical=json.dumps(operation.model_dump(),sort_keys=True,separators=(",",":"),
+    payload=operation.model_dump()
+    if (operation.record is not None and
+        "event_time_needs_confirmation" not in operation.record.model_fields_set):
+        # Keep omitted-field retries byte-compatible with the pre-field protocol,
+        # while distinguishing an explicit false from omission.
+        payload["record"].pop("event_time_needs_confirmation",None)
+    canonical=json.dumps(payload,sort_keys=True,separators=(",",":"),
                          ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -196,6 +221,14 @@ def push(body:Mutations):
                           WHERE original_tx_id=? OR refund_tx_id=? LIMIT 1""",
                           (existing["id"],existing["id"])).fetchone()
                         requested_status=record.review_status or existing["review_status"]
+                        needs_confirmation=bool(existing["event_time_needs_confirmation"])
+                        if "event_time_needs_confirmation" in record.model_fields_set:
+                            if record.event_time_needs_confirmation:
+                                needs_confirmation=True
+                            elif record.timestamp_ms!=existing["timestamp_ms"]:
+                                # An explicit false only clears on an actual
+                                # event-time change, not an unrelated update.
+                                needs_confirmation=False
                         if linked and (existing["amount_cents"]!=record.amount_cents
                                 or existing["currency"]!=record.currency
                                 or existing["direction"]!=record.direction
@@ -205,19 +238,22 @@ def push(body:Mutations):
                             continue
                         # Never erase Wallos review / refund status from a phone edit.
                         db.execute("""UPDATE transactions SET timestamp_ms=?,amount_cents=?,
-                          currency=?,direction=?,category=?,merchant=?,review_status=?
+                          currency=?,direction=?,category=?,merchant=?,review_status=?,
+                          event_time_needs_confirmation=?
                           WHERE event_id=?""",
                           (record.timestamp_ms,record.amount_cents,record.currency,
                            record.direction,record.category,record.merchant,
-                           requested_status,operation.event_id))
+                           requested_status,int(needs_confirmation),operation.event_id))
                     else:
                         db.execute("""INSERT INTO transactions(event_id,timestamp_ms,amount_cents,
-                          currency,direction,source,category,merchant,review_status)
-                          VALUES(?,?,?,?,?,?,?,?,?)""",
+                          currency,direction,source,category,merchant,review_status,
+                          event_time_needs_confirmation)
+                          VALUES(?,?,?,?,?,?,?,?,?,?)""",
                           (operation.event_id,record.timestamp_ms,record.amount_cents,
                            record.currency,record.direction,record.source,
                            resolve_category(db,record.merchant,record.category),record.merchant,
-                           record.review_status or "unverified"))
+                           record.review_status or "unverified",
+                           int(record.event_time_needs_confirmation)))
                 else:
                     existing=db.execute("SELECT id FROM transactions WHERE event_id=?",
                                         (operation.event_id,)).fetchone()
