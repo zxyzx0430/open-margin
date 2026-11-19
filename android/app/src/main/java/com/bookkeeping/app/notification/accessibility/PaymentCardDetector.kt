@@ -489,9 +489,8 @@ object PaymentCardDetector {
         joined: String,
         pageText: String,
     ): Classification? {
-        if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) {
-            return classifyFailed(lines, joined, pageText)
-        }
+        // A failed payment/refund never becomes a bookable card.
+        if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (REFUND_MARKERS.any { joined.contains(it) }) return classifyRefund(joined)
         if (isPayAfterUse(joined)) return classifyPayAfterUse(joined)
         if (joined.contains("红包")) return classifyRedPacket(joined)
@@ -601,7 +600,7 @@ object PaymentCardDetector {
         val expired = containsAny(joined, "已过期", "已失效", "已退回", "已退还", "已退款")
         val pending = containsAny(joined, "待领取", "未领取", "待拆开", "请领取", "尚未领取")
         val claimed = containsAny(
-            joined, "对方已领取", "红包已领取", "已领取红包", "领取了红包", "已到账", "已存入零钱",
+            joined, "对方已领取", "红包已领取", "已领取红包", "领取了红包", "已领取", "已到账", "已存入零钱",
         ) && !pending
         if (sent) {
             val status = when {
@@ -735,6 +734,10 @@ object PaymentCardDetector {
                 "支付中", "付款中", "支付处理中", "付款处理中", "处理中",
             ) -> PaymentCardStatus.PENDING
             strongPaid -> PaymentCardStatus.COMPLETED
+            // A bill-detail card with a merchant/order/payment-method field is
+            // the completed-payment layout: those pages do not repeat
+            // "支付成功" on every row.
+            hasContext -> PaymentCardStatus.COMPLETED
             else -> PaymentCardStatus.UNKNOWN
         }
         val direction = when {
@@ -778,12 +781,16 @@ object PaymentCardDetector {
         }
         return Classification(
             kind = PaymentCardKind.BILL,
-            status = PaymentCardStatus.UNKNOWN,
+            status = if (direction == PaymentDirection.UNKNOWN) {
+                PaymentCardStatus.UNKNOWN
+            } else {
+                PaymentCardStatus.COMPLETED
+            },
             direction = direction,
             nonFinalReason = if (direction == PaymentDirection.UNKNOWN) {
                 "账单方向未识别，未入账"
             } else {
-                "账单完成状态未明确"
+                null
             },
         )
     }

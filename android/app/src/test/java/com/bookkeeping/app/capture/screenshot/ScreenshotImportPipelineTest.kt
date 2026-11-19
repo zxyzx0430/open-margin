@@ -18,7 +18,7 @@ import java.util.TimeZone
  */
 class ScreenshotImportPipelineTest {
 
-    private val capturedAt = 1_763_000_000_000L // 2025-11-05T13:33:20Z
+    private val capturedAt = 1795064400000L // 2026-11-19 13:00 Asia/Shanghai, after the page time
 
     private companion object {
         const val FINGERPRINT =
@@ -46,6 +46,9 @@ class ScreenshotImportPipelineTest {
         byteSize = size,
         imageFingerprint = fingerprint,
     )
+
+    private fun parsedEventTime(): Long =
+        ScreenshotPageInterpreter.interpret(wechatSuccess(), capturedAt, zone).drafts.first().eventTimeMs!!
 
     /** WeChat transfer success page: completed, merchant, order id, real time. */
     private fun wechatSuccess() = listOf(
@@ -275,7 +278,7 @@ class ScreenshotImportPipelineTest {
                 direction = CaptureCandidate.DIRECTION_EXPENSE,
                 orderId = "1000123456789012",
                 merchant = "张三",
-                eventTimeMs = capturedAt,
+                eventTimeMs = parsedEventTime(),
             ),
         )
         val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), existing, timeZone = zone)
@@ -294,7 +297,7 @@ class ScreenshotImportPipelineTest {
                 amountCents = 3650,
                 direction = CaptureCandidate.DIRECTION_EXPENSE,
                 merchant = "王五",
-                eventTimeMs = capturedAt + 60_000,
+                eventTimeMs = parsedEventTime() + 60_000,
             ),
         )
         val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), existing, timeZone = zone)
@@ -311,7 +314,7 @@ class ScreenshotImportPipelineTest {
                 amountCents = 3650,
                 direction = CaptureCandidate.DIRECTION_EXPENSE,
                 merchant = "张三",
-                eventTimeMs = capturedAt + 30_000,
+                eventTimeMs = parsedEventTime() + 30_000,
             ),
         )
         val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), existing, timeZone = zone)
