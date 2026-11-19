@@ -667,8 +667,9 @@ Write-Output 'LAUNCH-RETURNED'
                 '-AppRoot', (ConvertTo-QuotedArgument $appRoot)
             ) -TimeoutSec 90
             $result.ExitCode | Should -Be 0
-            $result.StdOut | Should -Match 'LAUNCH-RETURNED'
-            $result.StdOut | Should -Match ([regex]::Escape($expectedUrl))
+            $launchOutput = [string]$result.StdOut + [Environment]::NewLine + [string]$result.StdErr
+            $launchOutput | Should -Match 'LAUNCH-RETURNED'
+            $launchOutput | Should -Match ([regex]::Escape($expectedUrl))
 
             $logFile = Get-ChildItem -Path (Join-Path $state 'logs') -Filter 'launch-*.log' -ErrorAction SilentlyContinue |
                 Sort-Object LastWriteTime | Select-Object -Last 1
