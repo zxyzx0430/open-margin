@@ -133,11 +133,18 @@ object ScreenshotPageInterpreter {
     /** A new segment starts at each amount-bearing line; other lines attach to it. */
     private fun splitSegments(blocks: List<TextBlock>): List<List<TextBlock>> {
         val segments = mutableListOf<MutableList<TextBlock>>()
+        val prelude = mutableListOf<TextBlock>()
         blocks.forEach { block ->
             if (amountOf(block.text) != null) {
-                segments += mutableListOf(block)
+                val segment = mutableListOf<TextBlock>()
+                if (segments.isEmpty()) segment += prelude
+                segment += block
+                segments += segment
             } else if (segments.isNotEmpty()) {
                 segments.last() += block
+            } else {
+                // Header, status and "paid to" lines often sit above the amount.
+                prelude += block
             }
         }
         return segments
@@ -185,16 +192,20 @@ object ScreenshotPageInterpreter {
         if (text.contains("退款") || text.contains("已退还") || text.contains("已退回")) {
             return CaptureCandidate.DIRECTION_INCOME
         }
-        if (amountLine.contains("-") || text.contains("支出") || text.contains("付款给")) {
+        if (amountLine.contains("-") || text.contains("支出") || text.contains("付款给") ||
+            text.contains("收款方") || text.contains("商户全称")
+        ) {
             return CaptureCandidate.DIRECTION_EXPENSE
         }
-        if (amountLine.contains("+") || text.contains("收款") || text.contains("已收款") ||
-            text.contains("已存入零钱")
+        // "支付宝" / "微信支付" contain 支付 but say nothing about direction.
+        val cleaned = text.replace("支付宝", "").replace("微信支付", "")
+        if (amountLine.contains("+") || cleaned.contains("收款") ||
+            cleaned.contains("已存入零钱") || cleaned.contains("收入")
         ) {
             return CaptureCandidate.DIRECTION_INCOME
         }
         return when {
-            text.contains("支付") || text.contains("转账给") || text.contains("付款") ||
+            cleaned.contains("支付") || text.contains("转账给") || text.contains("付款") ||
                 pageType == PAGE_CHECKOUT -> CaptureCandidate.DIRECTION_EXPENSE
             else -> CaptureCandidate.DIRECTION_UNKNOWN
         }

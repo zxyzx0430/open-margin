@@ -25,7 +25,6 @@ import dagger.hilt.components.SingletonComponent
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
-import java.util.UUID
 import kotlin.math.max
 
 /**
@@ -148,7 +147,13 @@ class ScreenshotIntakeCoordinator(
         var linked = 0
         var ignored = 0
         plan.decisions.forEach { decision ->
-            val candidate = decision.toCandidate(source, capturedAtMs, fingerprint, attemptId)
+            val candidate = ScreenshotCandidateFactory.create(
+                decision = decision,
+                source = source,
+                capturedAtMs = capturedAtMs,
+                imageFingerprint = fingerprint,
+                diagnosticAttemptId = attemptId,
+            )
             val stored = store.save(candidate, bytes)
             if (stored == null) {
                 ignored++
@@ -296,60 +301,6 @@ class ScreenshotIntakeCoordinator(
         "WECHAT" -> CaptureCandidate.PLATFORM_WECHAT
         "ALIPAY" -> CaptureCandidate.PLATFORM_ALIPAY
         else -> CaptureCandidate.PLATFORM_UNKNOWN
-    }
-
-    private fun CandidateDecision.toCandidate(
-        source: IntakeSource,
-        capturedAtMs: Long,
-        fingerprint: String,
-        attemptId: String,
-    ): CaptureCandidate {
-        val eventTime = draft.eventTimeMs ?: capturedAtMs
-        val needsConfirmation = draft.eventTimeMs == null
-        val confidence = when (tier) {
-            CaptureCandidate.TIER_HIGH -> 0.9f
-            CaptureCandidate.TIER_MEDIUM -> 0.6f
-            else -> 0.3f
-        }
-        return CaptureCandidate(
-            packageName = null,
-            pageIdentity = "screenshot:${draft.pageIdentity}:$index".take(190),
-            amountCents = draft.amountCents,
-            merchantCandidates = draft.merchantCandidates,
-            orderId = draft.orderId,
-            capturedAtMs = capturedAtMs,
-            screenshotPath = null,
-            confidence = confidence,
-            reason = reason.take(80).ifBlank { "screenshot" },
-            kind = draft.kind,
-            eventTimeMs = eventTime,
-            direction = draft.direction,
-            diagnosticAttemptId = attemptId,
-            intakeMethod = source.candidateValue,
-            paymentPlatform = when {
-                draft.pageIdentity.startsWith("wechat") -> CaptureCandidate.PLATFORM_WECHAT
-                draft.pageIdentity.startsWith("alipay") -> CaptureCandidate.PLATFORM_ALIPAY
-                else -> CaptureCandidate.PLATFORM_UNKNOWN
-            },
-            confidenceTier = tier,
-            completionStatus = draft.completionStatus,
-            eventTimeSource = if (needsConfirmation) {
-                CaptureCandidate.TIME_SOURCE_CAPTURE
-            } else {
-                CaptureCandidate.TIME_SOURCE_ACTUAL
-            },
-            eventTimeNeedsConfirmation = needsConfirmation,
-            imageFingerprint = fingerprint,
-            candidateId = UUID.nameUUIDFromBytes(
-                "$fingerprint|$index|${draft.amountCents}|${draft.direction}".toByteArray(),
-            ).toString(),
-            supportedPaymentPage = draft.supportedPaymentPage,
-            transactionLike = true,
-            amountUnambiguous = draft.amountUnambiguous,
-            completionExplicit = draft.completionExplicit,
-            directionExplicit = draft.directionExplicit,
-            matchedTransactionId = matchedTransactionId,
-        )
     }
 
     companion object {
