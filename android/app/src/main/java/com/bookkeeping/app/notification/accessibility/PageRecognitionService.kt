@@ -16,6 +16,7 @@ import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.ocr.MlKitOcrEngine
@@ -582,7 +583,6 @@ open class PageRecognitionService : AccessibilityService() {
         }
     }
 
-    @Suppress("UNUSED_PARAMETER")
     private fun processCandidates(
         candidates: List<CaptureCandidate>,
         screenshot: ByteArray?,
@@ -662,6 +662,19 @@ open class PageRecognitionService : AccessibilityService() {
                             return@forEachIndexed
                         }
 
+                        if (!CaptureBookGate.mayWriteLedger(allowAuto)) {
+                            // Hard gate: preview-only or auto-disabled passes keep the
+                            // candidate in the local inbox for manual review and must
+                            // not touch the ledger at all.
+                            store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                            repository.recordDiagnostic(
+                                attemptId = input.attemptId,
+                                stage = TransactionDiagnostics.STAGE_DEDUP,
+                                result = TransactionDiagnostics.RESULT_WARNING,
+                                details = "Capture held for review; auto booking disabled",
+                            )
+                            return@forEachIndexed
+                        }
                         val inserted = repository.insertIfNotDuplicate(
                             mappedTransaction,
                             windowMs = PAGE_DEDUP_WINDOW_MS,
