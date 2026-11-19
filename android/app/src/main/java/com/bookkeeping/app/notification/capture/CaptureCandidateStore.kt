@@ -1,6 +1,7 @@
 package com.bookkeeping.app.notification.capture
 
 import android.content.Context
+import com.bookkeeping.app.capture.screenshot.ScreenshotRetention
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import java.io.File
 import java.util.Locale
@@ -131,7 +132,6 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
 
     private fun pruneExpiredLocked(nowMs: Long = System.currentTimeMillis()) {
         if (!dir.isDirectory) return
-        val cutoff = nowMs - RETENTION_MS
         val referenced = mutableSetOf<String>()
         val expiredPaths = mutableSetOf<String>()
         if (indexFile.isFile) {
@@ -140,14 +140,14 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
                 val candidate = runCatching {
                     CaptureCandidate.fromJson(org.json.JSONObject(line))
                 }.getOrNull() ?: return@forEach
-                if (candidate.capturedAtMs <= cutoff) {
+                if (ScreenshotRetention.isExpired(candidate.capturedAtMs, nowMs)) {
                     candidate.screenshotPath?.let(expiredPaths::add)
                 } else {
                     keptLines += line
                     candidate.screenshotPath?.let(referenced::add)
                 }
             }
-            val replacement = File(dir, "candidates.jsonl.tmp")
+            val replacement = File(dir, INDEX_TMP_NAME)
             replacement.writeText(keptLines.joinToString("\n", postfix = if (keptLines.isEmpty()) "" else "\n"))
             if (!replacement.renameTo(indexFile)) {
                 replacement.copyTo(indexFile, overwrite = true)
@@ -155,10 +155,13 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
             }
         }
         expiredPaths.filterNot(referenced::contains).forEach(::deleteOwnedFile)
-        dir.listFiles().orEmpty().forEach { file ->
-            if (file == indexFile || file.name == "candidates.jsonl.tmp") return@forEach
-            if (file.absolutePath !in referenced) file.deleteRecursively()
-        }
+        val files = dir.listFiles().orEmpty()
+        val referencedNames = files.filter { it.absolutePath in referenced }.map { it.name }.toSet()
+        ScreenshotRetention.orphans(
+            files = files.map { it.name },
+            referencedNames = referencedNames,
+            keepNames = setOf(indexFile.name, INDEX_TMP_NAME),
+        ).forEach { name -> File(dir, name).deleteRecursively() }
     }
 
     private fun isAppPrivateFile(path: String): Boolean = runCatching {
@@ -181,7 +184,7 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
         private const val MAX_ENTRIES = 200
         private const val MAX_INDEX_BYTES = 512 * 1024L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
-        private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
+        private const val INDEX_TMP_NAME = "candidates.jsonl.tmp"
         private const val CORRELATION_WINDOW_MS = 10L * 60 * 1000
     }
 }
