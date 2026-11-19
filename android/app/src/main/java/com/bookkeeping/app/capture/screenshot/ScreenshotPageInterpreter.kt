@@ -14,6 +14,14 @@ import kotlin.math.abs
  * OCR gives text plus positions; this object only applies explainable rules.
  * "No failure marker found" is never treated as proof of success: a completed
  * transaction needs an explicit completion marker on the page.
+ *
+ * Three page shapes need more than one-amount-one-draft handling:
+ *  - future debit pages (支付分 / 先用后付) describe money that has not moved yet;
+ *    the page keeps one expected-deduction amount and waits for evidence;
+ *  - refund arrival pages describe one incoming refund, so an amount repeated in
+ *    the header and in the "退款金额" row stays one refund draft;
+ *  - app chrome (记账日报 / 本月统计) and narration ("充电订单-预付4元") are not
+ *    transactions at all.
  */
 object ScreenshotPageInterpreter {
 
@@ -23,7 +31,9 @@ object ScreenshotPageInterpreter {
     const val PAGE_LIST = "BILL_LIST"
     const val PAGE_UNKNOWN = "UNKNOWN"
 
-    private val WECHAT_MARKERS = listOf("微信支付", "微信", "零钱", "转账给", "收款方", "付款给", "当前状态")
+    private val WECHAT_MARKERS = listOf(
+        "微信支付", "微信", "零钱", "转账给", "收款方", "付款给", "当前状态", "支付分",
+    )
     private val ALIPAY_MARKERS = listOf("支付宝", "账单详情", "交易成功", "付款方式", "订单号", "花呗", "余额宝")
     private val LIST_MARKERS = listOf("全部账单", "账单明细", "收支明细", "账单记录")
     private val CHECKOUT_MARKERS = listOf("立即支付", "确认付款", "确认转账", "请输入金额")
@@ -32,16 +42,73 @@ object ScreenshotPageInterpreter {
         "交易成功", "支付成功", "付款成功", "转账成功", "交易完成", "已到账",
         "已存入零钱", "已收款", "收款成功", "支付完成",
     )
+    /** A refund that arrived is finished money, even though 已退回 reads like a cancellation. */
+    private val REFUND_COMPLETED_MARKERS = listOf(
+        "退款成功", "退款到账", "退款完成", "退款已到账", "退款已原路退回", "已全额退款",
+    )
     private val PENDING_MARKERS = listOf(
         "等待对方确认", "待收款", "待领取", "待对方接收", "处理中", "转账处理中", "对方未领取",
     )
-    private val CREATED_MARKERS = listOf("待付款", "等待付款", "已创建", "待支付")
+    private val CREATED_MARKERS = listOf(
+        "待付款", "等待付款", "已创建", "待支付", "订单已生成", "预计扣费", "先用后付",
+    )
     private val CANCELLED_MARKERS = listOf("已取消", "已关闭", "已过期", "已退还", "已退回")
     private val FAILED_MARKERS = listOf("支付失败", "转账失败", "交易失败")
 
+    /** Login / security notices are not payments, even when they carry the app name. */
+    private val NOTICE_MARKERS = listOf(
+        "登录通知", "新设备登录", "异地登录", "登录保护", "验证码", "微信团队",
+    )
+
+    /** 微信支付分 / 先用后付: the order exists but nothing has been charged. */
+    private val FUTURE_DEBIT_MARKERS = listOf(
+        "订单已生成", "预计扣费", "先用后付", "自动确认收货", "确认收货后扣款",
+    )
+    private val DEDUCTION_LABELS = listOf("预计扣费金额", "扣费金额", "预计扣款", "扣款金额", "待扣金额")
+
+    /** Refund arrival pages: one incoming refund, never the surrounding statistics. */
+    private val REFUND_PAGE_MARKERS = listOf(
+        "退款金额", "退款成功", "退款到账", "退款详情", "退款已原路退回", "已全额退款",
+    )
+
+    /** Footer / app-chrome statistics that sit under a payment page and are not transactions. */
+    private val NOISE_LINE_MARKERS = listOf(
+        "记账日报", "昨日支出", "昨日收入", "今日支出", "本周支出",
+        "本月统计", "本月支出", "上月支出", "收支分析", "账单分析", "消费报表",
+    )
+
+    /** Field labels and chrome that must never be read as a merchant name. */
+    private val MERCHANT_STOPWORDS = listOf(
+        "金额", "时间", "单号", "状态", "方式", "备注", "说明", "详情", "统计", "日报",
+        "支付", "收款", "转账", "退款", "订单", "零钱", "钱包", "账单",
+    )
+
     private val ORDER_ID_REGEX =
         Regex("(?:订单号|交易单号|交易号|商户订单号)\\s*[:：]?\\s*([A-Za-z0-9]{8,40})")
-    private val AMOUNT_REGEX = Regex("([¥￥]\\s*)?(-|\\+)?\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(元)?")
+
+    /**
+     * A line that starts with a currency amount: `¥48.00`, `-¥36.50`, `¥ 1.85 元`.
+     * Without an amount label this is the only accepted shape.
+     */
+    private val CURRENCY_LINE_REGEX = Regex(
+        "^\\s*([-+])?\\s*[¥￥]\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*元?",
+    )
+
+    /** A whole line that is only a number with the 元 suffix: `48.00元`. */
+    private val YUAN_LINE_REGEX = Regex(
+        "^\\s*([-+])?\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*元\\s*$",
+    )
+
+    /**
+     * A labelled amount: `退款金额 ¥1.85`, `预计扣费金额 9.65元`, `合计 48.00元`.
+     * The number still has to carry 元 or a currency sign, otherwise narration
+     * such as "充电订单-预付4元" would count as money.
+     */
+    private val LABELLED_AMOUNT_REGEX = Regex(
+        "(金额|实付|合计|支付|收款|退款|扣费|付款|转账|收入|支出)" +
+            "[^0-9¥￥\\n]{0,6}([¥￥])?\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)\\s*(元)?",
+    )
+
     private val DATE_TIME_REGEX = Regex(
         "(\\d{4})[-/年](\\d{1,2})[-/月](\\d{1,2})日?\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?",
     )
@@ -64,9 +131,11 @@ object ScreenshotPageInterpreter {
                 reason = "no text recognised",
             )
         }
-        val allText = ordered.joinToString("\n") { it.text }
+        // Footer statistics belong to the app shell, not to the transaction.
+        val content = ordered.filterNot { isNoiseLine(it.text) }
+        val allText = content.joinToString("\n") { it.text }
         val platform = detectPlatform(allText)
-        val pageType = detectPageType(allText)
+        val pageType = detectPageType(allText, content.any { amountOf(it.text) != null })
         if (pageType == PAGE_LIST) {
             return ScreenshotPageEvidence(
                 platform = platform,
@@ -76,9 +145,43 @@ object ScreenshotPageInterpreter {
                 reason = "bill list pages belong to the import flow",
             )
         }
+        if (isNoticePage(allText)) {
+            return ScreenshotPageEvidence(
+                platform = platform,
+                pageType = pageType,
+                transactionLike = false,
+                drafts = emptyList(),
+                reason = "login or security notice, not a payment",
+            )
+        }
+        // A created-but-not-charged page only ever waits for evidence, so it may
+        // be recognised even when the app name itself was not captured.
+        val futureDebit = FUTURE_DEBIT_MARKERS.any(allText::contains)
+        // Only WeChat / Alipay result pages are interpreted. An unknown app is
+        // ignored instead of being turned into a guessed draft.
+        if (platform == CaptureCandidate.PLATFORM_UNKNOWN && !futureDebit) {
+            return ScreenshotPageEvidence(
+                platform = platform,
+                pageType = pageType,
+                transactionLike = false,
+                drafts = emptyList(),
+                reason = "not a WeChat or Alipay payment page",
+            )
+        }
 
-        val segments = splitSegments(ordered)
-        val drafts = segments.mapIndexedNotNull { index, segment ->
+        val segments = splitSegments(content)
+        val refundPage = !futureDebit && REFUND_PAGE_MARKERS.any(allText::contains)
+        val reconciled = futureDebit || refundPage
+        val selected = when {
+            futureDebit -> preferredSegment(segments) { segment ->
+                segment.any { block -> DEDUCTION_LABELS.any { block.text.contains(it) } }
+            }
+            refundPage -> preferredSegment(segments) { segment ->
+                segment.any { block -> block.text.contains("退款金额") }
+            }
+            else -> segments
+        }
+        var drafts = selected.mapIndexedNotNull { index, segment ->
             buildDraft(index, segment, platform, pageType, capturedAtMs, timeZone)
         }
         if (drafts.isEmpty()) {
@@ -90,7 +193,35 @@ object ScreenshotPageInterpreter {
                 reason = "no transaction fields",
             )
         }
-        val conflicting = drafts.size == 1 && countDistinctAmounts(ordered) > 1
+        // Page-level reconciliation: the page itself says "not charged yet" or
+        // "this is the refund", so that amount is the only draft on the page.
+        if (futureDebit) {
+            drafts = drafts.map {
+                it.copy(
+                    completionStatus = CaptureCandidate.COMPLETION_CREATED,
+                    completionExplicit = true,
+                    reason = "future debit; nothing charged yet",
+                )
+            }
+        }
+        if (refundPage) {
+            val refundCompleted = REFUND_COMPLETED_MARKERS.any(allText::contains)
+            drafts = drafts.map {
+                it.copy(
+                    kind = CaptureCandidate.KIND_REFUND,
+                    direction = CaptureCandidate.DIRECTION_INCOME,
+                    directionExplicit = true,
+                    completionStatus = if (refundCompleted) {
+                        CaptureCandidate.COMPLETION_COMPLETED
+                    } else {
+                        it.completionStatus
+                    },
+                    completionExplicit = it.completionExplicit || refundCompleted,
+                    reason = "incoming refund",
+                )
+            }
+        }
+        val conflicting = !reconciled && drafts.size == 1 && countDistinctAmounts(content) > 1
         return ScreenshotPageEvidence(
             platform = platform,
             pageType = pageType,
@@ -111,7 +242,7 @@ object ScreenshotPageInterpreter {
         }
     }
 
-    private fun detectPageType(text: String): String {
+    private fun detectPageType(text: String, hasAmountLine: Boolean): String {
         if (LIST_MARKERS.any(text::contains)) return PAGE_LIST
         if (CHECKOUT_MARKERS.any(text::contains) &&
             COMPLETED_MARKERS.none(text::contains)
@@ -127,27 +258,54 @@ object ScreenshotPageInterpreter {
             return PAGE_DETAIL
         }
         if (text.contains("账单详情") || text.contains("交易详情")) return PAGE_DETAIL
-        return if (amountOf(text) != null) PAGE_DETAIL else PAGE_UNKNOWN
+        return if (hasAmountLine) PAGE_DETAIL else PAGE_UNKNOWN
     }
 
-    /** A new segment starts at each amount-bearing line; other lines attach to it. */
+    private fun isNoticePage(text: String): Boolean =
+        COMPLETED_MARKERS.none(text::contains) && NOTICE_MARKERS.any(text::contains)
+
+    private fun isNoiseLine(line: String): Boolean {
+        val text = line.trim()
+        return NOISE_LINE_MARKERS.any(text::contains)
+    }
+
+    /**
+     * Each amount-bearing line anchors one transaction. Every other line joins
+     * the vertically nearest anchor (ties go to the lower one), so the merchant
+     * header above the *next* amount is not appended to the previous card.
+     */
     private fun splitSegments(blocks: List<TextBlock>): List<List<TextBlock>> {
-        val segments = mutableListOf<MutableList<TextBlock>>()
-        val prelude = mutableListOf<TextBlock>()
+        val anchors = blocks.filter { amountOf(it.text) != null }
+        if (anchors.isEmpty()) return emptyList()
+        val segments = anchors.map { mutableListOf<TextBlock>() }
+        var anchorIndex = 0
         blocks.forEach { block ->
             if (amountOf(block.text) != null) {
-                val segment = mutableListOf<TextBlock>()
-                if (segments.isEmpty()) segment += prelude
-                segment += block
-                segments += segment
-            } else if (segments.isNotEmpty()) {
-                segments.last() += block
+                segments[anchorIndex] += block
+                anchorIndex += 1
             } else {
-                // Header, status and "paid to" lines often sit above the amount.
-                prelude += block
+                var best = 0
+                var bestDistance = Long.MAX_VALUE
+                anchors.forEachIndexed { index, anchor ->
+                    val distance = abs((block.top - anchor.top).toLong())
+                    if (distance <= bestDistance) {
+                        bestDistance = distance
+                        best = index
+                    }
+                }
+                segments[best] += block
             }
         }
         return segments
+    }
+
+    /** Keeps one segment for a page class that can only describe one payment. */
+    private fun preferredSegment(
+        segments: List<List<TextBlock>>,
+        matches: (List<TextBlock>) -> Boolean,
+    ): List<List<TextBlock>> {
+        if (segments.isEmpty()) return segments
+        return listOf(segments.firstOrNull(matches) ?: segments.first())
     }
 
     private fun buildDraft(
@@ -217,16 +375,20 @@ object ScreenshotPageInterpreter {
         text.contains("红包") -> CaptureCandidate.KIND_RED_PACKET
         text.contains("提现") -> CaptureCandidate.KIND_WITHDRAWAL
         text.contains("转账") -> CaptureCandidate.KIND_TRANSFER
-        text.contains("花呗") || text.contains("自动扣款") -> CaptureCandidate.KIND_AUTO_PAY
+        text.contains("花呗") || text.contains("自动扣款") || text.contains("先用后付") ->
+            CaptureCandidate.KIND_AUTO_PAY
         direction == CaptureCandidate.DIRECTION_UNKNOWN -> CaptureCandidate.KIND_PAYMENT
         else -> CaptureCandidate.KIND_PAYMENT
     }
 
     private fun completionOf(text: String): Pair<String, Boolean> = when {
         FAILED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_FAILED to true
-        CANCELLED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_CANCELLED to true
         PENDING_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_PENDING to true
         CREATED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_CREATED to true
+        // Checked before CANCELLED: "退款已原路退回" means the refund landed.
+        REFUND_COMPLETED_MARKERS.any(text::contains) ->
+            CaptureCandidate.COMPLETION_COMPLETED to true
+        CANCELLED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_CANCELLED to true
         COMPLETED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_COMPLETED to true
         else -> CaptureCandidate.COMPLETION_UNKNOWN to false
     }
@@ -239,22 +401,40 @@ object ScreenshotPageInterpreter {
                     block.text.contains("$label:")
                 ) {
                     val inline = block.text.substringAfter(label).trimStart('：', ':', ' ')
-                    if (inline.isNotBlank() && inline.length <= 40) return listOf(inline)
-                    segment.getOrNull(index + 1)?.text?.takeIf { it.length <= 40 }?.let {
+                    merchantName(inline, allowDigit = true)?.let { return listOf(it) }
+                    merchantName(segment.getOrNull(index + 1)?.text, allowDigit = true)?.let {
                         return listOf(it)
                     }
                 }
                 // "转账给 张三" on one line
                 if (block.text.contains("$label ") && block != amountBlock) {
                     val inline = block.text.substringAfter("$label ").trim()
-                    if (inline.isNotBlank() && inline.length <= 40) return listOf(inline)
+                    merchantName(inline, allowDigit = true)?.let { return listOf(it) }
                 }
             }
         }
         // Fall back to the line directly above the amount, which is where both
         // apps put the merchant on a success page.
-        val above = segment.lastOrNull { it.bottom <= amountBlock.top && it.text.length in 1..40 }
-        return above?.text?.takeIf { it.none(Char::isDigit) }?.let { listOf(it) } ?: emptyList()
+        val above = segment.lastOrNull { it.bottom <= amountBlock.top }
+        return merchantName(above?.text, allowDigit = false)?.let { listOf(it) } ?: emptyList()
+    }
+
+    /**
+     * Field labels ("退款金额"), status words ("交易成功") and sentences with
+     * numbers are not merchant names. Explicitly labelled values may contain
+     * digits, because real shops do ("7-ELEVEN").
+     */
+    private fun merchantName(value: String?, allowDigit: Boolean): String? {
+        val text = value?.trim().orEmpty()
+        if (text.isEmpty() || text.length > 40) return null
+        if (!allowDigit && text.any(Char::isDigit)) return null
+        if (text.contains('¥') || text.contains('￥') || text.endsWith("元")) return null
+        if (MERCHANT_STOPWORDS.any { text == it || text.endsWith(it) || text.startsWith(it) }) return null
+        val status = COMPLETED_MARKERS + REFUND_COMPLETED_MARKERS + CANCELLED_MARKERS +
+            PENDING_MARKERS + FAILED_MARKERS + CREATED_MARKERS + NOTICE_MARKERS +
+            listOf("当前状态", "支付方式", "商品详情", "交易详情", "账单详情", "订单号", "交易单号")
+        if (status.any(text::contains)) return null
+        return text
     }
 
     private fun eventTimeOf(text: String, capturedAtMs: Long, timeZone: TimeZone): Long? {
@@ -299,14 +479,34 @@ object ScreenshotPageInterpreter {
         return null
     }
 
-    /** Amount in integer cents; only explicit currency or 元-suffixed numbers count. */
+    /**
+     * Amount in integer cents.
+     *
+     * A line counts only when it is a whole-line currency amount ("¥48.00",
+     * "-¥36.50", "48.00元") or when it carries an explicit amount label next to
+     * a currency-suffixed number ("退款金额 ¥1.85"). Narration such as
+     * "商品详情 充电订单-预付4元" therefore never becomes a transaction.
+     */
     fun amountOf(line: String): Long? {
-        val match = AMOUNT_REGEX.findAll(line).firstOrNull { candidate ->
-            candidate.groupValues[1].isNotBlank() || candidate.groupValues[4].isNotBlank()
+        val text = line.trim()
+        if (text.isEmpty()) return null
+        CURRENCY_LINE_REGEX.find(text)?.let { match ->
+            return centsOf(match.groupValues[2])
+        }
+        YUAN_LINE_REGEX.matchEntire(text)?.let { match ->
+            return centsOf(match.groupValues[2])
+        }
+        val labelled = LABELLED_AMOUNT_REGEX.findAll(text).firstOrNull { candidate ->
+            candidate.groupValues[2].isNotBlank() || candidate.groupValues[4].isNotBlank()
         } ?: return null
-        val raw = match.groupValues[3].replace(",", "")
+        return centsOf(labelled.groupValues[3])
+    }
+
+    private fun centsOf(raw: String): Long? {
+        val plain = raw.replace(",", "")
+        if (plain.isEmpty()) return null
         return runCatching {
-            BigDecimal(raw).setScale(2, RoundingMode.HALF_UP)
+            BigDecimal(plain).setScale(2, RoundingMode.HALF_UP)
                 .multiply(BigDecimal(100))
                 .longValueExact()
         }.getOrNull()?.takeIf { it in 1..CaptureCandidate.MAX_CENTS }
