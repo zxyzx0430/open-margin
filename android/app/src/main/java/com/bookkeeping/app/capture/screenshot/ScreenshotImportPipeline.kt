@@ -89,6 +89,7 @@ object ScreenshotImportPipeline {
                     directionExplicit = draft.directionExplicit,
                     completionStatus = draft.completionStatus,
                     completionExplicit = draft.completionExplicit,
+                    kind = draft.kind,
                     conflictingFields = evidence.conflictingFields,
                     duplicateResult = dedup.first,
                 ),
@@ -96,6 +97,13 @@ object ScreenshotImportPipeline {
                 previewOnly = previewOnly,
             )
             var action = assessment.action
+            // Belt and braces: the policy already asks for these kinds, but a
+            // screenshot decision must never carry AUTO_BOOK for money that
+            // only the user can classify, even if a caller forgets to pass the
+            // kind into the evidence.
+            if (action == Action.AUTO_BOOK && ScreenshotCapturePolicy.requiresConfirmation(draft.kind)) {
+                action = Action.ASK_USER
+            }
             var reason = draft.reason
             var matched: Long? = null
             when (action) {
@@ -117,10 +125,12 @@ object ScreenshotImportPipeline {
                         return@forEach
                     }
                     mediumAsked = true
-                    reason = if (assessment.tier == CaptureCandidate.TIER_HIGH) {
-                        "high confidence but auto booking disabled"
-                    } else {
-                        "needs user confirmation"
+                    reason = when {
+                        ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
+                            "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
+                        assessment.tier == CaptureCandidate.TIER_HIGH ->
+                            "high confidence but auto booking disabled"
+                        else -> "needs user confirmation"
                     }
                 }
                 Action.WAIT_FOR_EVIDENCE -> {

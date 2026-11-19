@@ -1,5 +1,6 @@
 package com.bookkeeping.app.capture.screenshot
 
+import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
 
 /**
@@ -115,8 +116,17 @@ data class ImportPlan(
     val failure: FailureReason? = null,
     val repeatImage: Boolean = false,
 ) {
+    /**
+     * Rows the caller may write. Transfer / refund / red packet / withdrawal
+     * kinds are filtered here as a second lock: even if a future decision path
+     * marks one as auto, no caller can reach the ledger with it before the
+     * user confirms.
+     */
     val bookings: List<CandidateDecision>
-        get() = decisions.filter { it.action == Action.AUTO_BOOK }
+        get() = decisions.filter {
+            it.action == Action.AUTO_BOOK &&
+                !ScreenshotCapturePolicy.requiresConfirmation(it.draft.kind)
+        }
 
     val needsConfirmation: List<CandidateDecision>
         get() = decisions.filter { it.action == Action.ASK_USER }.sortedBy { it.index }

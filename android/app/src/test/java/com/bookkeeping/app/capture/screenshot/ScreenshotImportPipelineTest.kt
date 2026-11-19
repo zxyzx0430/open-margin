@@ -48,7 +48,7 @@ class ScreenshotImportPipelineTest {
     )
 
     private fun parsedEventTime(): Long =
-        ScreenshotPageInterpreter.interpret(wechatSuccess(), capturedAt, zone).drafts.first().eventTimeMs!!
+        ScreenshotPageInterpreter.interpret(wechatMerchantSuccess(), capturedAt, zone).drafts.first().eventTimeMs!!
 
     /** WeChat transfer success page: completed, merchant, order id, real time. */
     private fun wechatSuccess() = listOf(
@@ -60,6 +60,32 @@ class ScreenshotImportPipelineTest {
         block("2026-11-19 12:30", 180),
         block("订单号 1000123456789012", 220),
     )
+
+    /** WeChat merchant payment success page: the ordinary auto-book shape. */
+    private fun wechatMerchantSuccess() = listOf(
+        block("微信支付", 10),
+        block("收款方 便利店", 40),
+        block("-¥36.50", 80),
+        block("当前状态", 120),
+        block("交易成功", 140),
+        block("2026-11-19 12:30", 180),
+        block("订单号 1000123456789012", 220),
+    )
+
+    /** Refund arrival page: incoming money, but not ordinary income. */
+    private fun wechatRefundArrival() = listOf(
+        block("微信支付", 10),
+        block("退款成功", 40),
+        block("¥1.85", 70),
+        block("退款金额 ¥1.85", 100),
+        block("2026-11-19 12:30", 130),
+    )
+
+    /** Nothing may be written before the user confirms. */
+    private fun assertNothingBooked(plan: ImportPlan) {
+        assertTrue(plan.bookings.isEmpty())
+        assertTrue(plan.decisions.none { it.action == Action.AUTO_BOOK })
+    }
 
     /** Alipay merchant payment without an explicit completion marker. */
     private fun alipayMedium() = listOf(
@@ -74,7 +100,7 @@ class ScreenshotImportPipelineTest {
         val plans = IntakeSource.entries.map { source ->
             ScreenshotImportPipeline.plan(
                 request = request(source = source),
-                blocks = wechatSuccess(),
+                blocks = wechatMerchantSuccess(),
                 existing = emptyList(),
                 timeZone = zone,
             )
@@ -153,22 +179,102 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `high confidence is auto booked with real transaction time`() {
-        val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), emptyList(), timeZone = zone)
+    fun `completed merchant payment is still auto booked with real transaction time`() {
+        val plan = ScreenshotImportPipeline.plan(
+            request(),
+            wechatMerchantSuccess(),
+            emptyList(),
+            timeZone = zone,
+        )
         val decision = plan.decisions.single()
         assertEquals(Action.AUTO_BOOK, decision.action)
-        assertEquals(CaptureCandidate.KIND_TRANSFER, decision.draft.kind)
-        assertEquals(listOf("张三"), decision.draft.merchantCandidates)
+        assertEquals(CaptureCandidate.KIND_PAYMENT, decision.draft.kind)
+        assertEquals(listOf("便利店"), decision.draft.merchantCandidates)
         assertEquals("1000123456789012", decision.draft.orderId)
         assertNotNull(decision.draft.eventTimeMs)
         assertEquals(1, plan.bookings.size)
     }
 
     @Test
-    fun `preview only never yields a ledger booking even at high confidence`() {
+    fun `completed transfer is held for confirmation and writes nothing`() {
+        val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), emptyList(), timeZone = zone)
+        val decision = plan.decisions.single()
+        assertEquals(CaptureCandidate.KIND_TRANSFER, decision.draft.kind)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
+        // Confidence is still high; only the booking action is withheld.
+        assertEquals(CaptureCandidate.TIER_HIGH, decision.tier)
+        assertEquals(Action.ASK_USER, decision.action)
+        assertNothingBooked(plan)
+        assertEquals(1, plan.needsConfirmation.size)
+        assertEquals(decision.index, ScreenshotImportPipeline.nextConfirmation(plan.decisions)?.index)
+    }
+
+    @Test
+    fun `refund arrival is held for confirmation and writes nothing`() {
+        val plan = ScreenshotImportPipeline.plan(request(), wechatRefundArrival(), emptyList(), timeZone = zone)
+        val decision = plan.decisions.single()
+        assertEquals(CaptureCandidate.KIND_REFUND, decision.draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, decision.draft.direction)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
+        assertEquals(Action.ASK_USER, decision.action)
+        assertNothingBooked(plan)
+    }
+
+    @Test
+    fun `red packet and withdrawal are held for confirmation and write nothing`() {
+        val redPacket = listOf(
+            block("微信红包", 10),
+            block("¥8.88", 40),
+            block("已存入零钱", 70),
+            block("2026-11-19 12:30", 100),
+        )
+        val withdrawal = listOf(
+            block("支付宝", 10),
+            block("-¥100.00", 40),
+            block("提现", 70),
+            block("提现成功", 90),
+            block("已到账", 110),
+            block("2026-11-19 12:30", 140),
+        )
+        val redPacketPlan = ScreenshotImportPipeline.plan(request(), redPacket, emptyList(), timeZone = zone)
+        val redPacketDecision = redPacketPlan.decisions.single()
+        assertEquals(CaptureCandidate.KIND_RED_PACKET, redPacketDecision.draft.kind)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, redPacketDecision.draft.completionStatus)
+        assertEquals(Action.ASK_USER, redPacketDecision.action)
+        assertNothingBooked(redPacketPlan)
+
+        val withdrawalPlan = ScreenshotImportPipeline.plan(request(), withdrawal, emptyList(), timeZone = zone)
+        val withdrawalDecision = withdrawalPlan.decisions.single()
+        assertEquals(CaptureCandidate.KIND_WITHDRAWAL, withdrawalDecision.draft.kind)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, withdrawalDecision.draft.completionStatus)
+        assertEquals(Action.ASK_USER, withdrawalDecision.action)
+        assertNothingBooked(withdrawalPlan)
+    }
+
+    @Test
+    fun `a forged auto booking for a transfer never reaches the booking list`() {
+        val draft = ScreenshotPageInterpreter.interpret(wechatSuccess(), capturedAt, zone).drafts.single()
+        val plan = ImportPlan(
+            listOf(
+                CandidateDecision(
+                    index = 0,
+                    tier = CaptureCandidate.TIER_HIGH,
+                    action = Action.AUTO_BOOK,
+                    reason = "forged",
+                    draft = draft,
+                ),
+            ),
+        )
+        // The model layer is the last lock: only payment kinds can ever appear
+        // in ImportPlan.bookings, whatever a decision claims.
+        assertTrue(plan.bookings.isEmpty())
+    }
+
+    @Test
+    fun `preview only never yields a ledger booking even for a merchant payment`() {
         val plan = ScreenshotImportPipeline.plan(
             request(),
-            wechatSuccess(),
+            wechatMerchantSuccess(),
             emptyList(),
             allowAuto = true,
             previewOnly = true,
@@ -179,10 +285,10 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `auto disabled holds the candidate instead of booking`() {
+    fun `auto disabled holds the merchant payment instead of booking`() {
         val plan = ScreenshotImportPipeline.plan(
             request(),
-            wechatSuccess(),
+            wechatMerchantSuccess(),
             emptyList(),
             allowAuto = false,
             timeZone = zone,
@@ -203,6 +309,22 @@ class ScreenshotImportPipelineTest {
         val plan = ScreenshotImportPipeline.plan(request(), pending, emptyList(), timeZone = zone)
         assertEquals(Action.WAIT_FOR_EVIDENCE, plan.decisions.single().action)
         assertTrue(plan.bookings.isEmpty())
+    }
+
+    @Test
+    fun `cancelled transfer still waits for evidence instead of asking`() {
+        val cancelled = listOf(
+            block("微信支付", 10),
+            block("转账给 张三", 40),
+            block("¥200.00", 70),
+            block("对方已取消", 100),
+        )
+        val plan = ScreenshotImportPipeline.plan(request(), cancelled, emptyList(), timeZone = zone)
+        val decision = plan.decisions.single()
+        assertEquals(CaptureCandidate.KIND_TRANSFER, decision.draft.kind)
+        assertEquals(Action.WAIT_FOR_EVIDENCE, decision.action)
+        assertTrue(plan.needsConfirmation.isEmpty())
+        assertNothingBooked(plan)
     }
 
     @Test
@@ -277,11 +399,11 @@ class ScreenshotImportPipelineTest {
                 amountCents = 3650,
                 direction = CaptureCandidate.DIRECTION_EXPENSE,
                 orderId = "1000123456789012",
-                merchant = "张三",
+                merchant = "便利店",
                 eventTimeMs = parsedEventTime(),
             ),
         )
-        val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), existing, timeZone = zone)
+        val plan = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), existing, timeZone = zone)
         val decision = plan.decisions.single()
         assertEquals(Action.LINK_EXISTING, decision.action)
         assertEquals(77L, decision.matchedTransactionId)
@@ -300,7 +422,7 @@ class ScreenshotImportPipelineTest {
                 eventTimeMs = parsedEventTime() + 60_000,
             ),
         )
-        val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), existing, timeZone = zone)
+        val plan = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), existing, timeZone = zone)
         assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
         assertEquals(1, plan.bookings.size)
     }
@@ -352,7 +474,7 @@ class ScreenshotImportPipelineTest {
 
     @Test
     fun `real transaction time is not marked as needing confirmation`() {
-        val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), emptyList(), timeZone = zone)
+        val plan = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), emptyList(), timeZone = zone)
         val candidate = ScreenshotCandidateFactory.create(
             decision = plan.decisions.single(),
             source = IntakeSource.SHARE,

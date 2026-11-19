@@ -5,6 +5,20 @@ object ScreenshotCapturePolicy {
     enum class DuplicateResult { CLEAR, EXACT_MATCH, AMBIGUOUS }
     enum class Action { AUTO_BOOK, ASK_USER, WAIT_FOR_EVIDENCE, LINK_EXISTING, IGNORE }
 
+    /**
+     * Kinds that move money between accounts or reverse an earlier payment.
+     * A payment screenshot proves the page, not the ledger semantics: a
+     * "received transfer" arrives on someone else's page and a refund is not
+     * ordinary income. These are never auto booked, however high the
+     * confidence; the user confirms them one at a time.
+     */
+    val CONFIRM_ONLY_KINDS = setOf(
+        CaptureCandidate.KIND_TRANSFER,
+        CaptureCandidate.KIND_REFUND,
+        CaptureCandidate.KIND_RED_PACKET,
+        CaptureCandidate.KIND_WITHDRAWAL,
+    )
+
     data class Evidence(
         val supportedPaymentPage: Boolean,
         val paymentPlatformKnown: Boolean,
@@ -15,6 +29,7 @@ object ScreenshotCapturePolicy {
         val directionExplicit: Boolean,
         val completionStatus: String,
         val completionExplicit: Boolean,
+        val kind: String = CaptureCandidate.KIND_PAYMENT,
         val conflictingFields: Boolean = false,
         val duplicateResult: DuplicateResult = DuplicateResult.CLEAR,
     )
@@ -50,11 +65,19 @@ object ScreenshotCapturePolicy {
             evidence.completionExplicit && evidence.duplicateResult == DuplicateResult.CLEAR
         val tier = if (high) CaptureCandidate.TIER_HIGH else CaptureCandidate.TIER_MEDIUM
         val action = when {
+            // A completed transfer / refund / red packet / withdrawal still
+            // only describes money the page claims to have moved. Booking it
+            // automatically would turn a counterparty's page or a reversal
+            // into ordinary income or expense, so it always asks first.
+            requiresConfirmation(evidence.kind) -> Action.ASK_USER
             high && allowAuto && !previewOnly -> Action.AUTO_BOOK
             else -> Action.ASK_USER
         }
         return Assessment(tier, action)
     }
+
+    /** True for kinds that may only reach the ledger after the user confirms. */
+    fun requiresConfirmation(kind: String): Boolean = kind in CONFIRM_ONLY_KINDS
 
     private val NON_FINAL_STATUSES = setOf(
         CaptureCandidate.COMPLETION_PENDING,

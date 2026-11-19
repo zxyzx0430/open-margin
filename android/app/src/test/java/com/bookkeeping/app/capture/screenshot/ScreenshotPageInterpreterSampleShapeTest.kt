@@ -142,8 +142,11 @@ class ScreenshotPageInterpreterSampleShapeTest {
         val result = plan(blocks)
         assertEquals(1, result.decisions.size)
         assertTrue(result.decisions.none { it.draft.amountCents == 400L })
-        assertEquals(Action.AUTO_BOOK, result.decisions.single().action)
-        assertEquals(1, result.bookings.size)
+        // A landed refund is real money, but it is not ordinary income: it is
+        // only written after the user confirms.
+        assertEquals(Action.ASK_USER, result.decisions.single().action)
+        assertTrue(result.bookings.isEmpty())
+        assertEquals(1, result.needsConfirmation.size)
     }
 
     @Test
@@ -197,9 +200,12 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(20_000L, cancelled.draft.amountCents)
         assertEquals(20_000L, received.draft.amountCents)
         assertEquals(Action.WAIT_FOR_EVIDENCE, cancelled.action)
-        assertEquals(Action.AUTO_BOOK, received.action)
-        assertEquals(1, result.bookings.size)
-        assertEquals(received.index, result.bookings.single().index)
+        // A received transfer is complete money but still not ordinary income:
+        // it waits for the user instead of being booked.
+        assertEquals(CaptureCandidate.KIND_TRANSFER, received.draft.kind)
+        assertEquals(Action.ASK_USER, received.action)
+        assertTrue(result.bookings.isEmpty())
+        assertEquals(received.index, result.needsConfirmation.single().index)
     }
 
     @Test
