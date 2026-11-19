@@ -134,4 +134,18 @@ Describe 'DACL security descriptor verification' {
         $denied.HasUserRead | Should -BeFalse
         $denied.HasUserReadDeny | Should -BeTrue
     }
+
+    It 'resolves icacls SDDL aliases for the current local administrator SID' {
+        $module = Get-Module -Name OpenMargin.Setup -ErrorAction Stop
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $alias = & $module {
+            param($descriptor, $targetSid)
+            Test-OmDaclSecurityDescriptor -SecurityDescriptor $descriptor -Sid $targetSid
+        } 'D:(A;;FA;;;LA)' $sid
+        if ($sid -match '-500$') {
+            $alias.HasUserRead | Should -BeTrue
+        } else {
+            $alias.HasUserRead | Should -BeFalse
+        }
+    }
 }

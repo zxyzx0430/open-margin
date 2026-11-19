@@ -90,15 +90,20 @@ function Test-OmDaclSecurityDescriptor {
     if (-not $daclMatch.Success) {
         return [pscustomobject]@{ HasDacl = $false; HasUserRead = $false; HasUserReadDeny = $false }
     }
-    $aces = [regex]::Matches($daclMatch.Groups['Dacl'].Value, '\(([^()]*)\)')
+    $dacl = New-Object System.Security.AccessControl.RawSecurityDescriptor('D:' + $daclMatch.Groups['Dacl'].Value)
+    if ($null -eq $dacl.DiscretionaryAcl) {
+        return [pscustomobject]@{ HasDacl = $false; HasUserRead = $false; HasUserReadDeny = $false }
+    }
+    $aces = @($dacl.DiscretionaryAcl)
     $allowRead = $false
     $denyRead = $false
     foreach ($match in $aces) {
-        $fields = $match.Groups[1].Value.Split(';')
-        if ($fields.Count -lt 6 -or $fields[5] -ine $Sid) { continue }
-        if (-not (Test-OmDaclRightsIncludesRead -Rights $fields[2])) { continue }
-        if ($fields[0] -ieq 'A') { $allowRead = $true }
-        elseif ($fields[0] -ieq 'D') { $denyRead = $true }
+        $ace = $match -as [System.Security.AccessControl.QualifiedAce]
+        if ($null -eq $ace -or $ace.SecurityIdentifier.Value -ine $Sid) { continue }
+        $mask = [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$ace.AccessMask), 0)
+        if (-not (Test-OmDaclRightsIncludesRead -Rights ('0x' + $mask.ToString('X8')))) { continue }
+        if ($ace.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessAllowed) { $allowRead = $true }
+        elseif ($ace.AceQualifier -eq [System.Security.AccessControl.AceQualifier]::AccessDenied) { $denyRead = $true }
     }
     return [pscustomobject]@{
         HasDacl = ($aces.Count -gt 0)

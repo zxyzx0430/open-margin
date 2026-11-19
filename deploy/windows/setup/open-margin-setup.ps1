@@ -70,6 +70,13 @@ function Set-OmCliOption {
     }
 }
 
+function Set-OmCliJsonOutputEncoding {
+    # JSON is a machine-readable contract. Windows PowerShell 5.1 otherwise
+    # writes through the active console code page; characters such as curly
+    # quotes can be substituted and make the serialized JSON invalid.
+    try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
+}
+
 for ($index = 0; $index -lt $ExtraArgs.Count; $index++) {
     $token = [string]$ExtraArgs[$index]
     if ($token -match '^--([A-Za-z0-9-]+)=(.*)$') {
@@ -91,6 +98,7 @@ for ($index = 0; $index -lt $ExtraArgs.Count; $index++) {
 function Write-OmCliResult {
     param($Result, [int]$ExitCode = 0)
     if ($Json) {
+        Set-OmCliJsonOutputEncoding
         $Result | ConvertTo-Json -Depth 12
     } else {
         if ($Result -is [string]) {
@@ -327,6 +335,11 @@ try {
         step = $Command
         retryable = $false
     }
-    if ($Json) { $errorResult | ConvertTo-Json -Depth 8 } else { Write-Error (Protect-OmText $_.Exception.Message) }
+    if ($Json) {
+        Set-OmCliJsonOutputEncoding
+        $errorResult | ConvertTo-Json -Depth 8
+    } else {
+        Write-Error (Protect-OmText $_.Exception.Message)
+    }
     exit 30
 }
