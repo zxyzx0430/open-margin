@@ -26,6 +26,8 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import kotlin.math.max
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Android glue for every screenshot intake. It owns URI access, decoding and
@@ -57,7 +59,7 @@ class ScreenshotIntakeCoordinator(
         val handled: Int get() = booked + pending + waiting + linked
     }
 
-    private val ocrMutex = kotlinx.coroutines.sync.Mutex()
+    private val ocrMutex = Mutex()
     @Volatile private var ocrEngine: OcrEngine? = null
 
     suspend fun ingest(
