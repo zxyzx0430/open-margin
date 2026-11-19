@@ -165,6 +165,7 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                         put("source", event.source)
                         put("category", event.category)
                         put("merchant", event.merchant)
+                        put("event_time_needs_confirmation", event.eventTimeNeedsConfirmation)
                     })
                 }
                 val response = postBatch("$base/api/v1/transactions/batch", token, events)

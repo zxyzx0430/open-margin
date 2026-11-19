@@ -1079,6 +1079,9 @@ private fun LedgerTransactionRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 SoftBadge(text = sourceTag, tone = StatusTone.NEUTRAL)
+                if (transaction.eventTimeNeedsConfirmation) {
+                    SoftBadge(text = tr("时间待确认"), tone = StatusTone.WARNING)
+                }
                 Text(
                     text = transactionSubtitle(
                         categoryLabel = tr(category.displayName),

@@ -125,6 +125,12 @@ internal class BidirectionalSyncClient(
             it=="EXPENSE" || it=="INCOME"
         } ?: "EXPENSE"
         val reviewStatus=payload.optString("review_status","unverified")
+        val eventTimeNeedsConfirmation = EventTimeConfirmationPolicy.mergeRemote(
+            if (payload.has("event_time_needs_confirmation") &&
+                !payload.isNull("event_time_needs_confirmation")
+            ) payload.optBoolean("event_time_needs_confirmation") else null,
+            row?.eventTimeNeedsConfirmation ?: false,
+        )
         return TransactionEntity(
             id=row?.id ?: 0,
             amountCents=payload.getLong("amount_cents"),
@@ -147,7 +153,8 @@ internal class BidirectionalSyncClient(
             duplicateOfId=if (reviewStatus in setOf("confirmed","excluded","transfer","refund")) null
                           else row?.duplicateOfId,
             // Order IDs are local import evidence; keep them across server pulls.
-            sourceTransactionId=row?.sourceTransactionId
+            sourceTransactionId=row?.sourceTransactionId,
+            eventTimeNeedsConfirmation=eventTimeNeedsConfirmation,
         )
     }
 
@@ -224,6 +231,7 @@ internal class BidirectionalSyncClient(
             put("category",record.category)
             put("merchant",record.merchant)
             record.reviewStatus?.let { put("review_status",it) }
+            put("event_time_needs_confirmation",record.eventTimeNeedsConfirmation)
         }
     }
 

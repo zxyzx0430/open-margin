@@ -4,6 +4,7 @@ import com.bookkeeping.app.data.MoneyAmount
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
+import com.bookkeeping.app.sync.EventTimeConfirmationPolicy
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -131,6 +132,10 @@ object TransactionEditRules {
             source = fields.source,
             timestamp = fields.timestampMs,
             remoteReviewStatus = fields.reviewStatus,
+            eventTimeNeedsConfirmation = EventTimeConfirmationPolicy.afterUserEdit(
+                original.eventTimeNeedsConfirmation,
+                timestampChanged = original.timestamp != fields.timestampMs,
+            ),
         )
 
     /** 金额（分）→ 编辑框里的「元」，固定两位小数。 */

@@ -113,7 +113,7 @@ fun CaptureReviewDialog(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(state.pending, key = { it.stableKey() }) { candidate ->
+                        items(state.pending, key = { it.candidateId }) { candidate ->
                             CaptureCandidateCard(
                                 candidate = candidate,
                                 busy = state.busy,
@@ -137,10 +137,10 @@ private fun CaptureCandidateCard(
     onApprove: (String, TransactionCategory) -> Unit,
     onIgnore: () -> Unit,
 ) {
-    var merchant by remember(candidate.stableKey()) {
+    var merchant by remember(candidate.candidateId) {
         mutableStateOf(candidate.merchantCandidates.firstOrNull().orEmpty())
     }
-    var category by remember(candidate.stableKey()) {
+    var category by remember(candidate.candidateId) {
         mutableStateOf(
             when (candidate.kind) {
                 CaptureCandidate.KIND_TRANSFER,
@@ -194,11 +194,16 @@ private fun CaptureCandidateCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val amountCents = candidate.amountCents
                     val income = candidate.kind == CaptureCandidate.KIND_REFUND ||
                         candidate.direction == CaptureCandidate.DIRECTION_INCOME
                     Text(
-                        text = (if (income) "+¥" else "−¥") +
-                            "%.2f".format(Locale.CHINA, candidate.amountCents / 100.0),
+                        text = if (amountCents == null) {
+                            tr("金额待补")
+                        } else {
+                            (if (income) "+¥" else "−¥") +
+                                "%.2f".format(Locale.CHINA, amountCents / 100.0)
+                        },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = if (income) QingIncome
@@ -206,7 +211,13 @@ private fun CaptureCandidateCard(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        text = tr("置信度") + " " + (candidate.confidence * 100).toInt() + "%",
+                        text = tr(
+                            when (candidate.confidenceTier) {
+                                CaptureCandidate.TIER_HIGH -> "高置信度"
+                                CaptureCandidate.TIER_LOW -> "低置信度"
+                                else -> "需要确认"
+                            },
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -225,10 +236,18 @@ private fun CaptureCandidateCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (candidate.eventTimeNeedsConfirmation) {
+                    Text(
+                        text = tr("时间待确认"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
-                            .format(Date(candidate.eventTimeMs)) +
+                            .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs)) +
                             (candidate.orderId?.let { " · " + tr("单号") + " " + it } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
