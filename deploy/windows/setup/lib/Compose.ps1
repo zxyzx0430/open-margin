@@ -144,7 +144,12 @@ function Set-OmFileAcl {
         if ($nonEmpty.Count -eq 0) { throw ('empty DACL: ' + $Path) }
         $reader = @($nonEmpty | Where-Object { $_.HasUserRead })
         $denied = @($nonEmpty | Where-Object { $_.HasUserReadDeny })
-        if ($reader.Count -eq 0 -or $denied.Count -gt 0) { throw ('installing user has no usable read grant: ' + $Path) }
+        if ($reader.Count -eq 0 -or $denied.Count -gt 0) {
+            $observedAces = @($descriptors | ForEach-Object {
+                [regex]::Matches($_, '\(([^()]*)\)') | ForEach-Object { $_.Groups[1].Value }
+            }) -join ' '
+            throw ('installing user has no usable read grant for SID ' + $sid + '; ACL entries: ' + $observedAces + '; path: ' + $Path)
+        }
         if (-not $item.PSIsContainer) {
             $stream = [IO.File]::OpenRead($Path)
             $stream.Dispose()

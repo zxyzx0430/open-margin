@@ -693,9 +693,8 @@ Write-Output 'LAUNCH-RETURNED'
 
 Describe 'CLI check and the wizard setup port' -Tag 'Acceptance' {
     It 'does not report the running wizard setup port as PORT_CONFLICT' {
-        # PRODUCT GAP: the CLI `check` path builds checks from state.ports
-        # without ignoring the wizard's live setup port, so a healthy wizard
-        # makes its own check fail with PORT_CONFLICT.
+        # Exercise the real CLI in a separate Windows PowerShell process while
+        # the wizard is live. Include child output if its JSON contract breaks.
         $state = New-TestStateRoot 'cli-self-port'
         $wizard = Start-AcceptanceWizard -Port (Get-FreeAcceptancePort -Start 18790) -StateRoot $state
         try {
@@ -715,7 +714,14 @@ Describe 'CLI check and the wizard setup port' -Tag 'Acceptance' {
             ) -TimeoutSec 180
 
             $json = $null
-            try { $json = $result.StdOut | ConvertFrom-Json } catch { }
+            if ([string]::IsNullOrWhiteSpace([string]$result.StdOut)) {
+                throw ('CLI check returned empty stdout (exit ' + $result.ExitCode + '); stderr: ' + [string]$result.StdErr)
+            }
+            try {
+                $json = $result.StdOut | ConvertFrom-Json
+            } catch {
+                throw ('CLI check returned invalid JSON (exit ' + $result.ExitCode + '): ' + $_.Exception.Message + '; stdout: ' + [string]$result.StdOut + '; stderr: ' + [string]$result.StdErr)
+            }
             $json | Should -Not -BeNullOrEmpty
             @($json.checks).Count | Should -BeGreaterThan 0
             $portsCheck = @($json.checks | Where-Object { $_.id -eq 'ports' })[0]

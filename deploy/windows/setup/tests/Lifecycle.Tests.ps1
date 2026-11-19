@@ -397,8 +397,10 @@ Describe 'Uninstall-OpenMargin.ps1' {
         $app = New-TestApp 'uninstall-nodocker'
         $state = Join-Path $TestDrive 'uninstall-nodocker-state'
         $summary = Join-Path $TestDrive 'uninstall-nodocker-summary.txt'
+        $emptyPath = Join-Path $TestDrive 'nodocker-empty-path'
+        New-Item -ItemType Directory -Force -Path $emptyPath | Out-Null
         $result = Invoke-EnvHarness -Name 'nodocker' -Environment @{
-            PATH = ($env:SystemRoot + '\System32;' + $env:SystemRoot)
+            PATH = $emptyPath
         } -ScriptArguments @(
             '-AppRoot', $app, '-StateRoot', $state,
             '-SkipWatchdogTask', '-SkipUrlAcl', '-SkipFunnel',
