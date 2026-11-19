@@ -19,6 +19,11 @@ import java.util.TimeZone
 class ScreenshotImportPipelineTest {
 
     private val capturedAt = 1_763_000_000_000L // 2025-11-05T13:33:20Z
+
+    private companion object {
+        const val FINGERPRINT =
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
     private val zone = TimeZone.getTimeZone("Asia/Shanghai")
 
     private fun block(text: String, top: Int) = TextBlock(text = text, top = top, bottom = top + 20)
