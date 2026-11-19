@@ -5,6 +5,15 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "此版本不启用自动监听" to "Automatic watching is off in this build",
+        "需要相册读取权限" to "Photo access is required",
+        "仅处理你选中的图片" to "Only the photos you selected are processed",
+        "发现新截图后自动识别" to "New screenshots are recognised automatically",
+        "默认关闭，开启后只处理新截图" to "Off by default; only new screenshots are processed",
+        "自动识别新截图" to "Recognise new screenshots",
+        "从相册选截图" to "Pick a screenshot",
+        "识别微信 / 支付宝交易截图" to "Recognise WeChat / Alipay transaction screenshots",
+        "截图记账" to "Screenshot capture",
         "时间待确认" to "Time to be confirmed",
         "金额待补" to "Amount missing",
         "截图待确认" to "Screenshot review",

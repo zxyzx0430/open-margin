@@ -314,6 +314,9 @@ fun SettingsScreen(
                     onOpenSmsSettings = { openAppDetailsSettings(context) },
                 )
             }
+            item { SectionHeader(tr("截图记账")) }
+            item { ScreenshotCaptureCard() }
+
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
