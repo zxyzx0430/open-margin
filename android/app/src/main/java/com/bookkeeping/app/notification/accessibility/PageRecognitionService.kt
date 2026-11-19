@@ -14,6 +14,7 @@ import com.bookkeeping.app.capture.success.PaymentPage
 import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
