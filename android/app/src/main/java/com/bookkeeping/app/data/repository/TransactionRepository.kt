@@ -145,6 +145,10 @@ class TransactionRepository @Inject constructor(
     //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
     // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
     //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
+    /** Recent ledger rows for screenshot cross-source de-duplication (read-only). */
+    suspend fun screenshotDedupRows(limit: Int = 500): List<TransactionEntity> =
+        dao.recentForScreenshotDedup(limit)
+
     suspend fun insertIfNotDuplicate(
         transaction: TransactionEntity,
         windowMs: Long = 8_000L,

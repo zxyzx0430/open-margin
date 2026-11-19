@@ -10,6 +10,9 @@
         <exclude domain="database" path="bookkeeping.db-wal" />
         <exclude domain="file" path="datastore/" />
         <exclude domain="sharedpref" path="finance_sync.xml" />
+        <!-- 截图临时数据：原图副本、OCR 候选与诊断只在本机保留 7 天。 -->
+        <exclude domain="file" path="page_capture/" />
+        <exclude domain="sharedpref" path="screenshot_watch.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="bookkeeping.db" />
@@ -17,5 +20,7 @@
         <exclude domain="database" path="bookkeeping.db-wal" />
         <exclude domain="file" path="datastore/" />
         <exclude domain="sharedpref" path="finance_sync.xml" />
+        <exclude domain="file" path="page_capture/" />
+        <exclude domain="sharedpref" path="screenshot_watch.xml" />
     </device-transfer>
 </data-extraction-rules>

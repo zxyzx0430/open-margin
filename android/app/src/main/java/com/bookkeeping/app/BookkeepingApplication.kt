@@ -12,7 +12,10 @@ import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
 import com.bookkeeping.app.notification.CaptureHealthWorker
+import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.notification.capture.ScreenshotEvidenceRetentionWorker
 import com.bookkeeping.app.notification.CategoryLearning
 import com.bookkeeping.app.voice.asr.AsrMemoryAction
 import com.bookkeeping.app.voice.asr.AsrTrimMemoryPolicy
@@ -53,9 +56,25 @@ class BookkeepingApplication : Application() {
             // 纯本地写，失败不影响启动。
             runCatching { transactionRepository.repairCapturedDuplicatesOnce() }
             runCatching { transactionDiagnostics.pruneExpired() }
+            // 截图证据 7 天到期：启动先清一次，再交给定期任务。
+            runCatching { CaptureCandidateStore(applicationContext).pruneExpired() }
         }
         scheduleCaptureHealthRecovery()
         scheduleDiagnosticRetention()
+        scheduleScreenshotRetention()
+        // 新截图监听默认关闭；只有用户在设置里开启并授权后才会真正注册。
+        runCatching { ScreenshotWatchController.start(this) }
+    }
+
+    /** 截图副本 / OCR 候选 / 诊断的 7 天清理，进程重启后仍然生效。 */
+    private fun scheduleScreenshotRetention() {
+        val request = PeriodicWorkRequestBuilder<ScreenshotEvidenceRetentionWorker>(12, TimeUnit.HOURS)
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "screenshot_evidence_retention",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     /**

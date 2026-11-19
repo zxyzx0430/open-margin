@@ -111,6 +111,10 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE source IN ('WECHAT','ALIPAY','BANK_SMS') AND note != '' ORDER BY id DESC LIMIT 2000")
     suspend fun getAutoCapturedForRoundingAudit(): List<TransactionEntity>
 
+    /** 截图候选去重的只读粗筛：最近的正式账单（截图侧再按订单号/金额/时间精确比对）。 */
+    @Query("SELECT * FROM transactions WHERE syncDeleted = 0 ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun recentForScreenshotDedup(limit: Int): List<TransactionEntity>
+
     // 用于自动抓取路径去重：在时间窗口内找同来源 + 同金额的记录。
     // 命中即认为是重复（同一笔交易被通知/无障碍/SMS 多个通道抓到了）。
     @Query("""
