@@ -279,10 +279,13 @@ def confirm_subscription_payment(tx_id:int,subscription_id:int,cycle_key:str) ->
     return link(Link(tx_id=tx_id,subscription_id=subscription_id,cycle_key=cycle_key))
 
 @mcp.tool(annotations=MUTATES_LEDGER)
-def edit_record(tx_id:int,amount_cents:int|None=None,merchant:str|None=None,category:str|None=None) -> dict:
-    """Correct an existing ledger entry, recording an audit trail of edited fields."""
+def edit_record(tx_id:int,amount_cents:int|None=None,merchant:str|None=None,
+                category:str|None=None,timestamp_ms:int|None=None) -> dict:
+    """Correct an existing ledger entry; timestamp_ms is the actual event time."""
     from integration import edit_transaction, Edit
-    values={k:v for k,v in {"amount_cents":amount_cents,"merchant":merchant,"category":category}.items() if v is not None}
+    values={k:v for k,v in {"amount_cents":amount_cents,"merchant":merchant,
+                            "category":category,"timestamp_ms":timestamp_ms}.items()
+            if v is not None}
     return edit_transaction(tx_id,Edit(**values))
 
 @mcp.tool(annotations=MUTATES_IDEMPOTENT)
