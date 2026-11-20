@@ -281,7 +281,7 @@ class ScreenshotPageInterpreterSampleShapeTest {
         val decision = plan(blocks).decisions.single()
 
         assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, decision.draft.completionStatus)
-        assertEquals(Action.WAIT_FOR_EVIDENCE, decision.action)
+        assertEquals(Action.ASK_USER, decision.action)
     }
 
     @Test
