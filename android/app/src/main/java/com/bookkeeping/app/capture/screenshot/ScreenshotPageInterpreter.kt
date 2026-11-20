@@ -154,12 +154,12 @@ object ScreenshotPageInterpreter {
                 reason = "login or security notice, not a payment",
             )
         }
-        // A created-but-not-charged page only ever waits for evidence, so it may
-        // be recognised even when the app name itself was not captured.
-        val futureDebit = FUTURE_DEBIT_MARKERS.any(allText::contains)
+        // A created-but-not-charged page still needs a supported transaction
+        // source, but its marker is later attached to only the matching segment.
+        val hasFutureDebitMarker = FUTURE_DEBIT_MARKERS.any(allText::contains)
         // Only WeChat / Alipay result pages are interpreted. An unknown app is
         // ignored instead of being turned into a guessed draft.
-        if (platform == CaptureCandidate.PLATFORM_UNKNOWN && !futureDebit) {
+        if (platform == CaptureCandidate.PLATFORM_UNKNOWN && !hasFutureDebitMarker) {
             return ScreenshotPageEvidence(
                 platform = platform,
                 pageType = pageType,
@@ -170,18 +170,38 @@ object ScreenshotPageInterpreter {
         }
 
         val segments = splitSegments(content)
-        val refundPage = !futureDebit && REFUND_PAGE_MARKERS.any(allText::contains)
-        val reconciled = futureDebit || refundPage
-        val selected = when {
-            futureDebit -> preferredSegment(segments) { segment ->
-                segment.any { block -> DEDUCTION_LABELS.any { block.text.contains(it) } }
-            }
-            refundPage -> preferredSegment(segments) { segment ->
-                segment.any { block -> block.text.contains("退款金额") }
-            }
-            else -> segments
+        if (segments.isEmpty()) {
+            return ScreenshotPageEvidence(
+                platform = platform,
+                pageType = pageType,
+                transactionLike = false,
+                drafts = emptyList(),
+                reason = "no transaction fields",
+            )
         }
-        var drafts = selected.mapIndexedNotNull { index, segment ->
+        val refundPage = !hasFutureDebitMarker && REFUND_PAGE_MARKERS.any(allText::contains)
+        val selected: List<Pair<Int, List<TextBlock>>> = when {
+            hasFutureDebitMarker -> {
+                val hasDeductionAmount = segments.any { segment ->
+                    segment.any { block -> DEDUCTION_LABELS.any { block.text.contains(it) } }
+                }
+                segments.withIndex()
+                    // The future-debit page often repeats the amount as a generic
+                    // order total. Keep the labelled expected debit, not that total.
+                    .filterNot { (_, segment) ->
+                        hasDeductionAmount && segment.any { it.text.contains("订单金额") }
+                    }
+                    .map { it.index to it.value }
+            }
+            refundPage -> {
+                val index = segments.indexOfFirst { segment ->
+                    segment.any { it.text.contains("退款金额") }
+                }.takeIf { it >= 0 } ?: 0
+                listOf(index to segments[index])
+            }
+            else -> segments.mapIndexed { index, segment -> index to segment }
+        }
+        var drafts = selected.mapNotNull { (index, segment) ->
             buildDraft(index, segment, platform, pageType, capturedAtMs, timeZone)
         }
         if (drafts.isEmpty()) {
@@ -193,15 +213,24 @@ object ScreenshotPageInterpreter {
                 reason = "no transaction fields",
             )
         }
-        // Page-level reconciliation: the page itself says "not charged yet" or
-        // "this is the refund", so that amount is the only draft on the page.
-        if (futureDebit) {
-            drafts = drafts.map {
-                it.copy(
-                    completionStatus = CaptureCandidate.COMPLETION_CREATED,
-                    completionExplicit = true,
-                    reason = "future debit; nothing charged yet",
-                )
+        if (hasFutureDebitMarker) {
+            val localFutureIndices = segments.withIndex().filter { (_, segment) ->
+                segment.any { block -> FUTURE_DEBIT_MARKERS.any { block.text.contains(it) } }
+            }.map { it.index }.toSet()
+            val labelledDebitIndex = segments.indexOfFirst { segment ->
+                segment.any { block -> DEDUCTION_LABELS.any { block.text.contains(it) } }
+            }
+            val futureIndices = localFutureIndices + setOfNotNull(labelledDebitIndex.takeIf { it >= 0 })
+            drafts = drafts.map { draft ->
+                if (draft.index in futureIndices) {
+                    draft.copy(
+                        completionStatus = CaptureCandidate.COMPLETION_CREATED,
+                        completionExplicit = true,
+                        reason = "future debit; nothing charged yet",
+                    )
+                } else {
+                    draft
+                }
             }
         }
         if (refundPage) {
@@ -221,6 +250,7 @@ object ScreenshotPageInterpreter {
                 )
             }
         }
+        val reconciled = hasFutureDebitMarker || refundPage
         val conflicting = !reconciled && drafts.size == 1 && countDistinctAmounts(content) > 1
         return ScreenshotPageEvidence(
             platform = platform,
@@ -299,15 +329,6 @@ object ScreenshotPageInterpreter {
         return segments
     }
 
-    /** Keeps one segment for a page class that can only describe one payment. */
-    private fun preferredSegment(
-        segments: List<List<TextBlock>>,
-        matches: (List<TextBlock>) -> Boolean,
-    ): List<List<TextBlock>> {
-        if (segments.isEmpty()) return segments
-        return listOf(segments.firstOrNull(matches) ?: segments.first())
-    }
-
     private fun buildDraft(
         index: Int,
         segment: List<TextBlock>,
@@ -381,16 +402,27 @@ object ScreenshotPageInterpreter {
         else -> CaptureCandidate.KIND_PAYMENT
     }
 
-    private fun completionOf(text: String): Pair<String, Boolean> = when {
-        FAILED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_FAILED to true
-        PENDING_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_PENDING to true
-        CREATED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_CREATED to true
-        // Checked before CANCELLED: "退款已原路退回" means the refund landed.
-        REFUND_COMPLETED_MARKERS.any(text::contains) ->
-            CaptureCandidate.COMPLETION_COMPLETED to true
-        CANCELLED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_CANCELLED to true
-        COMPLETED_MARKERS.any(text::contains) -> CaptureCandidate.COMPLETION_COMPLETED to true
-        else -> CaptureCandidate.COMPLETION_UNKNOWN to false
+    private val NON_PAYMENT_CANCELLATION_MARKERS = listOf(
+        "通话已取消", "语音通话已取消", "视频通话已取消", "电话已取消",
+    )
+
+    private fun completionOf(text: String): Pair<String, Boolean> {
+        // A cancelled voice/video call can appear beside a payment card. It is
+        // not payment-state evidence even if layout segmentation joins its OCR line.
+        val paymentStatusText = text.lineSequence()
+            .filterNot { line -> NON_PAYMENT_CANCELLATION_MARKERS.any(line::contains) }
+            .joinToString("\n")
+        return when {
+            FAILED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_FAILED to true
+            PENDING_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_PENDING to true
+            CREATED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_CREATED to true
+            // Checked before CANCELLED: "退款已原路退回" means the refund landed.
+            REFUND_COMPLETED_MARKERS.any(paymentStatusText::contains) ->
+                CaptureCandidate.COMPLETION_COMPLETED to true
+            CANCELLED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_CANCELLED to true
+            COMPLETED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_COMPLETED to true
+            else -> CaptureCandidate.COMPLETION_UNKNOWN to false
+        }
     }
 
     private fun merchantOf(segment: List<TextBlock>, amountBlock: TextBlock): List<String> {

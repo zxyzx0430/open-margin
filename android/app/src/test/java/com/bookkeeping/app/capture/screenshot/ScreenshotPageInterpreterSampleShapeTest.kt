@@ -27,6 +27,9 @@ class ScreenshotPageInterpreterSampleShapeTest {
 
     private fun block(text: String, top: Int) = TextBlock(text = text, top = top, bottom = top + 20)
 
+    private fun blockAt(text: String, left: Int, top: Int, right: Int) =
+        TextBlock(text = text, left = left, top = top, right = right, bottom = top + 20)
+
     private fun plan(blocks: List<TextBlock>) = ScreenshotImportPipeline.plan(
         request = ScreenshotIntakeRequest(
             source = IntakeSource.SHARE,
@@ -206,6 +209,50 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(Action.ASK_USER, received.action)
         assertTrue(result.bookings.isEmpty())
         assertEquals(received.index, result.needsConfirmation.single().index)
+    }
+
+    @Test
+    fun `page level future debit marker does not suppress separate completed payment`() {
+        val mixed = listOf(
+            block("支付宝", 10),
+            block("订单已生成", 40),
+            block("预计扣费金额 9.65元", 80),
+            block("11月29日自动确认收货后扣款", 110),
+            block("先用后付", 140),
+            block("订单金额 ¥10.00", 170),
+            block("星巴克咖啡", 250),
+            block("¥18.00", 280),
+            block("支付成功", 310),
+        )
+        val result = plan(mixed)
+
+        assertEquals(2, result.decisions.size)
+        val future = result.decisions.single { it.draft.amountCents == 965L }
+        val paid = result.decisions.single { it.draft.amountCents == 1800L }
+        assertEquals(Action.WAIT_FOR_EVIDENCE, future.action)
+        assertEquals(CaptureCandidate.COMPLETION_CREATED, future.draft.completionStatus)
+        assertEquals(Action.AUTO_BOOK, paid.action)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, paid.draft.completionStatus)
+        assertEquals(listOf(1800L), result.bookings.map { it.draft.amountCents })
+    }
+
+    @Test
+    fun `cancelled voice call bubble beside payment does not cancel transfer`() {
+        // Two separate columns model a payment card and an unrelated cancelled-call bubble.
+        val blocks = listOf(
+            blockAt("微信支付", 20, 10, 140),
+            blockAt("转账给 张三", 20, 40, 140),
+            blockAt("¥200.00", 20, 70, 140),
+            blockAt("语音通话已取消", 230, 70, 430),
+            blockAt("交易成功", 20, 100, 140),
+        )
+        val result = plan(blocks)
+
+        assertEquals(1, result.decisions.size)
+        val transfer = result.decisions.single()
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, transfer.draft.completionStatus)
+        assertEquals(Action.ASK_USER, transfer.action)
+        assertEquals("张三", transfer.draft.merchantCandidates.single())
     }
 
     @Test
