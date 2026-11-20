@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.bookkeeping.app.R
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CaptureBookGate
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,7 +43,7 @@ object ScreenshotReviewNotifier {
         if (candidates.isEmpty() || !NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         ensureChannel(context)
         val candidate = candidates.first()
-        val canBook = candidate.ledgerWriteAllowed
+        val canBook = CaptureBookGate.mayConfirm(candidate)
         val book = actionIntent(context, candidate, ScreenshotReviewReceiver.ACTION_BOOK)
         val ignore = actionIntent(context, candidate, ScreenshotReviewReceiver.ACTION_IGNORE)
         val detail = buildString {
@@ -78,8 +79,12 @@ object ScreenshotReviewNotifier {
 
     internal fun candidateDetails(candidate: CaptureCandidate): String {
         val income = candidate.direction == CaptureCandidate.DIRECTION_INCOME
+        val directionKnown = candidate.direction in setOf(
+            CaptureCandidate.DIRECTION_INCOME, CaptureCandidate.DIRECTION_EXPENSE,
+        )
         val amount = candidate.amountCents?.let {
-            (if (income) "+¥" else "−¥") + String.format(Locale.ROOT, "%.2f", it / 100.0)
+            (if (!directionKnown) "¥" else if (income) "+¥" else "−¥") +
+                String.format(Locale.ROOT, "%.2f", it / 100.0)
         } ?: tr("金额待补")
         val merchant = candidate.merchantCandidates.firstOrNull()?.takeIf { it.isNotBlank() }
             ?: tr("未知商户")
@@ -101,7 +106,7 @@ object ScreenshotReviewNotifier {
         }
         return listOf(
             "${tr("金额")}：$amount",
-            "${tr("收支类型")}：${tr(if (income) "收入" else "支出")}",
+            "${tr("收支类型")}：${tr(if (!directionKnown) "方向待确认" else if (income) "收入" else "支出")}",
             "${tr("商户")}：$merchant · $platform",
             "${tr("发生时间")}：$time$pendingTime",
             "${tr("状态")}：$status",
