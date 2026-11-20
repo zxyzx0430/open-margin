@@ -121,7 +121,7 @@ fun TransactionDiagnosticsScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                tr("记录每笔账从采集到入库经过的每一步。仅保存在本机，最长 7 天。"),
+                tr("记录每笔账从采集到入库经过的每一步，含原始正文。仅保存在本机，最长 7 天。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
