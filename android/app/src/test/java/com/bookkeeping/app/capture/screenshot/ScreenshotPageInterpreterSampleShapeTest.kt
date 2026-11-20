@@ -310,8 +310,53 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(Action.AUTO_BOOK, decision.action)
     }
 
+    /**
+     * Two shops on one page. Without OCR boxes there is no way to tell which
+     * status word belongs to which amount, so the page must not be split by a
+     * distance tie (that used to hand 已取消 to the second shop's payment and
+     * auto book a cancelled payment).
+     */
+    private fun twoShopPage(withBoxes: Boolean): List<TextBlock> = listOf(
+        "微信支付" to 10,
+        "店铺A" to 40,
+        "-¥10.00" to 70,
+        "支付成功" to 100,
+        "店铺B" to 130,
+        "-¥20.00" to 160,
+        "已取消" to 190,
+    ).map { (text, top) ->
+        if (withBoxes) blockAt(text, 20, top, 300) else TextBlock(text = text)
+    }
+
     @Test
-    fun `a bare cancellation with unknown bounds still waits when nothing confirmed`() {
+    fun `a two shop page without card geometry never auto books the cancelled shop`() {
+        val result = plan(twoShopPage(withBoxes = false))
+
+        assertTrue(result.bookings.isEmpty())
+        assertTrue(result.decisions.none { it.action == Action.AUTO_BOOK })
+        // One page level candidate at most: two amounts keep it ambiguous.
+        assertEquals(1, result.decisions.size)
+        assertFalse(result.decisions.single().draft.amountUnambiguous)
+    }
+
+    @Test
+    fun `the same two shop page with real boxes keeps one card per shop`() {
+        val result = plan(twoShopPage(withBoxes = true))
+
+        assertEquals(2, result.decisions.size)
+        val paid = result.decisions.single { it.draft.amountCents == 1000L }
+        val cancelled = result.decisions.single { it.draft.amountCents == 2000L }
+        assertEquals(listOf("店铺A"), paid.draft.merchantCandidates)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, paid.draft.completionStatus)
+        assertEquals(Action.AUTO_BOOK, paid.action)
+        assertEquals(listOf("店铺B"), cancelled.draft.merchantCandidates)
+        assertEquals(CaptureCandidate.COMPLETION_CANCELLED, cancelled.draft.completionStatus)
+        assertEquals(Action.WAIT_FOR_EVIDENCE, cancelled.action)
+        assertEquals(listOf(1000L), result.bookings.map { it.draft.amountCents })
+    }
+
+    @Test
+    fun `a bare cancellation with unknown bounds is not trusted either way`() {
         val blocks = listOf(
             TextBlock(text = "微信支付"),
             TextBlock(text = "转账给 张三"),
@@ -321,8 +366,10 @@ class ScreenshotPageInterpreterSampleShapeTest {
 
         val decision = plan(blocks).decisions.single()
 
-        assertEquals(CaptureCandidate.COMPLETION_CANCELLED, decision.draft.completionStatus)
-        assertEquals(Action.WAIT_FOR_EVIDENCE, decision.action)
+        // No box means no proof the word belongs to this amount: the user
+        // decides instead of the app cancelling or booking it on a guess.
+        assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, decision.draft.completionStatus)
+        assertEquals(Action.ASK_USER, decision.action)
     }
 
     @Test

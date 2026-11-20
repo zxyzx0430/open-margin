@@ -308,29 +308,40 @@ object ScreenshotPageInterpreter {
 
     /**
      * Each amount-bearing line anchors one transaction. Every other line joins
-     * the vertically nearest anchor (ties go to the lower one), so the merchant
-     * header above the *next* amount is not appended to the previous card.
+     * the vertically nearest anchor, so the merchant header above the *next*
+     * amount is not appended to the previous card.
+     *
+     * Only a line with real geometry may be placed. OCR boxes are optional, and
+     * an all-zero placeholder box would make every line equidistant — the last
+     * card would then collect every stray status word on the page. A page with
+     * no usable geometry therefore stays one page-level card: the amount is no
+     * longer unambiguous, and the policy refuses to auto book it.
      */
     private fun splitSegments(blocks: List<TextBlock>): List<List<TextBlock>> {
-        val anchors = blocks.filter { amountOf(it.text) != null }
-        if (anchors.isEmpty()) return emptyList()
+        val anchors = blocks.filter { hasGeometry(it) && amountOf(it.text) != null }
+        if (anchors.isEmpty()) return listOf(blocks)
         val segments = anchors.map { mutableListOf<TextBlock>() }
         var anchorIndex = 0
         blocks.forEach { block ->
-            if (amountOf(block.text) != null) {
-                segments[anchorIndex] += block
-                anchorIndex += 1
-            } else {
-                var best = 0
-                var bestDistance = Long.MAX_VALUE
-                anchors.forEachIndexed { index, anchor ->
-                    val distance = abs((block.top - anchor.top).toLong())
-                    if (distance <= bestDistance) {
-                        bestDistance = distance
-                        best = index
-                    }
+            when {
+                // Missing geometry cannot be attributed to any card.
+                !hasGeometry(block) -> Unit
+                amountOf(block.text) != null -> {
+                    segments[anchorIndex] += block
+                    anchorIndex += 1
                 }
-                segments[best] += block
+                else -> {
+                    var best = 0
+                    var bestDistance = Long.MAX_VALUE
+                    anchors.forEachIndexed { index, anchor ->
+                        val distance = abs((block.top - anchor.top).toLong())
+                        if (distance <= bestDistance) {
+                            bestDistance = distance
+                            best = index
+                        }
+                    }
+                    segments[best] += block
+                }
             }
         }
         return segments
@@ -515,8 +526,13 @@ object ScreenshotPageInterpreter {
         return stronger.none(text::contains)
     }
 
+    /**
+     * A box with a real vertical span. OCR may return no box at all, and the
+     * zeroed placeholder must never be read as "same row" or "same card";
+     * width alone is not required because the card split is vertical.
+     */
     private fun hasGeometry(block: TextBlock): Boolean =
-        block.hasBounds && block.right > block.left && block.bottom > block.top
+        block.hasBounds && block.bottom > block.top
 
     private fun horizontalGap(a: TextBlock, b: TextBlock): Int = when {
         a.right < b.left -> b.left - a.right
@@ -532,13 +548,13 @@ object ScreenshotPageInterpreter {
     }
 
     /**
-     * Same card, or a real overlapping/nearby box. Without OCR boxes the card
-     * split is all the evidence there is, and completed evidence has already won
-     * above if the page carried any.
+     * Same card, or a real overlapping/nearby box. Without OCR boxes there is
+     * no evidence at all: unknown geometry must never be read as "attached",
+     * or a bare 已取消 would cancel whichever amount it happens to follow.
      */
     private fun isAttachedToAmount(block: TextBlock, amount: TextBlock?): Boolean {
         if (amount == null) return false
-        if (!hasGeometry(block) || !hasGeometry(amount)) return true
+        if (!hasGeometry(block) || !hasGeometry(amount)) return false
         val verticalOverlap = block.bottom >= amount.top && amount.bottom >= block.top
         if (verticalOverlap) return true
         val verticalGap = when {
