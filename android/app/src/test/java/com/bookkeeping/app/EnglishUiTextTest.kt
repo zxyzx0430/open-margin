@@ -7,6 +7,45 @@ import org.junit.Test
 
 class EnglishUiTextTest {
     @Test
+    fun screenshotImportConfirmationLabelsTranslate() {
+        val expected = mapOf(
+            "时间待确认" to "Time to be confirmed",
+            "金额待补" to "Amount missing",
+            "确认原因" to "Why confirmation is needed",
+            "交易已完成" to "Completed",
+            "交易处理中" to "In progress",
+            "尚未扣款" to "Not charged",
+            "交易已取消" to "Cancelled",
+            "交易失败" to "Failed",
+            "交易状态未识别" to "Status unknown",
+            "这类交易需要人工确认" to "This transaction type needs manual confirmation",
+            "自动记账已关闭" to "Automatic booking is off",
+            "截图未明确显示交易状态" to "The screenshot does not clearly show the transaction status",
+            "截图时间为暂用时间，请核对交易时间" to "The screenshot time is a temporary fallback; check the transaction time",
+            "请核对截图识别结果" to "Please check the recognised details",
+            "确认记入" to "Confirm and record",
+            "请确认截图交易" to "Review screenshot transaction",
+            "已确认记入 %d 笔截图交易" to "Confirmed %d screenshot transaction(s)",
+            "截图交易确认完成" to "Screenshot review complete",
+            "请确认这笔交易" to "Review this transaction",
+            "稍后" to "Later",
+            "正在更新截图候选" to "Updating the screenshot candidate",
+            "候选状态未能更新，请重试" to "Could not update the candidate; try again",
+            "这笔交易仍待确认" to "This transaction is still waiting for confirmation",
+            "正在记录截图交易" to "Recording the screenshot transaction",
+            "这笔交易已在账本中" to "This transaction is already in the ledger",
+            "暂时无法记录，请稍后重试" to "Unable to record it right now; try again later",
+            "还有 %d 笔待确认" to "%d more waiting for confirmation",
+            "仅预览，不能记入账本" to "Preview only; cannot be added to the ledger",
+            "所选照片权限无法可靠读取新截图；自动监听未开启，仍可分享或手动选图" to "Selected-photo access cannot reliably read new screenshots; automatic watching is off, but sharing or manual photo selection still works",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English screenshot label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun billImportExportLabelsTranslate() {
         val expected = mapOf(
             "账单导入" to "Bill import",

@@ -27,11 +27,11 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val candidateId = intent.getStringExtra(EXTRA_CANDIDATE_ID)
                 val store = CaptureCandidateStore(appContext)
-                val candidate = candidateId
-                    ?.let { id -> store.latest().lastOrNull { it.candidateId == id } }
-                    ?: store.pending().firstOrNull()
+                val pending = store.pending()
+                val candidate = intent.getStringExtra(EXTRA_CANDIDATE_ID)?.let { id ->
+                    pending.firstOrNull { it.candidateId == id }
+                }
                 if (candidate != null) {
                     if (action == ACTION_BOOK) book(appContext, store, candidate)
                     else store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
@@ -39,7 +39,9 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
                 // Reveal the next queued medium candidate instead of stacking.
                 val remaining = store.pending()
                 if (remaining.isNotEmpty()) {
-                    ScreenshotReviewNotifier.notifyPending(appContext, remaining.size)
+                    ScreenshotReviewNotifier.notifyPending(appContext, remaining)
+                } else {
+                    ScreenshotReviewNotifier.cancel(appContext)
                 }
             } finally {
                 pendingResult.finish()
@@ -69,9 +71,11 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
                 contextText = merchant,
             ).category,
         )
-        val inserted = runCatching {
+        val inserted = try {
             repository.insertIfNotDuplicate(entity, notifySuccess = false)
-        }.getOrNull()
+        } catch (_: Exception) {
+            return
+        }
         store.mark(
             candidate,
             if (inserted != null && inserted > 0L) CaptureCandidate.STATUS_APPROVED
@@ -83,7 +87,6 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
         const val ACTION_BOOK = "com.bookkeeping.app.action.SCREENSHOT_BOOK"
         const val ACTION_IGNORE = "com.bookkeeping.app.action.SCREENSHOT_IGNORE"
         const val EXTRA_CANDIDATE_ID = "candidate_id"
-        const val EXTRA_NEXT = "next"
     }
 }
 

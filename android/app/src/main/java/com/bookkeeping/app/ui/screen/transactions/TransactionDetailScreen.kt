@@ -253,6 +253,17 @@ private fun DetailContent(
                 add(tr("发生时间") to transactionTime(entry.timestamp))
             },
         )
+        if (entry.eventTimeNeedsConfirmation) {
+            Text(
+                text = tr("时间待确认"),
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
         if (entry.note.isNotBlank()) {
             NoteCard(note = entry.note)
         }

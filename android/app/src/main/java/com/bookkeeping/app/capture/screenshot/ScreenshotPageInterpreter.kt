@@ -410,11 +410,7 @@ object ScreenshotPageInterpreter {
         val anchoredStatuses = statusBlocks.filterNot { block ->
             isNonPaymentCallCancellation(block.text) ||
                 (amount != null && hasGeometry(block) && hasGeometry(amount) &&
-                    horizontalGap(block, amount) > statusHorizontalGapLimit(block, amount) &&
-                    statusBlocks.any { nearby ->
-                        nearby != block && hasGeometry(nearby) && hasGeometry(amount) &&
-                            horizontalGap(nearby, amount) <= statusHorizontalGapLimit(nearby, amount)
-                    })
+                    horizontalGap(block, amount) > statusHorizontalGapLimit(block, amount))
         }
         val paymentStatusText = anchoredStatuses.joinToString("\n") { it.text }
         return when {

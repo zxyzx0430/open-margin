@@ -1,6 +1,6 @@
 package com.bookkeeping.app.capture.screenshot
 
-import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -97,6 +97,11 @@ class ScreenshotImportActivity : ComponentActivity() {
     }
 
     private fun showOutcome(outcome: ScreenshotIntakeCoordinator.Outcome) {
+        if (outcome.confirmationCandidates.isNotEmpty()) {
+            status.text = tr("请确认截图交易")
+            showCandidateConfirmation(outcome.confirmationCandidates, index = 0, confirmed = 0)
+            return
+        }
         val message = when {
             outcome.failure == FailureReason.PERMISSION_DENIED -> tr("没有读取这张图片的权限")
             outcome.failure == FailureReason.URI_INVALID -> tr("图片地址已失效")
@@ -117,6 +122,88 @@ class ScreenshotImportActivity : ComponentActivity() {
         status.text = message
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         status.postDelayed({ if (!isFinishing) finish() }, 1200)
+    }
+
+    private fun showCandidateConfirmation(
+        candidates: List<com.bookkeeping.app.notification.capture.CaptureCandidate>,
+        index: Int,
+        confirmed: Int,
+    ) {
+        if (isFinishing) return
+        if (index >= candidates.size) {
+            val message = if (confirmed > 0) {
+                tr("已确认记入 %d 笔截图交易").format(confirmed)
+            } else {
+                tr("截图交易确认完成")
+            }
+            status.text = message
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+            status.postDelayed({ if (!isFinishing) finish() }, 1200)
+            return
+        }
+        val candidate = candidates[index]
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("请确认这笔交易"))
+            .setMessage(ScreenshotReviewNotifier.candidateDetails(candidate))
+            .setCancelable(true)
+            .setNegativeButton(tr("忽略")) { _, _ ->
+                status.text = tr("正在更新截图候选")
+                scope.launch {
+                    val ignored = coordinator.ignoreCandidate(candidate)
+                    runOnUiThread {
+                        if (ignored) {
+                            showCandidateConfirmation(candidates, index + 1, confirmed)
+                        } else {
+                            Toast.makeText(this@ScreenshotImportActivity, tr("候选状态未能更新，请重试"), Toast.LENGTH_LONG).show()
+                            showCandidateConfirmation(candidates, index, confirmed)
+                        }
+                    }
+                }
+            }
+            .setNeutralButton(tr("稍后")) { _, _ ->
+                val message = tr("这笔交易仍待确认")
+                status.text = message
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                status.postDelayed({ if (!isFinishing) finish() }, 1200)
+            }
+            .setOnCancelListener {
+                val message = tr("这笔交易仍待确认")
+                status.text = message
+                status.postDelayed({ if (!isFinishing) finish() }, 1200)
+            }
+        if (candidate.ledgerWriteAllowed) {
+            dialog.setPositiveButton(tr("确认记入")) { _, _ ->
+                status.text = tr("正在记录截图交易")
+                scope.launch {
+                    val result = coordinator.confirmCandidate(candidate)
+                    runOnUiThread {
+                        when (result) {
+                            ScreenshotIntakeCoordinator.ConfirmationResult.SAVED ->
+                                showCandidateConfirmation(candidates, index + 1, confirmed + 1)
+                            ScreenshotIntakeCoordinator.ConfirmationResult.ALREADY_EXISTS -> {
+                                Toast.makeText(this@ScreenshotImportActivity, tr("这笔交易已在账本中"), Toast.LENGTH_LONG).show()
+                                showCandidateConfirmation(candidates, index + 1, confirmed)
+                            }
+                            ScreenshotIntakeCoordinator.ConfirmationResult.ALREADY_HANDLED ->
+                                showCandidateConfirmation(candidates, index + 1, confirmed)
+                            ScreenshotIntakeCoordinator.ConfirmationResult.NOT_WRITABLE -> {
+                                Toast.makeText(this@ScreenshotImportActivity, tr("仅预览，不能记入账本"), Toast.LENGTH_LONG).show()
+                                showCandidateConfirmation(candidates, index + 1, confirmed)
+                            }
+                            ScreenshotIntakeCoordinator.ConfirmationResult.FAILED -> {
+                                Toast.makeText(this@ScreenshotImportActivity, tr("暂时无法记录，请稍后重试"), Toast.LENGTH_LONG).show()
+                                showCandidateConfirmation(candidates, index, confirmed)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            dialog.setPositiveButton(tr("继续")) { _, _ ->
+                showCandidateConfirmation(candidates, index + 1, confirmed)
+            }
+        }
+        dialog.show()
     }
 
     override fun onDestroy() {

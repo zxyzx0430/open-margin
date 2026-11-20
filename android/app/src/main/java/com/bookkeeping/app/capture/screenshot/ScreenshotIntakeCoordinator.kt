@@ -7,6 +7,8 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
@@ -17,13 +19,11 @@ import com.bookkeeping.app.ocr.MlKitOcrEngine
 import com.bookkeeping.app.ocr.OcrEngine
 import com.bookkeeping.app.ocr.PaddleOcrEngine
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewMapping
-import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import kotlin.math.max
 import kotlinx.coroutines.sync.Mutex
@@ -55,9 +55,12 @@ class ScreenshotIntakeCoordinator(
         val failure: FailureReason? = null,
         val repeatImage: Boolean = false,
         val autoBookAllowed: Boolean = true,
+        val confirmationCandidates: List<CaptureCandidate> = emptyList(),
     ) {
         val handled: Int get() = booked + pending + waiting + linked
     }
+
+    enum class ConfirmationResult { SAVED, ALREADY_EXISTS, ALREADY_HANDLED, NOT_WRITABLE, FAILED }
 
     private val ocrMutex = Mutex()
     @Volatile private var ocrEngine: OcrEngine? = null
@@ -89,8 +92,19 @@ class ScreenshotIntakeCoordinator(
             return Outcome(failure = validation.reason, autoBookAllowed = allowAuto && !previewOnly)
         }
 
-        val bytes = runCatching { readBounded(resolver.openInputStream(uri)) }.getOrNull()
-        if (bytes == null || bytes.isEmpty()) {
+        val boundedRead = runCatching {
+            ScreenshotBoundedReader.read(resolver.openInputStream(uri), ScreenshotImportPipeline.MAX_IMAGE_BYTES)
+        }.getOrNull()
+        if (boundedRead == null) {
+            return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = allowAuto && !previewOnly)
+        }
+        val bytes = when (boundedRead) {
+            is ScreenshotBoundedReader.Result.Complete -> boundedRead.bytes
+            ScreenshotBoundedReader.Result.Oversized -> {
+                return Outcome(failure = FailureReason.OVERSIZED, autoBookAllowed = allowAuto && !previewOnly)
+            }
+        }
+        if (bytes.isEmpty()) {
             return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = allowAuto && !previewOnly)
         }
         val fingerprint = sha256(bytes)
@@ -145,6 +159,7 @@ class ScreenshotIntakeCoordinator(
         val attemptId = TransactionDiagnostics.newAttemptId()
         var booked = 0
         var pending = 0
+        val confirmationCandidates = mutableListOf<CaptureCandidate>()
         var waiting = 0
         var linked = 0
         var ignored = 0
@@ -197,6 +212,7 @@ class ScreenshotIntakeCoordinator(
                 Action.ASK_USER -> {
                     store.mark(stored, CaptureCandidate.STATUS_PENDING)
                     pending++
+                    if (source != IntakeSource.MEDIASTORE) confirmationCandidates += stored
                 }
                 Action.WAIT_FOR_EVIDENCE -> {
                     store.mark(stored, CaptureCandidate.STATUS_WAITING)
@@ -212,8 +228,8 @@ class ScreenshotIntakeCoordinator(
                 }
             }
         }
-        if (pending > 0) {
-            runCatching { ScreenshotReviewNotifier.notifyPending(context, pending) }
+        if (pending > 0 && source == IntakeSource.MEDIASTORE) {
+            runCatching { ScreenshotReviewNotifier.notifyPending(context, store.pending()) }
         }
         return Outcome(
             booked = booked,
@@ -222,7 +238,50 @@ class ScreenshotIntakeCoordinator(
             linked = linked,
             ignored = ignored,
             autoBookAllowed = allowAuto && !previewOnly,
+            confirmationCandidates = confirmationCandidates,
         )
+    }
+
+    suspend fun confirmCandidate(candidate: CaptureCandidate): ConfirmationResult {
+        if (!CaptureBookGate.mayConfirm(candidate)) return ConfirmationResult.NOT_WRITABLE
+        val current = store.pending().firstOrNull { it.candidateId == candidate.candidateId }
+            ?: return ConfirmationResult.ALREADY_HANDLED
+        if (!CaptureBookGate.mayConfirm(current)) return ConfirmationResult.NOT_WRITABLE
+        val repository = repositoryProvider() ?: return ConfirmationResult.FAILED
+        val merchant = current.merchantCandidates.firstOrNull().orEmpty()
+        val category = CaptureReviewMapping.classificationFor(
+            candidate = current,
+            merchant = merchant,
+            contextText = merchant,
+        ).category
+        val entity = CaptureReviewMapping.toTransactionEntity(
+            candidate = current,
+            merchant = merchant,
+            category = category,
+        )
+        val inserted = try {
+            repository.insertIfNotDuplicate(
+                entity,
+                notifySuccess = false,
+                diagnosticInput = TransactionDiagnosticInput(
+                    attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+                ),
+            )
+        } catch (_: Exception) {
+            return ConfirmationResult.FAILED
+        }
+        return if (inserted != null && inserted > 0L) {
+            store.mark(current, CaptureCandidate.STATUS_APPROVED)
+            ConfirmationResult.SAVED
+        } else {
+            store.mark(current, CaptureCandidate.STATUS_IGNORED)
+            ConfirmationResult.ALREADY_EXISTS
+        }
+    }
+
+    fun ignoreCandidate(candidate: CaptureCandidate): Boolean {
+        val current = store.pending().firstOrNull { it.candidateId == candidate.candidateId } ?: return false
+        return store.mark(current, CaptureCandidate.STATUS_IGNORED)
     }
 
     fun close() {
@@ -236,23 +295,6 @@ class ScreenshotIntakeCoordinator(
             fallback = MlKitOcrEngine(),
         ).also { ocrEngine = it }
         engine.recognize(bitmap)
-    }
-
-    private fun readBounded(stream: java.io.InputStream?): ByteArray {
-        if (stream == null) return ByteArray(0)
-        stream.use { input ->
-            val out = ByteArrayOutputStream()
-            val buffer = ByteArray(16 * 1024)
-            var total = 0L
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                total += read
-                if (total > ScreenshotImportPipeline.MAX_IMAGE_BYTES) break
-                out.write(buffer, 0, read)
-            }
-            return out.toByteArray()
-        }
     }
 
     @Suppress("DEPRECATION")

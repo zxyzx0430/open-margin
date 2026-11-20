@@ -271,6 +271,20 @@ class ScreenshotPageInterpreterSampleShapeTest {
     }
 
     @Test
+    fun `far generic cancelled bubble without nearby payment status remains unknown`() {
+        val blocks = listOf(
+            blockAt("微信支付", 20, 10, 140),
+            blockAt("转账给 张三", 20, 40, 140),
+            blockAt("¥200.00", 20, 70, 140),
+            blockAt("已取消", 280, 70, 430),
+        )
+        val decision = plan(blocks).decisions.single()
+
+        assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, decision.draft.completionStatus)
+        assertEquals(Action.WAIT_FOR_EVIDENCE, decision.action)
+    }
+
+    @Test
     fun `non payment pages produce no drafts at all`() {
         val google = plan(googleOnePage())
         assertTrue(google.decisions.isEmpty())
