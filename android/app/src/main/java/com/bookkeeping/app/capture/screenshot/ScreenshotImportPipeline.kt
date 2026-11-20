@@ -121,6 +121,7 @@ object ScreenshotImportPipeline {
                             reason = "queued behind the previous confirmation",
                             draft = draft,
                             queued = true,
+                            ledgerWriteAllowed = allowAuto && !previewOnly,
                         )
                         return@forEach
                     }
@@ -165,28 +166,48 @@ object ScreenshotImportPipeline {
         existing: List<LedgerFingerprint>,
     ): Pair<ScreenshotCapturePolicy.DuplicateResult, Long?> {
         val orderId = draft.orderId?.trim()?.takeIf(String::isNotEmpty)
+        val platform = platformOf(draft.pageIdentity)
         if (orderId != null) {
-            val exact = existing.filter { it.orderId?.trim() == orderId }
-            return when {
-                exact.size == 1 -> ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to exact.single().transactionId
-                exact.size > 1 -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
-                else -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+            if (platform == CaptureCandidate.PLATFORM_UNKNOWN) {
+                return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+            }
+            val exact = existing.filter {
+                it.platform == platform && it.platform != CaptureCandidate.PLATFORM_UNKNOWN &&
+                    it.orderId?.trim() == orderId
+            }
+            when {
+                exact.size == 1 -> return ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to exact.single().transactionId
+                exact.size > 1 -> return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
             }
         }
         val amount = draft.amountCents ?: return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+        if (platform == CaptureCandidate.PLATFORM_UNKNOWN) {
+            return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+        }
         val merchant = normalize(draft.merchantCandidates.firstOrNull())
-        val candidates = existing.filter { row ->
-            row.amountCents == amount && row.direction == draft.direction &&
+        val possible = existing.filter { row ->
+            row.platform == platform && row.platform != CaptureCandidate.PLATFORM_UNKNOWN &&
+                row.amountCents == amount && row.direction == draft.direction &&
+                (orderId == null || row.orderId?.trim().let { it == null || it == orderId }) &&
                 normalize(row.merchant).let { rowMerchant ->
-                    (merchant.isEmpty() && rowMerchant.isEmpty()) ||
-                        (merchant.isNotEmpty() && rowMerchant.isNotEmpty() && merchant == rowMerchant)
-                } &&
-                draft.eventTimeMs != null &&
-                kotlin.math.abs(row.eventTimeMs - draft.eventTimeMs!!) <= DEDUP_WINDOW_MS
+                    merchant.isEmpty() || rowMerchant.isEmpty() || merchant == rowMerchant
+                }
+        }
+        if (draft.eventTimeMs == null) {
+            return if (possible.isEmpty()) ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+            else ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+        }
+        val candidates = possible.filter { row ->
+            row.eventTimeMs <= 0L ||
+                kotlin.math.abs(row.eventTimeMs - draft.eventTimeMs) <= DEDUP_WINDOW_MS
         }
         return when (candidates.size) {
             0 -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
-            1 -> ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to candidates.single().transactionId
+            1 -> if (candidates.single().eventTimeMs > 0L) {
+                ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to candidates.single().transactionId
+            } else {
+                ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+            }
             else -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
         }
     }
@@ -197,6 +218,12 @@ object ScreenshotImportPipeline {
 
     private fun normalize(value: String?): String =
         value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+
+    private fun platformOf(pageIdentity: String): String = when {
+        pageIdentity.startsWith("wechat") -> CaptureCandidate.PLATFORM_WECHAT
+        pageIdentity.startsWith("alipay") -> CaptureCandidate.PLATFORM_ALIPAY
+        else -> CaptureCandidate.PLATFORM_UNKNOWN
+    }
 
     private const val DEDUP_WINDOW_MS = 2L * 60 * 1000
 }

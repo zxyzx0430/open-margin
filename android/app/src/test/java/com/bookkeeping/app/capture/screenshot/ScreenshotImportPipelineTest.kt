@@ -28,6 +28,13 @@ class ScreenshotImportPipelineTest {
 
     private fun block(text: String, top: Int) = TextBlock(text = text, top = top, bottom = top + 20)
 
+    private fun localTime(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
+        java.util.Calendar.getInstance(zone).apply {
+            clear()
+            set(year, month - 1, day, hour, minute, 0)
+            isLenient = false
+        }.timeInMillis
+
     private fun request(
         source: IntakeSource = IntakeSource.SHARE,
         uri: String? = "content://media/external/images/media/42",
@@ -388,6 +395,24 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
+    fun `queued preview candidates remain non-writable`() {
+        val twoMedium = listOf(
+            block("微信支付", 10),
+            block("¥11.00", 40),
+            block("收款方 A店", 60),
+            block("¥22.00", 100),
+            block("收款方 B店", 120),
+        )
+        val plan = ScreenshotImportPipeline.plan(
+            request(), twoMedium, emptyList(), previewOnly = true, timeZone = zone,
+        )
+
+        assertEquals(2, plan.needsConfirmation.size)
+        assertTrue(plan.needsConfirmation.all { !it.ledgerWriteAllowed })
+        assertTrue(plan.bookings.isEmpty())
+    }
+
+    @Test
     fun `re sharing the same image does not book again`() {
         val plan = ScreenshotImportPipeline.plan(
             request = request(),
@@ -458,6 +483,189 @@ class ScreenshotImportPipelineTest {
         val plan = ScreenshotImportPipeline.plan(request(), page, existing, timeZone = zone)
         assertEquals(Action.LINK_EXISTING, plan.decisions.single().action)
         assertEquals(99L, plan.decisions.single().matchedTransactionId)
+    }
+
+    @Test
+    fun `same order id on another payment platform is not linked`() {
+        val otherPlatform = listOf(
+            LedgerFingerprint(
+                transactionId = 78,
+                platform = CaptureCandidate.PLATFORM_ALIPAY,
+                amountCents = 3650,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                orderId = "1000123456789012",
+                merchant = "便利店",
+                eventTimeMs = parsedEventTime(),
+            ),
+        )
+        val plan = ScreenshotImportPipeline.plan(
+            request(), wechatMerchantSuccess(), otherPlatform, timeZone = zone,
+        )
+
+        assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
+        assertNull(plan.decisions.single().matchedTransactionId)
+        assertEquals(1, plan.bookings.size)
+    }
+
+    @Test
+    fun `same fuzzy fields on another payment platform are not linked`() {
+        val alipay = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("2026-11-19 12:30", 130),
+        )
+        val time = ScreenshotPageInterpreter.interpret(alipay, capturedAt, zone).drafts.single().eventTimeMs!!
+        val otherPlatform = listOf(
+            LedgerFingerprint(
+                transactionId = 79,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 990,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = "便利店",
+                eventTimeMs = time,
+            ),
+        )
+        val plan = ScreenshotImportPipeline.plan(request(), alipay, otherPlatform, timeZone = zone)
+
+        assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
+        assertNull(plan.decisions.single().matchedTransactionId)
+    }
+
+    @Test
+    fun `missing actual event time makes a plausible fuzzy match review-only`() {
+        val noTime = listOf(
+            block("微信支付", 10),
+            block("-¥9.90", 40),
+            block("收款方 便利店", 80),
+            block("交易成功", 100),
+        )
+        val existing = listOf(
+            LedgerFingerprint(
+                transactionId = 80,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 990,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = "便利店",
+                eventTimeMs = capturedAt,
+            ),
+        )
+        val decision = ScreenshotImportPipeline.plan(request(), noTime, existing, timeZone = zone)
+            .decisions.single()
+
+        assertEquals(Action.ASK_USER, decision.action)
+        assertNull(decision.matchedTransactionId)
+    }
+
+    @Test
+    fun `explicit yesterday overrides same day time inference near day end`() {
+        val capture = localTime(2026, 11, 20, 23, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("昨天 20:10", 130),
+        )
+
+        val draft = ScreenshotPageInterpreter.interpret(blocks, capture, zone).drafts.single()
+        assertEquals(localTime(2026, 11, 19, 20, 10), draft.eventTimeMs)
+    }
+
+    @Test
+    fun `explicit yesterday crosses midnight in the pinned timezone`() {
+        val capture = localTime(2026, 11, 20, 0, 2)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("昨天 23:59", 130),
+        )
+
+        val draft = ScreenshotPageInterpreter.interpret(blocks, capture, zone).drafts.single()
+        assertEquals(localTime(2026, 11, 19, 23, 59), draft.eventTimeMs)
+    }
+
+    @Test
+    fun `relative day without a safe clock remains provisional at capture time`() {
+        val capture = localTime(2026, 11, 20, 0, 2)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("昨天", 130),
+        )
+        val plan = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture),
+            blocks,
+            emptyList(),
+            timeZone = zone,
+        )
+        val decision = plan.decisions.single()
+        assertNull(decision.draft.eventTimeMs)
+        val candidate = ScreenshotCandidateFactory.create(
+            decision = decision,
+            source = IntakeSource.SHARE,
+            capturedAtMs = capture,
+            imageFingerprint = FINGERPRINT,
+        )
+        assertEquals(capture, candidate.eventTimeMs)
+        assertEquals(CaptureCandidate.TIME_SOURCE_CAPTURE, candidate.eventTimeSource)
+        assertTrue(candidate.eventTimeNeedsConfirmation)
+    }
+
+    @Test
+    fun `invalid relative clock falls back provisionally without inventing time`() {
+        val capture = localTime(2026, 11, 20, 12, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("昨天 25:00", 130),
+        )
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
+        val candidate = ScreenshotCandidateFactory.create(
+            decision = decision,
+            source = IntakeSource.SHARE,
+            capturedAtMs = capture,
+            imageFingerprint = FINGERPRINT,
+        )
+
+        assertNull(decision.draft.eventTimeMs)
+        assertEquals(capture, candidate.eventTimeMs)
+        assertEquals(CaptureCandidate.TIME_SOURCE_CAPTURE, candidate.eventTimeSource)
+        assertTrue(candidate.eventTimeNeedsConfirmation)
+    }
+
+    @Test
+    fun `ambiguous relative clock stays provisional and needs confirmation`() {
+        val capture = localTime(2026, 11, 20, 12, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("昨天 20:10 21:20", 130),
+        )
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
+        val candidate = ScreenshotCandidateFactory.create(
+            decision = decision,
+            source = IntakeSource.SHARE,
+            capturedAtMs = capture,
+            imageFingerprint = FINGERPRINT,
+        )
+
+        assertNull(decision.draft.eventTimeMs)
+        assertEquals(capture, candidate.eventTimeMs)
+        assertTrue(candidate.eventTimeNeedsConfirmation)
     }
 
     @Test

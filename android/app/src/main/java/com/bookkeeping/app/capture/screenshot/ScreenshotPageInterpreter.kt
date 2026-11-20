@@ -7,6 +7,7 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
+import kotlin.math.max
 
 /**
  * Deterministic page understanding for WeChat / Alipay transaction screenshots.
@@ -113,6 +114,7 @@ object ScreenshotPageInterpreter {
         "(\\d{4})[-/年](\\d{1,2})[-/月](\\d{1,2})日?\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?",
     )
     private val TIME_ONLY_REGEX = Regex("(\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
+    private val RELATIVE_DAY_REGEX = Regex("大前天|前天|昨天|昨日|今天|今日")
 
     fun interpret(
         blocks: List<TextBlock>,
@@ -343,7 +345,7 @@ object ScreenshotPageInterpreter {
         val amountUnambiguous = segment.count { amountOf(it.text) != null } == 1
         val direction = directionOf(segmentText, amountBlock.text, pageType)
         val kind = kindOf(segmentText, direction)
-        val completion = completionOf(segmentText)
+        val completion = completionOf(segment)
         val merchant = merchantOf(segment, amountBlock)
         val orderId = ORDER_ID_REGEX.find(segmentText)?.groupValues?.get(1)
         val eventTime = eventTimeOf(segmentText, capturedAtMs, timeZone)
@@ -402,16 +404,19 @@ object ScreenshotPageInterpreter {
         else -> CaptureCandidate.KIND_PAYMENT
     }
 
-    private val NON_PAYMENT_CANCELLATION_MARKERS = listOf(
-        "通话已取消", "语音通话已取消", "视频通话已取消", "电话已取消",
-    )
-
-    private fun completionOf(text: String): Pair<String, Boolean> {
-        // A cancelled voice/video call can appear beside a payment card. It is
-        // not payment-state evidence even if layout segmentation joins its OCR line.
-        val paymentStatusText = text.lineSequence()
-            .filterNot { line -> NON_PAYMENT_CANCELLATION_MARKERS.any(line::contains) }
-            .joinToString("\n")
+    private fun completionOf(segment: List<TextBlock>): Pair<String, Boolean> {
+        val amount = segment.firstOrNull { amountOf(it.text) != null }
+        val statusBlocks = segment.filter { block -> isCompletionMarker(block.text) }
+        val anchoredStatuses = statusBlocks.filterNot { block ->
+            isNonPaymentCallCancellation(block.text) ||
+                (amount != null && hasGeometry(block) && hasGeometry(amount) &&
+                    horizontalGap(block, amount) > statusHorizontalGapLimit(block, amount) &&
+                    statusBlocks.any { nearby ->
+                        nearby != block && hasGeometry(nearby) && hasGeometry(amount) &&
+                            horizontalGap(nearby, amount) <= statusHorizontalGapLimit(nearby, amount)
+                    })
+        }
+        val paymentStatusText = anchoredStatuses.joinToString("\n") { it.text }
         return when {
             FAILED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_FAILED to true
             PENDING_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_PENDING to true
@@ -424,6 +429,26 @@ object ScreenshotPageInterpreter {
             else -> CaptureCandidate.COMPLETION_UNKNOWN to false
         }
     }
+
+    private fun isCompletionMarker(text: String): Boolean =
+        COMPLETED_MARKERS.any(text::contains) || REFUND_COMPLETED_MARKERS.any(text::contains) ||
+            PENDING_MARKERS.any(text::contains) || CREATED_MARKERS.any(text::contains) ||
+            CANCELLED_MARKERS.any(text::contains) || FAILED_MARKERS.any(text::contains)
+
+    private fun isNonPaymentCallCancellation(text: String): Boolean =
+        text.contains("已取消") && listOf("通话", "语音", "视频", "电话", "呼叫").any(text::contains)
+
+    private fun hasGeometry(block: TextBlock): Boolean =
+        block.right > block.left && block.bottom > block.top
+
+    private fun horizontalGap(a: TextBlock, b: TextBlock): Int = when {
+        a.right < b.left -> b.left - a.right
+        b.right < a.left -> a.left - b.right
+        else -> 0
+    }
+
+    private fun statusHorizontalGapLimit(a: TextBlock, b: TextBlock): Int =
+        max(MIN_STATUS_HORIZONTAL_GAP, max(a.bottom - a.top, b.bottom - b.top) * 4)
 
     private fun merchantOf(segment: List<TextBlock>, amountBlock: TextBlock): List<String> {
         val labels = listOf("收款方", "付款给", "转账给", "商户全称", "对方", "收款人")
@@ -474,6 +499,7 @@ object ScreenshotPageInterpreter {
             val values = match.groupValues
             return runCatching {
                 Calendar.getInstance(timeZone).apply {
+                    isLenient = false
                     clear()
                     set(
                         values[1].toInt(),
@@ -486,29 +512,54 @@ object ScreenshotPageInterpreter {
                 }.timeInMillis.takeIf { it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS) }
             }.getOrNull()
         }
-        TIME_ONLY_REGEX.find(text)?.let { match ->
-            if (text.contains("年") || text.contains("-")) return null
+
+        val relativeDay = RELATIVE_DAY_REGEX.find(text)?.value
+        val times = TIME_ONLY_REGEX.findAll(text).toList()
+        if (relativeDay != null) {
+            // A relative day without exactly one valid clock is not evidence for
+            // the transaction time. Do not fall through to capture-day inference.
+            val match = times.singleOrNull() ?: return null
+            val dayOffset = when (relativeDay) {
+                "大前天" -> -3
+                "前天" -> -2
+                "昨天", "昨日" -> -1
+                else -> 0
+            }
             return runCatching {
-                val calendar = Calendar.getInstance(timeZone).apply { timeInMillis = capturedAtMs }
-                val sameDay = Calendar.getInstance(timeZone).apply {
+                Calendar.getInstance(timeZone).apply {
                     timeInMillis = capturedAtMs
+                    isLenient = false
+                    add(Calendar.DAY_OF_YEAR, dayOffset)
                     set(Calendar.HOUR_OF_DAY, match.groupValues[1].toInt())
                     set(Calendar.MINUTE, match.groupValues[2].toInt())
                     set(Calendar.SECOND, match.groupValues[3].ifBlank { "0" }.toInt())
-                }
-                // A time later than the screenshot would belong to yesterday.
-                if (sameDay.timeInMillis > capturedAtMs + FUTURE_TOLERANCE_MS) {
-                    calendar.add(Calendar.DAY_OF_YEAR, -1)
-                    calendar.set(Calendar.HOUR_OF_DAY, match.groupValues[1].toInt())
-                    calendar.set(Calendar.MINUTE, match.groupValues[2].toInt())
-                    calendar.set(Calendar.SECOND, match.groupValues[3].ifBlank { "0" }.toInt())
-                    calendar.timeInMillis
-                } else {
-                    sameDay.timeInMillis
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis.takeIf {
+                    it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS)
                 }
             }.getOrNull()
         }
-        return null
+        if (times.size != 1 || text.contains("年") || text.contains("-")) return null
+        val match = times.single()
+        return runCatching {
+            val sameDay = Calendar.getInstance(timeZone).apply {
+                timeInMillis = capturedAtMs
+                isLenient = false
+                set(Calendar.HOUR_OF_DAY, match.groupValues[1].toInt())
+                set(Calendar.MINUTE, match.groupValues[2].toInt())
+                set(Calendar.SECOND, match.groupValues[3].ifBlank { "0" }.toInt())
+                set(Calendar.MILLISECOND, 0)
+            }
+            val sameDayTime = sameDay.timeInMillis
+            // A time later than the screenshot would belong to yesterday.
+            val eventTime = if (sameDayTime > capturedAtMs + FUTURE_TOLERANCE_MS) {
+                sameDay.add(Calendar.DAY_OF_YEAR, -1)
+                sameDay.timeInMillis
+            } else {
+                sameDayTime
+            }
+            eventTime.takeIf { it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS) }
+        }.getOrNull()
     }
 
     /**
@@ -552,6 +603,9 @@ object ScreenshotPageInterpreter {
 
     /** Used by the coordinator for cross-source correlation. */
     fun sameTransaction(a: TransactionDraft, b: TransactionDraft): Boolean {
+        val platformA = platformOf(a.pageIdentity)
+        val platformB = platformOf(b.pageIdentity)
+        if (platformA == CaptureCandidate.PLATFORM_UNKNOWN || platformA != platformB) return false
         if (a.orderId != null && b.orderId != null) return a.orderId == b.orderId
         if (a.amountCents != b.amountCents) return false
         if (a.direction != b.direction) return false
@@ -563,7 +617,14 @@ object ScreenshotPageInterpreter {
         return abs(timeA - timeB) <= CORRELATION_WINDOW_MS
     }
 
+    private fun platformOf(pageIdentity: String): String = when {
+        pageIdentity.startsWith("wechat") -> CaptureCandidate.PLATFORM_WECHAT
+        pageIdentity.startsWith("alipay") -> CaptureCandidate.PLATFORM_ALIPAY
+        else -> CaptureCandidate.PLATFORM_UNKNOWN
+    }
+
     private const val CORRELATION_WINDOW_MS = 2L * 60 * 1000
+    private const val MIN_STATUS_HORIZONTAL_GAP = 72
     private const val FUTURE_TOLERANCE_MS = 5L * 60 * 1000
     private const val MIN_EVENT_TIME = 1_262_304_000_000L // 2010-01-01
 }

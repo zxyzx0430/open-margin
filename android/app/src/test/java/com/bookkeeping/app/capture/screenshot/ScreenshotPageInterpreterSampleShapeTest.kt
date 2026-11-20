@@ -256,6 +256,21 @@ class ScreenshotPageInterpreterSampleShapeTest {
     }
 
     @Test
+    fun `generic cancelled notification bubble beside a completed payment is isolated geometrically`() {
+        val blocks = listOf(
+            blockAt("微信支付", 20, 10, 140),
+            blockAt("转账给 张三", 20, 40, 140),
+            blockAt("¥200.00", 20, 70, 140),
+            blockAt("已取消", 230, 70, 430),
+            blockAt("交易成功", 20, 100, 140),
+        )
+        val decision = plan(blocks).decisions.single()
+
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
+        assertEquals(Action.ASK_USER, decision.action)
+    }
+
+    @Test
     fun `non payment pages produce no drafts at all`() {
         val google = plan(googleOnePage())
         assertTrue(google.decisions.isEmpty())
