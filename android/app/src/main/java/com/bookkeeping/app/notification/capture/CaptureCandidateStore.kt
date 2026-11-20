@@ -53,12 +53,19 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
         readAll().lastOrNull { it.imageFingerprint == fingerprint }
     }
 
+    /**
+     * Every waiting card, oldest first.
+     *
+     * One screenshot can hold two payments and they stay two cards: collapsing
+     * them by [CaptureCandidate.imageFingerprint] hid the second one, which then
+     * "reappeared" after the first was ignored and looked like a closed card
+     * coming back. Repeated imports of the same image are stopped upstream by
+     * the importer's repeatImage rule, so candidateId is the only key needed.
+     */
     fun pending(limit: Int = 50): List<CaptureCandidate> =
         latest(MAX_ENTRIES)
             .filter { it.status == CaptureCandidate.STATUS_PENDING }
-            .groupBy { it.imageFingerprint ?: it.candidateId }
-            .values
-            .mapNotNull { group -> group.minByOrNull { it.capturedAtMs } }
+            .distinctBy { it.candidateId }
             .sortedBy { it.capturedAtMs }
             .take(limit.coerceIn(1, MAX_ENTRIES))
 

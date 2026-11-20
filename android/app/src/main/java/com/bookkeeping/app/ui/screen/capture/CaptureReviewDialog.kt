@@ -117,7 +117,7 @@ fun CaptureReviewDialog(
                         items(state.pending, key = { it.candidateId }) { candidate ->
                             CaptureCandidateCard(
                                 candidate = candidate,
-                                busy = state.busy,
+                                busy = state.busy || candidate.candidateId in state.busyIds,
                                 onApprove = { merchant, category, direction ->
                                     viewModel.approve(candidate, merchant, category, direction)
                                 },
