@@ -6,6 +6,7 @@ import android.content.Intent
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewMapping
 import dagger.hilt.EntryPoint
@@ -51,6 +52,7 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
         store: CaptureCandidateStore,
         candidate: CaptureCandidate,
     ) {
+        if (!CaptureBookGate.mayConfirm(candidate)) return
         val repository = runCatching {
             EntryPointAccessors.fromApplication(
                 context,

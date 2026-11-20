@@ -109,6 +109,8 @@ data class CandidateDecision(
     /** True when an earlier medium-confidence draft in the same image is still unanswered. */
     val queued: Boolean = false,
     val matchedTransactionId: Long? = null,
+    /** False for preview-only/allowAuto=false imports; persisted across review paths. */
+    val ledgerWriteAllowed: Boolean = true,
 )
 
 data class ImportPlan(
@@ -125,6 +127,7 @@ data class ImportPlan(
     val bookings: List<CandidateDecision>
         get() = decisions.filter {
             it.action == Action.AUTO_BOOK &&
+                it.ledgerWriteAllowed &&
                 !ScreenshotCapturePolicy.requiresConfirmation(it.draft.kind)
         }
 

@@ -59,6 +59,7 @@ object ScreenshotCandidateFactory {
             completionExplicit = draft.completionExplicit,
             directionExplicit = draft.directionExplicit,
             matchedTransactionId = decision.matchedTransactionId,
+            ledgerWriteAllowed = decision.ledgerWriteAllowed,
         )
     }
 

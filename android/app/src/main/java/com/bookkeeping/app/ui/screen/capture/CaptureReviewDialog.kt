@@ -244,6 +244,14 @@ private fun CaptureCandidateCard(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
+                if (!candidate.ledgerWriteAllowed) {
+                    Text(
+                        text = tr("仅预览，不能记入账本"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
@@ -281,7 +289,10 @@ private fun CaptureCandidateCard(
                     TextButton(onClick = onIgnore, enabled = !busy) {
                         Text(tr("忽略"))
                     }
-                    Button(onClick = { onApprove(merchant, category) }, enabled = !busy) {
+                    Button(
+                        onClick = { onApprove(merchant, category) },
+                        enabled = !busy && candidate.ledgerWriteAllowed,
+                    ) {
                         Text(tr("记入账本"))
                     }
                 }

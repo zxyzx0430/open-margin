@@ -281,6 +281,15 @@ class ScreenshotImportPipelineTest {
             timeZone = zone,
         )
         assertEquals(Action.ASK_USER, plan.decisions.single().action)
+        assertFalse(plan.decisions.single().ledgerWriteAllowed)
+        assertFalse(
+            ScreenshotCandidateFactory.create(
+                decision = plan.decisions.single(),
+                source = IntakeSource.SHARE,
+                capturedAtMs = capturedAt,
+                imageFingerprint = FINGERPRINT,
+            ).ledgerWriteAllowed,
+        )
         assertTrue(plan.bookings.isEmpty())
     }
 
@@ -294,6 +303,7 @@ class ScreenshotImportPipelineTest {
             timeZone = zone,
         )
         assertEquals(Action.ASK_USER, plan.decisions.single().action)
+        assertFalse(plan.decisions.single().ledgerWriteAllowed)
         assertTrue(plan.bookings.isEmpty())
     }
 
@@ -333,6 +343,7 @@ class ScreenshotImportPipelineTest {
         val decision = plan.decisions.single()
         assertEquals(CaptureCandidate.TIER_MEDIUM, decision.tier)
         assertEquals(Action.ASK_USER, decision.action)
+        assertTrue(decision.ledgerWriteAllowed)
         assertTrue(plan.bookings.isEmpty())
         assertEquals(2800L, decision.draft.amountCents)
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, decision.draft.direction)

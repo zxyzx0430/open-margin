@@ -34,4 +34,22 @@ class CaptureBookGateTest {
         )
         assertFalse(CaptureBookGate.mayWriteLedger(allowAuto = true, previewOnly = true))
     }
+
+    @Test
+    fun `preview candidate stays non-writable after review is queued`() {
+        val candidate = CaptureCandidate(
+            packageName = null,
+            pageIdentity = "screenshot:wechat:SUCCESS_PAGE:1:shop:0",
+            amountCents = 100L,
+            merchantCandidates = listOf("shop"),
+            orderId = null,
+            capturedAtMs = 1_700_000_000_000L,
+            screenshotPath = null,
+            confidence = 0.6f,
+            reason = "needs user confirmation",
+            ledgerWriteAllowed = false,
+        )
+        assertFalse(CaptureBookGate.mayConfirm(candidate))
+        assertTrue(CaptureBookGate.mayConfirm(candidate.copy(ledgerWriteAllowed = true)))
+    }
 }

@@ -22,6 +22,7 @@ internal object EnglishUiText {
         "有 %d 笔截图交易等你确认" to "%d screenshot transactions need your confirmation",
         "有一笔截图交易等你确认" to "One screenshot transaction needs your confirmation",
         "记入" to "Record",
+        "仅预览，不能记入账本" to "Preview only; cannot be added to the ledger",
         "正在识别截图" to "Reading the screenshot",
         "选择图片" to "Choose image",
         "当前系统不支持图片选择器" to "This system has no photo picker",

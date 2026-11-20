@@ -149,6 +149,7 @@ object ScreenshotImportPipeline {
                 reason = reason,
                 draft = draft,
                 matchedTransactionId = matched,
+                ledgerWriteAllowed = allowAuto && !previewOnly,
             )
         }
         return ImportPlan(decisions)

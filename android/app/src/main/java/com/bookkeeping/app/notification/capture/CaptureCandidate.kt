@@ -41,6 +41,8 @@ data class CaptureCandidate(
     val completionExplicit: Boolean = completionStatus == COMPLETION_COMPLETED,
     val directionExplicit: Boolean = direction != DIRECTION_UNKNOWN,
     val matchedTransactionId: Long? = null,
+    /** A preview candidate can be reviewed/ignored but never written through any path. */
+    val ledgerWriteAllowed: Boolean = true,
 ) {
 
     fun isValid(): Boolean {
@@ -122,6 +124,7 @@ data class CaptureCandidate(
         put("completionExplicit", completionExplicit)
         put("directionExplicit", directionExplicit)
         put("matchedTransactionId", matchedTransactionId ?: JSONObject.NULL)
+        put("ledgerWriteAllowed", ledgerWriteAllowed)
     }
 
     companion object {
@@ -272,6 +275,7 @@ data class CaptureCandidate(
                 directionExplicit = json.optBoolean("directionExplicit", direction != DIRECTION_UNKNOWN),
                 matchedTransactionId = if (json.isNull("matchedTransactionId")) null else
                     json.optLong("matchedTransactionId").takeIf { it > 0L },
+                ledgerWriteAllowed = json.optBoolean("ledgerWriteAllowed", true),
             )
             candidate.takeIf { it.isValid() }
         }.getOrNull()
