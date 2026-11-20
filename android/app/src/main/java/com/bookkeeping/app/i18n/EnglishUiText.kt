@@ -1265,7 +1265,7 @@ internal object EnglishUiText {
         "加载更多" to "Load more",
         "尝试 ID" to "Attempt ID",
         "记录每笔账从采集到入库经过的每一步。仅保存在本机，最长 7 天。" to
-            "Every step from capture to ledger, per bill. Stored only on this device for up to 7 days.",
+            "Every step from capture to ledger. Stored on this device for up to 7 days.",
         "链路 ID" to "Chain ID",
         "同一次采集的每一步共用，便于把过程串起来" to
             "Shared by every step of one capture, so the run reads as a single chain",
