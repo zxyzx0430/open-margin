@@ -601,6 +601,7 @@ internal object EnglishUiText {
         "没有待确认扫描结果" to "No pending scan results",
         "请先选择收支方向" to "Choose expense or income first",
         "扫描截图" to "Scan screenshot",
+        "查看大图" to "View full size",
         "置信度" to "Confidence",
         "候选：" to "Candidates: ",
         "单号" to "Order ",
