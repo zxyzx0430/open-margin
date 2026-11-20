@@ -90,6 +90,30 @@ object ScreenshotPageInterpreter {
         "支付", "收款", "转账", "退款", "订单", "零钱", "钱包", "账单",
     )
 
+    /**
+     * Rows that surround a bill-list card and can never be a shop name: the
+     * payment-method sentence (使用…支付 / 零钱 / 储蓄卡 / 信用卡 / 余额), the
+     * 账单详情 row and the 分分捐 / 领小红花 footer. On these cards the shop
+     * header itself sits two to four rows above the amount.
+     */
+    private val MERCHANT_INTERFERENCE = listOf(
+        "使用", "支付方式", "零钱", "储蓄卡", "信用卡", "余额",
+        "账单详情", "交易详情", "分分捐", "领小红花",
+    )
+
+    /** How many rows above the amount a shop name may sit on a bill-list card. */
+    private const val MERCHANT_LOOKUP_LINES = 4
+
+    /**
+     * WeChat chat transfer bubbles: the amount, the counterparty's action and
+     * the word 转账. 已被接收 is only drawn in the sender's bubble, while
+     * 已收款 / 待接收 are only drawn in the receiver's bubble.
+     */
+    private val TRANSFER_BUBBLE_STATES = listOf("已被接收", "已接收", "已收款", "待接收")
+
+    /** A page span narrower than this cannot prove which side a bubble sits on. */
+    private const val MIN_BUBBLE_SPAN = 240
+
     private val ORDER_ID_REGEX =
         Regex("(?:订单号|交易单号|交易号|商户订单号)\\s*[:：]?\\s*([A-Za-z0-9]{8,40})")
 
@@ -149,7 +173,16 @@ object ScreenshotPageInterpreter {
         // Footer statistics belong to the app shell, not to the transaction.
         val content = ordered.filterNot { isNoiseLine(it.text) }
         val allText = content.joinToString("\n") { it.text }
-        val platform = detectPlatform(allText)
+        val platform = detectPlatform(allText).let { detected ->
+            // A chat screenshot often carries no app name at all. The transfer
+            // bubble itself (amount + 已被接收/已收款/待接收 + 转账) is then the
+            // only proof that this is a WeChat payment page.
+            if (detected == CaptureCandidate.PLATFORM_UNKNOWN && isTransferBubbleText(allText)) {
+                CaptureCandidate.PLATFORM_WECHAT
+            } else {
+                detected
+            }
+        }
         val pageType = detectPageType(allText, content.any { amountOf(it.text) != null })
         if (pageType == PAGE_LIST) {
             return ScreenshotPageEvidence(
@@ -194,6 +227,11 @@ object ScreenshotPageInterpreter {
                 reason = "no transaction fields",
             )
         }
+        // Horizontal page span, used only to tell which side a chat bubble is
+        // drawn on. Without real boxes there is no side and no guess.
+        val boxedContent = content.filter { hasGeometry(it) }
+        val pageLeft = boxedContent.minOfOrNull { it.left } ?: 0
+        val pageRight = boxedContent.maxOfOrNull { it.right } ?: 0
         // Status evidence belongs to the card that carries it. A refund marker on
         // one card must not retype, complete or suppress another payment card on
         // the same page, and a future-debit marker must not hide its neighbour.
@@ -212,7 +250,16 @@ object ScreenshotPageInterpreter {
         }
         var drafts = cards.mapNotNull { card ->
             if (card.index in repeatedOrderTotals) return@mapNotNull null
-            buildDraft(card.index, card.blocks, platform, pageType, capturedAtMs, timeZone)
+            buildDraft(
+                card.index,
+                card.blocks,
+                platform,
+                pageType,
+                capturedAtMs,
+                timeZone,
+                pageLeft,
+                pageRight,
+            )
         }
         if (drafts.isEmpty()) {
             return ScreenshotPageEvidence(
@@ -474,14 +521,33 @@ object ScreenshotPageInterpreter {
         pageType: String,
         capturedAtMs: Long,
         timeZone: TimeZone,
+        pageLeft: Int,
+        pageRight: Int,
     ): TransactionDraft? {
         val amountBlock = segment.firstOrNull { amountOf(it.text) != null } ?: return null
         val segmentText = segment.joinToString("\n") { it.text }
         val amount = amountOf(amountBlock.text)
         val amountUnambiguous = segment.count { amountOf(it.text) != null } == 1
-        val direction = directionOf(segmentText, amountBlock.text, pageType)
+        val bubble = transferBubbleOf(segmentText)
+        val direction = if (bubble == null) {
+            directionOf(segmentText, amountBlock.text, pageType)
+        } else {
+            // The state word is only drawn on one side, and the bubble's own
+            // position is independent evidence. When both are readable they must
+            // agree; a contradiction stays UNKNOWN instead of being guessed.
+            val side = bubbleSideOf(amountBlock, pageLeft, pageRight)
+            when {
+                side == null -> bubble.direction
+                side == bubble.direction -> bubble.direction
+                else -> CaptureCandidate.DIRECTION_UNKNOWN
+            }
+        }
         val kind = kindOf(segmentText, direction)
-        val completion = completionOf(segment)
+        val completion = if (bubble != null) {
+            bubble.completionStatus to bubble.completionExplicit
+        } else {
+            completionOf(segment)
+        }
         val merchant = merchantOf(segment, amountBlock)
         val orderId = ORDER_ID_REGEX.find(segmentText)?.groupValues?.get(1)
         val eventTime = eventTimeOf(segmentText, capturedAtMs, timeZone)
@@ -538,6 +604,62 @@ object ScreenshotPageInterpreter {
             CaptureCandidate.KIND_AUTO_PAY
         direction == CaptureCandidate.DIRECTION_UNKNOWN -> CaptureCandidate.KIND_PAYMENT
         else -> CaptureCandidate.KIND_PAYMENT
+    }
+
+    /**
+     * A WeChat chat transfer bubble: amount + state + 转账.
+     *
+     * Only 已收款 proves the money arrived. 已被接收 and 待接收 describe the
+     * counterparty's action, not a settled entry, so they are surfaced for
+     * confirmation instead of being booked or claimed as completed.
+     */
+    private data class TransferBubble(
+        val direction: String,
+        val completionStatus: String,
+        val completionExplicit: Boolean,
+    )
+
+    private fun transferBubbleOf(text: String): TransferBubble? {
+        if (!text.contains("转账")) return null
+        return when {
+            text.contains("已被接收") || text.contains("已接收") -> TransferBubble(
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                completionStatus = CaptureCandidate.COMPLETION_UNKNOWN,
+                completionExplicit = false,
+            )
+            text.contains("待接收") -> TransferBubble(
+                direction = CaptureCandidate.DIRECTION_INCOME,
+                completionStatus = CaptureCandidate.COMPLETION_UNKNOWN,
+                completionExplicit = false,
+            )
+            text.contains("已收款") -> TransferBubble(
+                direction = CaptureCandidate.DIRECTION_INCOME,
+                completionStatus = CaptureCandidate.COMPLETION_COMPLETED,
+                completionExplicit = true,
+            )
+            else -> null
+        }
+    }
+
+    private fun isTransferBubbleText(text: String): Boolean =
+        text.contains("转账") && TRANSFER_BUBBLE_STATES.any(text::contains)
+
+    /**
+     * Which side of the page a chat bubble is drawn on: the sender's bubble sits
+     * on the left, the receiver's on the right. A side is only returned when
+     * real boxes and a wide enough page make it unambiguous.
+     */
+    private fun bubbleSideOf(amount: TextBlock, pageLeft: Int, pageRight: Int): String? {
+        if (!hasGeometry(amount)) return null
+        val span = pageRight - pageLeft
+        if (span < MIN_BUBBLE_SPAN) return null
+        val center = (amount.left + amount.right) / 2
+        val ratio = (center - pageLeft).toFloat() / span
+        return when {
+            ratio <= 0.35f -> CaptureCandidate.DIRECTION_EXPENSE
+            ratio >= 0.65f -> CaptureCandidate.DIRECTION_INCOME
+            else -> null
+        }
     }
 
     /**
@@ -661,10 +783,49 @@ object ScreenshotPageInterpreter {
                 }
             }
         }
-        // Fall back to the line directly above the amount, which is where both
-        // apps put the merchant on a success page.
-        val above = segment.lastOrNull { it.bottom <= amountBlock.top }
-        return merchantName(above?.text, allowDigit = false)?.let { listOf(it) } ?: emptyList()
+        // A chat transfer bubble has no merchant: its rows are the amount, the
+        // counterparty's action and the word 转账, and chat text above it must
+        // never be read as a shop name.
+        if (transferBubbleOf(segment.joinToString("\n") { it.text }) != null) return emptyList()
+        // Fall back to the rows above the amount. A bill-list card prints the
+        // shop two to four rows above it (icon row, payment method, timestamp),
+        // so giving up after one rejected row is exactly what left real shops
+        // unread. Walk at most [MERCHANT_LOOKUP_LINES] rows, nearest first, and
+        // skip the chrome that can never be a shop name.
+        val amountIndex = segment.indexOfFirst { it === amountBlock }
+        val above = if (amountIndex > 0) segment.subList(0, amountIndex) else emptyList()
+        above.takeLast(MERCHANT_LOOKUP_LINES).asReversed().forEach { block ->
+            if (isMerchantInterference(block.text)) return@forEach
+            merchantName(block.text, allowDigit = true)?.let { return listOf(it) }
+        }
+        return emptyList()
+    }
+
+    /**
+     * Rows around a bill-list card that are chrome, not a shop name: the
+     * payment-method sentence, card / balance words, timestamps, dates, pure
+     * numbers and the 账单详情 / 分分捐 footer.
+     *
+     * The shop itself may carry digits, brackets, @ and dots, so this is a list
+     * of known non-shop shapes rather than a "must be Chinese" filter.
+     */
+    private fun isMerchantInterference(line: String): Boolean {
+        val text = line.trim()
+        if (text.isEmpty()) return true
+        if (amountOf(text) != null) return true
+        if (isTimeOrDateLine(text)) return true
+        if (MERCHANT_INTERFERENCE.any(text::contains)) return true
+        if (text.all { it.isDigit() || it.isWhitespace() || it in ".,:：" }) return true
+        return false
+    }
+
+    /** `21:46`, `昨天 14:01`, `11月19日 20:10`, `2026-11-19 20:15`: never a shop. */
+    private fun isTimeOrDateLine(line: String): Boolean {
+        val stripped = RELATIVE_DAY_REGEX.replace(line, " ").trim()
+        if (TIME_ONLY_REGEX.matchEntire(stripped) != null) return true
+        if (DATE_TIME_REGEX.containsMatchIn(line)) return true
+        if (MONTH_DAY_TIME_REGEX.containsMatchIn(line)) return true
+        return line.contains("月") && line.contains("日")
     }
 
     /**
