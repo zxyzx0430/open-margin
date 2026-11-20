@@ -28,15 +28,20 @@ class CaptureReviewViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: TransactionRepository,
     private val settings: SettingsPreferences,
+    private val diagnostics: TransactionDiagnostics,
 ) : ViewModel() {
 
     data class UiState(
         val pending: List<CaptureCandidate> = emptyList(),
+        /** A full-list reload is running; per-card writes use [busyIds]. */
         val busy: Boolean = false,
+        /** Cards with a write in flight. One card never blocks another. */
+        val busyIds: Set<String> = emptySet(),
         val message: String? = null,
     )
 
     private val store = CaptureCandidateStore(context)
+    private val queue = CaptureReviewQueue()
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
@@ -46,9 +51,20 @@ class CaptureReviewViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
+            _state.update { it.copy(busy = true) }
             val pending = withContext(Dispatchers.IO) { store.pending() }
-            _state.update { it.copy(pending = pending) }
+            queue.replacePending(pending)
+            publish()
         }
+    }
+
+    private fun publish(message: String? = _state.value.message) {
+        _state.value = UiState(
+            pending = queue.pending(),
+            busy = false,
+            busyIds = queue.busyIds(),
+            message = message,
+        )
     }
 
     fun approve(
@@ -68,8 +84,9 @@ class CaptureReviewViewModel @Inject constructor(
             _state.update { it.copy(message = message) }
             return
         }
-        if (_state.value.busy) return
-        _state.update { it.copy(busy = true, message = null) }
+        // Only this card is blocked while it writes; other cards stay actionable.
+        if (!queue.begin(resolved)) return
+        publish(message = null)
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
@@ -93,20 +110,43 @@ class CaptureReviewViewModel @Inject constructor(
             if (result.isSuccess && merchant.isNotBlank()) {
                 settings.recordCategoryLearning(merchant, category)
             }
-            if (result.isSuccess) {
-                val status = if (inserted) {
-                    CaptureCandidate.STATUS_APPROVED
-                } else {
-                    CaptureCandidate.STATUS_IGNORED
-                }
-                withContext(Dispatchers.IO) { store.mark(resolved, status) }
+            if (result.isFailure) {
+                queue.rollback(resolved)
+                publish(message = AppLanguage.tr(context, "记入失败，请稍后重试"))
+                recordFailure(
+                    resolved,
+                    "approve: ledger write failed (${result.exceptionOrNull()?.javaClass?.simpleName})",
+                )
+                return@launch
             }
-            val pending = withContext(Dispatchers.IO) { store.pending() }
-            _state.value = UiState(
-                pending = pending,
-                busy = false,
+            val status = if (inserted) {
+                CaptureCandidate.STATUS_APPROVED
+            } else {
+                CaptureCandidate.STATUS_IGNORED
+            }
+            val marked = withContext(Dispatchers.IO) { store.mark(resolved, status) }
+            if (!marked) {
+                // The ledger part succeeded, only the candidate status did not:
+                // keep the card and say so instead of pretending it is done.
+                queue.rollback(resolved)
+                val statusText = AppLanguage.tr(context, CaptureReviewText.IGNORE_FAILED)
+                publish(
+                    message = if (inserted) {
+                        AppLanguage.tr(context, "已记入账本") + " · " + statusText
+                    } else {
+                        statusText
+                    },
+                )
+                recordFailure(
+                    resolved,
+                    "approve: ledger inserted=$inserted but store.mark returned false",
+                )
+                return@launch
+            }
+            queue.finish(resolved.candidateId)
+            queue.replacePending(withContext(Dispatchers.IO) { store.pending() })
+            publish(
                 message = when {
-                    result.isFailure -> AppLanguage.tr(context, "记入失败，请稍后重试")
                     inserted -> AppLanguage.tr(context, "已记入账本")
                     else -> AppLanguage.tr(context, "这笔记录已存在，已从待确认中移除")
                 },
@@ -115,17 +155,33 @@ class CaptureReviewViewModel @Inject constructor(
     }
 
     fun ignore(candidate: CaptureCandidate) {
-        if (_state.value.busy) return
-        _state.update { it.copy(busy = true, message = null) }
+        // Only the same card is refused while it writes; a tap on another card
+        // is never dropped, which is what made users tap twice.
+        if (!queue.begin(candidate)) return
+        publish(message = null)
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
+            val marked = withContext(Dispatchers.IO) {
                 store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
             }
-            val pending = withContext(Dispatchers.IO) { store.pending() }
-            _state.value = UiState(
-                pending = pending,
-                busy = false,
-                message = AppLanguage.tr(context, "扫描结果已忽略"),
+            val outcome = queue.settleIgnore(candidate, marked)
+            if (outcome == IgnoreOutcome.IGNORED) {
+                queue.replacePending(withContext(Dispatchers.IO) { store.pending() })
+            }
+            publish(message = CaptureReviewText.ignore(outcome)?.let { AppLanguage.tr(context, it) })
+            if (outcome == IgnoreOutcome.MARK_FAILED) {
+                recordFailure(candidate, "ignore: store.mark returned false")
+            }
+        }
+    }
+
+    /** One failure event per rejected write; diagnostics never change bookkeeping. */
+    private suspend fun recordFailure(candidate: CaptureCandidate, details: String) {
+        withContext(Dispatchers.IO) {
+            diagnostics.record(
+                attemptId = candidate.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+                stage = TransactionDiagnostics.STAGE_EDIT,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = details,
             )
         }
     }
@@ -212,16 +268,19 @@ class CaptureReviewQueue(initial: List<CaptureCandidate> = emptyList()) {
      */
     fun begin(candidate: CaptureCandidate): Boolean {
         if (items.none { it.candidateId == candidate.candidateId }) return false
-        // RED: mirrors the shipped rule, where any write blocks every card.
-        if (inFlight.isNotEmpty()) return false
-        inFlight += candidate.candidateId
+        // A card only blocks itself: two taps on the same card must not write
+        // twice, while a write on A must never swallow a tap on B.
+        if (!inFlight.add(candidate.candidateId)) return false
         items.removeAll { it.candidateId == candidate.candidateId }
         return true
     }
 
     /** Settle an ignore write. A failed mark must put the card back. */
     fun settleIgnore(candidate: CaptureCandidate, marked: Boolean): IgnoreOutcome {
-        // RED: mirrors the shipped ignore(), which never looks at mark()'s result.
+        if (!marked) {
+            rollback(candidate)
+            return IgnoreOutcome.MARK_FAILED
+        }
         finish(candidate.candidateId)
         return IgnoreOutcome.IGNORED
     }
