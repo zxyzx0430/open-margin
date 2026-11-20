@@ -106,8 +106,10 @@ object ScreenshotPageInterpreter {
 
     /**
      * WeChat chat transfer bubbles: the amount, the counterparty's action and
-     * the word 转账. 已被接收 is only drawn in the sender's bubble, while
-     * 已收款 / 待接收 are only drawn in the receiver's bubble.
+     * the word 转账. 已被接收 is only drawn in the sender's bubble and 已收款
+     * only in the receiver's, so those words identify the side. 待接收 is drawn
+     * on both bubbles — the sender waiting for the money to be accepted and the
+     * receiver waiting to accept it — so that word says nothing about direction.
      */
     private val TRANSFER_BUBBLE_STATES = listOf("已被接收", "已接收", "已收款", "待接收")
 
@@ -529,18 +531,14 @@ object ScreenshotPageInterpreter {
         val amount = amountOf(amountBlock.text)
         val amountUnambiguous = segment.count { amountOf(it.text) != null } == 1
         val bubble = transferBubbleOf(segmentText)
+        val side = if (bubble == null) null else bubbleSideOf(amountBlock, pageLeft, pageRight)
         val direction = if (bubble == null) {
             directionOf(segmentText, amountBlock.text, pageType)
         } else {
-            // The state word is only drawn on one side, and the bubble's own
-            // position is independent evidence. When both are readable they must
-            // agree; a contradiction stays UNKNOWN instead of being guessed.
-            val side = bubbleSideOf(amountBlock, pageLeft, pageRight)
-            when {
-                side == null -> bubble.direction
-                side == bubble.direction -> bubble.direction
-                else -> CaptureCandidate.DIRECTION_UNKNOWN
-            }
+            // The state word and the bubble's own position are independent
+            // evidence. When both are readable they must agree; a contradiction
+            // stays UNKNOWN instead of being guessed.
+            bubbleDirectionOf(bubble.direction, side)
         }
         val kind = kindOf(segmentText, direction)
         val completion = if (bubble != null) {
@@ -553,6 +551,10 @@ object ScreenshotPageInterpreter {
         val eventTime = eventTimeOf(segmentText, capturedAtMs, timeZone)
         val supported = platform != CaptureCandidate.PLATFORM_UNKNOWN &&
             pageType in setOf(PAGE_SUCCESS, PAGE_DETAIL)
+        // A waiting bubble whose own word proves no direction must not claim one
+        // in its reason either: the card has to say the direction is still open.
+        val directionUnproven = bubble != null && bubble.direction == null &&
+            direction == CaptureCandidate.DIRECTION_UNKNOWN
         return TransactionDraft(
             index = index,
             amountCents = amount,
@@ -567,7 +569,11 @@ object ScreenshotPageInterpreter {
             eventTimeMs = eventTime,
             pageIdentity = "${platform.lowercase(Locale.ROOT)}:$pageType:${amount ?: 0}:${noiseKey(merchant.firstOrNull())}",
             supportedPaymentPage = supported,
-            reason = if (supported) "supported payment page" else "page not recognised as a payment result",
+            reason = when {
+                !supported -> "page not recognised as a payment result"
+                directionUnproven -> "waiting transfer; direction needs a user pick"
+                else -> "supported payment page"
+            },
         )
     }
 
@@ -609,12 +615,19 @@ object ScreenshotPageInterpreter {
     /**
      * A WeChat chat transfer bubble: amount + state + 转账.
      *
+     * [direction] is the direction the state word itself proves, or null when
+     * the word proves nothing. 待接收 is printed on the sender's bubble (the
+     * money already left me, waiting for the other side to accept) and on the
+     * receiver's bubble (waiting for me to accept), so only the bubble's own
+     * position may decide the direction there; without that position the draft
+     * stays DIRECTION_UNKNOWN and the user has to pick.
+     *
      * Only 已收款 proves the money arrived. 已被接收 and 待接收 describe the
      * counterparty's action, not a settled entry, so they are surfaced for
      * confirmation instead of being booked or claimed as completed.
      */
     private data class TransferBubble(
-        val direction: String,
+        val direction: String?,
         val completionStatus: String,
         val completionExplicit: Boolean,
     )
@@ -627,8 +640,11 @@ object ScreenshotPageInterpreter {
                 completionStatus = CaptureCandidate.COMPLETION_UNKNOWN,
                 completionExplicit = false,
             )
+            // 待接收 appears on both sides of the chat, so it cannot prove a
+            // direction. Keep the unfinished meaning only; the bubble's side or
+            // the user decides who paid whom.
             text.contains("待接收") -> TransferBubble(
-                direction = CaptureCandidate.DIRECTION_INCOME,
+                direction = null,
                 completionStatus = CaptureCandidate.COMPLETION_UNKNOWN,
                 completionExplicit = false,
             )
@@ -639,6 +655,20 @@ object ScreenshotPageInterpreter {
             )
             else -> null
         }
+    }
+
+    /**
+     * Direction for a chat transfer bubble.
+     *
+     * A state word that identifies its own side is used when the page carries no
+     * readable side, and must agree with one when it does: a contradiction stays
+     * UNKNOWN. A word that proves nothing (待接收) leaves the decision to the
+     * bubble's side, and without a side stays UNKNOWN — never a guess.
+     */
+    private fun bubbleDirectionOf(textDirection: String?, side: String?): String {
+        if (textDirection == null) return side ?: CaptureCandidate.DIRECTION_UNKNOWN
+        if (side == null || side == textDirection) return textDirection
+        return CaptureCandidate.DIRECTION_UNKNOWN
     }
 
     private fun isTransferBubbleText(text: String): Boolean =
