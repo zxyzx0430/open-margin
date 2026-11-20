@@ -20,6 +20,7 @@ internal object EnglishUiText {
         "截图记账" to "Screenshot capture",
         "时间待确认" to "Time to be confirmed",
         "金额待补" to "Amount missing",
+        "方向待确认" to "Direction needs confirmation",
         "截图待确认" to "Screenshot review",
         "识别到的截图交易，等你确认后入账" to "A transaction recognised from a screenshot; it is booked only after you confirm",
         "截图识别待确认" to "Screenshot needs confirmation",
