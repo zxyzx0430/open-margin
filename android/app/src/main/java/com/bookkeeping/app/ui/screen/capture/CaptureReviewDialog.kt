@@ -68,8 +68,8 @@ fun CaptureReviewDialog(
     viewModel: CaptureReviewViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
-    // 预览位图与“当前打开的是哪张”放同一作用域：跨 composable 声明会 Unresolved reference。
-    var previewBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    // 预览只记「当前打开哪张原图」，不再顺手把列表那张 1/4 缩小的位图传下去：
+    // 传输略图等于把模糊放大，用户点开是要看清商户名的。
     var previewState by remember { mutableStateOf(CaptureImagePreviewState()) }
     Dialog(
         onDismissRequest = onDismiss,
@@ -128,8 +128,8 @@ fun CaptureReviewDialog(
                             CaptureCandidateCard(
                                 candidate = candidate,
                                 busy = state.busy || candidate.candidateId in state.busyIds,
-                                onOpenPreview = { bitmap ->
-                                    previewBitmap = bitmap
+                                onOpenPreview = {
+                                    // 只记路径；位图由预览自己按这个路径读原图。
                                     previewState = previewState.onThumbnailTapped(
                                         screenshotPath = candidate.screenshotPath,
                                         hasThumbnail = true,
@@ -146,11 +146,11 @@ fun CaptureReviewDialog(
             }
         }
     }
-    previewBitmap?.takeIf { previewState.open }?.let { bitmap ->
+    // 用 openPath 而不是位图做显示条件：读盘失败时预览自己给降级页，不会拿旧图顶上。
+    previewState.openPath?.let { path ->
         CaptureImagePreview(
-            bitmap = bitmap,
+            path = path,
             onDismiss = {
-                previewBitmap = null
                 previewState = previewState.onDismissed()
             },
         )
@@ -161,7 +161,7 @@ fun CaptureReviewDialog(
 private fun CaptureCandidateCard(
     candidate: CaptureCandidate,
     busy: Boolean,
-    onOpenPreview: (ImageBitmap) -> Unit,
+    onOpenPreview: () -> Unit,
     onApprove: (String, TransactionCategory, String?) -> Unit,
     onIgnore: () -> Unit,
 ) {
@@ -232,7 +232,7 @@ private fun CaptureCandidateCard(
                         modifier = Modifier
                             .size(64.dp)
                             .clip(RoundedCornerShape(14.dp))
-                            .clickable(enabled = previewable) { onOpenPreview(image) },
+                            .clickable(enabled = previewable) { onOpenPreview() },
                     )
                     if (previewable) {
                         // 右下角放大镜：缩略图太小，不给提示用户不知道能点。
