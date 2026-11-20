@@ -2,6 +2,7 @@ package com.bookkeeping.app.data.repository
 
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
+import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.settings.SettingsPreferences
@@ -20,6 +21,7 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 import java.util.UUID
+import kotlin.math.abs
 
 // Repository：业务层与数据层的桥梁。
 // 上层（ViewModel）只跟 Repository 打交道，不直接接触 DAO/网络/SharedPreferences。
@@ -145,6 +147,8 @@ class TransactionRepository @Inject constructor(
     //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
     // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
     //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
+    // 5) 跨来源只在截图路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
+    //    通知/短信/无障碍/手工完全不变）：同额同方同向、时间邻近、来源不同 → 不插新行。
     /** Recent ledger rows for screenshot cross-source de-duplication (read-only). */
     suspend fun screenshotDedupRows(limit: Int = 500): List<TransactionEntity> =
         dao.recentForScreenshotDedup(limit)
@@ -154,6 +158,12 @@ class TransactionRepository @Inject constructor(
         windowMs: Long = 8_000L,
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+        /**
+         * 跨来源重复窗口（毫秒）。默认 0 = 关闭，通知/短信/无障碍/手工记账的行为
+         * 与改动前完全一致；只有截图路径显式传入
+         * [CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS] 才启用跨来源检查。
+         */
+        crossSourceWindowMs: Long = 0L,
     ): Long? = duplicateMutex.withLock {
         diagnostics.record(
             attemptId = diagnosticInput.attemptId,
@@ -209,6 +219,46 @@ class TransactionRepository @Inject constructor(
                 result = TransactionDiagnostics.RESULT_WARNING,
                 details = "Exact duplicate candidate skipped",
                 transactionId = existing.id,
+            )
+            return@withLock null
+        }
+
+        // 层 2：跨来源拦截。默认关闭（crossSourceWindowMs = 0），只有截图路径显式
+        // 传窗口才走到这里；通知/短信/无障碍/手工记账的调用一行未改。
+        // 判据保守：同额 + 同向 + 同币种 + 时间邻近 + 订单号相等（跨来源也成立），
+        // 或商户明确相同；页面时间只是截屏时间的兜底时不拦（宁可多一行，不吞真钱）。
+        val crossSourceExisting = if (crossSourceWindowMs > 0L) {
+            try {
+                CrossSourceDuplicatePolicy.findMatch(
+                    candidates = dao.findRecentByAmount(
+                        amountCents = transaction.amountCents,
+                        type = transaction.type,
+                        currency = transaction.currency,
+                        windowStartMs = transaction.timestamp - crossSourceWindowMs,
+                        windowEndMs = transaction.timestamp + crossSourceWindowMs,
+                    ),
+                    incoming = transaction,
+                    windowMs = crossSourceWindowMs,
+                )
+            } catch (failure: Exception) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = diagnosticError(failure),
+                )
+                throw failure
+            }
+        } else {
+            null
+        }
+        if (crossSourceExisting != null) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "Cross-source duplicate candidate skipped",
+                transactionId = crossSourceExisting.id,
             )
             return@withLock null
         }
@@ -641,5 +691,79 @@ class TransactionRepository @Inject constructor(
 
     companion object {
         const val POSSIBLE_DUPLICATE_WINDOW_MS: Long = DuplicateReviewPolicy.WINDOW_MS
+    }
+}
+/**
+ * 跨来源防重复（纯逻辑，无 Android / Room 依赖，可直接跑 JVM 单测）。
+ *
+ * 同一笔钱可能被通知（source = 包名，如 com.tencent.mm）、短信、无障碍、截图
+ * （source = WECHAT / ALIPAY）各记一次。旧版 [TransactionDao.findRecentSameAmount]
+ * 把 `source` 写进了 WHERE，跨来源场景永远查不到，于是各插一行。
+ *
+ * 这里只在截图路径显式启用（[TransactionRepository.insertIfNotDuplicate] 的
+ * `crossSourceWindowMs`），默认 0 时完全不参与，通知/短信/无障碍/手工记账行为不变。
+ *
+ * 判据刻意保守，因为这里是「不再写入新行」：一旦判错，用户看不见那笔钱。
+ * - 两边都带订单号：相等才算同一笔（跨来源也成立），不等就是两笔。
+ * - 否则必须来源不同，且商户名明确相同（归一后相等或互相包含）。
+ * - 商户缺失/是「微信支付」这类占位名时不拦：证据不足，交给层 1 的人工确认。
+ * - 页面时间只是截屏时间兜底（`eventTimeNeedsConfirmation`）时不拦：时间本身不可信。
+ */
+object CrossSourceDuplicatePolicy {
+
+    /** 截图确认路径的跨来源窗口。页面有真实交易时间时，同一笔的时间差通常接近 0。 */
+    const val SCREENSHOT_WINDOW_MS: Long = 10 * 60_000L
+
+    /**
+     * 在 [candidates] 里找「和 [incoming] 是同一笔钱、但来自另一条采集路径」的一条。
+     *
+     * @param windowMs 0 表示关闭跨来源检查，直接返回 null（默认行为）。
+     * @return 最接近的一条已有记录；没有就返回 null。
+     */
+    fun findMatch(
+        candidates: List<TransactionEntity>,
+        incoming: TransactionEntity,
+        windowMs: Long,
+    ): TransactionEntity? {
+        if (windowMs <= 0L) return null
+        if (incoming.eventTimeNeedsConfirmation) return null
+        val incomingOrderId = incoming.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
+        return candidates
+            .asSequence()
+            .filter { it.id != incoming.id }
+            .filter { !it.syncDeleted && it.duplicateOfId == null }
+            .filter { it.remoteReviewStatus != "excluded" && it.remoteReviewStatus != "possible_duplicate" }
+            .filter { it.amountCents == incoming.amountCents }
+            .filter { it.type == incoming.type }
+            .filter { it.currency.equals(incoming.currency, ignoreCase = true) }
+            .filter { abs(it.timestamp - incoming.timestamp) <= windowMs }
+            .filter { existing ->
+                val existingOrderId = existing.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
+                when {
+                    existingOrderId != null && incomingOrderId != null ->
+                        existingOrderId.equals(incomingOrderId, ignoreCase = true)
+                    existing.source == incoming.source -> false
+                    else -> merchantsSame(existing.merchant, incoming.merchant)
+                }
+            }
+            .minByOrNull { abs(it.timestamp - incoming.timestamp) }
+    }
+
+    /**
+     * 两个商户名是否明确指向同一家店。
+     *
+     * 占位名（「微信支付」「未知商户」…）和空名字都不算证据，返回 false：
+     * 此时无法断言「同方」，宁可多一行让用户删，也不吞掉一笔真钱。
+     */
+    fun merchantsSame(first: String, second: String): Boolean {
+        if (!CaptureMergePolicy.hasMerchantInfo(first)) return false
+        if (!CaptureMergePolicy.hasMerchantInfo(second)) return false
+        val firstKey = MerchantRules.normalize(first)
+        val secondKey = MerchantRules.normalize(second)
+        if (firstKey.isEmpty() || secondKey.isEmpty()) return false
+        if (firstKey == secondKey) return true
+        val shorter = if (firstKey.length <= secondKey.length) firstKey else secondKey
+        val longer = if (shorter == firstKey) secondKey else firstKey
+        return shorter.length >= 2 && longer.contains(shorter)
     }
 }

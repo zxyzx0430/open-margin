@@ -10,6 +10,7 @@ import android.provider.OpenableColumns
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
@@ -277,7 +278,11 @@ class ScreenshotIntakeCoordinator private constructor(
                             ).category,
                         )
                         val inserted = runCatching {
-                            repo.insertIfNotDuplicate(entity, notifySuccess = false)
+                            repo.insertIfNotDuplicate(
+                                entity,
+                                notifySuccess = false,
+                                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                            )
                         }.getOrNull()
                         if (inserted != null && inserted > 0L) {
                             store.mark(stored, CaptureCandidate.STATUS_APPROVED)
@@ -366,6 +371,7 @@ class ScreenshotIntakeCoordinator private constructor(
                 diagnosticInput = TransactionDiagnosticInput(
                     attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
                 ),
+                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
             )
         } catch (_: Exception) {
             return ConfirmationResult.FAILED
