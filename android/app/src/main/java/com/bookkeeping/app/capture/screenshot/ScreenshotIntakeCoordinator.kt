@@ -25,6 +25,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.security.MessageDigest
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
@@ -36,26 +37,49 @@ import kotlinx.coroutines.sync.withLock
  * OCR; all admission decisions come from [ScreenshotImportPipeline] so the three
  * entry points cannot drift apart.
  */
-class ScreenshotIntakeCoordinator(
-    private val context: Context,
-    private val store: CaptureCandidateStore = CaptureCandidateStore(context),
-    private val repositoryProvider: () -> TransactionRepository? = {
-        runCatching {
-            EntryPointAccessors.fromApplication(
-                context.applicationContext,
-                ScreenshotImportEntryPoint::class.java,
-            ).transactionRepository()
-        }.getOrNull()
-    },
-    private val diagnosticsProvider: () -> TransactionDiagnostics? = {
-        runCatching {
-            EntryPointAccessors.fromApplication(
-                context.applicationContext,
-                ScreenshotImportEntryPoint::class.java,
-            ).transactionDiagnostics()
-        }.getOrNull()
-    },
+class ScreenshotIntakeCoordinator private constructor(
+    private val context: Context?,
+    private val store: CaptureCandidateStore,
+    private val repositoryProvider: () -> TransactionRepository?,
+    private val diagnosticSink: suspend (ScreenshotImportDiagnostics.FailureNote) -> Unit,
 ) {
+    /**
+     * Android entry point: URI access, decoding and OCR all come from [context].
+     * Everything after OCR is free of Android types, so tests build the
+     * coordinator from a store and a fake diagnostics sink instead.
+     */
+    constructor(context: Context) : this(
+        context = context,
+        store = CaptureCandidateStore(context),
+        repositoryProvider = {
+            runCatching {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    ScreenshotImportEntryPoint::class.java,
+                ).transactionRepository()
+            }.getOrNull()
+        },
+        diagnosticSink = { note ->
+            runCatching {
+                EntryPointAccessors.fromApplication(
+                    context.applicationContext,
+                    ScreenshotImportEntryPoint::class.java,
+                ).transactionDiagnostics()
+            }.getOrNull()?.record(
+                attemptId = note.attemptId,
+                stage = note.stage,
+                result = note.result,
+                details = note.details,
+            )
+        },
+    )
+
+    internal constructor(
+        store: CaptureCandidateStore,
+        repositoryProvider: () -> TransactionRepository? = { null },
+        diagnosticSink: suspend (ScreenshotImportDiagnostics.FailureNote) -> Unit = {},
+    ) : this(null, store, repositoryProvider, diagnosticSink)
+
     data class Outcome(
         val booked: Int = 0,
         val pending: Int = 0,
@@ -84,7 +108,7 @@ class ScreenshotIntakeCoordinator(
         allowAuto: Boolean = true,
         previewOnly: Boolean = false,
     ): Outcome {
-        val resolver = context.contentResolver
+        val resolver = requireContext().contentResolver
         val mime = runCatching { resolver.getType(uri) }.getOrNull()
         val size = runCatching {
             resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
@@ -99,35 +123,61 @@ class ScreenshotIntakeCoordinator(
             readable = true,
             byteSize = size,
         )
+        return ingestRequest(request, allowAuto, previewOnly) {
+            runCatching { resolver.openInputStream(uri) }.getOrNull()
+        }
+    }
+
+    /**
+     * Validate, read, decode and recognise one intake, then hand the page to
+     * [ingestBlocks]. Android-free except for decoding and OCR.
+     *
+     * The attempt id is created before validation: every rejection below writes
+     * one failure diagnostic, so a screenshot that never reaches the parser can
+     * still be traced. The write is best effort and never changes the outcome.
+     */
+    internal suspend fun ingestRequest(
+        request: ScreenshotIntakeRequest,
+        allowAuto: Boolean,
+        previewOnly: Boolean,
+        openStream: () -> InputStream?,
+    ): Outcome {
+        val attemptId = TransactionDiagnostics.newAttemptId()
+        val autoBookAllowed = allowAuto && !previewOnly
         val validation = ScreenshotImportPipeline.validate(request)
         if (validation is IntakeValidation.Rejected) {
-            return Outcome(failure = validation.reason, autoBookAllowed = allowAuto && !previewOnly)
+            recordFailure(attemptId, validation.reason)
+            return Outcome(failure = validation.reason, autoBookAllowed = autoBookAllowed)
         }
 
         val boundedRead = runCatching {
-            ScreenshotBoundedReader.read(resolver.openInputStream(uri), ScreenshotImportPipeline.MAX_IMAGE_BYTES)
+            ScreenshotBoundedReader.read(openStream(), ScreenshotImportPipeline.MAX_IMAGE_BYTES)
         }.getOrNull()
         if (boundedRead == null) {
-            return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = allowAuto && !previewOnly)
+            recordFailure(attemptId, FailureReason.UNREADABLE)
+            return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
         val bytes = when (boundedRead) {
             is ScreenshotBoundedReader.Result.Complete -> boundedRead.bytes
             ScreenshotBoundedReader.Result.Oversized -> {
-                return Outcome(failure = FailureReason.OVERSIZED, autoBookAllowed = allowAuto && !previewOnly)
+                recordFailure(attemptId, FailureReason.OVERSIZED)
+                return Outcome(failure = FailureReason.OVERSIZED, autoBookAllowed = autoBookAllowed)
             }
         }
         if (bytes.isEmpty()) {
-            return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = allowAuto && !previewOnly)
+            recordFailure(attemptId, FailureReason.UNREADABLE)
+            return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
-        val fingerprint = sha256(bytes)
         val decoded = runCatching { decode(bytes) }.getOrNull()
         if (decoded == null) {
-            return Outcome(failure = FailureReason.DECODE_FAILED, autoBookAllowed = allowAuto && !previewOnly)
+            recordFailure(attemptId, FailureReason.DECODE_FAILED)
+            return Outcome(failure = FailureReason.DECODE_FAILED, autoBookAllowed = autoBookAllowed)
         }
         val ocr = runCatching { recognize(decoded) }.getOrNull()
         decoded.recycle()
         if (ocr == null || ocr.isEmpty) {
-            return Outcome(failure = FailureReason.OCR_EMPTY, autoBookAllowed = allowAuto && !previewOnly)
+            recordFailure(attemptId, FailureReason.OCR_EMPTY)
+            return Outcome(failure = FailureReason.OCR_EMPTY, autoBookAllowed = autoBookAllowed)
         }
         val blocks = ocr.lines.mapNotNull { line ->
             val bounds = line.bounds
@@ -142,6 +192,29 @@ class ScreenshotIntakeCoordinator(
                 )
             }
         }
+        return ingestBlocks(
+            request = request,
+            blocks = blocks,
+            bytes = bytes,
+            fingerprint = sha256(bytes),
+            attemptId = attemptId,
+            allowAuto = allowAuto,
+            previewOnly = previewOnly,
+        )
+    }
+
+    /** Admit the recognised page and apply each decision to the candidate store. */
+    internal suspend fun ingestBlocks(
+        request: ScreenshotIntakeRequest,
+        blocks: List<TextBlock>,
+        bytes: ByteArray?,
+        fingerprint: String,
+        attemptId: String,
+        allowAuto: Boolean,
+        previewOnly: Boolean,
+    ): Outcome {
+        val source = request.source
+        val capturedAtMs = request.capturedAtMs
         val repository = repositoryProvider()
         val existing = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
         val previousFingerprints = runCatching {
@@ -156,9 +229,6 @@ class ScreenshotIntakeCoordinator(
             allowAuto = allowAuto,
             previewOnly = previewOnly,
         )
-        // The attempt id exists before any return, so a failed import still owns
-        // the correlation id its diagnostic row needs.
-        val attemptId = TransactionDiagnostics.newAttemptId()
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;
             // no ledger write and no user-visible noise.
@@ -257,7 +327,7 @@ class ScreenshotIntakeCoordinator(
             }
         }
         if (pending > 0 && source == IntakeSource.MEDIASTORE) {
-            runCatching { ScreenshotReviewNotifier.notifyPending(context, store.pending()) }
+            context?.let { runCatching { ScreenshotReviewNotifier.notifyPending(it, store.pending()) } }
         }
         return Outcome(
             booked = booked,
@@ -323,15 +393,9 @@ class ScreenshotIntakeCoordinator(
      * and it records only the attempt id, stage and failure code.
      */
     private suspend fun recordFailure(attemptId: String, failure: FailureReason) {
-        val diagnostics = diagnosticsProvider() ?: return
         val note = ScreenshotImportDiagnostics.failureNote(attemptId, failure)
         try {
-            diagnostics.record(
-                attemptId = note.attemptId,
-                stage = note.stage,
-                result = note.result,
-                details = note.details,
-            )
+            diagnosticSink(note)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -339,9 +403,12 @@ class ScreenshotIntakeCoordinator(
         }
     }
 
+    private fun requireContext(): Context =
+        checkNotNull(context) { "URI intake and OCR need an Android context" }
+
     private suspend fun recognize(bitmap: Bitmap) = ocrMutex.withLock {
         val engine = ocrEngine ?: PaddleOcrEngine(
-            context,
+            requireContext(),
             fallback = MlKitOcrEngine(),
         ).also { ocrEngine = it }
         engine.recognize(bitmap)
