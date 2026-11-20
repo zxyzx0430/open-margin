@@ -25,6 +25,15 @@
     <!-- 扫码连接 Windows：只在用户点「扫码连接」时申请；相册解码不需要相机。 -->
 
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- 主动截图：只在用户于设置中开启监听后申请相册读取权限。
+         Android 13+ 用 READ_MEDIA_IMAGES；Android 14+ 允许只授权部分照片
+         （READ_MEDIA_VISUAL_USER_SELECTED），此时只处理用户选中的图片。 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -50,6 +59,27 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 主动截图：系统分享入口。与 Photo Picker、MediaStore 监听共用同一个识别管线。 -->
+        <activity
+            android:name=".capture.screenshot.ScreenshotImportActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.BookkeepingApp">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <!-- 中置信度截图的「记入 / 忽略」后台操作，不拉起 Activity。 -->
+        <receiver
+            android:name=".capture.screenshot.ScreenshotReviewReceiver"
+            android:exported="false" />
 
         <!-- 崩溃报告页：只在未捕获异常时拉起，独立主题避免依赖 Compose -->
         <activity

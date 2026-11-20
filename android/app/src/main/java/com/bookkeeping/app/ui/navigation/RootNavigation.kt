@@ -19,6 +19,8 @@ import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.onboarding.OnboardingViewModel
 import com.bookkeeping.app.onboarding.OnboardingWelcome
 import com.bookkeeping.app.onboarding.TourState
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.i18n.tr
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -73,12 +75,14 @@ import com.bookkeeping.app.sync.SyncSettingsScreen
 import com.bookkeeping.app.ui.screen.billimport.BillImportScreen
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
+import com.bookkeeping.app.ui.screen.diagnostics.TransactionDiagnosticsScreen
 import com.bookkeeping.app.ui.screen.settings.MerchantRulesScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
+import com.bookkeeping.app.ui.screen.transactions.TransactionViewModel
 import com.bookkeeping.app.ui.screen.transactions.VoiceCapturePanel
 import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
@@ -93,6 +97,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val onboarding: OnboardingViewModel = hiltViewModel()
+    val transactionViewModel: TransactionViewModel = hiltViewModel()
     val tour by onboarding.state.collectAsState()
     var notificationEnabled by remember { mutableStateOf(NotificationListenerHelper.isEnabled(context)) }
     var waitingForAccess by rememberSaveable { mutableStateOf(false) }
@@ -231,6 +236,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     popEnterTransition = { EnterTransition.None },
                 ) {
                     TransactionListScreen(
+                        viewModel = transactionViewModel,
                         onOpenBillImport = { showBillImportSheet = true },
                         drilldown = pendingLedgerDrilldown,
                         onDrilldownConsumed = { pendingLedgerDrilldown = null },
@@ -292,6 +298,15 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     PendingConflictsScreen(onBack = { navController.popBackStack() })
                 }
                 composable(
+                    route = AppRoutes.TRANSACTION_DIAGNOSTICS,
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
+                ) {
+                    TransactionDiagnosticsScreen(onBack = { navController.popBackStack() })
+                }
+                composable(
                     route = AppRoutes.SYNC_SETTINGS,
                     enterTransition = { EnterTransition.None },
                     exitTransition = { ExitTransition.None },
@@ -334,6 +349,9 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
                         onOpenSyncSettings = { navController.navigate(AppRoutes.SYNC_SETTINGS) },
                         onOpenPendingConflicts = { navController.navigate(AppRoutes.PENDING_CONFLICTS) },
+                        onOpenTransactionDiagnostics = {
+                            navController.navigate(AppRoutes.TRANSACTION_DIAGNOSTICS)
+                        },
                         onReplayOnboarding = onboarding::restart,
                     )
                 }
@@ -376,9 +394,17 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 onCancel = {
                     voiceSheetOpen = false
                 },
-                onSubmit = { text ->
+                onSubmit = { text, attemptId ->
                     voiceSheetOpen = false
-                    voiceRequest = VoiceEntryRequest(text)
+                    voiceRequest = VoiceEntryRequest(text, attemptId)
+                },
+                onDiagnostic = { attemptId, result, details ->
+                    transactionViewModel.recordDiagnostic(
+                        input = TransactionDiagnosticInput(attemptId = attemptId),
+                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                        result = result,
+                        details = details,
+                    )
                 },
             )
         }

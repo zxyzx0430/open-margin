@@ -65,6 +65,8 @@ data class PaymentCardDetection(
     val nonFinalReason: String?,
     val pageIdentity: String,
     val cardKey: String,
+    val completionExplicit: Boolean = false,
+    val directionExplicit: Boolean = direction != PaymentDirection.UNKNOWN,
 ) {
     /** False for created/cancelled/pending/failed/unknown cards; never book those. */
     val isFinal: Boolean get() = status == PaymentCardStatus.COMPLETED
@@ -404,7 +406,6 @@ object PaymentCardDetector {
     ): PaymentCardDetection? {
         val joined = lines.joinToString(" ") { it.text }
         if (SENSITIVE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
-        if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (NEGATIVE_PAYMENT_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         // A group collection page lists what everyone paid. Only a strong
         // completed payment on the same page proves the user paid it.
@@ -449,7 +450,30 @@ object PaymentCardDetector {
             nonFinalReason = classification.nonFinalReason,
             pageIdentity = pageIdentity,
             cardKey = cardKey,
+            completionExplicit = completionExplicit(classification, joined),
+            directionExplicit = classification.direction != PaymentDirection.UNKNOWN,
         )
+    }
+
+    private fun completionExplicit(classification: Classification, joined: String): Boolean {
+        if (classification.status != PaymentCardStatus.COMPLETED) return false
+        return when (classification.kind) {
+            PaymentCardKind.PAYMENT -> STRONG_COMPLETED_PAYMENT.any(joined::contains)
+            PaymentCardKind.TRANSFER -> TRANSFER_SETTLED.any(joined::contains)
+            PaymentCardKind.RED_PACKET -> containsAny(
+                joined, "对方已领取", "红包已领取", "已领取红包", "领取了红包", "已到账", "已存入零钱",
+            )
+            PaymentCardKind.WITHDRAWAL -> containsAny(
+                joined, "提现成功", "已到账", "到账成功", "已提现",
+            )
+            PaymentCardKind.REFUND -> containsAny(
+                joined, "退款成功", "退款已到账", "退款到账", "已退款", "原路退回", "退款已原路退回",
+            )
+            PaymentCardKind.PAY_AFTER_USE -> containsAny(
+                joined, "已自动支付", "自动支付成功", "已扣款", "扣款成功", "支付成功", "付款成功", "已支付",
+            )
+            PaymentCardKind.BILL -> false
+        }
     }
 
     private fun isSummaryGroup(joined: String): Boolean {
@@ -465,6 +489,8 @@ object PaymentCardDetector {
         joined: String,
         pageText: String,
     ): Classification? {
+        // A failed payment/refund never becomes a bookable card.
+        if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
         if (REFUND_MARKERS.any { joined.contains(it) }) return classifyRefund(joined)
         if (isPayAfterUse(joined)) return classifyPayAfterUse(joined)
         if (joined.contains("红包")) return classifyRedPacket(joined)
@@ -472,6 +498,34 @@ object PaymentCardDetector {
         if (TRANSFER_MARKERS.any { joined.contains(it) }) return classifyTransfer(joined)
         if (PAYMENT_MARKERS.any { joined.contains(it) }) return classifyPayment(lines, joined)
         return classifyBill(lines, joined, pageText)
+    }
+
+    private fun classifyFailed(
+        lines: List<BillTextLine>,
+        joined: String,
+        pageText: String,
+    ): Classification? {
+        val kind = when {
+            REFUND_MARKERS.any(joined::contains) -> PaymentCardKind.REFUND
+            joined.contains("红包") -> PaymentCardKind.RED_PACKET
+            WITHDRAWAL_MARKERS.any(joined::contains) -> PaymentCardKind.WITHDRAWAL
+            TRANSFER_MARKERS.any(joined::contains) -> PaymentCardKind.TRANSFER
+            PAYMENT_MARKERS.any(joined::contains) || joined.contains("付款") || joined.contains("支付") ->
+                PaymentCardKind.PAYMENT
+            else -> return classifyBill(lines, joined, pageText)
+        }
+        val direction = when {
+            kind == PaymentCardKind.REFUND -> PaymentDirection.INCOME
+            kind == PaymentCardKind.WITHDRAWAL || kind == PaymentCardKind.PAYMENT ->
+                PaymentDirection.EXPENSE
+            kind == PaymentCardKind.TRANSFER -> classifyTransfer(joined).direction
+            kind == PaymentCardKind.RED_PACKET && containsAny(joined, "发出红包", "发送红包", "你发出的红包") ->
+                PaymentDirection.EXPENSE
+            kind == PaymentCardKind.RED_PACKET && containsAny(joined, "收到红包", "领取红包") ->
+                PaymentDirection.INCOME
+            else -> PaymentDirection.UNKNOWN
+        }
+        return Classification(kind, PaymentCardStatus.FAILED, direction, "交易失败")
     }
 
     private fun isPayAfterUse(joined: String): Boolean =
@@ -484,11 +538,26 @@ object PaymentCardDetector {
             "退款处理中", "退款中", "预计", "退款申请", "申请已提交",
             "等待商家", "待商家", "商家处理", "审核中", "处理中",
         )
+        val failed = containsAny(joined, "退款失败")
+        val completed = containsAny(
+            joined, "退款成功", "退款已到账", "退款到账", "已退款", "原路退回", "退款已原路退回",
+        )
+        val status = when {
+            failed -> PaymentCardStatus.FAILED
+            pending -> PaymentCardStatus.PENDING
+            completed -> PaymentCardStatus.COMPLETED
+            else -> PaymentCardStatus.UNKNOWN
+        }
         return Classification(
             kind = PaymentCardKind.REFUND,
-            status = if (pending) PaymentCardStatus.PENDING else PaymentCardStatus.COMPLETED,
+            status = status,
             direction = PaymentDirection.INCOME,
-            nonFinalReason = if (pending) "退款处理中，尚未到账" else null,
+            nonFinalReason = when (status) {
+                PaymentCardStatus.FAILED -> "退款失败"
+                PaymentCardStatus.PENDING -> "退款处理中，尚未到账"
+                PaymentCardStatus.UNKNOWN -> "退款状态未明确"
+                else -> null
+            },
         )
     }
 
@@ -530,19 +599,31 @@ object PaymentCardDetector {
         )
         val expired = containsAny(joined, "已过期", "已失效", "已退回", "已退还", "已退款")
         val pending = containsAny(joined, "待领取", "未领取", "待拆开", "请领取", "尚未领取")
+        val claimed = containsAny(
+            joined, "对方已领取", "红包已领取", "已领取红包", "领取了红包", "已领取", "已到账", "已存入零钱",
+        ) && !pending
         if (sent) {
+            val status = when {
+                expired -> PaymentCardStatus.CANCELLED
+                claimed -> PaymentCardStatus.COMPLETED
+                else -> PaymentCardStatus.PENDING
+            }
             return Classification(
                 kind = PaymentCardKind.RED_PACKET,
-                status = if (expired) PaymentCardStatus.CANCELLED else PaymentCardStatus.COMPLETED,
+                status = status,
                 direction = PaymentDirection.EXPENSE,
-                nonFinalReason = if (expired) "红包已过期或退回，金额未支出" else null,
+                nonFinalReason = when (status) {
+                    PaymentCardStatus.CANCELLED -> "红包已过期或退回，金额未支出"
+                    PaymentCardStatus.PENDING -> "红包尚未领取，等待状态更新"
+                    else -> "红包领取状态未明确"
+                },
             )
         }
         if (received) {
             val status = when {
                 expired -> PaymentCardStatus.CANCELLED
-                pending -> PaymentCardStatus.PENDING
-                else -> PaymentCardStatus.COMPLETED
+                claimed -> PaymentCardStatus.COMPLETED
+                else -> PaymentCardStatus.PENDING
             }
             return Classification(
                 kind = PaymentCardKind.RED_PACKET,
@@ -551,6 +632,7 @@ object PaymentCardDetector {
                 nonFinalReason = when (status) {
                     PaymentCardStatus.CANCELLED -> "红包已过期或退回，金额未到账"
                     PaymentCardStatus.PENDING -> "红包待领取，尚未到账"
+                    PaymentCardStatus.UNKNOWN -> "红包领取状态未明确"
                     else -> null
                 },
             )
@@ -574,11 +656,24 @@ object PaymentCardDetector {
 
     private fun classifyWithdrawal(joined: String): Classification {
         val pending = containsAny(joined, "处理中", "受理中", "预计", "待到账")
+        val failed = containsAny(joined, "提现失败")
+        val completed = containsAny(joined, "提现成功", "已到账", "到账成功", "已提现")
+        val status = when {
+            failed -> PaymentCardStatus.FAILED
+            pending -> PaymentCardStatus.PENDING
+            completed -> PaymentCardStatus.COMPLETED
+            else -> PaymentCardStatus.UNKNOWN
+        }
         return Classification(
             kind = PaymentCardKind.WITHDRAWAL,
-            status = if (pending) PaymentCardStatus.PENDING else PaymentCardStatus.COMPLETED,
+            status = status,
             direction = PaymentDirection.EXPENSE,
-            nonFinalReason = if (pending) "提现处理中，尚未到账" else null,
+            nonFinalReason = when (status) {
+                PaymentCardStatus.FAILED -> "提现失败"
+                PaymentCardStatus.PENDING -> "提现处理中，尚未到账"
+                PaymentCardStatus.UNKNOWN -> "提现状态未明确"
+                else -> null
+            },
         )
     }
 
@@ -638,7 +733,12 @@ object PaymentCardDetector {
                 joined, "待支付", "等待付款", "未支付", "未付款",
                 "支付中", "付款中", "支付处理中", "付款处理中", "处理中",
             ) -> PaymentCardStatus.PENDING
-            else -> PaymentCardStatus.COMPLETED
+            strongPaid -> PaymentCardStatus.COMPLETED
+            // A bill-detail card with a merchant/order/payment-method field is
+            // the completed-payment layout: those pages do not repeat
+            // "支付成功" on every row.
+            hasContext -> PaymentCardStatus.COMPLETED
+            else -> PaymentCardStatus.UNKNOWN
         }
         val direction = when {
             containsAny(joined, "收入", "入账", "到账", "成功收款", "收款成功", "已收款", "收到") &&
@@ -879,19 +979,25 @@ object PaymentCardDetector {
 
     // --- time and order ----------------------------------------------------
 
+    private val EXPLICIT_EVENT_DATE = Regex(
+        """(?:20\d{2}[-/年]|\d{1,2}[-/月]\d{1,2}(?:日)?|今天|昨天|前天)""",
+    )
+
     private fun eventTime(
         lines: List<BillTextLine>,
         kind: PaymentCardKind,
         capturedAtMs: Long,
     ): Long? {
+        fun parseVerified(raw: String): Long? =
+            raw.takeIf(EXPLICIT_EVENT_DATE::containsMatchIn)?.let { parseTime(it, capturedAtMs) }
+
         if (kind == PaymentCardKind.REFUND) {
             for (label in listOf("到账时间", "退款时间")) {
                 labeledValue(lines, label)?.let { raw ->
-                    parseTime(raw, capturedAtMs)?.let { return it }
+                    parseVerified(raw)?.let { return it }
                 }
             }
-            cardMessageTime(lines, capturedAtMs)?.let { return it }
-            return capturedAtMs
+            return cardMessageTime(lines, capturedAtMs)
         }
         cardMessageTime(lines, capturedAtMs)?.let { return it }
         val labels = when (kind) {
@@ -906,7 +1012,7 @@ object PaymentCardDetector {
         }
         for (label in labels) {
             labeledValue(lines, label)?.let { raw ->
-                parseTime(raw, capturedAtMs)?.let { return it }
+                parseVerified(raw)?.let { return it }
             }
         }
         return null

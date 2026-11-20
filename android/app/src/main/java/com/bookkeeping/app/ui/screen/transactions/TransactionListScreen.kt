@@ -184,6 +184,7 @@ fun TransactionListScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     // 新建表单顶部「一句话记账」的预填：语音 Final 或空（点 FAB 手填）。
     var addDialogQuickEntry by remember { mutableStateOf("") }
+    var addDialogDiagnosticAttemptId by remember { mutableStateOf<String?>(null) }
     var showCaptureReview by remember { mutableStateOf(false) }
     var showCategorySheet by remember { mutableStateOf(false) }
     var showVoiceHint by remember { mutableStateOf(false) }
@@ -226,6 +227,7 @@ fun TransactionListScreen(
     LaunchedEffect(voiceRequest) {
         val request = voiceRequest ?: return@LaunchedEffect
         addDialogQuickEntry = request.text.orEmpty()
+        addDialogDiagnosticAttemptId = request.diagnosticAttemptId
         showAddDialog = true
         onVoiceRequestConsumed()
     }
@@ -367,6 +369,7 @@ fun TransactionListScreen(
                     VoiceFab(
                         onTap = {
                             addDialogQuickEntry = ""
+                            addDialogDiagnosticAttemptId = null
                             showAddDialog = true
                         },
                         // 达到长按阈值：立刻打开面板并开始录音（不等松手）。
@@ -729,22 +732,24 @@ fun TransactionListScreen(
             onDismiss = {
                 showAddDialog = false
                 addDialogQuickEntry = ""
+                addDialogDiagnosticAttemptId = null
             },
             initialQuickEntry = addDialogQuickEntry,
+            initialDiagnosticAttemptId = addDialogDiagnosticAttemptId,
             // 手动新建和语音预填共用这一条保存路径：先查疑似重复，再入账。
             // 方向/币种/时间精度都一起传下去：不同方向的同金额、不同币种的同数字金额
             // 不是同一笔；时间精度决定同商户窗口（1 小时 / 12 小时）。
-            checkDuplicate = { amount, type, currency, merchant, timestampMs, precision ->
+            checkDuplicate = { transaction, diagnosticInput, precision ->
                 viewModel.findPossibleDuplicate(
-                    amountCents = amount,
-                    type = type,
-                    currency = currency,
-                    merchant = merchant,
-                    timestampMs = timestampMs,
+                    transaction = transaction,
+                    diagnosticInput = diagnosticInput,
                     precision = precision,
                 )
             },
-            onConfirm = { amount, type, category, merchant, note, timestampMs, account ->
+            onDiagnostic = { input, stage, result, details ->
+                viewModel.recordDiagnostic(input, stage, result, details)
+            },
+            onConfirm = { amount, type, category, merchant, note, timestampMs, account, diagnosticInput ->
                 viewModel.addTransaction(
                     amountCents = amount,
                     type = type,
@@ -753,6 +758,7 @@ fun TransactionListScreen(
                     note = note,
                     timestampMs = timestampMs,
                     account = account,
+                    diagnosticInput = diagnosticInput,
                 )
             },
             onSaved = { saved ->
@@ -1073,6 +1079,9 @@ private fun LedgerTransactionRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 SoftBadge(text = sourceTag, tone = StatusTone.NEUTRAL)
+                if (transaction.eventTimeNeedsConfirmation) {
+                    SoftBadge(text = tr("时间待确认"), tone = StatusTone.WARNING)
+                }
                 Text(
                     text = transactionSubtitle(
                         categoryLabel = tr(category.displayName),

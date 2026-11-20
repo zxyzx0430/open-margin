@@ -245,5 +245,175 @@ class SyncV2Tests(unittest.TestCase):
         self.assertEqual(more["items"][0]["event_id"],"wallos:manual:integration-test")
 
 
+class EventTimeNeedsConfirmationTests(unittest.TestCase):
+    """The pending-time flag must survive legacy clients and clear only on a real fix."""
+
+    def setUp(self):
+        self.folder=tempfile.TemporaryDirectory(prefix="pfs-event-time-")
+        self.old_db=core.DB
+        self.old_token=core.DEVICE_TOKEN
+        core.DB=Path(self.folder.name)/"finance.sqlite3"
+        core.DEVICE_TOKEN="synthetic-device-token"
+        self.client=TestClient(core.app)
+        self.headers={"X-Device-Token":"synthetic-device-token"}
+        self.path="/api/v2/sync"
+        self.event={
+            "event_id":"android:fake-device:flag",
+            "timestamp_ms":1791791400000,"amount_cents":1230,
+            "currency":"CNY","direction":"EXPENSE","source":"WECHAT",
+            "category":"FOOD","merchant":"Demo cafe"
+        }
+
+    def tearDown(self):
+        self.client.close()
+        core.DB=self.old_db
+        core.DEVICE_TOKEN=self.old_token
+        self.folder.cleanup()
+
+    def record(self,**overrides):
+        record={k:v for k,v in self.event.items() if k!="event_id"}
+        record.update(overrides)
+        return record
+
+    def push(self,mutation_id,record,revision=0):
+        operation={"mutation_id":mutation_id,"event_id":self.event["event_id"],
+                   "base_revision":revision,"action":"upsert","record":record}
+        response=self.client.post(f"{self.path}/push",json={"operations":[operation]},
+                                  headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        return response.json()["results"][0]
+
+    def stored_flag(self):
+        with core.db_connection() as db:
+            row=db.execute("SELECT event_time_needs_confirmation FROM transactions WHERE event_id=?",
+                           (self.event["event_id"],)).fetchone()
+        return bool(row["event_time_needs_confirmation"]) if row else None
+
+    def history(self):
+        response=self.client.get(f"{self.path}/changes",params={"since":0,"limit":500},
+                                 headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        return [item["record"] for item in response.json()["items"]
+                if item["event_id"]==self.event["event_id"]]
+
+    def latest(self):
+        return self.history()[-1]
+
+    def test_new_upsert_defaults_to_false_and_explicit_true_round_trips(self):
+        import sync_v2
+        first=self.push("flag-create-default-01",self.record())
+        self.assertEqual(first["status"],"applied")
+        self.assertFalse(self.stored_flag())
+        self.assertFalse(self.latest()["event_time_needs_confirmation"])
+        # Historical journal payloads without the field read as the false default.
+        archived=sync_v2.record_from_payload('{"event_id":"archived:old:1"}')
+        assert archived is not None
+        self.assertFalse(archived["event_time_needs_confirmation"])
+        revision=first["revision"]
+        second=self.push("flag-set-true-02",self.record(event_time_needs_confirmation=True),
+                         revision=revision)
+        self.assertEqual(second["status"],"applied")
+        self.assertTrue(self.stored_flag())
+        self.assertTrue(self.latest()["event_time_needs_confirmation"])
+
+    def test_legacy_payload_without_field_keeps_existing_true(self):
+        self.push("flag-legacy-create-01",self.record(event_time_needs_confirmation=True))
+        revision=self.pull_head()
+        result=self.push("flag-legacy-update-02",self.record(merchant="Renamed cafe"),
+                         revision=revision)
+        self.assertEqual(result["status"],"applied")
+        self.assertTrue(self.stored_flag())
+        self.assertTrue(self.latest()["event_time_needs_confirmation"])
+
+    def test_unrelated_update_without_field_keeps_true(self):
+        self.push("flag-amount-create-01",self.record(event_time_needs_confirmation=True))
+        revision=self.pull_head()
+        self.push("flag-amount-update-02",self.record(amount_cents=4560),revision=revision)
+        self.assertTrue(self.stored_flag())
+        self.assertTrue(self.latest()["event_time_needs_confirmation"])
+
+    def test_explicit_false_without_time_change_keeps_true(self):
+        self.push("flag-false-create-01",self.record(event_time_needs_confirmation=True))
+        revision=self.pull_head()
+        self.push("flag-false-update-02",self.record(amount_cents=4560,
+                  event_time_needs_confirmation=False),revision=revision)
+        self.assertTrue(self.stored_flag())
+        self.assertTrue(self.latest()["event_time_needs_confirmation"])
+
+    def test_explicit_false_with_time_change_clears_flag(self):
+        self.push("flag-fix-create-01",self.record(event_time_needs_confirmation=True))
+        revision=self.pull_head()
+        corrected=self.event["timestamp_ms"]+120000
+        self.push("flag-fix-update-02",self.record(timestamp_ms=corrected,
+                  event_time_needs_confirmation=False),revision=revision)
+        self.assertFalse(self.stored_flag())
+        self.assertFalse(self.latest()["event_time_needs_confirmation"])
+        published=[record["event_time_needs_confirmation"] for record in self.history()]
+        self.assertEqual(published,[True,False])
+
+    def test_omitted_field_and_explicit_false_hash_differ_but_legacy_retry_replays(self):
+        import hashlib
+        import json
+        import sync_v2
+        common={"mutation_id":"flag-hash-0001","event_id":self.event["event_id"],
+                "action":"upsert","base_revision":0}
+        legacy_record={**self.record(),"review_status":None}
+        omitted=sync_v2.Mutation(**common,record=legacy_record)
+        explicit=sync_v2.Mutation(**common,record={**legacy_record,
+                                                   "event_time_needs_confirmation":False})
+        assert omitted.record is not None and explicit.record is not None
+        self.assertNotIn("event_time_needs_confirmation",omitted.record.model_fields_set)
+        self.assertIn("event_time_needs_confirmation",explicit.record.model_fields_set)
+        canonical=json.dumps({**common,"record":legacy_record},sort_keys=True,
+                             separators=(",",":"),ensure_ascii=False)
+        self.assertEqual(sync_v2.mutation_hash(omitted),
+                         hashlib.sha256(canonical.encode("utf-8")).hexdigest())
+        self.assertNotEqual(sync_v2.mutation_hash(omitted),sync_v2.mutation_hash(explicit))
+        first=self.push("flag-legacy-retry-03",self.record())
+        again=self.push("flag-legacy-retry-03",self.record())
+        self.assertTrue(again["replayed"])
+        self.assertEqual(again["revision"],first["revision"])
+
+    def test_mcp_edit_record_timestamp_correction_clears_flag(self):
+        import mcp_service
+        self.push("flag-mcp-create-01",self.record(event_time_needs_confirmation=True))
+        with core.db_connection() as db:
+            tx_id=db.execute("SELECT id FROM transactions WHERE event_id=?",
+                             (self.event["event_id"],)).fetchone()["id"]
+        result=mcp_service.edit_record(tx_id=tx_id,
+                                       timestamp_ms=self.event["timestamp_ms"]+180000)
+        self.assertTrue(result["ok"],result)
+        self.assertFalse(self.stored_flag())
+        self.assertFalse(self.latest()["event_time_needs_confirmation"])
+
+    def test_mcp_edit_record_without_timestamp_keeps_flag(self):
+        import mcp_service
+        self.push("flag-mcp-keep-01",self.record(event_time_needs_confirmation=True))
+        with core.db_connection() as db:
+            tx_id=db.execute("SELECT id FROM transactions WHERE event_id=?",
+                             (self.event["event_id"],)).fetchone()["id"]
+        result=mcp_service.edit_record(tx_id=tx_id,merchant="Edited via MCP")
+        self.assertTrue(result["ok"],result)
+        self.assertTrue(self.stored_flag())
+
+    def test_v1_legacy_upload_does_not_clear_flag(self):
+        self.push("flag-v1-create-01",self.record(event_time_needs_confirmation=True))
+        before=self.history()
+        response=self.client.post("/api/v1/transactions/batch",
+            json={"events":[{**self.event,"merchant":"Legacy retry"}]},
+            headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(response.json()["already_present"],1)
+        self.assertTrue(self.stored_flag())
+        self.assertEqual(len(self.history()),len(before))
+        self.assertTrue(self.latest()["event_time_needs_confirmation"])
+
+    def pull_head(self):
+        response=self.client.get(f"{self.path}/changes",params={"since":0,"limit":500},
+                                 headers=self.headers)
+        self.assertEqual(response.status_code,200,response.text)
+        return response.json()["head_revision"]
+
+
 if __name__=="__main__":
     unittest.main()

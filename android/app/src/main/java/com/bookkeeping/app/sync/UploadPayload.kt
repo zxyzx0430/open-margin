@@ -12,6 +12,7 @@ data class UploadEventFields(
     val source: String,
     val category: String,
     val merchant: String,
+    val eventTimeNeedsConfirmation: Boolean,
 )
 
 /**
@@ -28,6 +29,7 @@ data class SyncRecordFields(
     val category: String,
     val merchant: String,
     val reviewStatus: String?,
+    val eventTimeNeedsConfirmation: Boolean,
 )
 
 object UploadPayload {
@@ -52,6 +54,7 @@ object UploadPayload {
             source = entity.source.uppercase(),
             category = entity.category,
             merchant = entity.merchant.take(140),
+            eventTimeNeedsConfirmation = entity.eventTimeNeedsConfirmation,
         )
 
     fun v2Record(entity: TransactionEntity): SyncRecordFields =
@@ -64,5 +67,14 @@ object UploadPayload {
             category = entity.category,
             merchant = entity.merchant.take(140),
             reviewStatus = entity.remoteReviewStatus.takeIf { it in REVIEW_STATUSES },
+            eventTimeNeedsConfirmation = entity.eventTimeNeedsConfirmation,
         )
+}
+
+/** Missing fields from an older client preserve an existing true marker. */
+object EventTimeConfirmationPolicy {
+    fun mergeRemote(incoming: Boolean?, existing: Boolean): Boolean = incoming ?: existing
+
+    fun afterUserEdit(existing: Boolean, timestampChanged: Boolean): Boolean =
+        if (timestampChanged) false else existing
 }

@@ -58,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.data.MoneyAmount
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
@@ -91,8 +93,8 @@ private data class PendingSave(
     val note: String,
     val timestamp: Long,
     val account: String,
-    /** 这句话对时间的精确程度，决定疑似重复检查的同商户窗口。 */
     val timePrecision: TimePrecision,
+    val diagnosticInput: TransactionDiagnosticInput,
 )
 
 // "新建账单"底部面板
@@ -111,21 +113,26 @@ fun AddTransactionDialog(
         note: String,
         timestamp: Long,
         account: String,
+        diagnosticInput: TransactionDiagnosticInput,
     ) -> Long,
     onSaved: (TransactionEntity) -> Unit = {},
     // 语音识别结果带进来的原文：为空就是普通新建。填了就在打开时先解析一次，
     // 让 ASR 那边只管把文本传进来，不用重复写「填哪个字段」的逻辑。
     initialQuickEntry: String = "",
+    initialDiagnosticAttemptId: String? = null,
     // 保存前的疑似重复检查。由调用方接到 DAO 的只读查询上；
     // 为 null 表示不检查（例如预留给编辑路径）。命中只会多问一句，不阻止保存。
     checkDuplicate: (suspend (
-        amountCents: Long,
-        type: TransactionType,
-        currency: String,
-        merchant: String,
-        timestampMs: Long,
+        transaction: TransactionEntity,
+        diagnosticInput: TransactionDiagnosticInput,
         precision: TimePrecision,
     ) -> DuplicateCandidate?)? = null,
+    onDiagnostic: suspend (
+        input: TransactionDiagnosticInput,
+        stage: String,
+        result: String,
+        details: String,
+    ) -> Unit = { _, _, _, _ -> },
 ) {
     val scope = rememberCoroutineScope()
     // 用户输入的本地 UI 状态（对话框关闭就丢弃，不存到 ViewModel）
@@ -178,13 +185,46 @@ fun AddTransactionDialog(
 
     // 解析一句话 → 回填字段。只写解析出来的那一部分，且只覆盖用户没亲手改过的字段。
     // 分类额外走现有商户记忆：用户规则优先，之后才用解析器分类。
+    var quickEntryDiagnostic by remember(initial?.id, initialQuickEntry, initialDiagnosticAttemptId) {
+        mutableStateOf<Pair<String, TransactionDiagnosticInput>?>(null)
+    }
     val applyQuickEntry: (String) -> QuickEntryPrefill = { raw ->
         val parsedAt = System.currentTimeMillis()
-        val prefill = QuickEntryPrefill.from(
-            VoiceTransactionParser.parse(raw, parsedAt),
-            parsedAt,
-            categoryResolver = { merchant, _ -> CategoryClassifier.rememberedCategory(merchant) },
-        )
+        val input = quickEntryDiagnostic?.takeIf { it.first == raw }?.second
+            ?: TransactionDiagnosticInput(
+                attemptId = initialDiagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+            ).also {
+                quickEntryDiagnostic = raw to it
+            }
+        var parseFailure: Exception? = null
+        val prefill = try {
+            QuickEntryPrefill.from(
+                VoiceTransactionParser.parse(raw, parsedAt),
+                parsedAt,
+                categoryResolver = { merchant, _ -> CategoryClassifier.rememberedCategory(merchant) },
+            )
+        } catch (failure: Exception) {
+            parseFailure = failure
+            QuickEntryPrefill(notice = QuickEntryNotice.AMOUNT_MISSING)
+        }
+        scope.launch {
+            onDiagnostic(input, TransactionDiagnostics.STAGE_PARSE, TransactionDiagnostics.RESULT_STARTED,
+                "Quick-entry parsing started")
+            val result = when {
+                parseFailure != null -> TransactionDiagnostics.RESULT_FAILURE
+                prefill.notice == QuickEntryNotice.AMOUNT_MISSING -> TransactionDiagnostics.RESULT_FAILURE
+                prefill.notice == QuickEntryNotice.NEEDS_REVIEW -> TransactionDiagnostics.RESULT_WARNING
+                else -> TransactionDiagnostics.RESULT_SUCCESS
+            }
+            val details = if (parseFailure != null) {
+                "Quick-entry parsing failed"
+            } else when (prefill.notice) {
+                QuickEntryNotice.AMOUNT_MISSING -> "Amount not recognized"
+                QuickEntryNotice.NEEDS_REVIEW -> "Parsed with review warnings"
+                null -> "Quick-entry text parsed"
+            }
+            onDiagnostic(input, TransactionDiagnostics.STAGE_PARSE, result, details)
+        }
         val previous = lastAutoPrefill
         if (!amountTouched) {
             if (prefill.amountText != null) {
@@ -234,6 +274,7 @@ fun AddTransactionDialog(
                     payload.note,
                     payload.timestamp,
                     payload.account,
+                    payload.diagnosticInput,
                 )
             } catch (cancellation: CancellationException) {
                 saving = false
@@ -267,6 +308,10 @@ fun AddTransactionDialog(
     val buildPayload: () -> PendingSave? = {
         if (QuickEntryRule.canSubmit(quickEntry)) applyQuickEntry(quickEntry)
         val typed = MoneyAmount.cents(amountText)
+        val diagnosticInput = quickEntryDiagnostic?.takeIf { it.first == quickEntry }?.second
+            ?: TransactionDiagnosticInput(
+                attemptId = initialDiagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+            )
         when {
             typed != null -> PendingSave(
                 amountCents = typed,
@@ -280,6 +325,7 @@ fun AddTransactionDialog(
                 timePrecision = if (
                     !timestampTouched && quickEntryTimePrecision != TimePrecision.NONE
                 ) quickEntryTimePrecision else TimePrecision.PRECISE,
+                diagnosticInput = diagnosticInput,
             )
             else -> null
         }
@@ -302,11 +348,18 @@ fun AddTransactionDialog(
                     // 读库失败按「没命中」处理；协程取消原样抛出，避免弹窗已关还继续保存。
                     val hit = try {
                         checker(
-                            payload.amountCents,
-                            payload.type,
-                            payload.currency,
-                            payload.merchant,
-                            payload.timestamp,
+                            TransactionEntity(
+                                amountCents = payload.amountCents,
+                                type = payload.type.name,
+                                category = payload.category.name,
+                                merchant = payload.merchant,
+                                note = payload.note,
+                                source = initial?.source ?: "MANUAL",
+                                account = payload.account.trim().ifBlank { null },
+                                timestamp = payload.timestamp,
+                                currency = payload.currency,
+                            ),
+                            payload.diagnosticInput,
                             payload.timePrecision,
                         )
                     } catch (cancellation: CancellationException) {

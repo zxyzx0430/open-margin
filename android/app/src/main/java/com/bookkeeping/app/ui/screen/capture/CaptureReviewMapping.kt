@@ -34,9 +34,9 @@ object CaptureReviewMapping {
             CaptureCandidate.DIRECTION_EXPENSE -> ClassificationDirection.EXPENSE
             else -> ClassificationDirection.NEUTRAL
         }
-        val source = when (candidate.packageName) {
-            CaptureCandidate.WECHAT -> ClassificationSource.WECHAT
-            CaptureCandidate.ALIPAY -> ClassificationSource.ALIPAY
+        val source = when (candidate.paymentPlatform) {
+            CaptureCandidate.PLATFORM_WECHAT -> ClassificationSource.WECHAT
+            CaptureCandidate.PLATFORM_ALIPAY -> ClassificationSource.ALIPAY
             else -> ClassificationSource.OTHER
         }
         return CategoryClassifier.classify(
@@ -47,7 +47,7 @@ object CaptureReviewMapping {
                 source = source,
                 kind = kind,
                 status = ClassificationStatus.COMPLETED,
-                amountCents = candidate.amountCents,
+                amountCents = candidate.amountCents ?: 0L,
             ),
         )
     }
@@ -63,14 +63,14 @@ object CaptureReviewMapping {
         merchant: String,
         category: TransactionCategory,
     ): TransactionEntity {
-        val source = when (candidate.packageName) {
-            CaptureCandidate.WECHAT -> TransactionSource.WECHAT
-            CaptureCandidate.ALIPAY -> TransactionSource.ALIPAY
+        val source = when (candidate.paymentPlatform) {
+            CaptureCandidate.PLATFORM_WECHAT -> TransactionSource.WECHAT
+            CaptureCandidate.PLATFORM_ALIPAY -> TransactionSource.ALIPAY
             else -> TransactionSource.OTHER
         }
-        val sourceLabel = when (candidate.packageName) {
-            CaptureCandidate.WECHAT -> "微信"
-            CaptureCandidate.ALIPAY -> "支付宝"
+        val sourceLabel = when (candidate.paymentPlatform) {
+            CaptureCandidate.PLATFORM_WECHAT -> "微信"
+            CaptureCandidate.PLATFORM_ALIPAY -> "支付宝"
             else -> "页面"
         }
         val refund = candidate.kind == CaptureCandidate.KIND_REFUND
@@ -109,7 +109,9 @@ object CaptureReviewMapping {
             candidate.orderId?.let { append(" · 单号 ").append(it) }
         }
         return TransactionEntity(
-            amountCents = candidate.amountCents,
+            amountCents = requireNotNull(candidate.amountCents) {
+                "A transaction cannot be created without a verified amount"
+            },
             type = if (income) TransactionType.INCOME.name else TransactionType.EXPENSE.name,
             category = when {
                 refund -> TransactionCategory.OTHER.name
@@ -120,7 +122,7 @@ object CaptureReviewMapping {
             merchant = name,
             note = note,
             source = source.name,
-            timestamp = candidate.eventTimeMs.takeIf { it > 0L } ?: candidate.capturedAtMs,
+            timestamp = candidate.eventTimeMs?.takeIf { it > 0L } ?: candidate.capturedAtMs,
             merchantIconKey = MerchantIconCatalog.forMerchant(name)?.key,
             remoteReviewStatus = when {
                 refund -> "refund"
@@ -131,6 +133,7 @@ object CaptureReviewMapping {
             captureConfidence = candidate.confidence,
             captureKind = candidate.kind,
             captureObservedAtMs = candidate.capturedAtMs,
+            eventTimeNeedsConfirmation = candidate.eventTimeNeedsConfirmation,
         )
     }
 }

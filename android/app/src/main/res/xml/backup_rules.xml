@@ -14,4 +14,7 @@
     <exclude domain="file" path="datastore/" />
     <!-- Device bearer token must never be included in an Android cloud backup. -->
     <exclude domain="sharedpref" path="finance_sync.xml" />
+    <!-- 截图临时数据：原图副本、OCR 候选与诊断只在本机保留 7 天，不进云备份。 -->
+    <exclude domain="file" path="page_capture/" />
+    <exclude domain="sharedpref" path="screenshot_watch.xml" />
 </full-backup-content>
