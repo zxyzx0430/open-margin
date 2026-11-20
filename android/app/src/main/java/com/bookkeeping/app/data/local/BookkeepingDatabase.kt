@@ -18,7 +18,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
     entities = [TransactionEntity::class, ProcessedNoticeEntity::class, TransactionDiagnosticEventEntity::class],
-    version = 10,
+    version = 11,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -39,8 +39,20 @@ abstract class BookkeepingDatabase : RoomDatabase() {
          */
         fun build(context: Context): BookkeepingDatabase =
             Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
+
+        // v11: readable capture chains. Three nullable TEXT columns; every row
+        // written before this version keeps NULL and the log screen renders the
+        // old shape without empty placeholder lines. Additive only — no table
+        // rebuild, no data rewrite, so the drop-and-recreate path never runs.
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transaction_diagnostic_events ADD COLUMN callSite TEXT")
+                db.execSQL("ALTER TABLE transaction_diagnostic_events ADD COLUMN inputSummary TEXT")
+                db.execSQL("ALTER TABLE transaction_diagnostic_events ADD COLUMN outputSummary TEXT")
+            }
+        }
 
         // v10: a synchronized, user-correctable marker for provisional event time.
         val MIGRATION_9_10 = object : Migration(9, 10) {

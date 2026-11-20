@@ -46,7 +46,10 @@ interface TransactionDiagnosticDao {
                   AND (attemptId LIKE '%' || :query || '%'
                        OR stage LIKE '%' || :query || '%'
                        OR result LIKE '%' || :query || '%'
-                       OR details LIKE '%' || :query || '%')
+                       OR details LIKE '%' || :query || '%'
+                       OR callSite LIKE '%' || :query || '%'
+                       OR inputSummary LIKE '%' || :query || '%'
+                       OR outputSummary LIKE '%' || :query || '%')
               )
           )
         ORDER BY occurredAtMs DESC, rowid DESC

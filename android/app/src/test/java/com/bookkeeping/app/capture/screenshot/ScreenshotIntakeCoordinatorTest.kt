@@ -1,5 +1,7 @@
 package com.bookkeeping.app.capture.screenshot
 
+import com.bookkeeping.app.data.diagnostics.DiagnosticStep
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import java.io.File
@@ -32,14 +34,14 @@ class ScreenshotIntakeCoordinatorTest {
 
     private fun coordinator(
         dir: File,
-        sink: suspend (ScreenshotImportDiagnostics.FailureNote) -> Unit,
+        sink: suspend (DiagnosticStep) -> Unit,
     ) = ScreenshotIntakeCoordinator(CaptureCandidateStore(dir), diagnosticSink = sink)
 
     @Test
     fun `a rejected request still writes its failure diagnostic`() = runBlocking {
         val dir = Files.createTempDirectory("intake-rejected").toFile()
         try {
-            val notes = mutableListOf<ScreenshotImportDiagnostics.FailureNote>()
+            val notes = mutableListOf<DiagnosticStep>()
             val outcome = coordinator(dir) { notes += it }.ingestRequest(
                 request = request(mime = "application/pdf"),
                 allowAuto = true,
@@ -48,13 +50,15 @@ class ScreenshotIntakeCoordinatorTest {
             )
 
             assertEquals(FailureReason.UNSUPPORTED_MIME, outcome.failure)
-            // Only the attempt id and the failure code: no page text or money.
-            assertEquals(
-                listOf(ScreenshotImportDiagnostics.failureNote(notes.single().attemptId, FailureReason.UNSUPPORTED_MIME)),
-                notes,
-            )
-            assertTrue(notes.single().attemptId.isNotBlank())
-            assertEquals("UNSUPPORTED_MIME", notes.single().details)
+            // Only the attempt id, the failure code and a structured input summary:
+            // no page text or money.
+            val note = notes.single()
+            assertEquals(TransactionDiagnostics.STAGE_IMPORT, note.stage)
+            assertEquals(TransactionDiagnostics.RESULT_FAILURE, note.result)
+            assertEquals("UNSUPPORTED_MIME", note.details)
+            assertEquals("ScreenshotIntakeCoordinator.ingest", note.callSite)
+            assertEquals("截图 1 张 · 390 KB · application/pdf", note.inputSummary)
+            assertTrue(note.attemptId.isNotBlank())
         } finally {
             dir.deleteRecursively()
         }
@@ -64,7 +68,7 @@ class ScreenshotIntakeCoordinatorTest {
     fun `an unreadable stream is recorded before any parsing happens`() = runBlocking {
         val dir = Files.createTempDirectory("intake-unreadable").toFile()
         try {
-            val notes = mutableListOf<ScreenshotImportDiagnostics.FailureNote>()
+            val notes = mutableListOf<DiagnosticStep>()
             val outcome = coordinator(dir) { notes += it }.ingestRequest(
                 request = request(),
                 allowAuto = true,

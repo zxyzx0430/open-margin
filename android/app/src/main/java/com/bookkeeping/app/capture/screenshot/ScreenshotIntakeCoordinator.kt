@@ -7,6 +7,8 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.bookkeeping.app.data.diagnostics.DiagnosticStep
+import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -41,7 +43,7 @@ class ScreenshotIntakeCoordinator private constructor(
     private val context: Context?,
     private val store: CaptureCandidateStore,
     private val repositoryProvider: () -> TransactionRepository?,
-    private val diagnosticSink: suspend (ScreenshotImportDiagnostics.FailureNote) -> Unit,
+    private val diagnosticSink: suspend (DiagnosticStep) -> Unit,
 ) {
     /**
      * Android entry point: URI access, decoding and OCR all come from [context].
@@ -52,18 +54,13 @@ class ScreenshotIntakeCoordinator private constructor(
         context = ctx,
         store = CaptureCandidateStore(ctx),
         repositoryProvider = { androidRepositoryOrNull(ctx) },
-        diagnosticSink = { note -> androidDiagnostics(ctx)?.record(
-            attemptId = note.attemptId,
-            stage = note.stage,
-            result = note.result,
-            details = note.details,
-        ) },
+        diagnosticSink = { step -> androidDiagnostics(ctx)?.record(step.copy(callSite = step.callSite ?: CALL_SITE_INGEST)) },
     )
 
     internal constructor(
         store: CaptureCandidateStore,
         repositoryProvider: () -> TransactionRepository? = { null },
-        diagnosticSink: suspend (ScreenshotImportDiagnostics.FailureNote) -> Unit = {},
+        diagnosticSink: suspend (DiagnosticStep) -> Unit = {},
     ) : this(null, store, repositoryProvider, diagnosticSink)
 
     data class Outcome(
@@ -130,9 +127,10 @@ class ScreenshotIntakeCoordinator private constructor(
     ): Outcome {
         val attemptId = TransactionDiagnostics.newAttemptId()
         val autoBookAllowed = allowAuto && !previewOnly
+        val inputSummary = intakeSummary(request)
         val validation = ScreenshotImportPipeline.validate(request)
         if (validation is IntakeValidation.Rejected) {
-            recordFailure(attemptId, validation.reason)
+            recordFailure(attemptId, validation.reason, inputSummary)
             return Outcome(failure = validation.reason, autoBookAllowed = autoBookAllowed)
         }
 
@@ -140,29 +138,29 @@ class ScreenshotIntakeCoordinator private constructor(
             ScreenshotBoundedReader.read(openStream(), ScreenshotImportPipeline.MAX_IMAGE_BYTES)
         }.getOrNull()
         if (boundedRead == null) {
-            recordFailure(attemptId, FailureReason.UNREADABLE)
+            recordFailure(attemptId, FailureReason.UNREADABLE, inputSummary)
             return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
         val bytes = when (boundedRead) {
             is ScreenshotBoundedReader.Result.Complete -> boundedRead.bytes
             ScreenshotBoundedReader.Result.Oversized -> {
-                recordFailure(attemptId, FailureReason.OVERSIZED)
+                recordFailure(attemptId, FailureReason.OVERSIZED, inputSummary)
                 return Outcome(failure = FailureReason.OVERSIZED, autoBookAllowed = autoBookAllowed)
             }
         }
         if (bytes.isEmpty()) {
-            recordFailure(attemptId, FailureReason.UNREADABLE)
+            recordFailure(attemptId, FailureReason.UNREADABLE, inputSummary)
             return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
         val decoded = runCatching { decode(bytes) }.getOrNull()
         if (decoded == null) {
-            recordFailure(attemptId, FailureReason.DECODE_FAILED)
+            recordFailure(attemptId, FailureReason.DECODE_FAILED, inputSummary)
             return Outcome(failure = FailureReason.DECODE_FAILED, autoBookAllowed = autoBookAllowed)
         }
         val ocr = runCatching { recognize(decoded) }.getOrNull()
         decoded.recycle()
         if (ocr == null || ocr.isEmpty) {
-            recordFailure(attemptId, FailureReason.OCR_EMPTY)
+            recordFailure(attemptId, FailureReason.OCR_EMPTY, inputSummary)
             return Outcome(failure = FailureReason.OCR_EMPTY, autoBookAllowed = autoBookAllowed)
         }
         val blocks = ocr.lines.mapNotNull { line ->
@@ -178,6 +176,16 @@ class ScreenshotIntakeCoordinator private constructor(
                 )
             }
         }
+        // Counts only: how many text blocks came back, never what they said.
+        recordStep(
+            attemptId = attemptId,
+            stage = TransactionDiagnostics.STAGE_CAPTURE,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            details = "OCR payment-page capture started",
+            callSite = CALL_SITE_INGEST,
+            inputSummary = inputSummary,
+            outputSummary = "OCR ${blocks.size} 个文本块",
+        )
         return ingestBlocks(
             request = request,
             blocks = blocks,
@@ -215,10 +223,11 @@ class ScreenshotIntakeCoordinator private constructor(
             allowAuto = allowAuto,
             previewOnly = previewOnly,
         )
+        val ocrSummary = "OCR ${blocks.size} 个文本块"
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;
             // no ledger write and no user-visible noise.
-            recordFailure(attemptId, failure)
+            recordFailure(attemptId, failure, ocrSummary)
             return Outcome(
                 failure = failure,
                 repeatImage = plan.repeatImage,
@@ -226,11 +235,62 @@ class ScreenshotIntakeCoordinator private constructor(
             )
         }
         if (plan.repeatImage) {
+            recordStep(
+                attemptId = attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "Recent page-capture fingerprint suppressed",
+                callSite = CALL_SITE_INGEST,
+                inputSummary = ocrSummary,
+                outputSummary = "同一张截图已处理过，本次未写入",
+            )
             return Outcome(repeatImage = true, autoBookAllowed = allowAuto && !previewOnly)
         }
 
+        val drafts = plan.decisions.map { it.draft }
+        val firstDraft = drafts.firstOrNull()
+        val candidateSummary = firstDraft?.let { draft ->
+            DiagnosticSummary.amountWithMerchant(
+                amount = DiagnosticSummary.amount(
+                    type = draft.direction,
+                    amountCents = draft.amountCents ?: 0L,
+                    currency = draft.currency,
+                ),
+                merchant = draft.merchantCandidates.firstOrNull(),
+            )
+        }
+        recordStep(
+            attemptId = attemptId,
+            stage = TransactionDiagnostics.STAGE_PARSE,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            details = "Payment page parsed",
+            callSite = CALL_SITE_INGEST,
+            inputSummary = ocrSummary,
+            outputSummary = listOfNotNull(
+                "${drafts.size} 笔候选",
+                candidateSummary,
+            ).joinToString(" · "),
+        )
+
+        val matched = plan.decisions.mapNotNull { it.matchedTransactionId }
+        recordStep(
+            attemptId = attemptId,
+            stage = TransactionDiagnostics.STAGE_DEDUP,
+            result = if (matched.isEmpty()) TransactionDiagnostics.RESULT_SUCCESS
+            else TransactionDiagnostics.RESULT_WARNING,
+            details = if (matched.isEmpty()) "No duplicate found" else "Exact duplicate candidate skipped",
+            callSite = CALL_SITE_INGEST,
+            inputSummary = candidateSummary ?: ocrSummary,
+            outputSummary = if (matched.isEmpty()) {
+                "未命中已有账单"
+            } else {
+                "命中已有 ${matched.joinToString("、") { "#$it" }}，跳过 ${matched.size} 笔"
+            },
+        )
+
         var booked = 0
         var pending = 0
+        val bookedIds = mutableListOf<Long>()
         val confirmationCandidates = mutableListOf<CaptureCandidate>()
         var waiting = 0
         var linked = 0
@@ -277,11 +337,21 @@ class ScreenshotIntakeCoordinator private constructor(
                             ).category,
                         )
                         val inserted = runCatching {
-                            repo.insertIfNotDuplicate(entity, notifySuccess = false)
+                            // Keep the ledger write inside this chain: same attempt id
+                            // so the log reads capture → parse → dedup → save as one run.
+                            repo.insertIfNotDuplicate(
+                                entity,
+                                notifySuccess = false,
+                                diagnosticInput = TransactionDiagnosticInput(
+                                    attemptId = attemptId,
+                                    callSite = CALL_SITE_INGEST,
+                                ),
+                            )
                         }.getOrNull()
                         if (inserted != null && inserted > 0L) {
                             store.mark(stored, CaptureCandidate.STATUS_APPROVED)
                             booked++
+                            bookedIds += inserted
                             applied = true
                         } else {
                             store.mark(stored, CaptureCandidate.STATUS_IGNORED)
@@ -330,6 +400,29 @@ class ScreenshotIntakeCoordinator private constructor(
         if (pending > 0 && source == IntakeSource.MEDIASTORE) {
             context?.let { runCatching { ScreenshotReviewNotifier.notifyPending(it, store.pending()) } }
         }
+        recordStep(
+            attemptId = attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = when {
+                booked > 0 || pending > 0 || waiting > 0 || linked > 0 -> TransactionDiagnostics.RESULT_SUCCESS
+                else -> TransactionDiagnostics.RESULT_WARNING
+            },
+            details = "Screenshot intake applied",
+            transactionId = bookedIds.firstOrNull(),
+            callSite = CALL_SITE_INGEST,
+            inputSummary = "${plan.decisions.size} 笔候选",
+            outputSummary = buildString {
+                append(
+                    DiagnosticSummary.counts(
+                        "入账" to booked,
+                        "待确认" to pending,
+                        "等待" to waiting,
+                        "跳过" to ignored + linked,
+                    ),
+                )
+                if (!CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)) append(" · 预览模式，未写入账本")
+            },
+        )
         return Outcome(
             booked = booked,
             pending = pending,
@@ -365,6 +458,7 @@ class ScreenshotIntakeCoordinator private constructor(
                 notifySuccess = false,
                 diagnosticInput = TransactionDiagnosticInput(
                     attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+                    callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
                 ),
             )
         } catch (_: Exception) {
@@ -390,19 +484,61 @@ class ScreenshotIntakeCoordinator private constructor(
     }
 
     /**
-     * Best effort: a diagnostic write must never block, change or fail capture,
-     * and it records only the attempt id, stage and failure code.
+     * Best effort: a diagnostic write must never block, change or fail capture.
+     * Failures keep the stable reason code in [DiagnosticStep.details] and add
+     * only a structured input summary (image size, block count) — no page text.
      */
-    private suspend fun recordFailure(attemptId: String, failure: FailureReason) {
+    private suspend fun recordFailure(
+        attemptId: String,
+        failure: FailureReason,
+        inputSummary: String? = null,
+    ) {
         val note = ScreenshotImportDiagnostics.failureNote(attemptId, failure)
+        recordStep(
+            attemptId = note.attemptId,
+            stage = note.stage,
+            result = note.result,
+            details = note.details,
+            callSite = CALL_SITE_INGEST,
+            inputSummary = inputSummary,
+        )
+    }
+
+    private suspend fun recordStep(
+        attemptId: String,
+        stage: String,
+        result: String,
+        details: String = "",
+        transactionId: Long? = null,
+        callSite: String? = CALL_SITE_INGEST,
+        inputSummary: String? = null,
+        outputSummary: String? = null,
+    ) {
+        val step = DiagnosticStep(
+            attemptId = attemptId,
+            stage = stage,
+            result = result,
+            details = details,
+            transactionId = transactionId,
+            callSite = callSite,
+            inputSummary = inputSummary,
+            outputSummary = outputSummary,
+        )
         try {
-            diagnosticSink(note)
+            diagnosticSink(step)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             // Diagnostics must never fail an import.
         }
     }
+
+    /** "截图 1 张 · 400 KB · IMAGE_JPEG" — size and type, never the pixels. */
+    private fun intakeSummary(request: ScreenshotIntakeRequest): String = listOfNotNull(
+        "截图 1 张",
+        request.byteSize?.takeIf { it > 0L }?.let { bytes -> "${bytes / 1024} KB" },
+        request.mimeType?.trim()?.takeIf { it.isNotEmpty() },
+    ).joinToString(" · ")
 
     private fun requireContext(): Context =
         checkNotNull(context) { "URI intake and OCR need an Android context" }
@@ -467,6 +603,8 @@ class ScreenshotIntakeCoordinator private constructor(
     }
 
     companion object {
+        /** Dotted entry point shown under each step; also the chain's entry kind. */
+        const val CALL_SITE_INGEST = "ScreenshotIntakeCoordinator.ingest"
         private const val MAX_EDGE = 1600
         private const val MAX_REMEMBERED = 80
     }
