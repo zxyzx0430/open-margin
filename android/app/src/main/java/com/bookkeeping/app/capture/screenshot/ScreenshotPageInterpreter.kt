@@ -597,29 +597,6 @@ object ScreenshotPageInterpreter {
     private fun noiseKey(value: String?): String =
         value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "").take(24)
 
-    /** Used by the coordinator for cross-source correlation. */
-    fun sameTransaction(a: TransactionDraft, b: TransactionDraft): Boolean {
-        val platformA = platformOf(a.pageIdentity)
-        val platformB = platformOf(b.pageIdentity)
-        if (platformA == CaptureCandidate.PLATFORM_UNKNOWN || platformA != platformB) return false
-        if (a.orderId != null && b.orderId != null) return a.orderId == b.orderId
-        if (a.amountCents != b.amountCents) return false
-        if (a.direction != b.direction) return false
-        val merchantA = noiseKey(a.merchantCandidates.firstOrNull())
-        val merchantB = noiseKey(b.merchantCandidates.firstOrNull())
-        if (merchantA.isNotEmpty() && merchantB.isNotEmpty() && merchantA != merchantB) return false
-        val timeA = a.eventTimeMs ?: return false
-        val timeB = b.eventTimeMs ?: return false
-        return abs(timeA - timeB) <= CORRELATION_WINDOW_MS
-    }
-
-    private fun platformOf(pageIdentity: String): String = when {
-        pageIdentity.startsWith("wechat") -> CaptureCandidate.PLATFORM_WECHAT
-        pageIdentity.startsWith("alipay") -> CaptureCandidate.PLATFORM_ALIPAY
-        else -> CaptureCandidate.PLATFORM_UNKNOWN
-    }
-
-    private const val CORRELATION_WINDOW_MS = 2L * 60 * 1000
     private const val MIN_STATUS_HORIZONTAL_GAP = 72
     private const val FUTURE_TOLERANCE_MS = 5L * 60 * 1000
     private const val MIN_EVENT_TIME = 1_262_304_000_000L // 2010-01-01

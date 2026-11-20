@@ -15,6 +15,7 @@ import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
+import com.bookkeeping.app.notification.capture.ScreenshotWaitingCorrelation
 import com.bookkeeping.app.ocr.MlKitOcrEngine
 import com.bookkeeping.app.ocr.OcrEngine
 import com.bookkeeping.app.ocr.PaddleOcrEngine
@@ -52,6 +53,8 @@ class ScreenshotIntakeCoordinator(
         val waiting: Int = 0,
         val linked: Int = 0,
         val ignored: Int = 0,
+        /** Waiting candidates this import settled with later evidence. */
+        val superseded: Int = 0,
         val failure: FailureReason? = null,
         val repeatImage: Boolean = false,
         val autoBookAllowed: Boolean = true,
@@ -163,6 +166,7 @@ class ScreenshotIntakeCoordinator(
         var waiting = 0
         var linked = 0
         var ignored = 0
+        var superseded = 0
         plan.decisions.forEach { decision ->
             val candidate = ScreenshotCandidateFactory.create(
                 decision = decision,
@@ -175,6 +179,17 @@ class ScreenshotIntakeCoordinator(
             if (stored == null) {
                 ignored++
                 return@forEach
+            }
+            if (ScreenshotWaitingCorrelation.isSettlingEvidence(stored)) {
+                // A later completed page settles the earlier waiting placeholder,
+                // so one transaction leaves one actionable item and at most one
+                // ledger row. Ambiguous matches return null and change nothing.
+                val settled = runCatching {
+                    store.relatedWaiting(stored, capturedAtMs)
+                }.getOrNull()
+                if (settled != null && store.mark(settled, CaptureCandidate.STATUS_LINKED)) {
+                    superseded++
+                }
             }
             when (decision.action) {
                 Action.AUTO_BOOK -> {
@@ -237,6 +252,7 @@ class ScreenshotIntakeCoordinator(
             waiting = waiting,
             linked = linked,
             ignored = ignored,
+            superseded = superseded,
             autoBookAllowed = allowAuto && !previewOnly,
             confirmationCandidates = confirmationCandidates,
         )

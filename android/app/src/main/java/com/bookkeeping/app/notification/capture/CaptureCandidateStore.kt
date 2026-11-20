@@ -4,7 +4,6 @@ import android.content.Context
 import com.bookkeeping.app.capture.screenshot.ScreenshotRetention
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import java.io.File
-import java.util.Locale
 
 /** Local candidate inbox; it never writes the ledger. */
 class CaptureCandidateStore internal constructor(private val filesRoot: File) {
@@ -64,31 +63,15 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
             .sortedBy { it.capturedAtMs }
             .take(limit.coerceIn(1, MAX_ENTRIES))
 
-    /** Return one unambiguous waiting item for later state evidence. */
+    /**
+     * Return one unambiguous waiting item for later state evidence.
+     *
+     * Delegates to [ScreenshotWaitingCorrelation] so the screenshot coordinator,
+     * the store and the unit tests all share one rule.
+     */
     fun relatedWaiting(incoming: CaptureCandidate, nowMs: Long): CaptureCandidate? = synchronized(lock) {
         runCatching { pruneExpiredLocked() }
-        val incomingOrderId = incoming.orderId?.trim()?.takeIf(String::isNotEmpty)
-        val waiting = latest(MAX_ENTRIES).filter { it.status == CaptureCandidate.STATUS_WAITING }
-        val exactOrder = incomingOrderId?.let { order ->
-            waiting.filter {
-                it.paymentPlatform == incoming.paymentPlatform && it.orderId?.trim() == order
-            }
-        }.orEmpty()
-        if (exactOrder.size == 1) return@synchronized exactOrder.single()
-        if (exactOrder.size > 1) return@synchronized null
-
-        val merchant = normalizeMerchant(incoming.merchantCandidates.firstOrNull())
-        if (merchant.isBlank() || incomingOrderId != null) return@synchronized null
-        val matches = waiting.filter { previous ->
-            previous.orderId == null &&
-                previous.paymentPlatform == incoming.paymentPlatform &&
-                previous.kind == incoming.kind &&
-                previous.amountCents == incoming.amountCents &&
-                previous.direction == incoming.direction &&
-                normalizeMerchant(previous.merchantCandidates.firstOrNull()) == merchant &&
-                kotlin.math.abs(nowMs - previous.capturedAtMs) <= CORRELATION_WINDOW_MS
-        }
-        matches.singleOrNull()
+        ScreenshotWaitingCorrelation.settleTarget(incoming, latest(MAX_ENTRIES), nowMs)
     }
 
     /** Appends a status record; readers keep the last record for each candidateId. */
@@ -177,14 +160,10 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
         }
     }
 
-    private fun normalizeMerchant(value: String?): String =
-        value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
-
     companion object {
         private const val MAX_ENTRIES = 200
         private const val MAX_INDEX_BYTES = 512 * 1024L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
         private const val INDEX_TMP_NAME = "candidates.jsonl.tmp"
-        private const val CORRELATION_WINDOW_MS = 10L * 60 * 1000
     }
 }
