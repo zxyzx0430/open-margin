@@ -15,6 +15,14 @@ interface TransactionDiagnosticDao {
     @Query("DELETE FROM transaction_diagnostic_events WHERE occurredAtMs < :cutoffMs")
     suspend fun pruneBefore(cutoffMs: Long): Int
 
+    /**
+     * Erase every stored raw input in one statement. Summaries, stages, results
+     * and the seven-day retention are untouched: only the payload goes away, so
+     * the log stays readable while the phone stops holding notification bodies.
+     */
+    @Query("UPDATE transaction_diagnostic_events SET rawText = NULL WHERE rawText IS NOT NULL")
+    suspend fun clearRawText(): Int
+
     @Query("""
         SELECT * FROM transaction_diagnostic_events
         WHERE occurredAtMs >= :cutoffMs

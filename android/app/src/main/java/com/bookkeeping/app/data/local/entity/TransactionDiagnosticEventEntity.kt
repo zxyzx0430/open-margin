@@ -35,4 +35,15 @@ data class TransactionDiagnosticEventEntity(
     val inputSummary: String? = null,
     /** Structured output summary, e.g. "-¥8.00 · 祐迎迎生鲜超市". */
     val outputSummary: String? = null,
+    /**
+     * The raw input this chain actually received: notification title + body, SMS
+     * sender + body, page OCR text (one line per block, reading order) or the
+     * manual / ASR utterance. Stored so a user-reported bug can be reproduced.
+     *
+     * Bounded by [com.bookkeeping.app.data.diagnostics.DiagnosticRawText.MAX_LENGTH]
+     * (never by the 160-char summary clip), device-private, excluded from the
+     * sync payload, never written to Logcat, and erasable by the user in one
+     * action. Never image bytes, audio, or a whole import file.
+     */
+    val rawText: String? = null,
 )

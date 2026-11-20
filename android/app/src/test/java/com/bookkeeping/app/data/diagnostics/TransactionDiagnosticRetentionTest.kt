@@ -41,17 +41,19 @@ class TransactionDiagnosticRetentionTest {
             .map { it.name }
             .toSet()
 
-        // v11 added three nullable explanation columns. The guard stays hard: the
-        // table is still metadata-only, and nothing may add a raw payload column
-        // (screenshot bytes, OCR text, audio, notification body, import file).
+        // v11 added three nullable explanation columns, v12 one nullable raw-text
+        // column. The guard stays hard: no binary payload may ever appear here
+        // (screenshot bytes, audio, a whole import file). Raw text is deliberate
+        // and user-approved — it is the原文 a user needs to report a bug, is
+        // bounded to 4000 chars, stays local and can be erased from the log page.
         assertEquals(
             setOf(
                 "eventId", "attemptId", "transactionId", "occurredAtMs", "stage", "result", "details",
-                "callSite", "inputSummary", "outputSummary",
+                "callSite", "inputSummary", "outputSummary", "rawText",
             ),
             fields,
         )
-        listOf("callSite", "inputSummary", "outputSummary").forEach { name ->
+        listOf("callSite", "inputSummary", "outputSummary", "rawText").forEach { name ->
             val field = TransactionDiagnosticEventEntity::class.java.getDeclaredField(name)
             assertEquals("$name must be nullable text", String::class.java, field.type)
             assertFalse("$name must not be a primitive", field.type.isPrimitive)
@@ -79,6 +81,8 @@ private class PruneFailingDiagnosticDao : TransactionDiagnosticDao {
 
     override suspend fun pruneBefore(cutoffMs: Long): Int =
         throw IllegalStateException("prune failed")
+
+    override suspend fun clearRawText(): Int = 0
 
     override fun observeEvents(
         cutoffMs: Long,

@@ -14,9 +14,10 @@ import javax.inject.Singleton
  *
  * Every row may carry a dotted [callSite] plus structured [inputSummary] and
  * [outputSummary] strings. Those summaries are counts, amounts, directions,
- * merchant names and hit/miss facts — never raw OCR text, screenshot bytes,
- * audio, notification bodies or a whole import file. [DiagnosticSummary] clips
- * them so one bad caller cannot turn a row into a text dump.
+ * merchant names and hit/miss facts. The raw input travels separately in
+ * [TransactionDiagnosticEventEntity.rawText], bounded by [DiagnosticRawText] —
+ * never by the 160-char summary clip, and never a screenshot byte, audio clip
+ * or whole import file.
  */
 @Singleton
 class TransactionDiagnostics @Inject constructor(
@@ -32,6 +33,7 @@ class TransactionDiagnostics @Inject constructor(
         callSite: String? = null,
         inputSummary: String? = null,
         outputSummary: String? = null,
+        rawText: String? = null,
     ) {
         try {
             try {
@@ -53,6 +55,9 @@ class TransactionDiagnostics @Inject constructor(
                     callSite = DiagnosticSummary.clip(callSite),
                     inputSummary = DiagnosticSummary.clip(inputSummary),
                     outputSummary = DiagnosticSummary.clip(outputSummary),
+                    // Independent bound: the summary clip is 160 chars and would
+                    // silently destroy the payload this column exists for.
+                    rawText = DiagnosticRawText.store(rawText),
                 ),
             )
         } catch (cancelled: CancellationException) {
@@ -72,7 +77,11 @@ class TransactionDiagnostics @Inject constructor(
         callSite = step.callSite,
         inputSummary = step.inputSummary,
         outputSummary = step.outputSummary,
+        rawText = step.rawText,
     )
+
+    /** Null every stored raw input; the summaries and the 7-day window stay. */
+    suspend fun clearRawText(): Int = dao.clearRawText()
 
     suspend fun pruneExpired(nowMs: Long = System.currentTimeMillis()): Int =
         dao.pruneBefore(TransactionDiagnosticRetention.cutoffMs(nowMs))
@@ -99,7 +108,8 @@ class TransactionDiagnostics @Inject constructor(
 
 /**
  * One pipeline step. [callSite] answers "where did this happen", the two
- * summaries answer "what went in / what came out" without storing the payload.
+ * summaries answer "what went in / what came out" without storing the payload,
+ * and [rawText] carries the actual input (bounded by [DiagnosticRawText]).
  */
 data class DiagnosticStep(
     val attemptId: String,
@@ -110,12 +120,19 @@ data class DiagnosticStep(
     val callSite: String? = null,
     val inputSummary: String? = null,
     val outputSummary: String? = null,
+    val rawText: String? = null,
 )
 
 data class TransactionDiagnosticInput(
     val attemptId: String = TransactionDiagnostics.newAttemptId(),
     /** Dotted entry point of this chain; null keeps the receiver's default. */
     val callSite: String? = null,
+    /**
+     * Verbatim input when the caller still holds it — the ASR transcript for a
+     * voice entry, for example. Null lets the repository derive the raw text
+     * from the merchant and note the user actually submitted.
+     */
+    val rawText: String? = null,
 )
 
 /**
@@ -123,8 +140,7 @@ data class TransactionDiagnosticInput(
  *
  * Rules: money is rendered from integer cents (never a Double), the merchant is
  * the only free-text field, and every string is clipped to [MAX_LENGTH] before
- * it reaches the database. No helper here accepts OCR text, a notification body
- * or a file path.
+ * it reaches the database.
  */
 object DiagnosticSummary {
     const val MAX_LENGTH = 160
@@ -161,6 +177,80 @@ object DiagnosticSummary {
     fun counts(vararg pairs: Pair<String, Int>): String =
         pairs.joinToString(" · ") { (label, value) -> "$label $value" }
 }
+
+/**
+ * The only bound raw input is subject to.
+ *
+ * It cannot reuse [DiagnosticSummary.clip]: 160 characters is shorter than one
+ * payment notification, so clipping raw text there would store a truncated body
+ * and make bug reports unreproducible. A screenshot page is typically 200–800
+ * characters, so 4000 leaves ample room while still preventing a caller bug from
+ * writing an unbounded dump.
+ *
+ * This object also owns the reading-order join used by the screenshot chain so
+ * the stored text keeps the OCR order instead of a re-assembled structure.
+ */
+object DiagnosticRawText {
+    const val MAX_LENGTH = 4_000
+    const val TRUNCATED_MARK = "…（已截断）"
+
+    /** Trim, drop blank input (NULL, not an empty string) and bound the length. */
+    fun store(value: String?): String? {
+        val trimmed = value?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
+        if (trimmed.length <= MAX_LENGTH) return trimmed
+        // Reserve room for the mark so the result is never longer than MAX_LENGTH.
+        return trimmed.take(MAX_LENGTH - TRUNCATED_MARK.length) + TRUNCATED_MARK
+    }
+
+    /**
+     * "标题\n正文" for a notification or SMS. A missing half is dropped; both
+     * missing yields null so an empty row never claims to carry a payload.
+     */
+    fun titleAndBody(title: String?, body: String?): String? {
+        val parts = listOfNotNull(
+            title?.trim()?.takeIf { it.isNotEmpty() },
+            body?.trim()?.takeIf { it.isNotEmpty() },
+        )
+        return store(parts.joinToString("\n"))
+    }
+
+    /**
+     * A hand-typed bill has no single "original sentence": the two free-text
+     * fields the user filled are the closest thing. Blank fields are dropped so
+     * a bill with only a merchant stores just the merchant.
+     */
+    fun manualEntry(merchant: String?, note: String?): String? = store(
+        listOfNotNull(merchant, note)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n"),
+    )
+
+    /**
+     * One OCR block per line, ordered top-to-bottom then left-to-right. Blocks
+     * without bounds sink to the end in their original order rather than being
+     * given a fake coordinate at the top of the page.
+     */
+    fun ocrLines(blocks: List<RawLine>): String? {
+        val ordered = blocks
+            .filter { it.text.isNotBlank() }
+            .sortedWith(
+                compareBy<RawLine> { if (it.hasBounds) 0 else 1 }
+                    .thenBy { it.top }
+                    .thenBy { it.left },
+            )
+        return store(ordered.joinToString("\n") { it.text.trim() })
+    }
+}
+
+/** One recognised line with its position; the data layer's copy of a TextBlock. */
+data class RawLine(
+    val text: String,
+    val top: Int = 0,
+    val left: Int = 0,
+    val hasBounds: Boolean = true,
+)
 
 /** 7×24-hour rolling retention. Events exactly at the cutoff remain available. */
 object TransactionDiagnosticRetention {
