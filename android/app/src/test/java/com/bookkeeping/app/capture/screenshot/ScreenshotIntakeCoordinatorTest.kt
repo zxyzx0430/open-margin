@@ -193,33 +193,35 @@ class ScreenshotIntakeCoordinatorTest {
     }
 
     @Test
-    fun `a page the app refuses to act on never settles a placeholder`() = runBlocking {
+    fun `a card the app refuses to act on never settles a placeholder`() = runBlocking {
         val dir = Files.createTempDirectory("intake-ignored").toFile()
         try {
             val store = CaptureCandidateStore(dir)
-            // An earlier ¥10 purchase at 店铺A is waiting for evidence.
+            // An earlier ¥20 purchase at 店铺A is waiting for evidence.
             val waiting = waitingTransfer(capturedAtMs = capturedAt - 60_000).copy(
                 merchantCandidates = listOf("店铺A"),
-                amountCents = 1_000L,
+                amountCents = 2_000L,
                 kind = CaptureCandidate.KIND_PAYMENT,
-                pageIdentity = "screenshot:wechat:PAYMENT:1000:店铺A",
+                pageIdentity = "screenshot:wechat:PAYMENT:2000:店铺A",
             )
             store.save(waiting, null)
-            // No boxes, two shops, one cancellation: the page is ambiguous, so
-            // every decision is IGNORE and nothing may be settled from it.
+            // Two ¥20 cards with no OCR boxes: the page cannot be split, so its
+            // single ambiguous draft is IGNORE. An ignored card may not close the
+            // placeholder and may not book anything either.
             val page = listOf(
                 TextBlock(text = "微信支付"),
                 TextBlock(text = "收款方 店铺A"),
-                TextBlock(text = "-¥10.00"),
+                TextBlock(text = "-¥20.00"),
                 TextBlock(text = "支付成功"),
                 TextBlock(text = "店铺B"),
                 TextBlock(text = "-¥20.00"),
-                TextBlock(text = "已取消"),
+                TextBlock(text = "支付成功"),
             )
 
             val outcome = ingestPage(ScreenshotIntakeCoordinator(store), capturedAt, page)
 
             assertEquals(0, outcome.superseded)
+            assertEquals(0, outcome.booked)
             assertEquals(
                 CaptureCandidate.STATUS_WAITING,
                 store.latest().single { it.candidateId == waiting.candidateId }.status,
