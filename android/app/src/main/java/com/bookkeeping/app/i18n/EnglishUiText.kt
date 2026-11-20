@@ -590,6 +590,7 @@ internal object EnglishUiText {
         "扫描只在本机保存结构化字段和截图，确认后才会写入账本。" to
             "Scan data and screenshots stay on this device; the ledger is written only after you confirm.",
         "没有待确认扫描结果" to "No pending scan results",
+        "请先选择收支方向" to "Choose expense or income first",
         "扫描截图" to "Scan screenshot",
         "置信度" to "Confidence",
         "候选：" to "Candidates: ",
