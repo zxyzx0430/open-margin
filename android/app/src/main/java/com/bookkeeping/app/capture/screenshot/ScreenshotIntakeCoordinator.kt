@@ -27,6 +27,7 @@ import dagger.hilt.components.SingletonComponent
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import kotlin.math.max
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -44,6 +45,14 @@ class ScreenshotIntakeCoordinator(
                 context.applicationContext,
                 ScreenshotImportEntryPoint::class.java,
             ).transactionRepository()
+        }.getOrNull()
+    },
+    private val diagnosticsProvider: () -> TransactionDiagnostics? = {
+        runCatching {
+            EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                ScreenshotImportEntryPoint::class.java,
+            ).transactionDiagnostics()
         }.getOrNull()
     },
 ) {
@@ -147,9 +156,13 @@ class ScreenshotIntakeCoordinator(
             allowAuto = allowAuto,
             previewOnly = previewOnly,
         )
+        // The attempt id exists before any return, so a failed import still owns
+        // the correlation id its diagnostic row needs.
+        val attemptId = TransactionDiagnostics.newAttemptId()
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;
             // no ledger write and no user-visible noise.
+            recordFailure(attemptId, failure)
             return Outcome(
                 failure = failure,
                 repeatImage = plan.repeatImage,
@@ -160,7 +173,6 @@ class ScreenshotIntakeCoordinator(
             return Outcome(repeatImage = true, autoBookAllowed = allowAuto && !previewOnly)
         }
 
-        val attemptId = TransactionDiagnostics.newAttemptId()
         var booked = 0
         var pending = 0
         val confirmationCandidates = mutableListOf<CaptureCandidate>()
@@ -306,6 +318,27 @@ class ScreenshotIntakeCoordinator(
         ocrEngine = null
     }
 
+    /**
+     * Best effort: a diagnostic write must never block, change or fail capture,
+     * and it records only the attempt id, stage and failure code.
+     */
+    private suspend fun recordFailure(attemptId: String, failure: FailureReason) {
+        val diagnostics = diagnosticsProvider() ?: return
+        val note = ScreenshotImportDiagnostics.failureNote(attemptId, failure)
+        try {
+            diagnostics.record(
+                attemptId = note.attemptId,
+                stage = note.stage,
+                result = note.result,
+                details = note.details,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Diagnostics must never fail an import.
+        }
+    }
+
     private suspend fun recognize(bitmap: Bitmap) = ocrMutex.withLock {
         val engine = ocrEngine ?: PaddleOcrEngine(
             context,
@@ -375,4 +408,5 @@ class ScreenshotIntakeCoordinator(
 @InstallIn(SingletonComponent::class)
 interface ScreenshotImportEntryPoint {
     fun transactionRepository(): TransactionRepository
+    fun transactionDiagnostics(): TransactionDiagnostics
 }
