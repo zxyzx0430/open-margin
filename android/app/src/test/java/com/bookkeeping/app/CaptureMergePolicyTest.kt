@@ -54,13 +54,15 @@ class CaptureMergePolicyTest {
 
     @Test
     fun emptyMerchantIsMergedWithRichMerchant() {
-        val fromNotification = entity(id = 5)
+        // 两个入口带同一个订单号：强标识相等才允许并成一条，空商户由富记录补全。
+        val fromNotification = entity(id = 5, orderId = "420000123420260101")
         val fromPaymentPage = entity(
             id = 0,
             timestamp = t0 + 9_000L,
             merchant = "禧迎迎生鲜超市(岭南店)",
             category = TransactionCategory.FOOD.name,
             account = null,
+            orderId = "420000123420260101",
         )
 
         assertTrue(CaptureMergePolicy.isSamePayment(fromNotification, fromPaymentPage))
@@ -78,7 +80,7 @@ class CaptureMergePolicyTest {
     }
 
     @Test
-    fun orderIdIsWrittenBackIntoSamePayment() {
+    fun orderIdOnOneSideOnlyIsNotEnoughToMerge() {
         val existing = entity(id = 7, merchant = "禧迎迎", account = null, note = "")
         val incoming = entity(
             id = 0,
@@ -88,8 +90,13 @@ class CaptureMergePolicyTest {
             category = TransactionCategory.FOOD.name,
         )
 
-        assertTrue(CaptureMergePolicy.isSamePayment(existing, incoming))
+        // 只有一边有订单号 → 不是「强标识相等」，不自动吞并，两笔各自成行。
+        assertFalse(CaptureMergePolicy.isSamePayment(existing, incoming))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(existing), incoming))
+        // 仍然按「可能重复」交人工确认，不丢记录
+        assertTrue(DuplicateReviewPolicy.shouldFlag(existing, incoming))
 
+        // mergeInto 的补全能力本身保留：真的合并（历史纠正）时订单号仍会写回
         val merged = CaptureMergePolicy.mergeInto(existing, incoming)
         assertEquals("420000123420260101", merged.sourceTransactionId)
         // 支付成功页的商户名更具体 → 升级，但不丢原有 id
@@ -102,16 +109,18 @@ class CaptureMergePolicyTest {
 
     @Test
     fun beyondMergeWindowIsNotMerged() {
-        val existing = entity(timestamp = t0)
+        val existing = entity(timestamp = t0, orderId = "420000123420260101")
         val tooLate = entity(
             id = 0,
             timestamp = t0 + CaptureMergePolicy.AUTO_MERGE_WINDOW_MS + 1,
             merchant = "禧迎迎生鲜超市(岭南店)",
+            orderId = "420000123420260101",
         )
         val atEdge = entity(
             id = 0,
             timestamp = t0 + CaptureMergePolicy.AUTO_MERGE_WINDOW_MS,
             merchant = "禧迎迎生鲜超市(岭南店)",
+            orderId = "420000123420260101",
         )
 
         assertFalse(CaptureMergePolicy.isSamePayment(existing, tooLate))
@@ -200,10 +209,12 @@ class CaptureMergePolicyTest {
 
     @Test
     fun historicalPairRepairKeepsTheRichRowAndHidesThePoorOne() {
+        // 历史重复对能自动纠正的前提：两条都带同一个订单号（强标识相等）。
         val poor = entity(
             id = 5,
             duplicateOfId = 6,
             reviewStatus = CaptureMergePolicy.STATUS_POSSIBLE_DUPLICATE,
+            orderId = "420000123420260101",
         )
         val rich = entity(
             id = 6,
@@ -268,15 +279,17 @@ class CaptureMergePolicyTest {
 
     @Test
     fun notificationThenPaymentPageKeepsOneEnrichedRow() {
+        // 两个入口抓到同一笔，且都带同一个订单号（强标识相等），才能自动合成一条。
+        val orderId = "420000123420260101"
         // 1) 通知先入库：商户为空、分类「其他」，id = 5
-        val ledger = mutableListOf(entity(id = 5))
+        val ledger = mutableListOf(entity(id = 5, orderId = orderId))
         // 2) 支付成功页随后到：完整商户 + 订单号 + 具体分类
         val fromPaymentPage = entity(
             id = 0,
             timestamp = t0 + 4_000L,
             merchant = "禧迎迎生鲜超市(岭南店)",
             category = TransactionCategory.FOOD.name,
-            orderId = "420000123420260101",
+            orderId = orderId,
             account = null,
         )
 
@@ -293,8 +306,8 @@ class CaptureMergePolicyTest {
         assertNull(ledger.single().duplicateOfId)
         assertEquals("unverified", ledger.single().remoteReviewStatus)
 
-        // 3) 通知重发（仍是空商户）继续并进同一条，不会产生第三行
-        val repost = entity(id = 0, timestamp = t0 + 30_000L)
+        // 3) 通知重发（同一个订单号）继续并进同一条，不会产生第三行
+        val repost = entity(id = 0, timestamp = t0 + 30_000L, orderId = orderId)
         val again = CaptureMergePolicy.findMergeTarget(ledger, repost)
         assertNotNull(again)
         assertEquals(5L, again!!.id)
@@ -318,7 +331,7 @@ class CaptureMergePolicyTest {
 
         val target = CaptureMergePolicy.findMergeTarget(
             candidates = listOf(mergedAway, keptRich),
-            incoming = entity(id = 0, timestamp = t0 + 60_000L),
+            incoming = entity(id = 0, timestamp = t0 + 60_000L, orderId = "420000123"),
         )
 
         assertNotNull(target)

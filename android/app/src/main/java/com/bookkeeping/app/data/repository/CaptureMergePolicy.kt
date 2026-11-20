@@ -6,19 +6,23 @@ import com.bookkeeping.app.data.merchant.MerchantRules
 import kotlin.math.abs
 
 /**
- * 采集自动合并规则：同一笔支付被两条采集路径各扫一次时，合成一条记录。
+ * 采集自动合并规则：同一条支付凭据被两条采集路径各扫一次时，合成一条记录。
  *
- * 典型场景：微信通知文本只拿到金额（商户为空），支付成功页拿到完整商户名。
- * 过去这种组合会插入两条记录并弹「待确认重复」卡片，现在直接写回先入库的
- * 那条，把新记录里的有效字段补进去，不再打断用户。
+ * 唯一允许自动合并的证据是强标识（订单号 / 交易号）相等：两条记录必须都带
+ * 非空的 `sourceTransactionId` 且相等。金额、商户、方向、币种和 120 秒窗口
+ * 只是必要条件，单独拿出来不足以证明是同一笔——同一商户连续两笔同额消费很
+ * 常见，静默并掉会让账本少一笔钱，而多出来的一行用户自己删得掉。
+ *
+ * 因此没有订单号时本规则一律返回 false，两笔各自入库；可能与既有记录重复的
+ * 行由 [DuplicateReviewPolicy] 标注后交用户确认，绝不自动吞并。
  *
  * 纯逻辑，无 Android 依赖，可直接跑 JVM 单测。
  *
  * 与 [DuplicateReviewPolicy] 的分工：
- * - 本规则只处理「证据足够、可确定是同一笔」的情况（同来源 + 同金额方向币种
- *   + 120 秒内 + 商户/订单号互证），命中即自动合并，不再插入新行。
- * - [DuplicateReviewPolicy] 的 3 分钟窗口继续兜底「可能重复」：跨来源、商户
- *   明显不同、或超时的记录仍然入库并弹人工确认卡片。
+ * - 本规则只处理「强标识相等、可确定是同一笔」的情况，命中即自动合并，
+ *   不再插入新行。
+ * - [DuplicateReviewPolicy] 的 3 分钟窗口兜底「可能重复」：同商户、跨来源、
+ *   或超时的记录仍然入库并弹人工确认卡片。
  */
 object CaptureMergePolicy {
     /**
@@ -81,13 +85,14 @@ object CaptureMergePolicy {
      * 判定两条记录是同一笔支付。
      *
      * 硬条件：金额、方向、币种、来源全部相同，且时间差 ≤ [AUTO_MERGE_WINDOW_MS]。
-     * 证据条件（任一）：
-     * 1. 一方没有商户信息（空或占位名），另一方有；
-     * 2. 两边商户按 [MerchantRules.normalize] 归一后相同（分店后缀会被去掉）；
-     * 3. 一方有订单号、另一方没有，且两边商户互不矛盾（归一后一方包含另一方）。
+     * 证据条件：两边都带非空订单号/交易号，且相等（忽略大小写与首尾空白）。
      *
-     * 两边都有商户且明显不同（归一后既不相等也不互相包含）时绝不自动合并，
-     * 即使一方带订单号——那更可能是两笔真实支付。
+     * 没有订单号、或只有一边有订单号时一律返回 false：金额相同 + 同商户 +
+     * 几分钟内不足以证明是同一笔，连续两笔同额交易必须能各自成行。多出来的一行
+     * 用户自己删得掉，被吞掉的那笔钱用户看不见。
+     *
+     * 两边都有商户且明显不同（归一后既不相等也不互相包含）时也返回 false，
+     * 即使订单号相同——数据自相矛盾，交人工确认。
      */
     fun isSamePayment(existing: TransactionEntity, candidate: TransactionEntity): Boolean {
         if (existing.id != 0L && existing.id == candidate.id) return false
@@ -98,17 +103,17 @@ object CaptureMergePolicy {
         if (existing.source != candidate.source) return false
         if (abs(existing.timestamp - candidate.timestamp) > AUTO_MERGE_WINDOW_MS) return false
 
-        val existingMerchant = MerchantRules.normalize(existing.merchant)
-        val candidateMerchant = MerchantRules.normalize(candidate.merchant)
-        val existingHasMerchant = hasMerchantInfo(existing.merchant)
-        val candidateHasMerchant = hasMerchantInfo(candidate.merchant)
-        if (!existingHasMerchant || !candidateHasMerchant) return true
-        if (existingMerchant == candidateMerchant) return true
+        // 唯一证据：两边带同一个强标识。没有订单号就不合并。
+        val existingOrderId = existing.sourceTransactionId?.trim().orEmpty()
+        val candidateOrderId = candidate.sourceTransactionId?.trim().orEmpty()
+        if (existingOrderId.isEmpty() || candidateOrderId.isEmpty()) return false
+        if (!existingOrderId.equals(candidateOrderId, ignoreCase = true)) return false
 
-        val oneSideHasOrderId =
-            existing.sourceTransactionId.isNullOrBlank() !=
-                candidate.sourceTransactionId.isNullOrBlank()
-        return oneSideHasOrderId && merchantsRelated(existingMerchant, candidateMerchant)
+        if (!hasMerchantInfo(existing.merchant) || !hasMerchantInfo(candidate.merchant)) return true
+        return merchantsRelated(
+            MerchantRules.normalize(existing.merchant),
+            MerchantRules.normalize(candidate.merchant),
+        )
     }
 
     /**
@@ -165,8 +170,9 @@ object CaptureMergePolicy {
     }
 
     /**
-     * 从窗口内同金额的候选行里挑出自动合并的目标：证据充分的同来源记录中
-     * id 最小（先入库）的那条。没有证据返回 null，交回 [DuplicateReviewPolicy]。
+     * 从窗口内同金额的候选行里挑出自动合并的目标：带同一个订单号、id 最小
+     * （先入库）的那条。没有强标识时返回 null，交回 [DuplicateReviewPolicy]
+     * 标注后由用户确认。
      */
     fun findMergeTarget(
         candidates: List<TransactionEntity>,
