@@ -664,7 +664,9 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `chinese month day resolves strictly against the capture year`() {
+    fun `a plain month day beats capture day inference`() {
+        // Captured 2026-11-20 12:00, page says 11月19日 20:10: yesterday evening,
+        // not today's clock. Guards the ordinary case the new-year logic sits on.
         val capture = localTime(2026, 11, 20, 12, 0)
         val blocks = listOf(
             block("支付宝", 10),
@@ -677,6 +679,28 @@ class ScreenshotImportPipelineTest {
         val decision = ScreenshotImportPipeline.plan(
             request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
         ).decisions.single()
+
+        assertEquals(localTime(2026, 11, 19, 20, 10), decision.draft.eventTimeMs)
+        // Capture-day inference would have produced the 20th at 20:10 instead.
+        assertNotEquals(localTime(2026, 11, 20, 20, 10), decision.draft.eventTimeMs)
+    }
+
+    @Test
+    fun `chinese month day resolves to the nearest year`() {
+        // Captured 2027-01-01 00:30, page says 12月31日 22:00: the capture year
+        // would be eleven months ahead, so the year that just ended wins.
+        val capture = localTime(2027, 1, 1, 0, 30)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("12月31日 22:00", 130),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
         val candidate = ScreenshotCandidateFactory.create(
             decision = decision,
             source = IntakeSource.SHARE,
@@ -684,9 +708,86 @@ class ScreenshotImportPipelineTest {
             imageFingerprint = FINGERPRINT,
         )
 
-        assertEquals(localTime(2026, 11, 19, 20, 10), decision.draft.eventTimeMs)
+        assertEquals(localTime(2026, 12, 31, 22, 0), decision.draft.eventTimeMs)
         assertEquals(CaptureCandidate.TIME_SOURCE_ACTUAL, candidate.eventTimeSource)
         assertFalse(candidate.eventTimeNeedsConfirmation)
+        // Not the capture year's December, and not the capture day's clock.
+        assertNotEquals(localTime(2027, 12, 31, 22, 0), decision.draft.eventTimeMs)
+        assertNotEquals(localTime(2027, 1, 1, 22, 0), decision.draft.eventTimeMs)
+    }
+
+    @Test
+    fun `a new year month day captured on new year's eve stays on that day`() {
+        // Captured 2026-12-31 23:50, page says 1月1日 00:10 — twenty minutes old,
+        // not eleven months old. Capture-day inference would also give a false
+        // date here, so the yearless date has to be resolved on its own.
+        val capture = localTime(2026, 12, 31, 23, 50)
+        val page = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("1月1日 00:10", 130),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), page, emptyList(), timeZone = zone,
+        ).decisions.single()
+
+        assertEquals(localTime(2027, 1, 1, 0, 10), decision.draft.eventTimeMs)
+        assertNotEquals(localTime(2026, 1, 1, 0, 10), decision.draft.eventTimeMs)
+        assertFalse(
+            "a page date must never be replaced by the capture day's clock",
+            locallySameDay(decision.draft.eventTimeMs!!, capture),
+        )
+    }
+
+    private fun locallySameDay(a: Long, b: Long): Boolean {
+        val one = java.util.Calendar.getInstance(zone).apply { timeInMillis = a }
+        val two = java.util.Calendar.getInstance(zone).apply { timeInMillis = b }
+        return one.get(java.util.Calendar.YEAR) == two.get(java.util.Calendar.YEAR) &&
+            one.get(java.util.Calendar.DAY_OF_YEAR) == two.get(java.util.Calendar.DAY_OF_YEAR)
+    }
+
+    @Test
+    fun `a merchant name containing month or day characters keeps a bare clock`() {
+        // 每日优鲜 carries 日 and 月饼 carries 月, but neither is a date token.
+        // The old guard dropped the whole page's clock because of them.
+        val capture = localTime(2026, 11, 20, 22, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("每日优鲜 月饼礼盒", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("20:10", 130),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
+
+        assertEquals(localTime(2026, 11, 20, 20, 10), decision.draft.eventTimeMs)
+    }
+
+    @Test
+    fun `a real date token still blocks the time only fallback`() {
+        val capture = localTime(2026, 11, 20, 12, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("11月29日 20:10", 130),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
+
+        // 11-29 is nine days in the future: beyond tolerance, still unresolved.
+        assertNull(decision.draft.eventTimeMs)
+        // And it must not fall back to the capture day's clock either.
+        assertNotEquals(localTime(2026, 11, 20, 20, 10), decision.draft.eventTimeMs)
     }
 
     @Test

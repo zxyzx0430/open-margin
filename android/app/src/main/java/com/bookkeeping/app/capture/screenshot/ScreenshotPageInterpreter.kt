@@ -120,10 +120,12 @@ object ScreenshotPageInterpreter {
         "(\\d{4})[-/年](\\d{1,2})[-/月](\\d{1,2})日?\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?",
     )
 
-    /** `11月19日 20:10`: a real date that carries no year; resolved against the capture year. */
+    /** `11月19日 20:10`: a real date that carries no year; resolved to the nearest year. */
     private val MONTH_DAY_TIME_REGEX = Regex(
         "(?:^|[^0-9])(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日\\s*(\\d{1,2}):(\\d{2})(?::(\\d{2}))?",
     )
+    /** A date-shaped token: `11月19日` / `11月`, not `每日优鲜` or `月饼`; also `2026-11`, `11/19`. */
+    private val DATE_TOKEN_REGEX = Regex("(\\d{1,2})\\s*[月日]|\\d{1,4}\\s*[-/]\\s*\\d{1,2}")
     private val TIME_ONLY_REGEX = Regex("(\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
     private val RELATIVE_DAY_REGEX = Regex("大前天|前天|昨天|昨日|今天|今日")
 
@@ -653,28 +655,36 @@ object ScreenshotPageInterpreter {
             }.getOrNull()
         }
 
-        // `11月19日 20:10` is a real date with the year omitted. It is resolved
-        // strictly against the capture year; an impossible or future date stays
-        // unresolved, which leaves the candidate provisional at capture time
-        // instead of pretending it happened at that clock time today.
+        // `11月19日 20:10` is a real date with the year omitted. Resolving it
+        // against the capture year alone breaks at New Year: `12月31日` seen on
+        // 2027-01-01 looked like a future date, and `1月1日` seen on 2026-12-31
+        // landed eleven months early. Consider the neighbouring years and keep
+        // the occurrence nearest the capture moment, allowing a day of clock
+        // skew ahead. Beyond half a year back the year cannot be pinned, so the
+        // date stays unresolved instead of being stamped as actual time.
         MONTH_DAY_TIME_REGEX.find(text)?.let { match ->
             val values = match.groupValues
-            return runCatching {
-                val captureYear = Calendar.getInstance(timeZone).apply { timeInMillis = capturedAtMs }
-                    .get(Calendar.YEAR)
-                Calendar.getInstance(timeZone).apply {
-                    isLenient = false
-                    clear()
-                    set(
-                        captureYear,
-                        values[1].toInt() - 1,
-                        values[2].toInt(),
-                        values[3].toInt(),
-                        values[4].toInt(),
-                        values[5].ifBlank { "0" }.toInt(),
-                    )
-                }.timeInMillis.takeIf { it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS) }
-            }.getOrNull()
+            val captureYear = Calendar.getInstance(timeZone).apply { timeInMillis = capturedAtMs }
+                .get(Calendar.YEAR)
+            return ((captureYear - 1)..(captureYear + 1))
+                .mapNotNull { year ->
+                    runCatching {
+                        Calendar.getInstance(timeZone).apply {
+                            isLenient = false
+                            clear()
+                            set(
+                                year,
+                                values[1].toInt() - 1,
+                                values[2].toInt(),
+                                values[3].toInt(),
+                                values[4].toInt(),
+                                values[5].ifBlank { "0" }.toInt(),
+                            )
+                        }.timeInMillis
+                    }.getOrNull()
+                }
+                .filter { it in (capturedAtMs - MONTH_DAY_MAX_AGE_MS)..(capturedAtMs + MONTH_DAY_FUTURE_TOLERANCE_MS) }
+                .minByOrNull { abs(it - capturedAtMs) }
         }
 
         val relativeDay = RELATIVE_DAY_REGEX.find(text)?.value
@@ -703,11 +713,12 @@ object ScreenshotPageInterpreter {
                 }
             }.getOrNull()
         }
-        // Date tokens without a time-only match are not a clock: falling through
-        // here would assert "capture day at HH:mm" for a date we failed to read.
-        if (times.size != 1 || text.contains("年") || text.contains("-") ||
-            text.contains("月") || text.contains("日")
-        ) {
+        // Date-shaped tokens without a time-only match are not a clock: falling
+        // through here would assert "capture day at HH:mm" for a date we failed
+        // to read. Only a number glued to 月/日 (or a numeric 年-月-日 shape)
+        // counts — a merchant named 每日优鲜, a note about 月饼 and a negative
+        // amount like -¥9.90 must not kill a real 20:10.
+        if (times.size != 1 || text.contains("年") || DATE_TOKEN_REGEX.containsMatchIn(text)) {
             return null
         }
         val match = times.single()
@@ -773,5 +784,9 @@ object ScreenshotPageInterpreter {
 
     private const val MIN_STATUS_HORIZONTAL_GAP = 72
     private const val FUTURE_TOLERANCE_MS = 5L * 60 * 1000
+    /** A yearless date may sit slightly in the future because of clock skew. */
+    private const val MONTH_DAY_FUTURE_TOLERANCE_MS = 24L * 60 * 60 * 1000
+    /** Beyond half a year back a yearless month/day can no longer be pinned. */
+    private const val MONTH_DAY_MAX_AGE_MS = 183L * 24 * 60 * 60 * 1000
     private const val MIN_EVENT_TIME = 1_262_304_000_000L // 2010-01-01
 }
