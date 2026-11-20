@@ -664,6 +664,81 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
+    fun `chinese month day resolves strictly against the capture year`() {
+        val capture = localTime(2026, 11, 20, 12, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("11月19日 20:10", 130),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
+        val candidate = ScreenshotCandidateFactory.create(
+            decision = decision,
+            source = IntakeSource.SHARE,
+            capturedAtMs = capture,
+            imageFingerprint = FINGERPRINT,
+        )
+
+        assertEquals(localTime(2026, 11, 19, 20, 10), decision.draft.eventTimeMs)
+        assertEquals(CaptureCandidate.TIME_SOURCE_ACTUAL, candidate.eventTimeSource)
+        assertFalse(candidate.eventTimeNeedsConfirmation)
+    }
+
+    @Test
+    fun `impossible or future month day stays provisional instead of using capture time`() {
+        val capture = localTime(2026, 11, 20, 12, 0)
+        listOf("2月30日 20:10", "13月1日 20:10", "12月24日 20:10").forEach { stamp ->
+            val blocks = listOf(
+                block("支付宝", 10),
+                block("收款方 便利店", 40),
+                block("-¥9.90", 70),
+                block("交易成功", 100),
+                block(stamp, 130),
+            )
+            val decision = ScreenshotImportPipeline.plan(
+                request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+            ).decisions.single()
+            val candidate = ScreenshotCandidateFactory.create(
+                decision = decision,
+                source = IntakeSource.SHARE,
+                capturedAtMs = capture,
+                imageFingerprint = FINGERPRINT,
+            )
+
+            assertNull("$stamp must not be read as a clock", decision.draft.eventTimeMs)
+            assertEquals(capture, candidate.eventTimeMs)
+            assertEquals(CaptureCandidate.TIME_SOURCE_CAPTURE, candidate.eventTimeSource)
+            assertTrue(candidate.eventTimeNeedsConfirmation)
+        }
+    }
+
+    @Test
+    fun `date tokens without a readable clock never become the capture day`() {
+        val capture = localTime(2026, 11, 20, 12, 0)
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("收款方 便利店", 40),
+            block("-¥9.90", 70),
+            block("交易成功", 100),
+            block("11月29日 20:10 自动确认收货后扣款", 130),
+            block("2026年12月01日 09:00", 160),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(
+            request().copy(capturedAtMs = capture), blocks, emptyList(), timeZone = zone,
+        ).decisions.single()
+
+        // The month/day pair is only 9 days in the future, still beyond tolerance,
+        // and the 年 form is beyond the five-minute future window as well.
+        assertNull(decision.draft.eventTimeMs)
+    }
+
+    @Test
     fun `explicit yesterday overrides same day time inference near day end`() {
         val capture = localTime(2026, 11, 20, 23, 0)
         val blocks = listOf(
