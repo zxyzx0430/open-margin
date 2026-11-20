@@ -159,14 +159,17 @@ object ScreenshotImportPipeline {
     /**
      * Only a positively identified row may be linked.
      *
-     * 1. An exact platform-scoped order id wins outright.
-     * 2. Otherwise the row must match on platform, amount, direction, currency
-     *    and sit inside the two-minute window, and the merchant has to be
-     *    present and equal on both sides. An empty merchant is missing
-     *    evidence, not a wildcard: it can never turn a same-amount row into an
-     *    exact match, because swallowing a distinct transaction loses money
-     *    from the ledger. Rows that are plausible but unidentifiable return
-     *    AMBIGUOUS, which routes the candidate to human review.
+     * 1. An exact platform-scoped order id is the only proof that two captures
+     *    describe one transaction, so it is the only path to EXACT_MATCH. Two
+     *    rows sharing an order id are one payment; a second match is AMBIGUOUS.
+     * 2. Without an order id, platform + amount + direction + currency +
+     *    merchant + the two-minute window is a *resemblance*, not an identity:
+     *    a convenience store rings up the same amount twice in a row, so the
+     *    same merchant and the same cents a minute apart are ordinary, distinct
+     *    transactions. Those rows (and a row missing its merchant, and a row
+     *    without a real event time) return AMBIGUOUS, which routes the
+     *    candidate to human review. Nothing is merged silently: swallowing a
+     *    real payment loses money from the ledger, while asking costs one tap.
      * 3. Different merchants mean different transactions (two shops can charge
      *    the same amount a minute apart), so those stay CLEAR.
      */
@@ -222,13 +225,12 @@ object ScreenshotImportPipeline {
             return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
         }
         val identified = inWindow.filter { normalize(it.merchant) == merchant }
+        // Two distinct payments to one shop in the same two minutes look exactly
+        // like this, and nothing here can tell them apart: ask, never link.
+        // Only the order id branch above may ever return EXACT_MATCH.
         return when {
             identified.isEmpty() -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
-            identified.size > 1 -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
-            identified.single().eventTimeMs <= 0L ->
-                ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
-            else -> ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to
-                identified.single().transactionId
+            else -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
         }
     }
 

@@ -23,5 +23,6 @@ object CaptureBookGate {
         decide(allowAuto, previewOnly) == Decision.WRITE_LEDGER
 
     /** User confirmation is not permission to turn a preview into a ledger write. */
-    fun mayConfirm(candidate: CaptureCandidate): Boolean = candidate.ledgerWriteAllowed
+    fun mayConfirm(candidate: CaptureCandidate): Boolean = candidate.ledgerWriteAllowed &&
+        candidate.direction in setOf(CaptureCandidate.DIRECTION_INCOME, CaptureCandidate.DIRECTION_EXPENSE)
 }

@@ -20,6 +20,7 @@ internal object EnglishUiText {
         "截图记账" to "Screenshot capture",
         "时间待确认" to "Time to be confirmed",
         "金额待补" to "Amount missing",
+        "方向待确认" to "Direction needs confirmation",
         "截图待确认" to "Screenshot review",
         "识别到的截图交易，等你确认后入账" to "A transaction recognised from a screenshot; it is booked only after you confirm",
         "截图识别待确认" to "Screenshot needs confirmation",
@@ -589,6 +590,7 @@ internal object EnglishUiText {
         "扫描只在本机保存结构化字段和截图，确认后才会写入账本。" to
             "Scan data and screenshots stay on this device; the ledger is written only after you confirm.",
         "没有待确认扫描结果" to "No pending scan results",
+        "请先选择收支方向" to "Choose expense or income first",
         "扫描截图" to "Scan screenshot",
         "置信度" to "Confidence",
         "候选：" to "Candidates: ",

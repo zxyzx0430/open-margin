@@ -47,6 +47,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.ui.components.CategoryIcon
+import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.theme.QingIncome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -117,8 +118,8 @@ fun CaptureReviewDialog(
                             CaptureCandidateCard(
                                 candidate = candidate,
                                 busy = state.busy,
-                                onApprove = { merchant, category ->
-                                    viewModel.approve(candidate, merchant, category)
+                                onApprove = { merchant, category, direction ->
+                                    viewModel.approve(candidate, merchant, category, direction)
                                 },
                                 onIgnore = { viewModel.ignore(candidate) },
                             )
@@ -134,7 +135,7 @@ fun CaptureReviewDialog(
 private fun CaptureCandidateCard(
     candidate: CaptureCandidate,
     busy: Boolean,
-    onApprove: (String, TransactionCategory) -> Unit,
+    onApprove: (String, TransactionCategory, String?) -> Unit,
     onIgnore: () -> Unit,
 ) {
     var merchant by remember(candidate.candidateId) {
@@ -155,6 +156,19 @@ private fun CaptureCandidateCard(
             },
         )
     }
+    // 方向未知的候选只能由用户点选支出/收入后才能记入；默认不选中。
+    val needsDirection = CaptureReviewDirection.requiresSelection(candidate)
+    var directionChoice by remember(candidate.candidateId) { mutableStateOf<String?>(null) }
+    val directionKnown = candidate.direction != CaptureCandidate.DIRECTION_UNKNOWN ||
+        directionChoice != null
+    val income = when {
+        candidate.kind == CaptureCandidate.KIND_REFUND -> true
+        candidate.direction == CaptureCandidate.DIRECTION_UNKNOWN ->
+            directionChoice == CaptureCandidate.DIRECTION_INCOME
+        else -> candidate.direction == CaptureCandidate.DIRECTION_INCOME
+    }
+    // 方向未知且未选时不给正负号，避免把待确认的交易显示成支出。
+    val showSign = directionKnown || candidate.kind == CaptureCandidate.KIND_REFUND
     var categoryMenu by remember { mutableStateOf(false) }
     val thumbnail by produceState<ImageBitmap?>(initialValue = null, candidate.screenshotPath) {
         value = candidate.screenshotPath?.let { path ->
@@ -195,19 +209,23 @@ private fun CaptureCandidateCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val amountCents = candidate.amountCents
-                    val income = candidate.kind == CaptureCandidate.KIND_REFUND ||
-                        candidate.direction == CaptureCandidate.DIRECTION_INCOME
                     Text(
                         text = if (amountCents == null) {
                             tr("金额待补")
                         } else {
-                            (if (income) "+¥" else "−¥") +
-                                "%.2f".format(Locale.CHINA, amountCents / 100.0)
+                            (when {
+                                !showSign -> "¥"
+                                income -> "+¥"
+                                else -> "−¥"
+                            }) + "%.2f".format(Locale.CHINA, amountCents / 100.0)
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (income) QingIncome
-                        else MaterialTheme.colorScheme.error,
+                        color = when {
+                            !showSign -> MaterialTheme.colorScheme.onSurface
+                            income -> QingIncome
+                            else -> MaterialTheme.colorScheme.error
+                        },
                         modifier = Modifier.weight(1f),
                     )
                     Text(
@@ -221,6 +239,29 @@ private fun CaptureCandidateCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                if (needsDirection) {
+                    if (directionChoice == null) {
+                        Text(
+                            text = tr("请先选择收支方向"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CaptureReviewDirection.directions.forEach { option ->
+                            LedgerFilterChip(
+                                label = if (option == CaptureCandidate.DIRECTION_INCOME) {
+                                    tr("收入")
+                                } else {
+                                    tr("支出")
+                                },
+                                selected = directionChoice == option,
+                                onClick = { directionChoice = option },
+                            )
+                        }
+                    }
                 }
                 OutlinedTextField(
                     value = merchant,
@@ -290,8 +331,9 @@ private fun CaptureCandidateCard(
                         Text(tr("忽略"))
                     }
                     Button(
-                        onClick = { onApprove(merchant, category) },
-                        enabled = !busy && candidate.ledgerWriteAllowed,
+                        onClick = { onApprove(merchant, category, directionChoice) },
+                        enabled = !busy &&
+                            CaptureReviewDirection.canConfirm(candidate, directionChoice),
                     ) {
                         Text(tr("记入账本"))
                     }

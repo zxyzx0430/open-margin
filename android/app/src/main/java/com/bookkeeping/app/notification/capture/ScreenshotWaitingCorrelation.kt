@@ -28,17 +28,19 @@ object ScreenshotWaitingCorrelation {
         candidate.completionStatus in SETTLING_STATUSES
 
     /**
-     * The single waiting candidate [incoming] settles, or null when none or more
+     * The one waiting candidate [incoming] settles, or null when none or more
      * than one candidate could be meant.
      *
      * Positive identification only:
-     * 1. platform + exact order id;
+     * 1. platform + exact order id (strong identifier, wins outright);
      * 2. platform + kind + amount + direction + normalized merchant, inside
      *    [CORRELATION_WINDOW_MS], and only when both sides carry the merchant.
      *
-     * An empty merchant is missing evidence, not a wildcard, and a different
-     * kind is a different transaction: a completed payment never closes a
-     * waiting transfer, even when the numbers line up.
+     * The fuzzy shape must be unique among all waiting items, including ones
+     * that carry their own order id: two transfers to the same person for the
+     * same amount are ordinary, and an unidentified page may be either one's
+     * later evidence. An empty merchant is missing evidence, not a wildcard,
+     * and a different kind is a different transaction.
      */
     fun settleTarget(
         incoming: CaptureCandidate,
@@ -63,18 +65,22 @@ object ScreenshotWaitingCorrelation {
 
         val merchant = normalizeMerchant(incoming.merchantCandidates.firstOrNull())
         if (merchant.isEmpty()) return null
-        val matches = candidates.filter { previous ->
-            // Two order ids cannot describe one transaction, and a placeholder
-            // that already carries one is identified by it alone.
-            previous.orderId?.trim().isNullOrEmpty() &&
-                previous.paymentPlatform == incoming.paymentPlatform &&
+        // Count every waiting item of this shape, including items that already
+        // carry an order id. Dropping those first would manufacture a "single"
+        // match: this page may simply not print the order id, so an identified
+        // sibling is still a competing reading of the same evidence.
+        val sameShape = candidates.filter { previous ->
+            previous.paymentPlatform == incoming.paymentPlatform &&
                 previous.kind == incoming.kind &&
                 previous.amountCents == incoming.amountCents &&
                 previous.direction == incoming.direction &&
                 normalizeMerchant(previous.merchantCandidates.firstOrNull()) == merchant &&
                 kotlin.math.abs(nowMs - previous.capturedAtMs) <= CORRELATION_WINDOW_MS
         }
-        return matches.singleOrNull()
+        val only = sameShape.singleOrNull() ?: return null
+        // An order id is the only positive identification a placeholder can
+        // carry here; amount and merchant may never stand in for it.
+        return only.takeIf { it.orderId?.trim().isNullOrEmpty() }
     }
 
     private fun normalizeMerchant(value: String?): String =
