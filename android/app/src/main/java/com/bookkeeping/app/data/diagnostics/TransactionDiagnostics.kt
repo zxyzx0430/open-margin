@@ -161,3 +161,10 @@ object DiagnosticSummary {
     fun counts(vararg pairs: Pair<String, Int>): String =
         pairs.joinToString(" · ") { (label, value) -> "$label $value" }
 }
+
+/** 7×24-hour rolling retention. Events exactly at the cutoff remain available. */
+object TransactionDiagnosticRetention {
+    const val RETENTION_MS: Long = 7L * 24L * 60L * 60L * 1_000L
+    fun cutoffMs(nowMs: Long): Long = nowMs - RETENTION_MS
+    fun isExpired(occurredAtMs: Long, nowMs: Long): Boolean = occurredAtMs < cutoffMs(nowMs)
+}
