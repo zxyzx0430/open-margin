@@ -26,6 +26,7 @@ class EnglishUiTextTest {
             "确认记入" to "Confirm and record",
             "请确认截图交易" to "Review screenshot transaction",
             "已确认记入 %d 笔截图交易" to "Confirmed %d screenshot transaction(s)",
+            "（已更新 %d 笔旧记录）" to "(updated %d earlier item(s))",
             "截图交易确认完成" to "Screenshot review complete",
             "请确认这笔交易" to "Review this transaction",
             "稍后" to "Later",

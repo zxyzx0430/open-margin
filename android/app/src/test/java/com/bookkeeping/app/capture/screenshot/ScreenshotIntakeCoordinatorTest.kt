@@ -95,4 +95,166 @@ class ScreenshotIntakeCoordinatorTest {
             dir.deleteRecursively()
         }
     }
+
+    private fun block(text: String, top: Int) = TextBlock(text = text, top = top, right = 300, bottom = top + 20)
+
+    private fun transferPage(status: String) = listOf(
+        block("微信支付", 10),
+        block("转账给 张三", 40),
+        block("-¥200.00", 70),
+        block(status, 100),
+    )
+
+    private fun waitingTransfer(capturedAtMs: Long) = CaptureCandidate(
+        packageName = null,
+        pageIdentity = "screenshot:wechat:TRANSFER:20000:张三",
+        amountCents = 20_000L,
+        merchantCandidates = listOf("张三"),
+        orderId = null,
+        capturedAtMs = capturedAtMs,
+        screenshotPath = null,
+        confidence = 0.6f,
+        reason = "waiting",
+        status = CaptureCandidate.STATUS_WAITING,
+        kind = CaptureCandidate.KIND_TRANSFER,
+        eventTimeMs = capturedAtMs,
+        direction = CaptureCandidate.DIRECTION_EXPENSE,
+        paymentPlatform = CaptureCandidate.PLATFORM_WECHAT,
+        completionStatus = CaptureCandidate.COMPLETION_PENDING,
+        candidateId = "waiting-transfer",
+    )
+
+    private suspend fun ingestPage(
+        coordinator: ScreenshotIntakeCoordinator,
+        capturedAtMs: Long,
+        blocks: List<TextBlock>,
+        allowAuto: Boolean = true,
+        previewOnly: Boolean = false,
+    ) = coordinator.ingestBlocks(
+        request = request().copy(capturedAtMs = capturedAtMs),
+        blocks = blocks,
+        bytes = null,
+        fingerprint = "page-$capturedAtMs",
+        attemptId = "attempt-$capturedAtMs",
+        allowAuto = allowAuto,
+        previewOnly = previewOnly,
+    )
+
+    @Test
+    fun `a completed card settles the earlier waiting placeholder and counts it`() = runBlocking {
+        val dir = Files.createTempDirectory("intake-settle").toFile()
+        try {
+            val store = CaptureCandidateStore(dir)
+            val waiting = waitingTransfer(capturedAtMs = capturedAt - 60_000)
+            store.save(waiting, null)
+            val coordinator = ScreenshotIntakeCoordinator(store)
+
+            val outcome = ingestPage(coordinator, capturedAt, transferPage("交易成功"))
+
+            assertEquals(1, outcome.superseded)
+            assertEquals(1, outcome.pending)
+            assertEquals(
+                CaptureCandidate.STATUS_LINKED,
+                store.latest().single { it.candidateId == waiting.candidateId }.status,
+            )
+            // One actionable item, not two: the placeholder is closed.
+            assertEquals(1, store.pending().size)
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `preview only and allowAuto false change nothing at all`() = runBlocking {
+        val dir = Files.createTempDirectory("intake-preview").toFile()
+        try {
+            val store = CaptureCandidateStore(dir)
+            val waiting = waitingTransfer(capturedAtMs = capturedAt - 60_000)
+            store.save(waiting, null)
+            val coordinator = ScreenshotIntakeCoordinator(store)
+
+            val preview = ingestPage(coordinator, capturedAt, transferPage("交易成功"), previewOnly = true)
+            val noAuto = ingestPage(
+                coordinator,
+                capturedAt + 1_000,
+                transferPage("交易成功"),
+                allowAuto = false,
+            )
+
+            assertEquals(0, preview.superseded)
+            assertEquals(0, noAuto.superseded)
+            assertEquals(
+                CaptureCandidate.STATUS_WAITING,
+                store.latest().single { it.candidateId == waiting.candidateId }.status,
+            )
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a page the app refuses to act on never settles a placeholder`() = runBlocking {
+        val dir = Files.createTempDirectory("intake-ignored").toFile()
+        try {
+            val store = CaptureCandidateStore(dir)
+            // An earlier ¥10 purchase at 店铺A is waiting for evidence.
+            val waiting = waitingTransfer(capturedAtMs = capturedAt - 60_000).copy(
+                merchantCandidates = listOf("店铺A"),
+                amountCents = 1_000L,
+                kind = CaptureCandidate.KIND_PAYMENT,
+                pageIdentity = "screenshot:wechat:PAYMENT:1000:店铺A",
+            )
+            store.save(waiting, null)
+            // No boxes, two shops, one cancellation: the page is ambiguous, so
+            // every decision is IGNORE and nothing may be settled from it.
+            val page = listOf(
+                TextBlock(text = "微信支付"),
+                TextBlock(text = "收款方 店铺A"),
+                TextBlock(text = "-¥10.00"),
+                TextBlock(text = "支付成功"),
+                TextBlock(text = "店铺B"),
+                TextBlock(text = "-¥20.00"),
+                TextBlock(text = "已取消"),
+            )
+
+            val outcome = ingestPage(ScreenshotIntakeCoordinator(store), capturedAt, page)
+
+            assertEquals(0, outcome.superseded)
+            assertEquals(
+                CaptureCandidate.STATUS_WAITING,
+                store.latest().single { it.candidateId == waiting.candidateId }.status,
+            )
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `a sibling card from the same import never settles the card this import created`() = runBlocking {
+        val dir = Files.createTempDirectory("intake-sibling").toFile()
+        try {
+            val store = CaptureCandidateStore(dir)
+            val page = listOf(
+                block("微信支付", 10),
+                block("转账给 张三", 40),
+                block("-¥200.00", 70),
+                block("等待对方确认", 100),
+                block("转账给 张三", 140),
+                block("-¥200.00", 170),
+                block("交易成功", 200),
+            )
+
+            val outcome = ingestPage(ScreenshotIntakeCoordinator(store), capturedAt, page)
+
+            // Nothing was superseded: the only match was this import's own card.
+            assertEquals(0, outcome.superseded)
+            assertEquals(1, outcome.waiting)
+            assertEquals(
+                listOf(CaptureCandidate.STATUS_PENDING, CaptureCandidate.STATUS_WAITING),
+                store.latest().map { it.status }.sorted(),
+            )
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
 }

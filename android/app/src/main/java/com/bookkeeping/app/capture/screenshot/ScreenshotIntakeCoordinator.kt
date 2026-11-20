@@ -250,6 +250,13 @@ class ScreenshotIntakeCoordinator private constructor(
         var linked = 0
         var ignored = 0
         var superseded = 0
+        // Preview / allowAuto=false must not touch anything: a waiting card is
+        // only closed once this import produced a real outcome for its own card.
+        val settleAllowed = CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)
+        // Cards created by this import are never "later evidence": a sibling on
+        // the same page must not settle a placeholder this run just stored.
+        val createdHere = mutableSetOf<String>()
+        val waitingToSettle = linkedMapOf<String, CaptureCandidate>()
         plan.decisions.forEach { decision ->
             val candidate = ScreenshotCandidateFactory.create(
                 decision = decision,
@@ -263,17 +270,8 @@ class ScreenshotIntakeCoordinator private constructor(
                 ignored++
                 return@forEach
             }
-            if (ScreenshotWaitingCorrelation.isSettlingEvidence(stored)) {
-                // A later completed page settles the earlier waiting placeholder,
-                // so one transaction leaves one actionable item and at most one
-                // ledger row. Ambiguous matches return null and change nothing.
-                val settled = runCatching {
-                    store.relatedWaiting(stored, capturedAtMs)
-                }.getOrNull()
-                if (settled != null && store.mark(settled, CaptureCandidate.STATUS_LINKED)) {
-                    superseded++
-                }
-            }
+            createdHere += stored.candidateId
+            var applied = false
             when (decision.action) {
                 Action.AUTO_BOOK -> {
                     if (!CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)) {
@@ -298,18 +296,23 @@ class ScreenshotIntakeCoordinator private constructor(
                         if (inserted != null && inserted > 0L) {
                             store.mark(stored, CaptureCandidate.STATUS_APPROVED)
                             booked++
+                            applied = true
                         } else {
                             store.mark(stored, CaptureCandidate.STATUS_IGNORED)
                             ignored++
                         }
                     } ?: run {
+                        // No repository (Hilt unavailable): the card is still
+                        // offered for review, so it counts as a real outcome.
                         store.mark(stored, CaptureCandidate.STATUS_PENDING)
                         pending++
+                        applied = true
                     }
                 }
                 Action.ASK_USER -> {
                     store.mark(stored, CaptureCandidate.STATUS_PENDING)
                     pending++
+                    applied = true
                     if (source != IntakeSource.MEDIASTORE) confirmationCandidates += stored
                 }
                 Action.WAIT_FOR_EVIDENCE -> {
@@ -325,6 +328,18 @@ class ScreenshotIntakeCoordinator private constructor(
                     ignored++
                 }
             }
+            // Only evidence that became its own written or reviewable item may
+            // close an earlier placeholder. Ignored or waiting cards, failed
+            // inserts and preview runs change nothing.
+            if (applied && settleAllowed && ScreenshotWaitingCorrelation.isSettlingEvidence(stored)) {
+                runCatching { store.relatedWaiting(stored, capturedAtMs) }
+                    .getOrNull()
+                    ?.takeIf { it.candidateId !in createdHere }
+                    ?.let { waitingToSettle[it.candidateId] = it }
+            }
+        }
+        waitingToSettle.values.forEach { settled ->
+            if (store.mark(settled, CaptureCandidate.STATUS_LINKED)) superseded++
         }
         if (pending > 0 && source == IntakeSource.MEDIASTORE) {
             context?.let { runCatching { ScreenshotReviewNotifier.notifyPending(it, store.pending()) } }

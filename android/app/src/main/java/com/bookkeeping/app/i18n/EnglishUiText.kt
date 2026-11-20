@@ -71,6 +71,7 @@ internal object EnglishUiText {
         "交易还没完成，稍后再看" to "The transaction is not complete yet",
         "这笔已经在账本里" to "This transaction is already in the ledger",
         "没有可记录的交易" to "No transaction to record",
+        "（已更新 %d 笔旧记录）" to "(updated %d earlier item(s))",
         "重看引导" to "Replay the tour",
         "再次查看清衡的主要功能" to "See the main features again",
         "待更新组件：" to "Update components: ",

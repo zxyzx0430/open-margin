@@ -102,7 +102,7 @@ class ScreenshotImportActivity : ComponentActivity() {
             showCandidateConfirmation(outcome.confirmationCandidates, index = 0, confirmed = 0)
             return
         }
-        val message = when {
+        val base = when {
             outcome.failure == FailureReason.PERMISSION_DENIED -> tr("没有读取这张图片的权限")
             outcome.failure == FailureReason.URI_INVALID -> tr("图片地址已失效")
             outcome.failure == FailureReason.UNSUPPORTED_MIME -> tr("不是支持的图片格式")
@@ -118,6 +118,13 @@ class ScreenshotImportActivity : ComponentActivity() {
             outcome.waiting > 0 -> tr("交易还没完成，稍后再看")
             outcome.linked > 0 -> tr("这笔已经在账本里")
             else -> tr("没有可记录的交易")
+        }
+        // Waiting placeholders this import closed are part of the result: say so
+        // instead of silently dropping them from the count.
+        val message = if (outcome.superseded > 0) {
+            base + tr("（已更新 %d 笔旧记录）").format(outcome.superseded)
+        } else {
+            base
         }
         status.text = message
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
