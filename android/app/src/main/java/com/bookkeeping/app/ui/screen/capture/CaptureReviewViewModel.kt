@@ -286,7 +286,9 @@ class CaptureReviewQueue(initial: List<CaptureCandidate> = emptyList()) {
 
     /** Put a card back after a failed write, keeping capture-time order. */
     fun rollback(candidate: CaptureCandidate) {
-        if (!inFlight.remove(candidate.candidateId)) return
+        // Clear the in-flight mark even if a concurrent store refresh already
+        // dropped this id from bookkeeping; a failed write must stay visible.
+        inFlight.remove(candidate.candidateId)
         if (items.any { it.candidateId == candidate.candidateId }) return
         val index = items.indexOfFirst { it.capturedAtMs > candidate.capturedAtMs }
         if (index < 0) items.add(candidate) else items.add(index, candidate)
