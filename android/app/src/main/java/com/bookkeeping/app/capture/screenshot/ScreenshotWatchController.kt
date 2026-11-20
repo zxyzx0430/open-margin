@@ -30,19 +30,20 @@ object ScreenshotWatchController {
     @Volatile private var startedAtMs = 0L
 
     fun state(context: Context): State {
-        if (!ScreenshotWatchSettings.isAvailable()) return State.UNSUPPORTED
-        if (!ScreenshotWatchSettings.isEnabled(context)) return State.OFF
-        return when (permission(context)) {
-            Permission.FULL -> State.ACTIVE
-            Permission.PARTIAL -> State.PERMISSION_PARTIAL
-            Permission.NONE -> State.PERMISSION_MISSING
-        }
+        val state = ScreenshotWatchPermissionPolicy.state(
+            available = ScreenshotWatchSettings.isAvailable(),
+            enabled = ScreenshotWatchSettings.isEnabled(context),
+            access = permission(context),
+        )
+        return State.valueOf(state.name)
     }
 
     /** Idempotent: safe to call on every app start and after the user toggles it. */
     fun start(context: Context) {
         val appContext = context.applicationContext
-        if (state(appContext) != State.ACTIVE && state(appContext) != State.PERMISSION_PARTIAL) {
+        if (state(appContext) != State.ACTIVE ||
+            !ScreenshotWatchPermissionPolicy.mayWatch(permission(appContext))
+        ) {
             stop(appContext)
             return
         }
@@ -128,34 +129,32 @@ object ScreenshotWatchController {
         return SCREENSHOT_HINTS.any(haystack::contains)
     }
 
-    private fun permission(context: Context): Permission {
+    private fun permission(context: Context): ScreenshotWatchPermissionPolicy.Access {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val full = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.READ_MEDIA_IMAGES,
             ) == PackageManager.PERMISSION_GRANTED
-            if (full) return Permission.FULL
+            if (full) return ScreenshotWatchPermissionPolicy.Access.FULL
             val partial = ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
             ) == PackageManager.PERMISSION_GRANTED
-            return if (partial) Permission.PARTIAL else Permission.NONE
+            return if (partial) ScreenshotWatchPermissionPolicy.Access.PARTIAL else ScreenshotWatchPermissionPolicy.Access.NONE
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             return if (ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.READ_MEDIA_IMAGES,
                 ) == PackageManager.PERMISSION_GRANTED
-            ) Permission.FULL else Permission.NONE
+            ) ScreenshotWatchPermissionPolicy.Access.FULL else ScreenshotWatchPermissionPolicy.Access.NONE
         }
         return if (ContextCompat.checkSelfPermission(
                 context,
                 Manifest.permission.READ_EXTERNAL_STORAGE,
             ) == PackageManager.PERMISSION_GRANTED
-        ) Permission.FULL else Permission.NONE
+        ) ScreenshotWatchPermissionPolicy.Access.FULL else ScreenshotWatchPermissionPolicy.Access.NONE
     }
-
-    private enum class Permission { FULL, PARTIAL, NONE }
 
     private val SCREENSHOT_HINTS = listOf("screenshot", "screen_shot", "screencap", "截图", "屏幕截图")
     private const val GRACE_MS = 30_000L

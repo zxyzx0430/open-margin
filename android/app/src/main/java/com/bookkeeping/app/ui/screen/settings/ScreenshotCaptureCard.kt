@@ -25,21 +25,23 @@ import com.bookkeeping.app.i18n.tr
 @Composable
 internal fun ScreenshotCaptureCard() {
     val context = LocalContext.current
-    var enabled by remember { mutableStateOf(ScreenshotWatchSettings.isEnabled(context)) }
     var state by remember { mutableStateOf(ScreenshotWatchController.state(context)) }
+    var enabled by remember {
+        mutableStateOf(ScreenshotWatchSettings.isEnabled(context) && state == ScreenshotWatchController.State.ACTIVE)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        // On Android 14+ "select photos" counts as partial access and is still
-        // usable for the screenshots the user picked.
-        enabled = granted || ScreenshotWatchController.state(context) ==
-            ScreenshotWatchController.State.PERMISSION_PARTIAL
-        if (enabled) {
-            ScreenshotWatchSettings.setEnabled(context, true)
+        // Full library access is required for a new-image watcher. Android 14
+        // selected-photo access is intentionally left off; manual routes remain available.
+        ScreenshotWatchSettings.setEnabled(context, true)
+        state = ScreenshotWatchController.state(context)
+        enabled = state == ScreenshotWatchController.State.ACTIVE
+        if (enabled && granted) {
             ScreenshotWatchController.refresh(context)
         } else {
-            ScreenshotWatchSettings.setEnabled(context, false)
+            enabled = false
             ScreenshotWatchController.stop(context)
         }
         state = ScreenshotWatchController.state(context)
@@ -48,7 +50,7 @@ internal fun ScreenshotCaptureCard() {
     val subtitle = when {
         !ScreenshotWatchSettings.isAvailable() -> tr("此版本不启用自动监听")
         state == ScreenshotWatchController.State.PERMISSION_MISSING -> tr("需要相册读取权限")
-        state == ScreenshotWatchController.State.PERMISSION_PARTIAL -> tr("仅处理你选中的图片")
+        state == ScreenshotWatchController.State.PERMISSION_PARTIAL -> tr("所选照片权限无法可靠读取新截图；自动监听未开启，仍可分享或手动选图")
         enabled -> tr("发现新截图后自动识别")
         else -> tr("默认关闭，开启后只处理新截图")
     }
