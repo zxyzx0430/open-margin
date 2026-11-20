@@ -1,5 +1,6 @@
 package com.bookkeeping.app.capture.screenshot
 
+import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import java.io.File
 import java.nio.file.Files
