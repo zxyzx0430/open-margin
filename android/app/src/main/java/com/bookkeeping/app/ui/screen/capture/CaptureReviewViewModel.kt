@@ -169,3 +169,84 @@ object CaptureReviewDirection {
     fun canConfirm(candidate: CaptureCandidate, choice: String?): Boolean =
         CaptureBookGate.mayConfirm(resolve(candidate, choice))
 }
+
+/** Outcome of one ignore attempt, free of Android so the rules stay unit-testable. */
+enum class IgnoreOutcome {
+    IGNORED,
+    MARK_FAILED,
+    ALREADY_IN_FLIGHT,
+}
+
+/**
+ * Per-card review queue: which candidates are still waiting and which ones
+ * already have a write in flight.
+ *
+ * It is pure Kotlin on purpose. The dialog used to gate every card on one
+ * global `busy` flag, so a tap on another card was silently dropped while a
+ * write was running; keeping the rule here makes that behaviour directly
+ * testable.
+ */
+class CaptureReviewQueue(initial: List<CaptureCandidate> = emptyList()) {
+
+    private val items = mutableListOf<CaptureCandidate>()
+    private val inFlight = linkedSetOf<String>()
+
+    init {
+        replacePending(initial)
+    }
+
+    fun pending(): List<CaptureCandidate> = items.toList()
+
+    fun busyIds(): Set<String> = inFlight.toSet()
+
+    /** Store truth wins, but a card with a write in flight stays hidden until it settles. */
+    fun replacePending(list: List<CaptureCandidate>) {
+        items.clear()
+        items.addAll(list.filterNot { it.candidateId in inFlight })
+        inFlight.retainAll(list.mapTo(mutableSetOf()) { it.candidateId })
+    }
+
+    /**
+     * Accept a tap for [candidate]: the card leaves the list and joins the
+     * in-flight set. False means this card must not start another write.
+     */
+    fun begin(candidate: CaptureCandidate): Boolean {
+        if (items.none { it.candidateId == candidate.candidateId }) return false
+        // RED: mirrors the shipped rule, where any write blocks every card.
+        if (inFlight.isNotEmpty()) return false
+        inFlight += candidate.candidateId
+        items.removeAll { it.candidateId == candidate.candidateId }
+        return true
+    }
+
+    /** Settle an ignore write. A failed mark must put the card back. */
+    fun settleIgnore(candidate: CaptureCandidate, marked: Boolean): IgnoreOutcome {
+        // RED: mirrors the shipped ignore(), which never looks at mark()'s result.
+        finish(candidate.candidateId)
+        return IgnoreOutcome.IGNORED
+    }
+
+    /** Put a card back after a failed write, keeping capture-time order. */
+    fun rollback(candidate: CaptureCandidate) {
+        if (!inFlight.remove(candidate.candidateId)) return
+        if (items.any { it.candidateId == candidate.candidateId }) return
+        val index = items.indexOfFirst { it.capturedAtMs > candidate.capturedAtMs }
+        if (index < 0) items.add(candidate) else items.add(index, candidate)
+    }
+
+    fun finish(candidateId: String) {
+        inFlight.remove(candidateId)
+    }
+}
+
+/** User-visible source strings for ignore outcomes; translated at the UI edge. */
+object CaptureReviewText {
+    const val IGNORED = "扫描结果已忽略"
+    const val IGNORE_FAILED = "候选状态未能更新，请重试"
+
+    fun ignore(outcome: IgnoreOutcome): String? = when (outcome) {
+        IgnoreOutcome.IGNORED -> IGNORED
+        IgnoreOutcome.MARK_FAILED -> IGNORE_FAILED
+        IgnoreOutcome.ALREADY_IN_FLIGHT -> null
+    }
+}
