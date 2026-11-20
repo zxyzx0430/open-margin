@@ -237,6 +237,61 @@ class ScreenshotPageInterpreterSampleShapeTest {
     }
 
     @Test
+    fun `refund card beside an ordinary payment keeps both cards typed`() {
+        // One page, two independent transactions: an incoming refund and a normal
+        // merchant payment. The refund must not retype or hide the payment.
+        val blocks = listOf(
+            block("微信支付", 10),
+            block("退款成功", 40),
+            block("¥1.85", 70),
+            block("退款金额 ¥1.85", 100),
+            block("星巴克咖啡", 240),
+            block("¥18.00", 280),
+            block("支付成功", 310),
+        )
+        val result = plan(blocks)
+
+        assertEquals(2, result.decisions.size)
+        val refund = result.decisions.single { it.draft.amountCents == 185L }
+        val payment = result.decisions.single { it.draft.amountCents == 1800L }
+        assertEquals(CaptureCandidate.KIND_REFUND, refund.draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, refund.draft.direction)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, refund.draft.completionStatus)
+        assertEquals(CaptureCandidate.KIND_PAYMENT, payment.draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, payment.draft.direction)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, payment.draft.completionStatus)
+        assertEquals(Action.ASK_USER, refund.action)
+        assertEquals(Action.AUTO_BOOK, payment.action)
+        assertEquals(listOf(1800L), result.bookings.map { it.draft.amountCents })
+    }
+
+    @Test
+    fun `future debit card does not drop another card order total`() {
+        // The future-debit card repeats its expected debit as 订单金额. The second
+        // card also uses 订单金额, but it is a different, completed transaction.
+        val blocks = listOf(
+            block("支付宝", 10),
+            block("订单已生成", 40),
+            block("预计扣费金额 9.65元", 80),
+            block("先用后付", 110),
+            block("订单金额 ¥10.00", 140),
+            block("星巴克咖啡", 240),
+            block("订单金额 ¥18.00", 280),
+            block("支付成功", 310),
+        )
+        val result = plan(blocks)
+
+        assertEquals(2, result.decisions.size)
+        val future = result.decisions.single { it.draft.amountCents == 965L }
+        val paid = result.decisions.single { it.draft.amountCents == 1800L }
+        assertEquals(CaptureCandidate.COMPLETION_CREATED, future.draft.completionStatus)
+        assertEquals(Action.WAIT_FOR_EVIDENCE, future.action)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, paid.draft.completionStatus)
+        assertEquals(Action.AUTO_BOOK, paid.action)
+        assertEquals(listOf(1800L), result.bookings.map { it.draft.amountCents })
+    }
+
+    @Test
     fun `cancelled voice call bubble beside payment does not cancel transfer`() {
         // Two separate columns model a payment card and an unrelated cancelled-call bubble.
         val blocks = listOf(

@@ -67,6 +67,12 @@ object ScreenshotPageInterpreter {
     )
     private val DEDUCTION_LABELS = listOf("预计扣费金额", "扣费金额", "预计扣款", "扣款金额", "待扣金额")
 
+    /** A generic order total that may merely repeat the card's expected debit. */
+    private const val ORDER_TOTAL_LABEL = "订单金额"
+
+    /** The labelled refund row that carries the amount a refund page repeats. */
+    private const val REFUND_AMOUNT_LABEL = "退款金额"
+
     /** Refund arrival pages: one incoming refund, never the surrounding statistics. */
     private val REFUND_PAGE_MARKERS = listOf(
         "退款金额", "退款成功", "退款到账", "退款详情", "退款已原路退回", "已全额退款",
@@ -181,30 +187,25 @@ object ScreenshotPageInterpreter {
                 reason = "no transaction fields",
             )
         }
-        val refundPage = !hasFutureDebitMarker && REFUND_PAGE_MARKERS.any(allText::contains)
-        val selected: List<Pair<Int, List<TextBlock>>> = when {
-            hasFutureDebitMarker -> {
-                val hasDeductionAmount = segments.any { segment ->
-                    segment.any { block -> DEDUCTION_LABELS.any { block.text.contains(it) } }
-                }
-                segments.withIndex()
-                    // The future-debit page often repeats the amount as a generic
-                    // order total. Keep the labelled expected debit, not that total.
-                    .filterNot { (_, segment) ->
-                        hasDeductionAmount && segment.any { it.text.contains("订单金额") }
-                    }
-                    .map { it.index to it.value }
-            }
-            refundPage -> {
-                val index = segments.indexOfFirst { segment ->
-                    segment.any { it.text.contains("退款金额") }
-                }.takeIf { it >= 0 } ?: 0
-                listOf(index to segments[index])
-            }
-            else -> segments.mapIndexed { index, segment -> index to segment }
+        // Status evidence belongs to the card that carries it. A refund marker on
+        // one card must not retype, complete or suppress another payment card on
+        // the same page, and a future-debit marker must not hide its neighbour.
+        val cards = mergeRepeatedRefundCards(segments)
+        val refundCard = cards.associate { card -> card.index to carriesAny(card.blocks, REFUND_PAGE_MARKERS) }
+        val futureDebitCard = cards.associate { card ->
+            card.index to carriesAny(card.blocks, FUTURE_DEBIT_MARKERS)
         }
-        var drafts = selected.mapNotNull { (index, segment) ->
-            buildDraft(index, segment, platform, pageType, capturedAtMs, timeZone)
+        val deductionCard = cards.associate { card -> card.index to carriesAny(card.blocks, DEDUCTION_LABELS) }
+        // A generic 订单金额 that repeats the expected debit is the same card's
+        // total, not a second transaction. Only those repeats are dropped.
+        val repeatedOrderTotals = if (deductionCard.containsValue(true)) {
+            duplicateOrderTotals(cards, deductionCard)
+        } else {
+            emptySet()
+        }
+        var drafts = cards.mapNotNull { card ->
+            if (card.index in repeatedOrderTotals) return@mapNotNull null
+            buildDraft(card.index, card.blocks, platform, pageType, capturedAtMs, timeZone)
         }
         if (drafts.isEmpty()) {
             return ScreenshotPageEvidence(
@@ -215,16 +216,12 @@ object ScreenshotPageInterpreter {
                 reason = "no transaction fields",
             )
         }
-        if (hasFutureDebitMarker) {
-            val localFutureIndices = segments.withIndex().filter { (_, segment) ->
-                segment.any { block -> FUTURE_DEBIT_MARKERS.any { block.text.contains(it) } }
-            }.map { it.index }.toSet()
-            val labelledDebitIndex = segments.indexOfFirst { segment ->
-                segment.any { block -> DEDUCTION_LABELS.any { block.text.contains(it) } }
-            }
-            val futureIndices = localFutureIndices + setOfNotNull(labelledDebitIndex.takeIf { it >= 0 })
+        if (futureDebitCard.containsValue(true) || deductionCard.containsValue(true)) {
+            val anyFutureDebit = futureDebitCard.containsValue(true)
             drafts = drafts.map { draft ->
-                if (draft.index in futureIndices) {
+                val ownFutureDebit = futureDebitCard[draft.index] == true
+                val expectedDebit = deductionCard[draft.index] == true && anyFutureDebit
+                if (ownFutureDebit || expectedDebit) {
                     draft.copy(
                         completionStatus = CaptureCandidate.COMPLETION_CREATED,
                         completionExplicit = true,
@@ -235,24 +232,27 @@ object ScreenshotPageInterpreter {
                 }
             }
         }
-        if (refundPage) {
-            val refundCompleted = REFUND_COMPLETED_MARKERS.any(allText::contains)
-            drafts = drafts.map {
-                it.copy(
+        if (refundCard.containsValue(true)) {
+            drafts = drafts.map { draft ->
+                if (refundCard[draft.index] != true) return@map draft
+                val card = cards.first { it.index == draft.index }
+                val refundCompleted = carriesAny(card.blocks, REFUND_COMPLETED_MARKERS)
+                draft.copy(
                     kind = CaptureCandidate.KIND_REFUND,
                     direction = CaptureCandidate.DIRECTION_INCOME,
                     directionExplicit = true,
                     completionStatus = if (refundCompleted) {
                         CaptureCandidate.COMPLETION_COMPLETED
                     } else {
-                        it.completionStatus
+                        draft.completionStatus
                     },
-                    completionExplicit = it.completionExplicit || refundCompleted,
+                    completionExplicit = draft.completionExplicit || refundCompleted,
                     reason = "incoming refund",
                 )
             }
         }
-        val reconciled = hasFutureDebitMarker || refundPage
+        val reconciled = futureDebitCard.containsValue(true) ||
+            deductionCard.containsValue(true) || refundCard.containsValue(true)
         val conflicting = !reconciled && drafts.size == 1 && countDistinctAmounts(content) > 1
         return ScreenshotPageEvidence(
             platform = platform,
@@ -329,6 +329,64 @@ object ScreenshotPageInterpreter {
             }
         }
         return segments
+    }
+
+    /** One transaction card: its own amount anchor plus the text around it. */
+    private data class Card(val index: Int, val blocks: List<TextBlock>)
+
+    private fun carriesAny(blocks: List<TextBlock>, markers: List<String>): Boolean =
+        blocks.any { block -> markers.any { block.text.contains(it) } }
+
+    /**
+     * A refund page repeats the same money twice: once as the header amount and
+     * once as the labelled `退款金额` row. Those are one refund, so the header
+     * card's status text is folded into the labelled card and its duplicate
+     * amount line dropped. Refunds with different amounts stay separate cards.
+     */
+    private fun mergeRepeatedRefundCards(segments: List<List<TextBlock>>): List<Card> {
+        val labelled = segments.indices.filter { index ->
+            segments[index].any { block -> block.text.contains(REFUND_AMOUNT_LABEL) }
+        }
+        if (labelled.isEmpty()) return segments.mapIndexed { index, blocks -> Card(index, blocks) }
+
+        val merged = segments.map { it.toMutableList() }
+        val dropped = mutableSetOf<Int>()
+        segments.forEachIndexed { index, segment ->
+            if (index in labelled) return@forEachIndexed
+            if (!carriesAny(segment, REFUND_PAGE_MARKERS)) return@forEachIndexed
+            val amount = segment.firstNotNullOfOrNull { amountOf(it.text) } ?: return@forEachIndexed
+            val target = labelled.firstOrNull { other ->
+                segments[other].firstNotNullOfOrNull { amountOf(it.text) } == amount
+            } ?: return@forEachIndexed
+            merged[target] += segment.filterNot { amountOf(it.text) != null }
+            dropped += index
+        }
+        if (dropped.isEmpty()) return segments.mapIndexed { index, blocks -> Card(index, blocks) }
+        return segments.indices.filterNot { it in dropped }.map { Card(it, merged[it]) }
+    }
+
+    /**
+     * Generic `订单金额` cards that only repeat the expected debit of a future-debit
+     * card. A card that confirms its own payment, or sits next to no labelled
+     * expected debit, is a real transaction and stays.
+     */
+    private fun duplicateOrderTotals(cards: List<Card>, deductionCard: Map<Int, Boolean>): Set<Int> {
+        val deductionIndices = cards.map { it.index }.filter { deductionCard[it] == true }
+        val deductionAmounts = deductionIndices.mapNotNull { index ->
+            cards.first { it.index == index }.blocks.firstNotNullOfOrNull { amountOf(it.text) }
+        }.toSet()
+        val duplicates = mutableSetOf<Int>()
+        cards.forEach { card ->
+            if (card.blocks.none { it.text.contains(ORDER_TOTAL_LABEL) }) return@forEach
+            if (carriesAny(card.blocks, COMPLETED_MARKERS)) return@forEach
+            val ownFutureDebit = carriesAny(card.blocks, FUTURE_DEBIT_MARKERS)
+            val amount = card.blocks.firstNotNullOfOrNull { amountOf(it.text) }
+            val nextToExpectedDebit = deductionIndices.any { it == card.index - 1 || it == card.index + 1 }
+            if (ownFutureDebit || nextToExpectedDebit || (amount != null && amount in deductionAmounts)) {
+                duplicates += card.index
+            }
+        }
+        return duplicates
     }
 
     private fun buildDraft(
