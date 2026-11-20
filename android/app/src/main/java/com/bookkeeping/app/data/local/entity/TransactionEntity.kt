@@ -82,6 +82,10 @@ data class TransactionEntity(
     val captureConfidence: Float? = null,
     val captureKind: String? = null,
     val captureObservedAtMs: Long? = null,
+
+    // Bill-level provenance marker; follows ledger sync, never screenshot evidence.
+    @ColumnInfo(defaultValue = "0")
+    val eventTimeNeedsConfirmation: Boolean = false,
 )
 
 // 收入还是支出

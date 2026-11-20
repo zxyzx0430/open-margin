@@ -4,10 +4,13 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -53,6 +56,10 @@ class CaptureReviewViewModel @Inject constructor(
         merchant: String,
         category: TransactionCategory,
     ) {
+        if (!CaptureBookGate.mayConfirm(candidate)) {
+            _state.update { it.copy(message = AppLanguage.tr(context, "仅预览，不能记入账本")) }
+            return
+        }
         if (_state.value.busy) return
         _state.update { it.copy(busy = true, message = null) }
         viewModelScope.launch {
@@ -63,7 +70,14 @@ class CaptureReviewViewModel @Inject constructor(
                         merchant = merchant,
                         category = category,
                     )
-                    repository.insertIfNotDuplicate(entity, notifySuccess = false)
+                    repository.insertIfNotDuplicate(
+                        entity,
+                        notifySuccess = false,
+                        diagnosticInput = TransactionDiagnosticInput(
+                            attemptId = candidate.diagnosticAttemptId
+                                ?: TransactionDiagnostics.newAttemptId(),
+                        ),
+                    )
                 }
             }
             val insertedId = result.getOrNull()

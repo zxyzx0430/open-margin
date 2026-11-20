@@ -3,6 +3,7 @@ package com.bookkeeping.app.sync
 import android.content.SharedPreferences
 import com.bookkeeping.app.data.local.BookkeepingDatabase
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -20,7 +21,32 @@ internal class BidirectionalSyncClient(
     private val installationId:String,
 ) {
     private val dao=db.transactionDao()
+    private val diagnostics=TransactionDiagnostics(db.transactionDiagnosticDao())
+    private val syncAttemptIds=mutableMapOf<Long,String>()
     private val ownPrefix="android:$installationId:"
+
+    private suspend fun recordSync(
+        transaction:TransactionEntity,
+        result:String,
+        details:String,
+    ) {
+        val attemptId=syncAttemptIds.getOrPut(transaction.id) { TransactionDiagnostics.newAttemptId() }
+        diagnostics.record(
+            attemptId=attemptId,
+            stage=TransactionDiagnostics.STAGE_SYNC,
+            result=result,
+            details=details,
+            transactionId=transaction.id.takeIf { it > 0L },
+        )
+    }
+
+    private suspend fun recordSyncAttempt(result:String,details:String) {
+        diagnostics.record(
+            stage=TransactionDiagnostics.STAGE_SYNC,
+            result=result,
+            details=details,
+        )
+    }
 
     private fun request(method:String,path:String,data:JSONObject?=null):Pair<Int,JSONObject>? {
         val conn=(URL("$base/api/v2/sync/$path").openConnection() as HttpURLConnection)
@@ -99,6 +125,12 @@ internal class BidirectionalSyncClient(
             it=="EXPENSE" || it=="INCOME"
         } ?: "EXPENSE"
         val reviewStatus=payload.optString("review_status","unverified")
+        val eventTimeNeedsConfirmation = EventTimeConfirmationPolicy.mergeRemote(
+            if (payload.has("event_time_needs_confirmation") &&
+                !payload.isNull("event_time_needs_confirmation")
+            ) payload.optBoolean("event_time_needs_confirmation") else null,
+            row?.eventTimeNeedsConfirmation ?: false,
+        )
         return TransactionEntity(
             id=row?.id ?: 0,
             amountCents=payload.getLong("amount_cents"),
@@ -121,7 +153,8 @@ internal class BidirectionalSyncClient(
             duplicateOfId=if (reviewStatus in setOf("confirmed","excluded","transfer","refund")) null
                           else row?.duplicateOfId,
             // Order IDs are local import evidence; keep them across server pulls.
-            sourceTransactionId=row?.sourceTransactionId
+            sourceTransactionId=row?.sourceTransactionId,
+            eventTimeNeedsConfirmation=eventTimeNeedsConfirmation,
         )
     }
 
@@ -129,17 +162,46 @@ internal class BidirectionalSyncClient(
         val id=change.getString("event_id")
         val revision=change.getLong("revision")
         val previous=local(id)
-        if(previous!=null && previous.remoteRevision>=revision)return
+        if(previous!=null && previous.remoteRevision>=revision){
+            recordSync(previous,TransactionDiagnostics.RESULT_SUCCESS,"Stale server change ignored")
+            return
+        }
         if(previous?.syncDirty==true){
             // Never replace an unsent local edit. Push uses the preserved base
             // revision to detect an actual concurrent edit and resolve it.
-            if(previous.remoteEventId==null)dao.update(previous.copy(remoteEventId=id))
+            try {
+                if(previous.remoteEventId==null)dao.update(previous.copy(remoteEventId=id))
+            } catch(failure:Exception) {
+                recordSync(previous,TransactionDiagnostics.RESULT_FAILURE,diagnosticError())
+                throw failure
+            }
+            recordSync(previous,TransactionDiagnostics.RESULT_WARNING,"Remote change held because the local transaction has unsent edits")
             return
         }
         val next=serverValue(previous,id,revision,change.getString("action"),
-                             change.optJSONObject("record")) ?: return
-        if(previous==null)dao.insert(next) else dao.update(next)
+                             change.optJSONObject("record"))
+        if(next==null){
+            recordSyncAttempt(
+                TransactionDiagnostics.RESULT_WARNING,
+                "Remote change could not be applied to a local transaction",
+            )
+            return
+        }
+        try {
+            val saved = if(previous==null) {
+                next.copy(id=dao.insert(next))
+            } else {
+                dao.update(next)
+                next
+            }
+            recordSync(saved,TransactionDiagnostics.RESULT_SUCCESS,"Server transaction change applied locally")
+        } catch(failure:Exception) {
+            recordSync(previous ?: next,TransactionDiagnostics.RESULT_FAILURE,diagnosticError())
+            throw failure
+        }
     }
+
+    private fun diagnosticError(): String = "Sync operation failed"
 
     private suspend fun pull():Boolean {
         var cursor=prefs.getLong("last_pull_revision",0L)
@@ -169,6 +231,7 @@ internal class BidirectionalSyncClient(
             put("category",record.category)
             put("merchant",record.merchant)
             record.reviewStatus?.let { put("review_status",it) }
+            put("event_time_needs_confirmation",record.eventTimeNeedsConfirmation)
         }
     }
 
@@ -218,10 +281,22 @@ internal class BidirectionalSyncClient(
             if(pending.isEmpty())return PushOutcome(true,conflictIds,missingIds)
             var progress=false
             for(row in pending){
-                val result=send(row) ?: return PushOutcome(false,conflictIds,missingIds)
-                val live=dao.getById(row.id) ?: continue
+                recordSync(row,TransactionDiagnostics.RESULT_STARTED,"Transaction sync push started")
+                val result=send(row)
+                if(result==null){
+                    recordSync(row,TransactionDiagnostics.RESULT_FAILURE,"Transaction sync push failed")
+                    return PushOutcome(false,conflictIds,missingIds)
+                }
+                val live=dao.getById(row.id)
+                if(live==null){
+                    recordSync(row,TransactionDiagnostics.RESULT_WARNING,"Transaction was removed while sync push was in progress")
+                    continue
+                }
                 if(live.syncModifiedMs!=row.syncModifiedMs ||
-                   (row.syncMutationId!=null && live.syncMutationId!=row.syncMutationId))continue
+                   (row.syncMutationId!=null && live.syncMutationId!=row.syncMutationId)){
+                    recordSync(live,TransactionDiagnostics.RESULT_WARNING,"Local transaction changed during sync; stale response ignored")
+                    continue
+                }
                 val id=live.remoteEventId ?: ownPrefix+live.id
                 when(result.getString("status")){
                     "applied"->{
@@ -231,6 +306,11 @@ internal class BidirectionalSyncClient(
                         clearConflictApproval(id)
                         conflictIds.remove(id)
                         missingIds.remove(id)
+                        recordSync(
+                            live.copy(remoteEventId=id,remoteRevision=result.getLong("revision"),syncDirty=false,syncMutationId=null),
+                            TransactionDiagnostics.RESULT_SUCCESS,
+                            "Server applied transaction change",
+                        )
                         progress=true
                     }
                     "conflict"->{
@@ -240,6 +320,7 @@ internal class BidirectionalSyncClient(
                             // 状态页要单独说「服务器上找不到这条」，不能笼统算冲突。
                             conflictIds.add(id)
                             missingIds.add(id)
+                            recordSync(live,TransactionDiagnostics.RESULT_WARNING,"Server reports a conflict and no current record")
                             continue
                         }
                         val serverMs=current.optLong("changed_at_ms",0L)
@@ -272,14 +353,19 @@ internal class BidirectionalSyncClient(
                         if(decision==SyncConflictPolicy.Decision.KEEP_PHONE){
                             val retry=send(live,serverRevision)
                             if(retry?.optString("status")=="applied"){
-                                dao.update(live.copy(remoteEventId=id,
+                                val applied=live.copy(remoteEventId=id,
                                     remoteRevision=retry.getLong("revision"),
-                                    syncDirty=false,syncMutationId=null))
+                                    syncDirty=false,syncMutationId=null)
+                                dao.update(applied)
                                 clearConflictApproval(id)
                                 conflictIds.remove(id)
                                 missingIds.remove(id)
+                                recordSync(applied,TransactionDiagnostics.RESULT_SUCCESS,"User-approved local transaction change applied")
                                 progress=true
-                            }else conflictIds.add(id)
+                            }else {
+                                conflictIds.add(id)
+                                recordSync(live,TransactionDiagnostics.RESULT_WARNING,"User-approved local change was not applied")
+                            }
                         }else if(decision==SyncConflictPolicy.Decision.KEEP_SERVER){
                             val updated=serverValue(live,id,serverRevision,
                                 current.getString("action"),current.optJSONObject("record"))
@@ -288,10 +374,16 @@ internal class BidirectionalSyncClient(
                                 clearConflictApproval(id)
                                 conflictIds.remove(id)
                                 missingIds.remove(id)
+                                recordSync(updated,TransactionDiagnostics.RESULT_SUCCESS,"User-approved server transaction change applied")
                                 progress=true
+                            } else {
+                                conflictIds.add(id)
+                                recordSync(live,TransactionDiagnostics.RESULT_WARNING,"Server conflict resolution could not be applied")
                             }
-                            else conflictIds.add(id)
-                        }else conflictIds.add(id)
+                        }else {
+                            conflictIds.add(id)
+                            recordSync(live,TransactionDiagnostics.RESULT_WARNING,"Transaction sync conflict awaits resolution")
+                        }
                     }
                     "before_start"->{
                         // 只有旧版服务端才会回 before_start（当前服务端不再按
@@ -299,8 +391,9 @@ internal class BidirectionalSyncClient(
                         // 不能被当作已同步：悄悄确认会让手机与服务器的流水
                         // 在无人察觉的情况下分叉。这是版本落差，不是安全事件，
                         // 也不阻断其他记录的同步。
+                        recordSync(live,TransactionDiagnostics.RESULT_WARNING,"Older server did not accept this transaction before its start boundary")
                     }
-                    else->Unit
+                    else->recordSync(live,TransactionDiagnostics.RESULT_WARNING,"Unknown transaction sync result")
                 }
             }
             if(progress) skipped=0 else skipped+=pending.size

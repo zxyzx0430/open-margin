@@ -69,6 +69,25 @@ class CaptureCandidateTest {
     }
 
     @Test
+    fun diagnosticAttemptIdSurvivesCandidateJsonAndOldJsonRemainsReadable() {
+        val withAttempt = candidate().copy(diagnosticAttemptId = "attempt-stable")
+        val roundTrip = CaptureCandidate.fromJson(withAttempt.toJson())
+        assertTrue(roundTrip?.diagnosticAttemptId == "attempt-stable")
+
+        val oldRecord = candidate().toJson().apply { remove("diagnosticAttemptId") }
+        assertTrue(CaptureCandidate.fromJson(oldRecord)?.diagnosticAttemptId == null)
+    }
+
+    @Test
+    fun previewWritePermissionSurvivesCandidateJson() {
+        val preview = candidate().copy(ledgerWriteAllowed = false)
+        val restored = CaptureCandidate.fromJson(preview.toJson())
+
+        assertFalse(restored?.ledgerWriteAllowed ?: true)
+        assertTrue(CaptureCandidate.fromJson(candidate().toJson())?.ledgerWriteAllowed == true)
+    }
+
+    @Test
     fun dedupKeySeparatesAmountMerchantAndDirection() {
         val base = candidate().copy(orderId = null)
         assertTrue(base.dedupKey() != base.copy(amountCents = 1_525L).dedupKey())

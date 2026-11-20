@@ -7,6 +7,76 @@ import org.junit.Test
 
 class EnglishUiTextTest {
     @Test
+    fun screenshotImportConfirmationLabelsTranslate() {
+        val expected = mapOf(
+            "时间待确认" to "Time to be confirmed",
+            "金额待补" to "Amount missing",
+            "确认原因" to "Why confirmation is needed",
+            "交易已完成" to "Completed",
+            "交易处理中" to "In progress",
+            "尚未扣款" to "Not charged",
+            "交易已取消" to "Cancelled",
+            "交易失败" to "Failed",
+            "交易状态未识别" to "Status unknown",
+            "这类交易需要人工确认" to "This transaction type needs manual confirmation",
+            "自动记账已关闭" to "Automatic booking is off",
+            "截图未明确显示交易状态" to "The screenshot does not clearly show the transaction status",
+            "截图时间为暂用时间，请核对交易时间" to "The screenshot time is a temporary fallback; check the transaction time",
+            "请核对截图识别结果" to "Please check the recognised details",
+            "确认记入" to "Confirm and record",
+            "请确认截图交易" to "Review screenshot transaction",
+            "已确认记入 %d 笔截图交易" to "Confirmed %d screenshot transaction(s)",
+            "（已更新 %d 笔旧记录）" to "(updated %d earlier item(s))",
+            "截图交易确认完成" to "Screenshot review complete",
+            "请确认这笔交易" to "Review this transaction",
+            "稍后" to "Later",
+            "正在更新截图候选" to "Updating the screenshot candidate",
+            "候选状态未能更新，请重试" to "Could not update the candidate; try again",
+            "这笔交易仍待确认" to "This transaction is still waiting for confirmation",
+            "正在记录截图交易" to "Recording the screenshot transaction",
+            "这笔交易已在账本中" to "This transaction is already in the ledger",
+            "暂时无法记录，请稍后重试" to "Unable to record it right now; try again later",
+            "还有 %d 笔待确认" to "%d more waiting for confirmation",
+            "仅预览，不能记入账本" to "Preview only; cannot be added to the ledger",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English screenshot label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
+    fun screenshotWatchStatesTranslate() {
+        // 五种监听状态各一句，且必须互不相同：读起来一样说明状态又糊成一句了。
+        val subtitles = listOf(
+            "此安装包不含相册监听，用分享或选图",
+            "默认关闭，开启后只处理新截图",
+            "相册权限已关闭，监听没有运行",
+            "只授权了部分照片，监听无法运行",
+            "正在监听新增截图，会自动识别",
+        )
+        assertEquals("screenshot-watch states must read differently", 5, subtitles.toSet().size)
+
+        val expected = mapOf(
+            "此安装包不含相册监听，用分享或选图" to "No album watcher here; share or pick a photo",
+            "默认关闭，开启后只处理新截图" to "Off by default; only new screenshots are processed",
+            "相册权限已关闭，监听没有运行" to "No photo access; watching is off",
+            "只授权了部分照片，监听无法运行" to "Partial photo access; watching is off",
+            "正在监听新增截图，会自动识别" to "Watching new screenshots automatically",
+            "不可用" to "Unavailable",
+            "打开系统设置" to "Open system settings",
+            "授权全部照片" to "Allow all photos",
+            "自动识别新截图" to "Recognise new screenshots",
+            "从相册选截图" to "Pick a screenshot",
+            "识别微信 / 支付宝交易截图" to "Recognise WeChat / Alipay transaction screenshots",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English screenshot-watch label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun billImportExportLabelsTranslate() {
         val expected = mapOf(
             "账单导入" to "Bill import",

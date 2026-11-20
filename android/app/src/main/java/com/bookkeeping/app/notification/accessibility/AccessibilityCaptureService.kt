@@ -8,6 +8,8 @@ import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.EntryPointAccessors
@@ -126,23 +128,60 @@ class AccessibilityCaptureService : AccessibilityService() {
         }
 
         for (ext in list) {
-            val tx = runCatching { ext.extract(root, event) }
-                .onFailure {
-                    AccessibilityCaptureHealth.onFailure(this, "extract:" + ext.javaClass.simpleName, it)
-                    if (BuildConfig.DEBUG) Log.w(TAG, "  -> extractor " + ext.javaClass.simpleName + " failed (" + it.javaClass.simpleName + ")")
+            val input = TransactionDiagnosticInput()
+            val tx = try {
+                ext.extract(root, event)
+            } catch (failure: Exception) {
+                AccessibilityCaptureHealth.onFailure(this, "extract:" + ext.javaClass.simpleName, failure)
+                scope.launch {
+                    repository.recordDiagnostic(
+                        attemptId = input.attemptId,
+                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                        result = TransactionDiagnostics.RESULT_STARTED,
+                        details = "Accessibility page capture started",
+                    )
+                    repository.recordDiagnostic(
+                        attemptId = input.attemptId,
+                        stage = TransactionDiagnostics.STAGE_PARSE,
+                        result = TransactionDiagnostics.RESULT_FAILURE,
+                        details = "Accessibility capture failed",
+                    )
                 }
-                .getOrNull()
+                if (BuildConfig.DEBUG) Log.w(TAG, "  -> extractor " + ext.javaClass.simpleName + " failed (" + failure.javaClass.simpleName + ")")
+                null
+            }
 
             if (tx == null) {
                 if (BuildConfig.DEBUG) Log.v(TAG, "  -> ${ext.javaClass.simpleName} no match")
                 continue
             }
+            val diagnosticInput = input
 
             if (!shouldEmit(tx)) {
+                scope.launch {
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_CAPTURE,
+                        result = TransactionDiagnostics.RESULT_STARTED,
+                        details = "Accessibility page capture started",
+                    )
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_PARSE,
+                        result = TransactionDiagnostics.RESULT_SUCCESS,
+                        details = "Accessibility page parsed",
+                    )
+                    repository.recordDiagnostic(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                        result = TransactionDiagnostics.RESULT_WARNING,
+                        details = "Accessibility fingerprint duplicate suppressed",
+                    )
+                }
                 if (BuildConfig.DEBUG) Log.d(TAG, "  -> ${ext.javaClass.simpleName} matched but fingerprint duplicate, skip")
                 continue
             }
-            persist(tx)
+            persist(tx, diagnosticInput)
             break
         }
     }
@@ -164,10 +203,22 @@ class AccessibilityCaptureService : AccessibilityService() {
         return true
     }
 
-    private fun persist(tx: TransactionEntity) {
+    private fun persist(tx: TransactionEntity, diagnosticInput: TransactionDiagnosticInput) {
         scope.launch {
             try {
-                val id = repository.insertIfNotDuplicate(tx)
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_STARTED,
+                    details = "Accessibility page capture started",
+                )
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_PARSE,
+                    result = TransactionDiagnostics.RESULT_SUCCESS,
+                    details = "Accessibility page parsed",
+                )
+                val id = repository.insertIfNotDuplicate(tx, diagnosticInput = diagnosticInput)
                 if (id == null) {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Accessibility: skipped duplicate")
                 } else {
@@ -180,6 +231,12 @@ class AccessibilityCaptureService : AccessibilityService() {
                 // 出去会走未捕获异常处理器把整个进程打崩——一条记录入库
                 // 失败（磁盘满/DB 锁）不值得让 App 闪退（交叉审查修正）。
                 AccessibilityCaptureHealth.onFailure(this@AccessibilityCaptureService, "persist", failure)
+                repository.recordDiagnostic(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = "Accessibility capture failed",
+                )
                 Log.e(TAG, "Accessibility persist failed: ${failure.javaClass.simpleName}")
             }
         }

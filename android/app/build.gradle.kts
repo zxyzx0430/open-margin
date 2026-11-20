@@ -22,6 +22,14 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        // 主动截图监听（MediaStore 新截图）默认关闭；GitHub 实验版构建显式开启；
+        // Play 不传该参数。分享与选图不受影响。
+        buildConfigField(
+            "boolean",
+            "SCREENSHOT_WATCHER_AVAILABLE",
+            (project.findProperty("openMarginScreenshotWatcher") as String? ?: "false"),
+        )
+
         // 只打 arm64-v8a。真机只有 arm64；paddle-ocr/opencv 的预编译库也只有 arm64。
         // 语音的 sherpa-onnx AAR 自带 x86/x86_64 .so，如果不在这里收敛，debug 包会
         // 被系统当成 x86_64 原生应用，反而加载不了只有 arm64 的 OCR 库；

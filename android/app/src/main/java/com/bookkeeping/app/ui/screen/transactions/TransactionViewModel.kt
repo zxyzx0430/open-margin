@@ -3,6 +3,8 @@ package com.bookkeeping.app.ui.screen.transactions
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.budget.BudgetMonth
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
+import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -354,6 +356,7 @@ class TransactionViewModel @Inject constructor(
         note: String,
         timestampMs: Long = System.currentTimeMillis(),
         account: String? = null,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
     ): Long = viewModelScope.async {
         val entity = TransactionEntity(
             amountCents = amountCents,
@@ -366,7 +369,7 @@ class TransactionViewModel @Inject constructor(
             source = TransactionSource.MANUAL.name,
             timestamp = timestampMs,
         )
-        val id = repository.insert(entity)
+        val id = repository.insert(entity, diagnosticInput = diagnosticInput)
         if (merchant.isNotBlank()) {
             settings.recordCategoryLearning(merchant, category)
         }
@@ -381,36 +384,67 @@ class TransactionViewModel @Inject constructor(
      * 查询失败时返回 null（当作没命中）——数据库读不出来不应该拦住用户记账。
      */
     suspend fun findPossibleDuplicate(
-        amountCents: Long,
-        type: TransactionType,
-        currency: String,
-        merchant: String,
-        timestampMs: Long,
+        transaction: TransactionEntity,
+        diagnosticInput: TransactionDiagnosticInput,
         precision: TimePrecision,
     ): SaveCandidate? {
         val window = DuplicateRule.candidateWindowMs(precision)
-        // 读失败按「没命中」处理；协程取消要原样抛出去，否则弹窗已关还会继续保存。
+        repository.recordDiagnostic(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_DEDUP,
+            result = TransactionDiagnostics.RESULT_STARTED,
+            details = "Duplicate precheck started",
+        )
+        // 读失败按「没命中」处理；协程取消原样抛出去，避免弹窗已关还继续保存。
         val rows = try {
             dao.findAmountCandidatesAround(
-                amountCents = amountCents,
-                type = type.name,
-                currency = DuplicateRule.normalizeCurrency(currency),
-                windowStartMs = timestampMs - window,
-                windowEndMs = timestampMs + window,
+                amountCents = transaction.amountCents,
+                type = transaction.type,
+                currency = DuplicateRule.normalizeCurrency(transaction.currency),
+                windowStartMs = transaction.timestamp - window,
+                windowEndMs = transaction.timestamp + window,
             )
         } catch (cancellation: CancellationException) {
             throw cancellation
-        } catch (_: Exception) {
-            emptyList()
+        } catch (failure: Exception) {
+            repository.recordDiagnostic(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = "Duplicate precheck failed",
+            )
+            return null
         }
-        return DuplicateRule.find(
+        val candidate = DuplicateRule.find(
             list = rows.map { it.toDuplicateCandidate() },
-            amountCents = amountCents,
-            type = type.name,
-            currency = currency,
-            merchant = merchant,
-            timestampMs = timestampMs,
+            amountCents = transaction.amountCents,
+            type = transaction.type,
+            currency = transaction.currency,
+            merchant = transaction.merchant,
+            timestampMs = transaction.timestamp,
             precision = precision,
+        )
+        repository.recordDiagnostic(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_DEDUP,
+            result = if (candidate == null) TransactionDiagnostics.RESULT_SUCCESS
+            else TransactionDiagnostics.RESULT_WARNING,
+            details = if (candidate == null) "No similar bill found" else "Possible duplicate requires confirmation",
+        )
+        return candidate
+    }
+
+    suspend fun recordDiagnostic(
+        input: TransactionDiagnosticInput,
+        stage: String,
+        result: String,
+        details: String,
+    ) {
+        repository.recordDiagnostic(
+            attemptId = input.attemptId,
+            stage = stage,
+            result = result,
+            details = details,
         )
     }
 
@@ -453,7 +487,8 @@ class TransactionViewModel @Inject constructor(
         if (!TransactionEditRules.errorsOf(fields, now).isValid) return
         if (!TransactionEditRules.hasChanges(original, fields)) return
         viewModelScope.launch {
-            repository.update(TransactionEditRules.applyTo(original, fields))
+            val input = TransactionDiagnosticInput()
+            repository.update(TransactionEditRules.applyTo(original, fields), input)
             val category = runCatching { TransactionCategory.valueOf(fields.category) }.getOrNull()
             if (category != null && original.category != fields.category && fields.merchant.isNotBlank()) {
                 settings.recordCategoryLearning(fields.merchant, category)

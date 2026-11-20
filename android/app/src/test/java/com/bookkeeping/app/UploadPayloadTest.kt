@@ -4,6 +4,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
+import com.bookkeeping.app.sync.EventTimeConfirmationPolicy
 import com.bookkeeping.app.sync.UploadPayload
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,6 +26,7 @@ class UploadPayloadTest {
         timestamp: Long = 1_700_000_000_000L,
         currency: String = "CNY",
         reviewStatus: String = "confirmed",
+        eventTimeNeedsConfirmation: Boolean = false,
     ) = TransactionEntity(
         id = id,
         amountCents = amountCents,
@@ -37,6 +39,7 @@ class UploadPayloadTest {
         timestamp = timestamp,
         currency = currency,
         remoteReviewStatus = reviewStatus,
+        eventTimeNeedsConfirmation = eventTimeNeedsConfirmation,
     )
 
     @Test fun v1MapsEveryAllowedField() {
@@ -76,10 +79,31 @@ class UploadPayloadTest {
         assertEquals("excluded", fields.reviewStatus)
         // event_id is supplied by the sync operation, not the record payload.
         assertFalse(fields.toString().contains("installation"))
+        assertFalse(fields.toString().contains("local note"))
+        assertFalse(fields.toString().contains("bank card"))
+        assertFalse(fields.javaClass.declaredFields.any {
+            it.name.contains("diagnostic", ignoreCase = true) ||
+                it.name.contains("rawInput", ignoreCase = true) ||
+                it.name.contains("transactionSnapshot", ignoreCase = true)
+        })
     }
 
     @Test fun v2DropsUnknownReviewStatus() {
         assertNull(UploadPayload.v2Record(entity(reviewStatus = "refund")).reviewStatus)
+    }
+
+    @Test fun pendingEventTimeFlagIsExplicitlyUploadedAndCanBeCleared() {
+        val provisional = entity(eventTimeNeedsConfirmation = true)
+        assertTrue(UploadPayload.v1Event(provisional, "install").eventTimeNeedsConfirmation)
+        assertTrue(UploadPayload.v2Record(provisional).eventTimeNeedsConfirmation)
+        assertFalse(UploadPayload.v2Record(entity()).eventTimeNeedsConfirmation)
+    }
+
+    @Test fun missingRemoteFlagPreservesTrueButExplicitFalseClears() {
+        assertTrue(EventTimeConfirmationPolicy.mergeRemote(incoming = null, existing = true))
+        assertFalse(EventTimeConfirmationPolicy.mergeRemote(incoming = false, existing = true))
+        assertTrue(EventTimeConfirmationPolicy.afterUserEdit(existing = true, timestampChanged = false))
+        assertFalse(EventTimeConfirmationPolicy.afterUserEdit(existing = true, timestampChanged = true))
     }
 
     @Test fun uploadableRejectsInvalidMoneyDirectionAndSource() {

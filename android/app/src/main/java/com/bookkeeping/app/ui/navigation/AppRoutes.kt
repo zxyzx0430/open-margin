@@ -20,6 +20,9 @@ object AppRoutes {
     /** 待处理冲突独立页：只列冲突，可逐笔处理。 */
     const val PENDING_CONFLICTS = "pending-conflicts"
 
+    /** Per-bill diagnostic history remains device-private and is not a bottom tab. */
+    const val TRANSACTION_DIAGNOSTICS = "transaction-diagnostics"
+
     const val TRANSACTION_DETAIL = "transaction/{id}"
     const val TRANSACTION_ID = "id"
 

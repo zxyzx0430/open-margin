@@ -2,6 +2,7 @@ package com.bookkeeping.app.notification.accessibility
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
@@ -147,7 +148,7 @@ class WechatBillCardDetectorTest {
     }
 
     @Test
-    fun refundTimeFallsBackToCapturedAtWhenLabelMissing() {
+    fun refundTimeStaysUnknownWhenNoExplicitDateIsOnTheCard() {
         val lines = listOf(
             line("退款到账通知", 100),
             line("退款金额", 180),
@@ -160,7 +161,9 @@ class WechatBillCardDetectorTest {
         val card = WechatBillCardDetector.fromLines(
             WechatBillCardDetector.WECHAT, lines, capturedAt, 2400, "refund-page",
         ).single()
-        assertNotNull(card.eventTimeMs)
-        assertEquals(true, card.eventTimeMs!! > 0L)
+        // 4ad6f12 stopped inventing a time for refunds without an explicit date;
+        // the screenshot candidate layer then uses the capture time and marks it
+        // as needing confirmation instead of claiming a verified time.
+        assertNull(card.eventTimeMs)
     }
 }
