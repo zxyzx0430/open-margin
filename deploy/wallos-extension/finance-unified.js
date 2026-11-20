@@ -116,7 +116,9 @@
         '<div class="finance-day-entry-title"><div class="finance-day-entry-meta"><b>'+
         esc(tx.merchant||"未填写商户")+'</b><span class="finance-entry-badge'+
         (excluded?' is-excluded':'')+'">'+esc(["excluded","transfer","refund"].includes(status)?"不计入":category==="TRANSFER"?(tx.direction==="INCOME"?"转账入账 · 已计入":"转账 · 不计入"):labels[status]||"待核对")+
-        ' · '+esc(categories[category]||category)+'</span></div><strong>'+
+        ' · '+esc(categories[category]||category)+'</span>'+
+        (tx.event_time_needs_confirmation?'<strong class="finance-time-pending">时间待确认</strong>':'')+
+        '</div><strong>'+
         money(tx.amount_cents)+'</strong></div>'+
         '<details class="finance-entry-edit"><summary>编辑交易或核对状态</summary><div class="finance-entry-controls">'+
         '<form class="finance-tx-edit" data-finance-id="'+Number(tx.id)+'">'+

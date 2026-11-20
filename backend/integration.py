@@ -330,6 +330,7 @@ def rule_remove(rule_id:int):
     return {"ok":True}
 
 class Edit(BaseModel):
+    timestamp_ms:int|None=Field(default=None,gt=946684800000,lt=4102444800000)
     amount_cents:int|None=Field(default=None,gt=0,le=100_000_000_000)
     merchant:str|None=Field(default=None,max_length=140)
     category:str|None=None
@@ -354,12 +355,19 @@ def edit_transaction(tx_id:int, t:Edit):
                                     (tx_id,)).fetchone()
             if income_refund and income_refund[0]>changes["amount_cents"]:
                 raise HTTPException(409,"Corrected income below linked refund")
-        for key,new in changes.items():
-            old=row[key]
-            if old!=new:
-                db.execute(f"UPDATE transactions SET {key}=? WHERE id=?",(new,tx_id))
+        if ("timestamp_ms" in changes and changes["timestamp_ms"]!=row["timestamp_ms"]
+                and row["event_time_needs_confirmation"]):
+            # This endpoint accepts timestamp only from the existing explicit
+            # transaction editor; a real changed value is an actual-time correction.
+            changes["event_time_needs_confirmation"]=0
+        changed={key:new for key,new in changes.items() if row[key]!=new}
+        if changed:
+            assignments=",".join(f"{key}=?" for key in changed)
+            db.execute(f"UPDATE transactions SET {assignments} WHERE id=?",
+                       (*changed.values(),tx_id))
+            for key,new in changed.items():
                 db.execute("INSERT INTO transaction_edits(tx_id,field,old_value,new_value) VALUES (?,?,?,?)",
-                           (tx_id,key,str(old),str(new)))
+                           (tx_id,key,str(row[key]),str(new)))
     return {"ok":True,"changed_fields":list(changes)}
 
 class Refund(BaseModel):

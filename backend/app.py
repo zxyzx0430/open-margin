@@ -27,6 +27,7 @@ class Event(BaseModel):
     source: Literal["WECHAT","ALIPAY","BANK_SMS","MANUAL","OTHER"]
     category: str = Field(default="OTHER", max_length=45)
     merchant: str = Field(default="", max_length=140)
+    event_time_needs_confirmation: bool = False
     # transaction account fields, SMS contents, card digits, OTP and notes intentionally omitted
 
 class Batch(BaseModel):
@@ -74,8 +75,14 @@ def _initialize_database(db: sqlite3.Connection) -> None:
         source TEXT NOT NULL,
         category TEXT NOT NULL,
         merchant TEXT NOT NULL,
+        event_time_needs_confirmation INTEGER NOT NULL DEFAULT 0
+          CHECK(event_time_needs_confirmation IN (0,1)),
         review_status TEXT NOT NULL DEFAULT 'unverified',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+    if not any(row["name"]=="event_time_needs_confirmation"
+               for row in db.execute("PRAGMA table_info(transactions)")):
+        db.execute("""ALTER TABLE transactions ADD COLUMN event_time_needs_confirmation
+          INTEGER NOT NULL DEFAULT 0 CHECK(event_time_needs_confirmation IN (0,1))""")
     db.execute("CREATE INDEX IF NOT EXISTS tx_timestamp ON transactions(timestamp_ms)")
     # Upload de-duplication filters by amount/currency/direction and a
     # +/-90s timestamp window. Without this composite index every event
@@ -208,9 +215,11 @@ def ingest(batch: Batch):
             from integration import resolve_category
             classified=resolve_category(db,e.merchant,e.category)
             cur = db.execute("""INSERT OR IGNORE INTO transactions
-                (event_id,timestamp_ms,amount_cents,currency,direction,source,category,merchant,review_status)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
-                (e.event_id,e.timestamp_ms,e.amount_cents,e.currency,e.direction,e.source,classified,e.merchant,status))
+                (event_id,timestamp_ms,amount_cents,currency,direction,source,category,merchant,
+                 review_status,event_time_needs_confirmation)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (e.event_id,e.timestamp_ms,e.amount_cents,e.currency,e.direction,e.source,
+                 classified,e.merchant,status,int(e.event_time_needs_confirmation)))
             if cur.rowcount == 1:
                 inserted += 1
                 if possible:
@@ -261,7 +270,9 @@ def transactions(limit: int = Query(50,ge=1,le=500), before_ms: int | None = Non
             rows = db.execute("SELECT * FROM transactions ORDER BY timestamp_ms DESC LIMIT ?", (limit,)).fetchall()
         else:
             rows = db.execute("SELECT * FROM transactions WHERE timestamp_ms<? ORDER BY timestamp_ms DESC LIMIT ?", (before_ms,limit)).fetchall()
-    return {"items": [dict(row) for row in rows]}
+    return {"items": [{**dict(row),
+                       "event_time_needs_confirmation":bool(row["event_time_needs_confirmation"])}
+                      for row in rows]}
 
 @app.get("/api/v1/summary", dependencies=[Depends(admin_auth)])
 def summary(start_ms: int = Query(...), end_ms: int = Query(...)):

@@ -56,6 +56,7 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
 .finance-day-entry-meta{min-width:0;display:flex;flex-direction:column;gap:4px;}
 .finance-day-entry-meta>b{font-size:14px;}
 .finance-entry-badge{width:fit-content;color:var(--text-muted);font-size:11px;}
+.finance-time-pending{display:inline-block;flex:0 0 auto;padding:2px 6px;border-radius:6px;background:color-mix(in srgb,#d99b00 15%,var(--box-background-color));color:#765400;font-size:11px;white-space:nowrap;}
 .finance-entry-badge.is-excluded{background:color-mix(in srgb,var(--main-color) 8%,transparent);padding:2px 6px;border-radius:6px;}
 .finance-entry-edit{margin-top:3px;}
 .finance-entry-edit>summary{cursor:pointer;font-size:12px;color:var(--main-color);padding:8px 2px;list-style:none;}

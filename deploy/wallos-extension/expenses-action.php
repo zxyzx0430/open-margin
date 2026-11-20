@@ -72,9 +72,24 @@ try {
         [$whole,$fraction]=array_pad(explode('.',$raw,2),2,'');
         $amount=intval($whole)*100+intval(str_pad($fraction,2,'0'));
         if($amount<1)throw new InvalidArgumentException('Invalid amount');
-        ledger_request('PATCH','integration/transaction/'.$tx,[
+        $editPayload=[
             'amount_cents'=>$amount,'merchant'=>mb_substr((string)($_POST['merchant']??''),0,140),
-            'category'=>(string)($_POST['category']??'OTHER')]);
+            'category'=>(string)($_POST['category']??'OTHER')];
+        if (isset($_POST['spent_at']) || isset($_POST['original_spent_at'])) {
+            $spentAt=$_POST['spent_at']??null;
+            $originalSpentAt=$_POST['original_spent_at']??null;
+            if (!is_string($spentAt) || !is_string($originalSpentAt)) {
+                throw new InvalidArgumentException('Invalid transaction time');
+            }
+            if ($spentAt!==$originalSpentAt) {
+                $parsed=DateTimeImmutable::createFromFormat('!Y-m-d\\TH:i',$spentAt,new DateTimeZone('Asia/Shanghai'));
+                if (!$parsed || $parsed->format('Y-m-d\\TH:i')!==$spentAt) {
+                    throw new InvalidArgumentException('Invalid transaction time');
+                }
+                $editPayload['timestamp_ms']=intval($parsed->format('U'))*1000;
+            }
+        }
+        ledger_request('PATCH','integration/transaction/'.$tx,$editPayload);
         $notice='saved';
     } elseif ($action==='duplicate') {
         $tx=filter_var($_POST['entry_id']??'',FILTER_VALIDATE_INT,['options'=>['min_range'=>1]]);

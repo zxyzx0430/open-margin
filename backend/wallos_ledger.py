@@ -139,7 +139,7 @@ def month_view(
     where=" AND ".join(conditions)
     with core.db_connection() as db:
         rows=db.execute(f"""SELECT id,timestamp_ms,amount_cents,currency,direction,source,category,
-                merchant,review_status FROM transactions WHERE {where}
+                merchant,review_status,event_time_needs_confirmation FROM transactions WHERE {where}
                 ORDER BY timestamp_ms DESC,id DESC LIMIT 101 OFFSET ?""",(*params,offset)).fetchall()
         total=db.execute(f"""SELECT currency,direction,category,COUNT(*) AS count,
                 SUM(amount_cents) AS total_cents
@@ -180,7 +180,9 @@ def month_view(
     has_more=len(rows)>100
     return {
         "month":month,
-        "items":[dict(r) for r in rows[:100]],
+        "items":[{**dict(r),
+                   "event_time_needs_confirmation":bool(r["event_time_needs_confirmation"])}
+                  for r in rows[:100]],
         "totals":[dict(r) for r in total],
         "today_totals":today_totals,
         "last7_totals":last7_totals,
