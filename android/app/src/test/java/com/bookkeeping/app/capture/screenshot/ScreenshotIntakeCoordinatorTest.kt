@@ -19,7 +19,8 @@ import org.junit.Test
  */
 class ScreenshotIntakeCoordinatorTest {
 
-    private val capturedAt = 1795064400000L // 2026-11-19 13:00 Asia/Shanghai
+    // The candidate store prunes captures against the current clock.
+    private val capturedAt = System.currentTimeMillis()
 
     private fun request(mime: String? = "image/jpeg") = ScreenshotIntakeRequest(
         source = IntakeSource.SHARE,
@@ -135,7 +136,7 @@ class ScreenshotIntakeCoordinatorTest {
         request = request().copy(capturedAtMs = capturedAtMs),
         blocks = blocks,
         bytes = null,
-        fingerprint = "page-$capturedAtMs",
+        fingerprint = capturedAtMs.toString(16).padStart(64, '0'),
         attemptId = "attempt-$capturedAtMs",
         allowAuto = allowAuto,
         previewOnly = previewOnly,
