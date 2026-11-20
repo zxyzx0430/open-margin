@@ -48,13 +48,13 @@ class ScreenshotIntakeCoordinator private constructor(
      * Everything after OCR is free of Android types, so tests build the
      * coordinator from a store and a fake diagnostics sink instead.
      */
-    constructor(context: Context) : this(
-        context = context,
-        store = CaptureCandidateStore(context),
+    constructor(ctx: Context) : this(
+        context = ctx,
+        store = CaptureCandidateStore(ctx),
         repositoryProvider = {
             runCatching {
                 EntryPointAccessors.fromApplication(
-                    context.applicationContext,
+                    ctx.applicationContext,
                     ScreenshotImportEntryPoint::class.java,
                 ).transactionRepository()
             }.getOrNull()
@@ -62,7 +62,7 @@ class ScreenshotIntakeCoordinator private constructor(
         diagnosticSink = { note ->
             runCatching {
                 EntryPointAccessors.fromApplication(
-                    context.applicationContext,
+                    ctx.applicationContext,
                     ScreenshotImportEntryPoint::class.java,
                 ).transactionDiagnostics()
             }.getOrNull()?.record(
