@@ -5,12 +5,15 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
-        "此版本不启用自动监听" to "Automatic watching is off in this build",
-        "需要相册读取权限" to "Photo access is required",
-        "所选照片权限无法可靠读取新截图；自动监听未开启，仍可分享或手动选图" to "Selected-photo access cannot reliably read new screenshots; automatic watching is off, but sharing or manual photo selection still works",
+        "此安装包不含相册监听，用分享或选图" to "No album watcher here; share or pick a photo",
         "仅处理你选中的图片" to "Only the photos you selected are processed",
-        "发现新截图后自动识别" to "New screenshots are recognised automatically",
         "默认关闭，开启后只处理新截图" to "Off by default; only new screenshots are processed",
+        "相册权限已关闭，监听没有运行" to "No photo access; watching is off",
+        "只授权了部分照片，监听无法运行" to "Partial photo access; watching is off",
+        "正在监听新增截图，会自动识别" to "Watching new screenshots automatically",
+        "不可用" to "Unavailable",
+        "打开系统设置" to "Open system settings",
+        "授权全部照片" to "Allow all photos",
         "自动识别新截图" to "Recognise new screenshots",
         "从相册选截图" to "Pick a screenshot",
         "识别微信 / 支付宝交易截图" to "Recognise WeChat / Alipay transaction screenshots",

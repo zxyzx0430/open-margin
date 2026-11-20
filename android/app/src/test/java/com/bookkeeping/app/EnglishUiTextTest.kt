@@ -37,10 +37,40 @@ class EnglishUiTextTest {
             "暂时无法记录，请稍后重试" to "Unable to record it right now; try again later",
             "还有 %d 笔待确认" to "%d more waiting for confirmation",
             "仅预览，不能记入账本" to "Preview only; cannot be added to the ledger",
-            "所选照片权限无法可靠读取新截图；自动监听未开启，仍可分享或手动选图" to "Selected-photo access cannot reliably read new screenshots; automatic watching is off, but sharing or manual photo selection still works",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English screenshot label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
+    fun screenshotWatchStatesTranslate() {
+        // 五种监听状态各一句，且必须互不相同：读起来一样说明状态又糊成一句了。
+        val subtitles = listOf(
+            "此安装包不含相册监听，用分享或选图",
+            "默认关闭，开启后只处理新截图",
+            "相册权限已关闭，监听没有运行",
+            "只授权了部分照片，监听无法运行",
+            "正在监听新增截图，会自动识别",
+        )
+        assertEquals("screenshot-watch states must read differently", 5, subtitles.toSet().size)
+
+        val expected = mapOf(
+            "此安装包不含相册监听，用分享或选图" to "No album watcher here; share or pick a photo",
+            "默认关闭，开启后只处理新截图" to "Off by default; only new screenshots are processed",
+            "相册权限已关闭，监听没有运行" to "No photo access; watching is off",
+            "只授权了部分照片，监听无法运行" to "Partial photo access; watching is off",
+            "正在监听新增截图，会自动识别" to "Watching new screenshots automatically",
+            "不可用" to "Unavailable",
+            "打开系统设置" to "Open system settings",
+            "授权全部照片" to "Allow all photos",
+            "自动识别新截图" to "Recognise new screenshots",
+            "从相册选截图" to "Pick a screenshot",
+            "识别微信 / 支付宝交易截图" to "Recognise WeChat / Alipay transaction screenshots",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English screenshot-watch label: $source", EnglishUiText.hasTranslation(source))
             assertEquals(translated, EnglishUiText.translate(source))
         }
     }
