@@ -190,7 +190,7 @@ class CaptureMergePolicyAuditTest {
     // 10. 对照：真正同一笔（两边同一个订单号）仍然合成一行并补全字段。
     @Test
     fun sameOrderIdStillMergesIntoOneRow() {
-        val existing = entity(id = 5, merchant = "禧迎迎生鲜超市")
+        val existing = entity(id = 5, merchant = "禧迎迎")
         val ledger = mutableListOf(existing)
         val capturedAgain = entity(
             id = 0,
