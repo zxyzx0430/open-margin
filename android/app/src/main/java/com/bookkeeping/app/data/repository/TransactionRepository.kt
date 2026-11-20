@@ -2,6 +2,7 @@ package com.bookkeeping.app.data.repository
 
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
+import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.settings.SettingsPreferences
@@ -59,18 +60,27 @@ class TransactionRepository @Inject constructor(
         } else {
             TransactionDiagnostics.STAGE_CAPTURE
         }
+        val callSite = diagnosticInput.callSite ?: "TransactionRepository.insert"
+        val money = DiagnosticSummary.amountWithMerchant(
+            amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
+            merchant = transaction.merchant,
+        )
         if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
             diagnostics.record(
                 attemptId = diagnosticInput.attemptId,
                 stage = operationStage,
                 result = TransactionDiagnostics.RESULT_STARTED,
                 details = "Transaction save requested",
+                callSite = callSite,
+                inputSummary = money,
             )
         }
         diagnostics.record(
             attemptId = diagnosticInput.attemptId,
             stage = TransactionDiagnostics.STAGE_SAVE,
             result = TransactionDiagnostics.RESULT_STARTED,
+            callSite = callSite,
+            inputSummary = money,
         )
         val id = try {
             dao.insert(transaction)
@@ -80,6 +90,8 @@ class TransactionRepository @Inject constructor(
                 stage = TransactionDiagnostics.STAGE_SAVE,
                 result = TransactionDiagnostics.RESULT_FAILURE,
                 details = diagnosticError(failure),
+                callSite = callSite,
+                inputSummary = money,
             )
             if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
                 diagnostics.record(
@@ -87,6 +99,8 @@ class TransactionRepository @Inject constructor(
                     stage = operationStage,
                     result = TransactionDiagnostics.RESULT_FAILURE,
                     details = diagnosticError(failure),
+                    callSite = callSite,
+                    inputSummary = money,
                 )
             }
             throw failure
@@ -98,6 +112,9 @@ class TransactionRepository @Inject constructor(
             result = TransactionDiagnostics.RESULT_SUCCESS,
             details = "Transaction row inserted",
             transactionId = id,
+            callSite = callSite,
+            inputSummary = money,
+            outputSummary = "已写入 #$id",
         )
         if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
             diagnostics.record(
@@ -105,6 +122,9 @@ class TransactionRepository @Inject constructor(
                 stage = operationStage,
                 result = TransactionDiagnostics.RESULT_SUCCESS,
                 transactionId = id,
+                callSite = callSite,
+                inputSummary = money,
+                outputSummary = "已写入 #$id",
             )
         }
         // Only a real insert reaches this point. Notification failures must
@@ -155,10 +175,17 @@ class TransactionRepository @Inject constructor(
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
     ): Long? = duplicateMutex.withLock {
+        val callSite = diagnosticInput.callSite ?: "TransactionRepository.insertIfNotDuplicate"
+        val money = DiagnosticSummary.amountWithMerchant(
+            amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
+            merchant = transaction.merchant,
+        )
         diagnostics.record(
             attemptId = diagnosticInput.attemptId,
             stage = TransactionDiagnostics.STAGE_DEDUP,
             result = TransactionDiagnostics.RESULT_STARTED,
+            callSite = callSite,
+            inputSummary = "$money · 比对同商户同金额",
         )
         transaction.sourceTransactionId?.let { orderId ->
             val matched = try {
@@ -169,6 +196,8 @@ class TransactionRepository @Inject constructor(
                     stage = TransactionDiagnostics.STAGE_DEDUP,
                     result = TransactionDiagnostics.RESULT_FAILURE,
                     details = diagnosticError(failure),
+                    callSite = callSite,
+                    inputSummary = money,
                 )
                 throw failure
             }
@@ -179,6 +208,9 @@ class TransactionRepository @Inject constructor(
                     result = TransactionDiagnostics.RESULT_WARNING,
                     details = "Existing source transaction ID; candidate not inserted",
                     transactionId = matched.id,
+                    callSite = callSite,
+                    inputSummary = money,
+                    outputSummary = "命中已有 #${matched.id}（订单号相同），跳过写入",
                 )
                 return@withLock null
             }
@@ -199,6 +231,8 @@ class TransactionRepository @Inject constructor(
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_FAILURE,
                 details = diagnosticError(failure),
+                callSite = callSite,
+                inputSummary = money,
             )
             throw failure
         }
@@ -209,6 +243,9 @@ class TransactionRepository @Inject constructor(
                 result = TransactionDiagnostics.RESULT_WARNING,
                 details = "Exact duplicate candidate skipped",
                 transactionId = existing.id,
+                callSite = callSite,
+                inputSummary = money,
+                outputSummary = "命中已有 #${existing.id}，跳过写入",
             )
             return@withLock null
         }
@@ -223,6 +260,8 @@ class TransactionRepository @Inject constructor(
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_FAILURE,
                 details = diagnosticError(failure),
+                callSite = callSite,
+                inputSummary = money,
             )
             throw failure
         }
@@ -234,6 +273,9 @@ class TransactionRepository @Inject constructor(
                 result = TransactionDiagnostics.RESULT_WARNING,
                 details = "Candidate merged into existing transaction",
                 transactionId = merged.id,
+                callSite = callSite,
+                inputSummary = money,
+                outputSummary = "并入已有 #${merged.id}，补全商户与订单号",
             )
             update(merged, diagnosticInput, operationStage = TransactionDiagnostics.STAGE_CAPTURE)
             CaptureHealth.onTransactionSaved(context)
@@ -300,6 +342,13 @@ class TransactionRepository @Inject constructor(
                 "Possible duplicate retained for review"
             } else {
                 "No duplicate found"
+            },
+            callSite = callSite,
+            inputSummary = money,
+            outputSummary = if (candidate.duplicateOfId != null) {
+                "疑似 #${candidate.duplicateOfId}，仍写入并标记待确认"
+            } else {
+                "未命中重复，继续写入"
             },
         )
         val id = insert(candidate, notifySuccess = notifySuccess, diagnosticInput = diagnosticInput)
@@ -396,18 +445,27 @@ class TransactionRepository @Inject constructor(
             syncModifiedMs = System.currentTimeMillis(),
             syncMutationId = UUID.randomUUID().toString(),
         )
+        val callSite = diagnosticInput.callSite ?: "TransactionRepository.update"
+        val money = DiagnosticSummary.amountWithMerchant(
+            amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
+            merchant = transaction.merchant,
+        )
         diagnostics.record(
             attemptId = diagnosticInput.attemptId,
             stage = operationStage,
             result = TransactionDiagnostics.RESULT_STARTED,
             details = "Transaction edit requested",
             transactionId = transaction.id,
+            callSite = callSite,
+            inputSummary = money,
         )
         diagnostics.record(
             attemptId = diagnosticInput.attemptId,
             stage = TransactionDiagnostics.STAGE_SAVE,
             result = TransactionDiagnostics.RESULT_STARTED,
             transactionId = transaction.id,
+            callSite = callSite,
+            inputSummary = money,
         )
         try {
             dao.update(updated)
@@ -418,6 +476,8 @@ class TransactionRepository @Inject constructor(
                 result = TransactionDiagnostics.RESULT_FAILURE,
                 details = diagnosticError(failure),
                 transactionId = transaction.id,
+                callSite = callSite,
+                inputSummary = money,
             )
             diagnostics.record(
                 attemptId = diagnosticInput.attemptId,
@@ -425,6 +485,8 @@ class TransactionRepository @Inject constructor(
                 result = TransactionDiagnostics.RESULT_FAILURE,
                 details = diagnosticError(failure),
                 transactionId = transaction.id,
+                callSite = callSite,
+                inputSummary = money,
             )
             throw failure
         }
@@ -434,12 +496,17 @@ class TransactionRepository @Inject constructor(
             result = TransactionDiagnostics.RESULT_SUCCESS,
             details = "Transaction row updated",
             transactionId = transaction.id,
+            callSite = callSite,
+            inputSummary = money,
+            outputSummary = "已更新 #${transaction.id}",
         )
         diagnostics.record(
             attemptId = diagnosticInput.attemptId,
             stage = operationStage,
             result = TransactionDiagnostics.RESULT_SUCCESS,
             transactionId = transaction.id,
+            callSite = callSite,
+            outputSummary = "已更新 #${transaction.id}",
         )
         requestSync(diagnosticInput, updated)
     }
@@ -450,12 +517,18 @@ class TransactionRepository @Inject constructor(
         result: String,
         details: String = "",
         transactionId: Long? = null,
+        callSite: String? = null,
+        inputSummary: String? = null,
+        outputSummary: String? = null,
     ) = diagnostics.record(
         attemptId = attemptId,
         stage = stage,
         result = result,
         details = details,
         transactionId = transactionId,
+        callSite = callSite,
+        inputSummary = inputSummary,
+        outputSummary = outputSummary,
     )
 
     /**
@@ -608,6 +681,11 @@ class TransactionRepository @Inject constructor(
                 result = TransactionDiagnostics.RESULT_STARTED,
                 details = if (enabled) "Sync work requested" else "Sync is disabled; transaction remains local",
                 transactionId = transaction.id.takeIf { it > 0L },
+                callSite = input.callSite ?: "TransactionRepository.requestSync",
+                inputSummary = DiagnosticSummary.amountWithMerchant(
+                    amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
+                    merchant = transaction.merchant,
+                ),
             )
         }
         try {
@@ -620,6 +698,8 @@ class TransactionRepository @Inject constructor(
                     else TransactionDiagnostics.RESULT_WARNING,
                     details = if (enabled) "Sync work queued" else "No network upload scheduled",
                     transactionId = transaction.id.takeIf { it > 0L },
+                    callSite = input.callSite ?: "TransactionRepository.requestSync",
+                    outputSummary = if (enabled) "已排队上传" else "同步未开启，仅保留本机",
                 )
             }
         } catch (failure: Exception) {
@@ -630,6 +710,8 @@ class TransactionRepository @Inject constructor(
                     result = TransactionDiagnostics.RESULT_FAILURE,
                     details = diagnosticError(failure),
                     transactionId = transaction.id.takeIf { it > 0L },
+                    callSite = input.callSite ?: "TransactionRepository.requestSync",
+                    outputSummary = "排队失败，账本不受影响",
                 )
             }
         }

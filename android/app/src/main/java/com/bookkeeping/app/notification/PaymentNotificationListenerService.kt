@@ -9,6 +9,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
@@ -140,7 +141,13 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         // do not print them to logcat even in debug builds.
 
         if (packageName !in setOf("com.eg.android.AlipayGphone", "com.tencent.mm")) return
-        val diagnosticInput = TransactionDiagnosticInput()
+        // Structured only: one notification, its text length, the parsed amount
+        // and direction. The notification body itself never enters diagnostics.
+        val appLabel = if (packageName == "com.tencent.mm") "微信" else "支付宝"
+        val inputSummary = "$appLabel 通知 1 条（正文 ${body.orEmpty().length} 字）"
+        val diagnosticInput = TransactionDiagnosticInput(
+            callSite = "PaymentNotificationListenerService.onNotificationPosted",
+        )
         val parsed = try {
             NotificationParser.parse(
                 packageName = packageName,
@@ -155,12 +162,16 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     stage = TransactionDiagnostics.STAGE_CAPTURE,
                     result = TransactionDiagnostics.RESULT_STARTED,
                     details = "Payment notification capture started",
+                    callSite = diagnosticInput.callSite,
+                    inputSummary = inputSummary,
                 )
                 repository.recordDiagnostic(
                     attemptId = diagnosticInput.attemptId,
                     stage = TransactionDiagnostics.STAGE_PARSE,
                     result = TransactionDiagnostics.RESULT_FAILURE,
                     details = "Payment notification operation failed",
+                    callSite = diagnosticInput.callSite,
+                    inputSummary = inputSummary,
                 )
             }
             throw failure
@@ -172,12 +183,17 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     stage = TransactionDiagnostics.STAGE_CAPTURE,
                     result = TransactionDiagnostics.RESULT_STARTED,
                     details = "Payment notification capture started",
+                    callSite = diagnosticInput.callSite,
+                    inputSummary = inputSummary,
                 )
                 repository.recordDiagnostic(
                     attemptId = diagnosticInput.attemptId,
                     stage = TransactionDiagnostics.STAGE_PARSE,
                     result = TransactionDiagnostics.RESULT_WARNING,
                     details = "Notification did not parse as a completed bill",
+                    callSite = diagnosticInput.callSite,
+                    inputSummary = inputSummary,
+                    outputSummary = "未识别为已完成账单",
                 )
             }
             return
@@ -195,12 +211,24 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     stage = TransactionDiagnostics.STAGE_CAPTURE,
                     result = TransactionDiagnostics.RESULT_STARTED,
                     details = "Payment notification capture started",
+                    callSite = diagnosticInput.callSite,
+                    inputSummary = inputSummary,
                 )
                 repository.recordDiagnostic(
                     attemptId = diagnosticInput.attemptId,
                     stage = TransactionDiagnostics.STAGE_PARSE,
                     result = TransactionDiagnostics.RESULT_SUCCESS,
                     details = "Payment notification parsed",
+                    callSite = diagnosticInput.callSite,
+                    inputSummary = inputSummary,
+                    outputSummary = DiagnosticSummary.amountWithMerchant(
+                        amount = DiagnosticSummary.amount(
+                            type = parsed.type,
+                            amountCents = parsed.amountCents,
+                            currency = parsed.currency,
+                        ),
+                        merchant = parsed.merchant,
+                    ),
                 )
                 val replay = repository.recordNoticeFingerprint(
                     fingerprint = fingerprint,
@@ -226,6 +254,8 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     stage = TransactionDiagnostics.STAGE_CAPTURE,
                     result = TransactionDiagnostics.RESULT_FAILURE,
                     details = "Payment notification operation failed",
+                    callSite = diagnosticInput.callSite,
+                    outputSummary = "写入失败，通知未入账",
                 )
                 CaptureHealth.onFailure(applicationContext, "persist", failure)
                 KeepAliveService.refreshStatus(applicationContext)

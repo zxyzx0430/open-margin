@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,8 +51,10 @@ import com.bookkeeping.app.data.local.entity.TransactionDiagnosticEventEntity
 import com.bookkeeping.app.i18n.EnglishUiText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.screen.settings.SettingsGroupCard
-import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,7 +63,18 @@ fun TransactionDiagnosticsScreen(
     viewModel: TransactionDiagnosticsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
-    var expandedEvents by remember { mutableStateOf(emptySet<String>()) }
+    // The DAO returns newest-first; the timeline wants oldest-first so rows that
+    // share a millisecond keep their real insertion order.
+    val attempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
+    var expandedAttempts by remember { mutableStateOf(emptySet<String>()) }
+    var openedNewest by remember { mutableStateOf(false) }
+    LaunchedEffect(attempts.firstOrNull()?.attemptId) {
+        val newest = attempts.firstOrNull()?.attemptId ?: return@LaunchedEffect
+        if (!openedNewest) {
+            expandedAttempts = expandedAttempts + newest
+            openedNewest = true
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -90,9 +108,11 @@ fun TransactionDiagnosticsScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                tr("仅保存在本机，7 天后自动清理"),
+                tr("记录每笔账从采集到入库经过的每一步。仅保存在本机，最长 7 天。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             OutlinedTextField(
@@ -135,7 +155,7 @@ fun TransactionDiagnosticsScreen(
                     Text(tr(state.error.orEmpty()), color = MaterialTheme.colorScheme.error)
                     TextButton(onClick = viewModel::retry) { Text(tr("重试")) }
                 }
-                state.events.isEmpty() -> Box(
+                attempts.isEmpty() -> Box(
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -153,14 +173,17 @@ fun TransactionDiagnosticsScreen(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(state.events, key = { it.eventId }) { event ->
-                        val expanded = event.eventId in expandedEvents
-                        DiagnosticEventCard(
-                            event = event,
+                    items(attempts, key = { it.attemptId }) { attempt ->
+                        val expanded = attempt.attemptId in expandedAttempts
+                        AttemptCard(
+                            attempt = attempt,
                             expanded = expanded,
                             onToggle = {
-                                expandedEvents = if (expanded) expandedEvents - event.eventId
-                                else expandedEvents + event.eventId
+                                expandedAttempts = if (expanded) {
+                                    expandedAttempts - attempt.attemptId
+                                } else {
+                                    expandedAttempts + attempt.attemptId
+                                }
                             },
                         )
                     }
@@ -189,53 +212,91 @@ fun TransactionDiagnosticsScreen(
     }
 }
 
+/**
+ * One capture chain: what entered, what the chain produced, how long it took and
+ * where it ended. Expanding lists every step in order with its own input/output.
+ */
 @Composable
-private fun DiagnosticEventCard(
-    event: TransactionDiagnosticEventEntity,
+private fun AttemptCard(
+    attempt: DiagnosticTimeline.Attempt,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
-    SettingsGroupCard(
-        modifier = Modifier.clickable(onClick = onToggle),
-    ) {
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(attempt.attemptId) { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_600L)
+            copied = false
+        }
+    }
+    SettingsGroupCard(modifier = Modifier.clickable(onClick = onToggle)) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    diagnosticStage(event.stage),
+                    entryLabel(attempt.entry),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    diagnosticResult(event.result),
+                    outcomeLabel(attempt.outcome),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (event.result == "failure") MaterialTheme.colorScheme.error
-                    else if (event.result == "warning") MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.primary,
+                    color = outcomeColor(attempt.outcome),
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
             Text(
-                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
-                    .format(Date(event.occurredAtMs)),
+                "${formatFullTime(attempt.startedAtMs)} · ${tr("耗时")} ${DiagnosticTimeline.formatDuration(attempt.durationMs)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
             )
-            event.transactionId?.let { id ->
+            attempt.transactionId?.let { id ->
                 Text("${tr("账单")} #$id", style = MaterialTheme.typography.bodySmall)
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                TextButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(attempt.attemptId))
+                        copied = true
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        if (copied) tr("已复制") else tr("复制"),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
             Text(
-                tr(EnglishUiText.diagnosticDetailTranslationKey(event.details.ifBlank { "—" })),
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                tr("同一次采集的每一步共用，便于把过程串起来"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = if (event.result == "failure") MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurface,
             )
             if (expanded) {
-                Text("${tr("尝试 ID")}：${event.attemptId}", style = MaterialTheme.typography.labelSmall)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                attempt.steps.forEach { step ->
+                    StepRow(step = step, showSummaries = attempt.hasReadableSummaries)
+                }
             }
             Text(
                 if (expanded) tr("收起") else tr("查看详情"),
@@ -246,6 +307,126 @@ private fun DiagnosticEventCard(
     }
 }
 
+/** One pipeline step: exact time, stage, result, then what went in and out. */
+@Composable
+private fun StepRow(
+    step: TransactionDiagnosticEventEntity,
+    showSummaries: Boolean,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                formatStepTime(step.occurredAtMs),
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Text(
+                diagnosticStage(step.stage),
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(start = 10.dp),
+            )
+            Text(
+                diagnosticResult(step.result),
+                style = MaterialTheme.typography.labelMedium,
+                color = resultColor(step.result),
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+        Text(
+            tr(EnglishUiText.diagnosticDetailTranslationKey(step.details.ifBlank { "—" })),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (step.result == "failure") MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (showSummaries) {
+            Text(
+                "${tr("输入")}：${step.inputSummary ?: "—"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${tr("输出")}：${step.outputSummary ?: "—"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        step.callSite?.let { callSite ->
+            Text(
+                callSite,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+private fun formatFullTime(occurredAtMs: Long): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(occurredAtMs))
+
+private fun formatStepTime(occurredAtMs: Long): String =
+    SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(occurredAtMs))
+
+@Composable
+private fun resultColor(result: String) = when (result) {
+    "failure" -> MaterialTheme.colorScheme.error
+    "warning" -> MaterialTheme.colorScheme.tertiary
+    "started" -> MaterialTheme.colorScheme.onSurfaceVariant
+    else -> MaterialTheme.colorScheme.primary
+}
+
+@Composable
+private fun outcomeColor(outcome: DiagnosticTimeline.Outcome) = when (outcome) {
+    DiagnosticTimeline.Outcome.FAILURE -> MaterialTheme.colorScheme.error
+    DiagnosticTimeline.Outcome.PARTIAL -> MaterialTheme.colorScheme.error
+    DiagnosticTimeline.Outcome.WARNING -> MaterialTheme.colorScheme.tertiary
+    DiagnosticTimeline.Outcome.RUNNING -> MaterialTheme.colorScheme.onSurfaceVariant
+    DiagnosticTimeline.Outcome.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+    DiagnosticTimeline.Outcome.SUCCESS -> MaterialTheme.colorScheme.primary
+}
+
+@Composable
+private fun entryLabel(entry: DiagnosticTimeline.Entry): String = when (entry) {
+    DiagnosticTimeline.Entry.SCREENSHOT -> tr("截图")
+    DiagnosticTimeline.Entry.NOTIFICATION -> tr("通知")
+    DiagnosticTimeline.Entry.SMS -> tr("短信")
+    DiagnosticTimeline.Entry.ACCESSIBILITY -> tr("无障碍")
+    DiagnosticTimeline.Entry.MANUAL -> tr("手工")
+    DiagnosticTimeline.Entry.VOICE -> tr("语音")
+    DiagnosticTimeline.Entry.IMPORT -> tr("导入")
+    DiagnosticTimeline.Entry.SYNC -> tr("同步")
+    DiagnosticTimeline.Entry.EDIT -> tr("编辑")
+    DiagnosticTimeline.Entry.DELETE -> tr("删除")
+    DiagnosticTimeline.Entry.CAPTURE -> tr("采集")
+    DiagnosticTimeline.Entry.UNKNOWN -> tr("其他")
+}
+
+@Composable
+private fun outcomeLabel(outcome: DiagnosticTimeline.Outcome): String = when (outcome) {
+    DiagnosticTimeline.Outcome.SUCCESS -> tr("成功")
+    DiagnosticTimeline.Outcome.WARNING -> tr("待确认")
+    DiagnosticTimeline.Outcome.FAILURE -> tr("失败")
+    DiagnosticTimeline.Outcome.PARTIAL -> tr("部分失败")
+    DiagnosticTimeline.Outcome.RUNNING -> tr("进行中")
+    DiagnosticTimeline.Outcome.UNKNOWN -> tr("结果未记录")
+}
 
 @Composable
 private fun diagnosticStage(stage: String): String = when (stage) {
