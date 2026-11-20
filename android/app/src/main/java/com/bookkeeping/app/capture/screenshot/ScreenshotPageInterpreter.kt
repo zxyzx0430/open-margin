@@ -343,30 +343,60 @@ object ScreenshotPageInterpreter {
      * the vertically nearest anchor, so the merchant header above the *next*
      * amount is not appended to the previous card.
      *
-     * Only a line with real geometry may be placed. OCR boxes are optional, and
-     * an all-zero placeholder box would make every line equidistant — the last
-     * card would then collect every stray status word on the page. A page with
-     * no usable geometry therefore stays one page-level card: the amount is no
-     * longer unambiguous, and the policy refuses to auto book it.
+     * OCR boxes are optional, and a missing box must never delete money. Only a
+     * line with real geometry may be placed by distance, and only against an
+     * anchor that also has one: an all-zero placeholder box would make every
+     * line equidistant, and a zero-height box is not a row. An amount line
+     * anchors its own card whether or not it has a box — dropping the unboxed
+     * ones used to delete a whole transaction from a page that happened to have
+     * a boxed amount too.
+     *
+     * Unboxed text keeps its OCR reading order, but it may only join a card that
+     * is itself unboxed: geometry is the only proof that a word belongs to a
+     * positioned card, so an unboxed 支付成功 must never rewrite the status of a
+     * boxed card. Unboxed lines that follow no unboxed amount stay unplaced,
+     * exactly as before.
+     *
+     * A page with no box at all stays one page-level card: nothing can be
+     * attributed, so the amount is not unambiguous and the policy refuses to
+     * auto book it. The same holds when the only amount on the page has no box:
+     * one amount cannot be confused with another, and its status words belong to
+     * it. Several unboxed amounts are split one card each, so none disappears,
+     * and they carry no status evidence at all.
      */
     private fun splitSegments(blocks: List<TextBlock>): List<List<TextBlock>> {
-        val anchors = blocks.filter { hasGeometry(it) && amountOf(it.text) != null }
-        if (anchors.isEmpty()) return listOf(blocks)
+        val anchors = blocks.filter { amountOf(it.text) != null }
+        // Nothing to split, or no position anywhere: one page-level card.
+        if (anchors.isEmpty() || blocks.none { hasGeometry(it) }) return listOf(blocks)
+        val boxedAnchors = anchors.indices.filter { hasGeometry(anchors[it]) }
+        // One amount and no boxed amount of its own: the page still describes
+        // exactly that one transaction, so its status words belong to it.
+        if (boxedAnchors.isEmpty() && anchors.size == 1) return listOf(blocks)
         val segments = anchors.map { mutableListOf<TextBlock>() }
         var anchorIndex = 0
+        // Index of the last card opened by an amount line without a box, or -1.
+        var unboxedCard = -1
         blocks.forEach { block ->
             when {
-                // Missing geometry cannot be attributed to any card.
-                !hasGeometry(block) -> Unit
+                // Every amount keeps its own card, boxed or not.
                 amountOf(block.text) != null -> {
+                    unboxedCard = if (hasGeometry(block)) -1 else anchorIndex
                     segments[anchorIndex] += block
                     anchorIndex += 1
                 }
+                // Missing geometry is not a position: the line keeps its OCR
+                // reading order inside the unboxed card it follows.
+                !hasGeometry(block) -> {
+                    if (unboxedCard >= 0) segments[unboxedCard] += block
+                }
+                // A boxed line needs a boxed amount to be measured against;
+                // without one there is no row it could be proven to belong to.
+                boxedAnchors.isEmpty() -> Unit
                 else -> {
-                    var best = 0
+                    var best = boxedAnchors.first()
                     var bestDistance = Long.MAX_VALUE
-                    anchors.forEachIndexed { index, anchor ->
-                        val distance = abs((block.top - anchor.top).toLong())
+                    boxedAnchors.forEach { index ->
+                        val distance = abs((block.top - anchors[index].top).toLong())
                         if (distance <= bestDistance) {
                             bestDistance = distance
                             best = index
