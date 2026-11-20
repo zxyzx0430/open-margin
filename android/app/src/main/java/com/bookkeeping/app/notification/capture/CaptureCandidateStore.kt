@@ -11,7 +11,6 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
 
     private val dir = File(filesRoot, "page_capture")
     private val indexFile = File(dir, "candidates.jsonl")
-    private val lock = Any()
 
     fun save(candidate: CaptureCandidate, screenshot: ByteArray?): CaptureCandidate? {
         if (!candidate.isValid()) return null
@@ -161,6 +160,8 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
     }
 
     companion object {
+        // Store instances share the same on-disk index, including background cleanup.
+        private val lock = Any()
         private const val MAX_ENTRIES = 200
         private const val MAX_INDEX_BYTES = 512 * 1024L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
