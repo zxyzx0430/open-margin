@@ -167,7 +167,7 @@ class CaptureReviewViewModel @Inject constructor(
             if (outcome == IgnoreOutcome.IGNORED) {
                 queue.replacePending(withContext(Dispatchers.IO) { store.pending() })
             }
-            publish(message = CaptureReviewText.ignore(outcome)?.let { AppLanguage.tr(context, it) })
+            publish(message = AppLanguage.tr(context, CaptureReviewText.ignore(outcome)))
             if (outcome == IgnoreOutcome.MARK_FAILED) {
                 recordFailure(candidate, "ignore: store.mark returned false")
             }
@@ -230,7 +230,6 @@ object CaptureReviewDirection {
 enum class IgnoreOutcome {
     IGNORED,
     MARK_FAILED,
-    ALREADY_IN_FLIGHT,
 }
 
 /**
@@ -303,9 +302,8 @@ object CaptureReviewText {
     const val IGNORED = "扫描结果已忽略"
     const val IGNORE_FAILED = "候选状态未能更新，请重试"
 
-    fun ignore(outcome: IgnoreOutcome): String? = when (outcome) {
+    fun ignore(outcome: IgnoreOutcome): String = when (outcome) {
         IgnoreOutcome.IGNORED -> IGNORED
         IgnoreOutcome.MARK_FAILED -> IGNORE_FAILED
-        IgnoreOutcome.ALREADY_IN_FLIGHT -> null
     }
 }
