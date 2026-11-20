@@ -52,13 +52,20 @@ class ScreenshotWaitingCorrelationTest {
     )
 
     @Test
-    fun `only completed evidence settles a waiting candidate`() {
-        assertTrue(ScreenshotWaitingCorrelation.isSettlingEvidence(candidate("a")))
+    fun `final statuses settle while in-flight pages change nothing`() {
+        listOf(
+            CaptureCandidate.COMPLETION_COMPLETED,
+            CaptureCandidate.COMPLETION_CANCELLED,
+            CaptureCandidate.COMPLETION_FAILED,
+        ).forEach { status ->
+            assertTrue(
+                "status $status is final evidence",
+                ScreenshotWaitingCorrelation.isSettlingEvidence(candidate("a", completionStatus = status)),
+            )
+        }
         listOf(
             CaptureCandidate.COMPLETION_PENDING,
             CaptureCandidate.COMPLETION_CREATED,
-            CaptureCandidate.COMPLETION_CANCELLED,
-            CaptureCandidate.COMPLETION_FAILED,
             CaptureCandidate.COMPLETION_UNKNOWN,
         ).forEach { status ->
             assertFalse(
@@ -76,6 +83,115 @@ class ScreenshotWaitingCorrelationTest {
         val completed = candidate("completed", merchant = "张 三")
 
         assertEquals(waiting, ScreenshotWaitingCorrelation.settleTarget(completed, listOf(waiting), NOW))
+    }
+
+    @Test
+    fun `a cancelled or failed page also closes its placeholder`() {
+        // 已取消 / 支付失败 are final: the order will never move money, so the
+        // placeholder must stop waiting instead of asking the user twice.
+        listOf(
+            CaptureCandidate.COMPLETION_CANCELLED,
+            CaptureCandidate.COMPLETION_FAILED,
+        ).forEach { status ->
+            val waiting = candidate(
+                "waiting",
+                status = CaptureCandidate.STATUS_WAITING,
+                completionStatus = CaptureCandidate.COMPLETION_PENDING,
+                capturedAtMs = NOW - 2 * MINUTE,
+            )
+            val later = candidate("later", completionStatus = status)
+
+            assertTrue(
+                "status $status is final evidence",
+                ScreenshotWaitingCorrelation.isSettlingEvidence(later),
+            )
+            assertEquals(
+                "status $status must settle its own placeholder",
+                waiting,
+                ScreenshotWaitingCorrelation.settleTarget(later, listOf(waiting), NOW),
+            )
+        }
+    }
+
+    @Test
+    fun `a completed payment never closes a waiting transfer`() {
+        val waiting = candidate(
+            "waiting",
+            status = CaptureCandidate.STATUS_WAITING,
+            kind = CaptureCandidate.KIND_TRANSFER,
+            capturedAtMs = NOW - 3 * MINUTE,
+        )
+
+        // Same amount, merchant, direction and platform — only the kind differs.
+        assertNull(
+            ScreenshotWaitingCorrelation.settleTarget(
+                candidate("completed", kind = CaptureCandidate.KIND_PAYMENT),
+                listOf(waiting),
+                NOW,
+            ),
+        )
+        // Even a shared order id does not make a payment the same money as a
+        // transfer: cross-kind evidence must never close another kind's card.
+        assertNull(
+            ScreenshotWaitingCorrelation.settleTarget(
+                candidate("completed", kind = CaptureCandidate.KIND_PAYMENT, orderId = "4200001234567890"),
+                listOf(waiting.copy(orderId = "4200001234567890")),
+                NOW,
+            ),
+        )
+    }
+
+    @Test
+    fun `two same amount transfers settle at most one and only by order id`() {
+        // Two transfers of ¥200 to the same person five minutes apart. Without an
+        // order id neither can be identified, so nothing is settled.
+        val first = candidate(
+            "waiting-1",
+            status = CaptureCandidate.STATUS_WAITING,
+            capturedAtMs = NOW - 5 * MINUTE,
+        )
+        val second = candidate(
+            "waiting-2",
+            status = CaptureCandidate.STATUS_WAITING,
+            capturedAtMs = NOW - 4 * MINUTE,
+        )
+        assertNull(
+            ScreenshotWaitingCorrelation.settleTarget(
+                candidate("completed", orderId = null),
+                listOf(first, second),
+                NOW,
+            ),
+        )
+        // With real order ids the identification is positive again — but only
+        // the placeholder that carries the same order id is closed.
+        val firstWithId = first.copy(orderId = "4200000000000001")
+        val secondWithId = second.copy(orderId = "4200000000000002")
+        val later = candidate("completed", orderId = "4200000000000001")
+
+        assertEquals(
+            firstWithId,
+            ScreenshotWaitingCorrelation.settleTarget(later, listOf(firstWithId, secondWithId), NOW),
+        )
+        assertNull(
+            "a completed page still settles only one placeholder",
+            ScreenshotWaitingCorrelation.settleTarget(
+                later.copy(orderId = "4200000000000003"),
+                listOf(firstWithId, secondWithId),
+                NOW,
+            ),
+        )
+    }
+
+    @Test
+    fun `a placeholder carrying its own order id is never settled by amount and merchant`() {
+        val waiting = candidate(
+            "waiting",
+            status = CaptureCandidate.STATUS_WAITING,
+            orderId = "4200000000000009",
+            capturedAtMs = NOW - MINUTE,
+        )
+
+        assertNull(ScreenshotWaitingCorrelation.settleTarget(candidate("completed"), listOf(waiting), NOW))
     }
 
     @Test
