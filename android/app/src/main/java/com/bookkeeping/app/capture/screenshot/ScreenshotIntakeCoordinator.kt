@@ -7,8 +7,10 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.DiagnosticStep
 import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
+import com.bookkeeping.app.data.diagnostics.RawLine
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -176,7 +178,12 @@ class ScreenshotIntakeCoordinator private constructor(
                 )
             }
         }
-        // Counts only: how many text blocks came back, never what they said.
+        // Verbatim OCR text in reading order, one line per block. Stored because
+        // "截图没记上" is only diagnosable with what the page actually said; the
+        // image itself stays in its own store. Bounded by DiagnosticRawText, not
+        // by the 160-char summary clip.
+        val pageRawText = DiagnosticRawText.ocrLines(blocks.toRawLines())
+        // Counts plus the payload: how many text blocks came back and what they said.
         recordStep(
             attemptId = attemptId,
             stage = TransactionDiagnostics.STAGE_CAPTURE,
@@ -185,6 +192,7 @@ class ScreenshotIntakeCoordinator private constructor(
             callSite = CALL_SITE_INGEST,
             inputSummary = inputSummary,
             outputSummary = "OCR ${blocks.size} 个文本块",
+            rawText = pageRawText,
         )
         return ingestBlocks(
             request = request,
@@ -194,6 +202,7 @@ class ScreenshotIntakeCoordinator private constructor(
             attemptId = attemptId,
             allowAuto = allowAuto,
             previewOnly = previewOnly,
+            pageRawText = pageRawText,
         )
     }
 
@@ -206,9 +215,16 @@ class ScreenshotIntakeCoordinator private constructor(
         attemptId: String,
         allowAuto: Boolean,
         previewOnly: Boolean,
+        /**
+         * Verbatim OCR text of this page, one line per block in reading order.
+         * Null for callers that only hold the blocks; the text is then derived
+         * from [blocks] so the recorded chain still carries the original input.
+         */
+        pageRawText: String? = null,
     ): Outcome {
         val source = request.source
         val capturedAtMs = request.capturedAtMs
+        val rawText = pageRawText ?: DiagnosticRawText.ocrLines(blocks.toRawLines())
         val repository = repositoryProvider()
         val existing = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
         val previousFingerprints = runCatching {
@@ -226,8 +242,10 @@ class ScreenshotIntakeCoordinator private constructor(
         val ocrSummary = "OCR ${blocks.size} 个文本块"
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;
-            // no ledger write and no user-visible noise.
-            recordFailure(attemptId, failure, ocrSummary)
+            // no ledger write and no user-visible noise. The OCR text rides along
+            // because a page that parsed to nothing is exactly the case a user
+            // reports as "it did not record".
+            recordFailure(attemptId, failure, ocrSummary, rawText)
             return Outcome(
                 failure = failure,
                 repeatImage = plan.repeatImage,
@@ -270,6 +288,7 @@ class ScreenshotIntakeCoordinator private constructor(
                 "${drafts.size} 笔候选",
                 candidateSummary,
             ).joinToString(" · "),
+            rawText = rawText,
         )
 
         val matched = plan.decisions.mapNotNull { it.matchedTransactionId }
@@ -286,6 +305,7 @@ class ScreenshotIntakeCoordinator private constructor(
             } else {
                 "命中已有 ${matched.joinToString("、") { "#$it" }}，跳过 ${matched.size} 笔"
             },
+            rawText = rawText,
         )
 
         var booked = 0
@@ -422,6 +442,7 @@ class ScreenshotIntakeCoordinator private constructor(
                 )
                 if (!CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)) append(" · 预览模式，未写入账本")
             },
+            rawText = rawText,
         )
         return Outcome(
             booked = booked,
@@ -492,6 +513,7 @@ class ScreenshotIntakeCoordinator private constructor(
         attemptId: String,
         failure: FailureReason,
         inputSummary: String? = null,
+        rawText: String? = null,
     ) {
         val note = ScreenshotImportDiagnostics.failureNote(attemptId, failure)
         recordStep(
@@ -501,6 +523,7 @@ class ScreenshotIntakeCoordinator private constructor(
             details = note.details,
             callSite = CALL_SITE_INGEST,
             inputSummary = inputSummary,
+            rawText = rawText,
         )
     }
 
@@ -513,6 +536,7 @@ class ScreenshotIntakeCoordinator private constructor(
         callSite: String? = CALL_SITE_INGEST,
         inputSummary: String? = null,
         outputSummary: String? = null,
+        rawText: String? = null,
     ) {
         val step = DiagnosticStep(
             attemptId = attemptId,
@@ -523,6 +547,7 @@ class ScreenshotIntakeCoordinator private constructor(
             callSite = callSite,
             inputSummary = inputSummary,
             outputSummary = outputSummary,
+            rawText = rawText,
         )
         try {
             diagnosticSink(step)
@@ -539,6 +564,20 @@ class ScreenshotIntakeCoordinator private constructor(
         request.byteSize?.takeIf { it > 0L }?.let { bytes -> "${bytes / 1024} KB" },
         request.mimeType?.trim()?.takeIf { it.isNotEmpty() },
     ).joinToString(" · ")
+
+    /**
+     * The data layer keeps no dependency on the capture package, so the OCR
+     * blocks are handed over as [RawLine] value objects. Coordinates are only
+     * used for ordering; `hasBounds` keeps a missing box from sorting to the top.
+     */
+    private fun List<TextBlock>.toRawLines(): List<RawLine> = map { block ->
+        RawLine(
+            text = block.text,
+            top = block.top,
+            left = block.left,
+            hasBounds = block.hasBounds,
+        )
+    }
 
     private fun requireContext(): Context =
         checkNotNull(context) { "URI intake and OCR need an Android context" }

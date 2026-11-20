@@ -18,7 +18,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
     entities = [TransactionEntity::class, ProcessedNoticeEntity::class, TransactionDiagnosticEventEntity::class],
-    version = 11,
+    version = 12,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -39,8 +39,21 @@ abstract class BookkeepingDatabase : RoomDatabase() {
          */
         fun build(context: Context): BookkeepingDatabase =
             Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build()
+
+        // v12: the raw input behind one chain (notification title + body, SMS,
+        // page OCR text, manual/ASR utterance) so a user-reported bug can be
+        // reproduced. One nullable TEXT column, additive only: every row written
+        // before this version keeps NULL and the log screen simply hides the
+        // block. Raw text has its own 4000-char bound (DiagnosticRawText), never
+        // the 160-char summary clip. The user can null every row from the log
+        // screen without losing any summary.
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transaction_diagnostic_events ADD COLUMN rawText TEXT")
+            }
+        }
 
         // v11: readable capture chains. Three nullable TEXT columns; every row
         // written before this version keeps NULL and the log screen renders the

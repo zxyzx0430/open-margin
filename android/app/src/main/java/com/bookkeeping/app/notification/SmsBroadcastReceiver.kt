@@ -6,6 +6,7 @@ import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.TransactionRepository
@@ -50,7 +51,11 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             "农行", "交行",
         ).any(fullBody::contains)
         if (!bankSignal) return
-        val diagnosticInput = TransactionDiagnosticInput()
+        // Sender + full body: an SMS that failed to parse is only diagnosable with
+        // the text the bank actually sent. Bounded by DiagnosticRawText (this is
+        // not the 160-char summary clip), local-only, erasable in the log screen.
+        val rawText = DiagnosticRawText.titleAndBody(sender, fullBody)
+        val diagnosticInput = TransactionDiagnosticInput(rawText = rawText)
         val parsed = try {
             SmsParser.parse(sender, fullBody, timestamp)
         } catch (failure: Exception) {
@@ -62,12 +67,14 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                         stage = TransactionDiagnostics.STAGE_CAPTURE,
                         result = TransactionDiagnostics.RESULT_STARTED,
                         details = "Bank SMS capture started",
+                        rawText = rawText,
                     )
                     repository.recordDiagnostic(
                         attemptId = diagnosticInput.attemptId,
                         stage = TransactionDiagnostics.STAGE_PARSE,
                         result = TransactionDiagnostics.RESULT_FAILURE,
                         details = "Bank SMS operation failed",
+                        rawText = rawText,
                     )
                 } finally {
                     pending.finish()
@@ -85,12 +92,14 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                         stage = TransactionDiagnostics.STAGE_CAPTURE,
                         result = TransactionDiagnostics.RESULT_STARTED,
                         details = "Bank SMS capture started",
+                        rawText = rawText,
                     )
                     repository.recordDiagnostic(
                         attemptId = diagnosticInput.attemptId,
                         stage = TransactionDiagnostics.STAGE_PARSE,
                         result = TransactionDiagnostics.RESULT_WARNING,
                         details = "Bank SMS did not parse as a transaction",
+                        rawText = rawText,
                     )
                 } finally {
                     pending.finish()
@@ -107,12 +116,14 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                     stage = TransactionDiagnostics.STAGE_CAPTURE,
                     result = TransactionDiagnostics.RESULT_STARTED,
                     details = "Bank SMS capture started",
+                    rawText = rawText,
                 )
                 repository.recordDiagnostic(
                     attemptId = diagnosticInput.attemptId,
                     stage = TransactionDiagnostics.STAGE_PARSE,
                     result = TransactionDiagnostics.RESULT_SUCCESS,
                     details = "Bank SMS parsed",
+                    rawText = rawText,
                 )
                 val id = repository.insertIfNotDuplicate(parsed, diagnosticInput = diagnosticInput)
                 if (id == null) {
@@ -128,6 +139,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                     stage = TransactionDiagnostics.STAGE_CAPTURE,
                     result = TransactionDiagnostics.RESULT_FAILURE,
                     details = "Bank SMS operation failed",
+                    rawText = rawText,
                 )
                 Log.e(TAG, "SMS processing failed: ${failure.javaClass.simpleName}")
             } finally {

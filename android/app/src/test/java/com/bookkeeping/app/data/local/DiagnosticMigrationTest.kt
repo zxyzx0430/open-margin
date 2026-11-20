@@ -12,7 +12,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * v10 -> v11 adds three nullable TEXT columns to the diagnostics table.
+ * v10 -> v11 adds three nullable TEXT columns to the diagnostics table;
+ * v11 -> v12 adds one more (rawText, the verbatim input).
  *
  * Room's own migration runner (`MigrationTestHelper`) needs an instrumented
  * device, and this project's CI only runs `testDebugUnitTest`, so the migration
@@ -77,22 +78,54 @@ class DiagnosticMigrationTest {
     }
 
     @Test
-    fun `the shared builder declares version 11 and registers the migration`() {
+    fun `the shared builder declares version 12 and registers the migration`() {
         val source = databaseSource()
         assertTrue(
-            "BookkeepingDatabase must declare version = 11",
-            Regex("""version\s*=\s*11""").containsMatchIn(source),
+            "BookkeepingDatabase must declare version = 12",
+            Regex("""version\s*=\s*12""").containsMatchIn(source),
         )
         assertTrue(
-            "MIGRATION_10_11 must be part of the addMigrations chain",
-            Regex("""addMigrations\([^)]*MIGRATION_10_11""").containsMatchIn(source),
+            "MIGRATION_11_12 must be part of the addMigrations chain",
+            Regex("""addMigrations\([^)]*MIGRATION_11_12""").containsMatchIn(source),
         )
         assertTrue(
-            "MIGRATION_10_11 must exist",
-            Regex("""val MIGRATION_10_11\s*=\s*object\s*:\s*Migration\(10,\s*11\)""").containsMatchIn(source),
+            "MIGRATION_11_12 must exist",
+            Regex("""val MIGRATION_11_12\s*=\s*object\s*:\s*Migration\(11,\s*12\)""").containsMatchIn(source),
+        )
+        assertTrue(
+            "MIGRATION_10_11 must stay registered (users may still be on v10)",
+            Regex("""addMigrations\([^)]*MIGRATION_10_11[^)]*MIGRATION_11_12""").containsMatchIn(source),
         )
         // A destructive fallback would erase the user's unsynced ledger rows.
         assertFalse(source.contains("fallbackToDestructiveMigration"))
+    }
+
+    @Test
+    fun `migration 11 to 12 adds one nullable raw text column`() {
+        val statements = execSqlOf(BookkeepingDatabase.MIGRATION_11_12)
+
+        assertEquals(
+            listOf("ALTER TABLE transaction_diagnostic_events ADD COLUMN rawText TEXT"),
+            statements,
+        )
+        statements.forEach { sql ->
+            assertFalse("rawText must stay nullable", sql.contains("NOT NULL"))
+            assertFalse("old rows must not be backfilled with a placeholder", sql.contains("DEFAULT"))
+        }
+    }
+
+    @Test
+    fun `migration 11 to 12 never drops or rewrites rows`() {
+        val statements = execSqlOf(BookkeepingDatabase.MIGRATION_11_12).map { it.uppercase() }
+
+        statements.forEach { sql ->
+            assertFalse(sql.contains("DROP"))
+            assertFalse(sql.contains("DELETE"))
+            assertFalse(sql.contains("CREATE TABLE"))
+            assertFalse(sql.contains("RENAME"))
+            assertFalse(sql.contains("UPDATE"))
+        }
+        assertTrue(statements.all { it.startsWith("ALTER TABLE TRANSACTION_DIAGNOSTIC_EVENTS ADD COLUMN") })
     }
 
     @Test

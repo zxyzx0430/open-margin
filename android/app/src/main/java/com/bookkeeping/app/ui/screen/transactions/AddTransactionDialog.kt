@@ -58,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.data.MoneyAmount
+import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionCategory
@@ -193,6 +194,10 @@ fun AddTransactionDialog(
         val input = quickEntryDiagnostic?.takeIf { it.first == raw }?.second
             ?: TransactionDiagnosticInput(
                 attemptId = initialDiagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+                // The verbatim sentence the user typed or spoke. This is the only
+                // place the ASR transcript still exists; losing it here means a
+                // "语音记错了" report can never be reproduced.
+                rawText = DiagnosticRawText.store(raw),
             ).also {
                 quickEntryDiagnostic = raw to it
             }
@@ -311,6 +316,7 @@ fun AddTransactionDialog(
         val diagnosticInput = quickEntryDiagnostic?.takeIf { it.first == quickEntry }?.second
             ?: TransactionDiagnosticInput(
                 attemptId = initialDiagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+                rawText = DiagnosticRawText.store(quickEntry),
             )
         when {
             typed != null -> PendingSave(

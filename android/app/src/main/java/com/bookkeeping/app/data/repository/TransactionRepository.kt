@@ -65,6 +65,14 @@ class TransactionRepository @Inject constructor(
             amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
             merchant = transaction.merchant,
         )
+        // Manual and voice entries: the raw text is what the user actually sent.
+        // The dialog hands over the ASR transcript when it has one; otherwise the
+        // submitted merchant + note are the closest available original.
+        val entryRawText = if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
+            diagnosticInput.rawText ?: DiagnosticRawText.manualEntry(transaction.merchant, transaction.note)
+        } else {
+            null
+        }
         if (operationStage == TransactionDiagnostics.STAGE_ENTRY) {
             diagnostics.record(
                 attemptId = diagnosticInput.attemptId,
@@ -73,6 +81,7 @@ class TransactionRepository @Inject constructor(
                 details = "Transaction save requested",
                 callSite = callSite,
                 inputSummary = money,
+                rawText = entryRawText,
             )
         }
         diagnostics.record(
@@ -125,6 +134,7 @@ class TransactionRepository @Inject constructor(
                 callSite = callSite,
                 inputSummary = money,
                 outputSummary = "已写入 #$id",
+                rawText = entryRawText,
             )
         }
         // Only a real insert reaches this point. Notification failures must
@@ -520,6 +530,7 @@ class TransactionRepository @Inject constructor(
         callSite: String? = null,
         inputSummary: String? = null,
         outputSummary: String? = null,
+        rawText: String? = null,
     ) = diagnostics.record(
         attemptId = attemptId,
         stage = stage,
@@ -529,6 +540,7 @@ class TransactionRepository @Inject constructor(
         callSite = callSite,
         inputSummary = inputSummary,
         outputSummary = outputSummary,
+        rawText = rawText,
     )
 
     /**
