@@ -40,12 +40,17 @@ class TransactionDiagnosticsViewModel @Inject constructor(
         val loading: Boolean = true,
         val error: String? = null,
         val hasMore: Boolean = false,
+        /** True while the bulk "clear every raw text" write is in flight. */
+        val clearingRawText: Boolean = false,
+        /** One-shot result line under the toolbar, e.g. "原始正文已清除". */
+        val rawTextNotice: String? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
     private var eventJob: Job? = null
     private var reloadGeneration = 0L
+    private var clearJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -91,6 +96,34 @@ class TransactionDiagnosticsViewModel @Inject constructor(
     fun retry() {
         _state.value = _state.value.copy(error = null)
         reload()
+    }
+
+    /**
+     * Erase every stored raw input after the user confirms in the dialog.
+     *
+     * Deliberately not reversible and deliberately separate from the retention
+     * prune: the summaries, stages and results stay readable, only the payload
+     * (notification bodies, SMS text, OCR text, ASR transcripts) is nulled.
+     */
+    fun clearRawText() {
+        if (clearJob?.isActive == true) return
+        _state.value = _state.value.copy(clearingRawText = true, rawTextNotice = null)
+        clearJob = viewModelScope.launch {
+            val notice = try {
+                diagnostics.clearRawText()
+                "原始正文已清除"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                "清除失败，请重试"
+            }
+            _state.value = _state.value.copy(clearingRawText = false, rawTextNotice = notice)
+        }
+    }
+
+    fun dismissRawTextNotice() {
+        if (_state.value.rawTextNotice == null) return
+        _state.value = _state.value.copy(rawTextNotice = null)
     }
 
     private fun reload() {

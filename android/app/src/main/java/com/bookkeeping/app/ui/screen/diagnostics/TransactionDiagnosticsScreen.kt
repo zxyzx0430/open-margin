@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.diagnostics
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -10,13 +11,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -68,12 +73,20 @@ fun TransactionDiagnosticsScreen(
     val attempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
     var expandedAttempts by remember { mutableStateOf(emptySet<String>()) }
     var openedNewest by remember { mutableStateOf(false) }
+    var confirmClearRawText by remember { mutableStateOf(false) }
     LaunchedEffect(attempts.firstOrNull()?.attemptId) {
         val newest = attempts.firstOrNull()?.attemptId ?: return@LaunchedEffect
         if (!openedNewest) {
             expandedAttempts = expandedAttempts + newest
             openedNewest = true
         }
+    }
+    // The confirmation says the raw text is gone for good; drop the line by itself
+    // so the page does not keep a stale status forever.
+    LaunchedEffect(state.rawTextNotice) {
+        if (state.rawTextNotice == null) return@LaunchedEffect
+        delay(4_000L)
+        viewModel.dismissRawTextNotice()
     }
 
     Scaffold(
@@ -115,6 +128,16 @@ fun TransactionDiagnosticsScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
+            state.rawTextNotice?.let { notice ->
+                Text(
+                    tr(notice),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (notice.startsWith("清除失败")) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
+                    maxLines = 2,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             OutlinedTextField(
                 value = state.query,
                 onValueChange = viewModel::setQuery,
@@ -208,7 +231,46 @@ fun TransactionDiagnosticsScreen(
                     }
                 }
             }
+            // One fixed footer so the clear action is reachable from any scroll
+            // position; it cannot be mistaken for part of the log.
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            TextButton(
+                onClick = { confirmClearRawText = true },
+                enabled = !state.clearingRawText,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            ) {
+                Text(
+                    if (state.clearingRawText) tr("正在清除…") else tr("清除所有原始正文"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
         }
+    }
+
+    if (confirmClearRawText) {
+        AlertDialog(
+            onDismissRequest = { confirmClearRawText = false },
+            title = { Text(tr("清除所有原始正文？")) },
+            text = {
+                Text(tr("清除后只保留摘要，无法恢复。日志本身仍保留 7 天。"))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearRawText = false
+                        viewModel.clearRawText()
+                    },
+                ) {
+                    Text(tr("清除"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearRawText = false }) { Text(tr("取消")) }
+            },
+        )
     }
 }
 
@@ -373,6 +435,85 @@ private fun StepRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        step.rawText?.let { rawText -> RawTextBlock(rawText = rawText) }
+    }
+}
+
+/**
+ * The verbatim input of one step, collapsed by default.
+ *
+ * A user reporting "微信付了 5 块没记上" needs the original text; the person
+ * scanning the log needs the summary. The block therefore shows only its size
+ * until expanded, caps at 240dp with its own scroll so one long OCR page cannot
+ * stretch the card past the screen, and lets the user copy the text out.
+ * Raw text is NULL for rows written before v12 and after "清除所有原始正文",
+ * in which case [StepRow] never calls this at all.
+ */
+@Composable
+private fun RawTextBlock(rawText: String) {
+    val clipboard = LocalClipboardManager.current
+    var expanded by remember { mutableStateOf(false) }
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_600L)
+            copied = false
+        }
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+            ) {
+                Text(
+                    if (expanded) {
+                        tr("收起原始内容（${rawText.length} 字）")
+                    } else {
+                        tr("原始内容（${rawText.length} 字）")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            if (expanded) {
+                TextButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(rawText))
+                        copied = true
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        if (copied) tr("已复制") else tr("复制"),
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
+        if (expanded) {
+            Text(
+                rawText,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp),
+                    )
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
             )
         }
     }

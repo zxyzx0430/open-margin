@@ -1282,6 +1282,13 @@ internal object EnglishUiText {
         "结果未记录" to "No result recorded",
 
         "查看详情" to "View details",
+        "清除所有原始正文" to "Clear all raw text",
+        "正在清除…" to "Clearing…",
+        "清除所有原始正文？" to "Clear all raw text?",
+        "清除后只保留摘要，无法恢复。日志本身仍保留 7 天。" to
+            "Only the summaries stay. This cannot be undone. The log itself is still kept for 7 days.",
+        "原始正文已清除" to "Raw text cleared",
+        "清除失败，请重试" to "Could not clear; please retry",
         "采集" to "Capture",
         "录入" to "Entry",
         "解析" to "Parse",
@@ -1560,6 +1567,16 @@ internal object EnglishUiText {
         if (chinese.startsWith("超过最大行数 ") && chinese.endsWith("，已停止解析")) {
             val rows = chinese.removePrefix("超过最大行数 ").removeSuffix("，已停止解析")
             return "Exceeded the maximum number of rows ($rows); parsing stopped"
+        }
+        // Raw-text block labels carry the character count, so they cannot be a
+        // fixed map key: "原始内容（47 字）" / "收起原始内容（47 字）".
+        if (chinese.startsWith("收起原始内容（") && chinese.endsWith(" 字）")) {
+            val count = chinese.removePrefix("收起原始内容（").removeSuffix(" 字）")
+            return "Hide raw text ($count chars)"
+        }
+        if (chinese.startsWith("原始内容（") && chinese.endsWith(" 字）")) {
+            val count = chinese.removePrefix("原始内容（").removeSuffix(" 字）")
+            return "Raw text ($count chars)"
         }
         return chinese
     }
