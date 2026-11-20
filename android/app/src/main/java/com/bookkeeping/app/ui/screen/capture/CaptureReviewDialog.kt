@@ -2,6 +2,8 @@ package com.bookkeeping.app.ui.screen.capture
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,13 +15,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -35,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -61,6 +68,9 @@ fun CaptureReviewDialog(
     viewModel: CaptureReviewViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    // 预览位图与“当前打开的是哪张”放同一作用域：跨 composable 声明会 Unresolved reference。
+    var previewBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var previewState by remember { mutableStateOf(CaptureImagePreviewState()) }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -118,6 +128,13 @@ fun CaptureReviewDialog(
                             CaptureCandidateCard(
                                 candidate = candidate,
                                 busy = state.busy,
+                                onOpenPreview = { bitmap ->
+                                    previewBitmap = bitmap
+                                    previewState = previewState.onThumbnailTapped(
+                                        screenshotPath = candidate.screenshotPath,
+                                        hasThumbnail = true,
+                                    )
+                                },
                                 onApprove = { merchant, category, direction ->
                                     viewModel.approve(candidate, merchant, category, direction)
                                 },
@@ -129,12 +146,22 @@ fun CaptureReviewDialog(
             }
         }
     }
+    previewBitmap?.takeIf { previewState.open }?.let { bitmap ->
+        CaptureImagePreview(
+            bitmap = bitmap,
+            onDismiss = {
+                previewBitmap = null
+                previewState = previewState.onDismissed()
+            },
+        )
+    }
 }
 
 @Composable
 private fun CaptureCandidateCard(
     candidate: CaptureCandidate,
     busy: Boolean,
+    onOpenPreview: (ImageBitmap) -> Unit,
     onApprove: (String, TransactionCategory, String?) -> Unit,
     onIgnore: () -> Unit,
 ) {
@@ -192,14 +219,40 @@ private fun CaptureCandidateCard(
         ) {
             val image = thumbnail
             if (image != null) {
-                Image(
-                    bitmap = image,
-                    contentDescription = tr("扫描截图"),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(14.dp)),
+                // 有原图路径才给点击 + 放大镜：否则点开也是同一张 64dp 的图。
+                val previewable = canPreviewCaptureImage(
+                    screenshotPath = candidate.screenshotPath,
+                    hasThumbnail = true,
                 )
+                Box {
+                    Image(
+                        bitmap = image,
+                        contentDescription = tr("扫描截图"),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(enabled = previewable) { onOpenPreview(image) },
+                    )
+                    if (previewable) {
+                        // 右下角放大镜：缩略图太小，不给提示用户不知道能点。
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.82f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ZoomIn,
+                                contentDescription = tr("查看大图"),
+                                tint = Color.Black.copy(alpha = 0.75f),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                }
             } else {
                 CategoryIcon(category = category, size = 64.dp)
             }
