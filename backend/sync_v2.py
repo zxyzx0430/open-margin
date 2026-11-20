@@ -62,34 +62,87 @@ def schema(db: sqlite3.Connection) -> None:
               VALUES(?,'upsert',?,?)""", (row["event_id"], json.dumps(payload,ensure_ascii=False),0))
         db.execute("INSERT INTO ledger_settings(key,value) VALUES('sync_v2_seeded','1')")
 
-    # Replace the journal triggers, rather than CREATE IF NOT EXISTS: existing
-    # databases keep their pre-field trigger bodies otherwise and would silently
-    # omit this field from future changes.
-    db.execute("DROP TRIGGER IF EXISTS sync_journal_insert")
-    db.execute("DROP TRIGGER IF EXISTS sync_journal_update")
-    db.execute(f"""CREATE TRIGGER sync_journal_insert
-      AFTER INSERT ON transactions BEGIN
-       INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
-       VALUES(NEW.event_id,'upsert',{RECORD_JSON},(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
-      END""")
-    db.execute(f"""CREATE TRIGGER sync_journal_update
-      AFTER UPDATE OF timestamp_ms,amount_cents,currency,direction,source,
-        category,merchant,review_status,event_time_needs_confirmation ON transactions
-      WHEN OLD.timestamp_ms<>NEW.timestamp_ms
-        OR OLD.amount_cents<>NEW.amount_cents OR OLD.currency<>NEW.currency
-        OR OLD.direction<>NEW.direction OR OLD.source<>NEW.source
-        OR OLD.category<>NEW.category OR OLD.merchant<>NEW.merchant
-        OR OLD.review_status<>NEW.review_status
-        OR OLD.event_time_needs_confirmation<>NEW.event_time_needs_confirmation
-      BEGIN
-       INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
-       VALUES(NEW.event_id,'upsert',{RECORD_JSON},(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
-      END""")
-    db.execute("""CREATE TRIGGER IF NOT EXISTS sync_journal_delete
-      AFTER DELETE ON transactions BEGIN
-       INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
-       VALUES(OLD.event_id,'delete',NULL,(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
-      END""")
+    _ensure_journal_triggers(db)
+
+
+def _journal_triggers_need_upgrade(db: sqlite3.Connection) -> bool:
+    triggers = {
+        row[0]: row[1]
+        for row in db.execute("""SELECT name,sql FROM sqlite_master
+          WHERE type='trigger' AND name IN
+            ('sync_journal_insert','sync_journal_update','sync_journal_delete')""")
+    }
+    insert_sql = triggers.get("sync_journal_insert") or ""
+    update_sql = triggers.get("sync_journal_update") or ""
+    return (
+        "event_time_needs_confirmation" not in insert_sql
+        or "event_time_needs_confirmation" not in update_sql
+        or triggers.get("sync_journal_delete") is None
+    )
+
+
+def _ensure_journal_triggers(db: sqlite3.Connection) -> None:
+    # The trigger bodies only need changing once for databases created before
+    # the event-time flag was added. Avoid any trigger DDL on normal requests.
+    if not _journal_triggers_need_upgrade(db):
+        return
+
+    # Do not commit a transaction owned by the caller. For an idle connection,
+    # reserve SQLite's writer lock before rechecking and changing the triggers.
+    owns_transaction = not db.in_transaction
+    savepoint = f"sync_journal_trigger_upgrade_{uuid.uuid4().hex}"
+    if owns_transaction:
+        db.execute("BEGIN IMMEDIATE")
+    else:
+        db.execute(f"SAVEPOINT {savepoint}")
+
+    try:
+        if not owns_transaction:
+            # A caller can have an explicit deferred transaction that has not
+            # reserved the writer lock. This no-op update reserves it before
+            # trigger DDL while leaving the caller's transaction open.
+            db.execute("UPDATE ledger_settings SET value=value WHERE key='sync_v2_server_id'")
+
+        # Another connection may have completed this one-time migration while
+        # this connection waited for the writer lock.
+        if _journal_triggers_need_upgrade(db):
+            db.execute("DROP TRIGGER IF EXISTS sync_journal_insert")
+            db.execute("DROP TRIGGER IF EXISTS sync_journal_update")
+            db.execute(f"""CREATE TRIGGER sync_journal_insert
+              AFTER INSERT ON transactions BEGIN
+               INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
+               VALUES(NEW.event_id,'upsert',{RECORD_JSON},(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
+              END""")
+            db.execute(f"""CREATE TRIGGER sync_journal_update
+              AFTER UPDATE OF timestamp_ms,amount_cents,currency,direction,source,
+                category,merchant,review_status,event_time_needs_confirmation ON transactions
+              WHEN OLD.timestamp_ms<>NEW.timestamp_ms
+                OR OLD.amount_cents<>NEW.amount_cents OR OLD.currency<>NEW.currency
+                OR OLD.direction<>NEW.direction OR OLD.source<>NEW.source
+                OR OLD.category<>NEW.category OR OLD.merchant<>NEW.merchant
+                OR OLD.review_status<>NEW.review_status
+                OR OLD.event_time_needs_confirmation<>NEW.event_time_needs_confirmation
+              BEGIN
+               INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
+               VALUES(NEW.event_id,'upsert',{RECORD_JSON},(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
+              END""")
+            db.execute("""CREATE TRIGGER IF NOT EXISTS sync_journal_delete
+              AFTER DELETE ON transactions BEGIN
+               INSERT INTO sync_journal(event_id,action,payload,changed_at_ms)
+               VALUES(OLD.event_id,'delete',NULL,(CAST(strftime('%s','now') AS INTEGER)*1000 + CAST(substr(strftime('%f','now'),4,3) AS INTEGER)));
+              END""")
+
+        if owns_transaction:
+            db.commit()
+        else:
+            db.execute(f"RELEASE SAVEPOINT {savepoint}")
+    except BaseException:
+        if owns_transaction:
+            db.rollback()
+        else:
+            db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            db.execute(f"RELEASE SAVEPOINT {savepoint}")
+        raise
 
 
 def latest(db: sqlite3.Connection, event_id: str):
