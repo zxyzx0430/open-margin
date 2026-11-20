@@ -243,17 +243,25 @@ object ScreenshotPageInterpreter {
             drafts = drafts.map { draft ->
                 if (refundCard[draft.index] != true) return@map draft
                 val card = cards.first { it.index == draft.index }
-                val refundCompleted = carriesAny(card.blocks, REFUND_COMPLETED_MARKERS)
+                val amountBlock = card.blocks.firstOrNull { amountOf(it.text) != null }
+                val refundCompleted = card.blocks.any { block ->
+                    REFUND_COMPLETED_MARKERS.any(block.text::contains) &&
+                        isCompletionMarker(block.text) && isBoundStatus(block, amountBlock)
+                }
+                val ambiguousCompletion = !refundCompleted &&
+                    draft.completionStatus == CaptureCandidate.COMPLETION_COMPLETED
                 draft.copy(
                     kind = CaptureCandidate.KIND_REFUND,
                     direction = CaptureCandidate.DIRECTION_INCOME,
                     directionExplicit = true,
                     completionStatus = if (refundCompleted) {
                         CaptureCandidate.COMPLETION_COMPLETED
+                    } else if (ambiguousCompletion) {
+                        CaptureCandidate.COMPLETION_UNKNOWN
                     } else {
                         draft.completionStatus
                     },
-                    completionExplicit = draft.completionExplicit || refundCompleted,
+                    completionExplicit = !ambiguousCompletion && (draft.completionExplicit || refundCompleted),
                     reason = "incoming refund",
                 )
             }
@@ -515,7 +523,7 @@ object ScreenshotPageInterpreter {
         val statusBlocks = segment
             .filter { block -> isCompletionMarker(block.text) }
             .filterNot { block -> isNonPaymentCallCancellation(block.text) }
-            .filterNot { block -> isDetachedFromAmount(block, amount) }
+            .filter { block -> isBoundStatus(block, amount) }
         val confirmedText = statusBlocks
             .filterNot { block -> isBareCancellation(block.text) }
             .joinToString("\n") { it.text }
@@ -534,10 +542,21 @@ object ScreenshotPageInterpreter {
         }
     }
 
-    private fun isCompletionMarker(text: String): Boolean =
-        COMPLETED_MARKERS.any(text::contains) || REFUND_COMPLETED_MARKERS.any(text::contains) ||
-            PENDING_MARKERS.any(text::contains) || CREATED_MARKERS.any(text::contains) ||
-            CANCELLED_MARKERS.any(text::contains) || FAILED_MARKERS.any(text::contains)
+    private fun isBoundStatus(block: TextBlock, amount: TextBlock?): Boolean =
+        !isDetachedFromAmount(block, amount) &&
+            (amount == null || !hasGeometry(block) || !hasGeometry(amount) || isAttachedToAmount(block, amount))
+
+    private fun isCompletionMarker(text: String): Boolean {
+        val value = text.trim()
+        val markers = COMPLETED_MARKERS + REFUND_COMPLETED_MARKERS + PENDING_MARKERS +
+            CREATED_MARKERS + CANCELLED_MARKERS + FAILED_MARKERS
+        return markers.any { marker ->
+            value == marker || value == "对方$marker" ||
+                value == "状态 $marker" || value == "状态：$marker" || value == "状态:$marker" ||
+                value == "当前状态 $marker" || value == "当前状态：$marker" || value == "当前状态:$marker" ||
+                (amountOf(value) != null && value.endsWith(" $marker"))
+        }
+    }
 
     private fun isNonPaymentCallCancellation(text: String): Boolean =
         text.contains("已取消") && listOf("通话", "语音", "视频", "电话", "呼叫").any(text::contains)
