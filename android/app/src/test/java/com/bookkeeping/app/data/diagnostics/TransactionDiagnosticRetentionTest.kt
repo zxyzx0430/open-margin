@@ -41,10 +41,30 @@ class TransactionDiagnosticRetentionTest {
             .map { it.name }
             .toSet()
 
+        // v11 added three nullable explanation columns. The guard stays hard: the
+        // table is still metadata-only, and nothing may add a raw payload column
+        // (screenshot bytes, OCR text, audio, notification body, import file).
         assertEquals(
-            setOf("eventId", "attemptId", "transactionId", "occurredAtMs", "stage", "result", "details"),
+            setOf(
+                "eventId", "attemptId", "transactionId", "occurredAtMs", "stage", "result", "details",
+                "callSite", "inputSummary", "outputSummary",
+            ),
             fields,
         )
+        listOf("callSite", "inputSummary", "outputSummary").forEach { name ->
+            val field = TransactionDiagnosticEventEntity::class.java.getDeclaredField(name)
+            assertEquals("$name must be nullable text", String::class.java, field.type)
+            assertFalse("$name must not be a primitive", field.type.isPrimitive)
+        }
+    }
+
+    @Test fun summaryColumnsAreClippedAndNeverCarryRawPayloads() {
+        // Nothing may be stored unbounded: one caller mistake must not turn a row
+        // into a text dump of the page.
+        val long = "x".repeat(400)
+        assertEquals(DiagnosticSummary.MAX_LENGTH, DiagnosticSummary.clip(long)!!.length)
+        assertEquals(null, DiagnosticSummary.clip("   "))
+        assertEquals(null, DiagnosticSummary.clip(null))
     }
 }
 

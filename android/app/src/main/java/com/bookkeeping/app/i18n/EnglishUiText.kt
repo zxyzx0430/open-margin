@@ -1264,6 +1264,22 @@ internal object EnglishUiText {
         "没有匹配的日志" to "No matching logs",
         "加载更多" to "Load more",
         "尝试 ID" to "Attempt ID",
+        "记录每笔账从采集到入库经过的每一步。仅保存在本机，最长 7 天。" to
+            "Every step from capture to ledger, per bill. Stored only on this device for up to 7 days.",
+        "链路 ID" to "Chain ID",
+        "同一次采集的每一步共用，便于把过程串起来" to
+            "Shared by every step of one capture, so the run reads as a single chain",
+        "耗时" to "Took",
+        "输入" to "In",
+        "输出" to "Out",
+        "截图" to "Screenshot",
+        "无障碍" to "Accessibility",
+        "手工" to "Manual",
+        "语音" to "Voice",
+        "待确认" to "Needs review",
+        "部分失败" to "Partly failed",
+        "进行中" to "In progress",
+        "结果未记录" to "No result recorded",
 
         "查看详情" to "View details",
         "采集" to "Capture",
