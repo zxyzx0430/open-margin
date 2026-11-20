@@ -55,9 +55,17 @@ class CaptureReviewViewModel @Inject constructor(
         candidate: CaptureCandidate,
         merchant: String,
         category: TransactionCategory,
+        direction: String? = null,
     ) {
-        if (!CaptureBookGate.mayConfirm(candidate)) {
-            _state.update { it.copy(message = AppLanguage.tr(context, "仅预览，不能记入账本")) }
+        val resolved = CaptureReviewDirection.resolve(candidate, direction)
+        if (!CaptureBookGate.mayConfirm(resolved)) {
+            val message = when {
+                CaptureReviewDirection.requiresSelection(candidate) &&
+                    !CaptureReviewDirection.isChoice(direction) ->
+                    AppLanguage.tr(context, "请先选择收支方向")
+                else -> AppLanguage.tr(context, "仅预览，不能记入账本")
+            }
+            _state.update { it.copy(message = message) }
             return
         }
         if (_state.value.busy) return
@@ -66,7 +74,7 @@ class CaptureReviewViewModel @Inject constructor(
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     val entity = CaptureReviewMapping.toTransactionEntity(
-                        candidate = candidate,
+                        candidate = resolved,
                         merchant = merchant,
                         category = category,
                     )
@@ -91,7 +99,7 @@ class CaptureReviewViewModel @Inject constructor(
                 } else {
                     CaptureCandidate.STATUS_IGNORED
                 }
-                withContext(Dispatchers.IO) { store.mark(candidate, status) }
+                withContext(Dispatchers.IO) { store.mark(resolved, status) }
             }
             val pending = withContext(Dispatchers.IO) { store.pending() }
             _state.value = UiState(
@@ -121,4 +129,43 @@ class CaptureReviewViewModel @Inject constructor(
             )
         }
     }
+}
+
+/**
+ * Direction review rules for the capture inbox.
+ *
+ * A screenshot whose expense/income direction could not be read stays
+ * [CaptureCandidate.DIRECTION_UNKNOWN] and [CaptureBookGate.mayConfirm] keeps
+ * refusing it. The review UI breaks that dead end by asking the user for the
+ * direction: a valid pick replaces the unknown value and marks it explicit, so
+ * the same gate now allows the write. Pure so the rule is testable without
+ * Android or Compose.
+ */
+object CaptureReviewDirection {
+    /** The only directions the review UI may offer, in display order. */
+    val directions: Set<String> = linkedSetOf(
+        CaptureCandidate.DIRECTION_EXPENSE,
+        CaptureCandidate.DIRECTION_INCOME,
+    )
+
+    fun isChoice(value: String?): Boolean = value != null && value in directions
+
+    /** True when the candidate has no readable direction and needs a user pick. */
+    fun requiresSelection(candidate: CaptureCandidate): Boolean =
+        candidate.direction == CaptureCandidate.DIRECTION_UNKNOWN
+
+    /**
+     * Candidate handed to the confirm chain. A valid pick supplies the direction
+     * and marks it explicit; no pick, or a value outside [directions], leaves the
+     * candidate untouched so the gate keeps refusing the unknown direction.
+     */
+    fun resolve(candidate: CaptureCandidate, choice: String?): CaptureCandidate {
+        if (!requiresSelection(candidate)) return candidate
+        val picked = choice?.takeIf { isChoice(it) } ?: return candidate
+        return candidate.copy(direction = picked, directionExplicit = true)
+    }
+
+    /** Whether the confirm action may book the candidate with [choice] applied. */
+    fun canConfirm(candidate: CaptureCandidate, choice: String?): Boolean =
+        CaptureBookGate.mayConfirm(resolve(candidate, choice))
 }
