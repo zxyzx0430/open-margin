@@ -53,12 +53,19 @@ data class TransactionDraft(
     val merchantCandidates: List<String> = emptyList(),
     val orderId: String? = null,
     val eventTimeMs: Long? = null,
+    /** Only currency-shaped amounts (¥ / 元) are parsed, so drafts are CNY. */
+    val currency: String = "CNY",
     val pageIdentity: String = "",
     val supportedPaymentPage: Boolean = false,
     val reason: String = "",
 )
 
-/** Ledger row fingerprint used for cross-source de-duplication. */
+/**
+ * Ledger row fingerprint used for cross-source de-duplication.
+ *
+ * [currency] mirrors the entity column: two rows with the same numeric amount in
+ * different currencies are different money, never a duplicate.
+ */
 data class LedgerFingerprint(
     val transactionId: Long,
     val platform: String,
@@ -67,6 +74,7 @@ data class LedgerFingerprint(
     val orderId: String? = null,
     val merchant: String? = null,
     val eventTimeMs: Long = 0L,
+    val currency: String = "CNY",
 )
 
 /** Result of validating the incoming URI before any parsing happens. */

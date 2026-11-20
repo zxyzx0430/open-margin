@@ -4,6 +4,7 @@ import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -556,6 +557,110 @@ class ScreenshotImportPipelineTest {
 
         assertEquals(Action.ASK_USER, decision.action)
         assertNull(decision.matchedTransactionId)
+    }
+
+    @Test
+    fun `same amount with an ocr missing merchant is review only, never a link`() {
+        // The page shows no merchant at all, so nothing proves this is the row
+        // the notification capture stored a minute earlier. It must not be
+        // swallowed as a duplicate.
+        val noMerchant = listOf(
+            block("微信支付", 10),
+            block("-¥9.90", 40),
+            block("交易成功", 70),
+            block("2026-11-19 12:30", 100),
+        )
+        val pageTime = ScreenshotPageInterpreter.interpret(noMerchant, capturedAt, zone)
+            .drafts.single().eventTimeMs!!
+        val existing = listOf(
+            LedgerFingerprint(
+                transactionId = 91,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 990,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = "便利店",
+                eventTimeMs = pageTime + 60_000,
+            ),
+        )
+
+        val plan = ScreenshotImportPipeline.plan(request(), noMerchant, existing, timeZone = zone)
+        val decision = plan.decisions.single()
+
+        assertEquals(Action.ASK_USER, decision.action)
+        assertNull(decision.matchedTransactionId)
+        assertTrue(plan.bookings.isEmpty())
+    }
+
+    @Test
+    fun `ledger row without a merchant name is never an exact match`() {
+        val existing = listOf(
+            LedgerFingerprint(
+                transactionId = 92,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 3650,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = null,
+                eventTimeMs = parsedEventTime() + 30_000,
+            ),
+        )
+
+        val plan = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), existing, timeZone = zone)
+        val decision = plan.decisions.single()
+
+        assertEquals(Action.ASK_USER, decision.action)
+        assertNull(decision.matchedTransactionId)
+        assertTrue(plan.bookings.isEmpty())
+    }
+
+    @Test
+    fun `a second unidentifiable row keeps the duplicate decision ambiguous`() {
+        val time = parsedEventTime()
+        val existing = listOf(
+            LedgerFingerprint(
+                transactionId = 93,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 3650,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = "便利店",
+                eventTimeMs = time + 30_000,
+            ),
+            LedgerFingerprint(
+                transactionId = 94,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 3650,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = null,
+                eventTimeMs = time + 45_000,
+            ),
+        )
+
+        val decision = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), existing, timeZone = zone)
+            .decisions.single()
+
+        assertEquals(Action.ASK_USER, decision.action)
+        assertNull(decision.matchedTransactionId)
+    }
+
+    @Test
+    fun `same amount in another currency is never an exact match`() {
+        val existing = listOf(
+            LedgerFingerprint(
+                transactionId = 95,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 3650,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                merchant = "便利店",
+                eventTimeMs = parsedEventTime() + 30_000,
+                currency = "USD",
+            ),
+        )
+
+        val plan = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), existing, timeZone = zone)
+        val decision = plan.decisions.single()
+
+        assertNotEquals(Action.LINK_EXISTING, decision.action)
+        assertNull(decision.matchedTransactionId)
+        assertEquals(1, plan.bookings.size)
     }
 
     @Test

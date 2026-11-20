@@ -157,9 +157,18 @@ object ScreenshotImportPipeline {
     }
 
     /**
-     * Exact order id wins. Otherwise amount + direction + platform plus a
-     * merchant on one side and a <=2 minute gap. Equal amounts a few minutes
-     * apart are *not* merged on their own, so two identical purchases stay two.
+     * Only a positively identified row may be linked.
+     *
+     * 1. An exact platform-scoped order id wins outright.
+     * 2. Otherwise the row must match on platform, amount, direction, currency
+     *    and sit inside the two-minute window, and the merchant has to be
+     *    present and equal on both sides. An empty merchant is missing
+     *    evidence, not a wildcard: it can never turn a same-amount row into an
+     *    exact match, because swallowing a distinct transaction loses money
+     *    from the ledger. Rows that are plausible but unidentifiable return
+     *    AMBIGUOUS, which routes the candidate to human review.
+     * 3. Different merchants mean different transactions (two shops can charge
+     *    the same amount a minute apart), so those stay CLEAR.
      */
     fun deduplicate(
         draft: TransactionDraft,
@@ -185,30 +194,41 @@ object ScreenshotImportPipeline {
             return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
         }
         val merchant = normalize(draft.merchantCandidates.firstOrNull())
-        val possible = existing.filter { row ->
+        val currency = normalizeCurrency(draft.currency)
+        val sameShape = existing.filter { row ->
             row.platform == platform && row.platform != CaptureCandidate.PLATFORM_UNKNOWN &&
                 row.amountCents == amount && row.direction == draft.direction &&
-                (orderId == null || row.orderId?.trim().let { it == null || it == orderId }) &&
-                normalize(row.merchant).let { rowMerchant ->
-                    merchant.isEmpty() || rowMerchant.isEmpty() || merchant == rowMerchant
-                }
+                normalizeCurrency(row.currency) == currency &&
+                (orderId == null || row.orderId?.trim().let { it == null || it == orderId })
         }
+        if (sameShape.isEmpty()) {
+            return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+        }
+        // Without a real transaction time nothing can be placed inside (or
+        // outside) the window, so the match stays reviewable.
         if (draft.eventTimeMs == null) {
-            return if (possible.isEmpty()) ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
-            else ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+            return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
         }
-        val candidates = possible.filter { row ->
+        val inWindow = sameShape.filter { row ->
             row.eventTimeMs <= 0L ||
                 kotlin.math.abs(row.eventTimeMs - draft.eventTimeMs) <= DEDUP_WINDOW_MS
         }
-        return when (candidates.size) {
-            0 -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
-            1 -> if (candidates.single().eventTimeMs > 0L) {
-                ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to candidates.single().transactionId
-            } else {
+        if (inWindow.isEmpty()) {
+            return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+        }
+        // A row without a merchant name is plausible but not identified: the
+        // OCR may simply have missed it, so the user decides.
+        if (merchant.isEmpty() || inWindow.any { normalize(it.merchant).isEmpty() }) {
+            return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+        }
+        val identified = inWindow.filter { normalize(it.merchant) == merchant }
+        return when {
+            identified.isEmpty() -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+            identified.size > 1 -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+            identified.single().eventTimeMs <= 0L ->
                 ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
-            }
-            else -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+            else -> ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to
+                identified.single().transactionId
         }
     }
 
@@ -218,6 +238,10 @@ object ScreenshotImportPipeline {
 
     private fun normalize(value: String?): String =
         value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
+
+    /** Legacy rows without a currency column value are CNY, like the entity default. */
+    private fun normalizeCurrency(value: String?): String =
+        value?.trim()?.uppercase(Locale.ROOT)?.takeIf(String::isNotEmpty) ?: "CNY"
 
     private fun platformOf(pageIdentity: String): String = when {
         pageIdentity.startsWith("wechat") -> CaptureCandidate.PLATFORM_WECHAT

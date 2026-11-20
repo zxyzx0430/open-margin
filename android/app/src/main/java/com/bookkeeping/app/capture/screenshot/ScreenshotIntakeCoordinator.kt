@@ -339,6 +339,7 @@ class ScreenshotIntakeCoordinator(
         orderId = sourceTransactionId,
         merchant = merchant,
         eventTimeMs = timestamp,
+        currency = currency,
     )
 
     private fun platformFor(source: String): String = when (source) {
