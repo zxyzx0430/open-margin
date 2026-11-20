@@ -256,6 +256,28 @@ object ScreenshotPageInterpreter {
                 )
             }
         }
+        // A refund page repeats the amount once in the header and once in the
+        // 退款金额 row. Which card the status line lands in depends on OCR
+        // geometry, so the duplicate is dropped page-wide: any other draft with
+        // the labelled refund amount in refund/income shape is the same money,
+        // never a second incoming payment to confirm.
+        val labelledRefundAmounts = cards
+            .flatMap { card -> card.blocks }
+            .filter { block -> block.text.contains(REFUND_AMOUNT_LABEL) }
+            .mapNotNull { block -> amountOf(block.text) }
+            .toSet()
+        if (labelledRefundAmounts.isNotEmpty()) {
+            drafts = drafts.filterNot { draft ->
+                val card = cards.first { it.index == draft.index }
+                draft.amountCents?.let { it in labelledRefundAmounts } == true &&
+                    !carriesAny(card.blocks, listOf(REFUND_AMOUNT_LABEL)) &&
+                    (
+                        draft.kind == CaptureCandidate.KIND_REFUND ||
+                            (draft.direction == CaptureCandidate.DIRECTION_INCOME &&
+                                draft.merchantCandidates.isEmpty())
+                        )
+            }
+        }
         val reconciled = futureDebitCard.containsValue(true) ||
             deductionCard.containsValue(true) || refundCard.containsValue(true)
         val conflicting = !reconciled && drafts.size == 1 && countDistinctAmounts(content) > 1

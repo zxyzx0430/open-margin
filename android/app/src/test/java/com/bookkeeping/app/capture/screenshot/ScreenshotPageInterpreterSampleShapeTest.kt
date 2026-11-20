@@ -266,6 +266,28 @@ class ScreenshotPageInterpreterSampleShapeTest {
     }
 
     @Test
+    fun `refund marker beside the labelled row still leaves one refund draft`() {
+        // 退款成功 sits midway between the header amount and the 退款金额 row, so
+        // the tie-break puts it in the labelled card. The header card must not
+        // survive as a second income prompt for the same refund.
+        val blocks = listOf(
+            block("微信支付", 10),
+            block("+¥1.85", 40),
+            block("退款成功", 70),
+            block("退款金额 ¥1.85", 100),
+        )
+        val result = plan(blocks)
+
+        assertEquals(1, result.decisions.size)
+        val refund = result.decisions.single()
+        assertEquals(185L, refund.draft.amountCents)
+        assertEquals(CaptureCandidate.KIND_REFUND, refund.draft.kind)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, refund.draft.completionStatus)
+        assertEquals(Action.ASK_USER, refund.action)
+        assertEquals(listOf(185L), result.needsConfirmation.map { it.draft.amountCents })
+    }
+
+    @Test
     fun `future debit card does not drop another card order total`() {
         // The future-debit card repeats its expected debit as 订单金额. The second
         // card also uses 订单金额, but it is a different, completed transaction.
