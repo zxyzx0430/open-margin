@@ -14,6 +14,7 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.local.entity.TransactionSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -730,8 +731,7 @@ object CrossSourceDuplicatePolicy {
         incoming: TransactionEntity,
         windowMs: Long,
     ): TransactionEntity? {
-        // RED: 逻辑尚未实现，测试先行。
-        if (windowMs > 0L || windowMs <= 0L) return null
+        if (windowMs <= 0L) return null
         if (incoming.eventTimeNeedsConfirmation) return null
         // 只有截图/卡片采集出来的行才需要这次检查；其它来源一行不变。
         if (incoming.captureObservedAtMs == null) return null
@@ -743,8 +743,8 @@ object CrossSourceDuplicatePolicy {
             .filter { it.remoteReviewStatus !in SKIPPED_STATUSES }
             // 对侧必须来自另一条通道，否则只是同一通道的重发，交给 8 秒窗口。
             .filter { it.captureObservedAtMs == null }
-            // 微信和支付宝同额同方也是两笔钱，不做跨平台合并。
-            .filter { it.source == incoming.source }
+            // 微信和支付宝同额同方也是两笔钱：按支付平台比较，不按 source 字符串。
+            .filter { samePaymentPlatform(it.source, incoming.source) }
             .filter { it.amountCents == incoming.amountCents }
             .filter { it.type == incoming.type }
             .filter { it.currency.equals(incoming.currency, ignoreCase = true) }
@@ -758,6 +758,22 @@ object CrossSourceDuplicatePolicy {
                 }
             }
             .minByOrNull { abs(it.timestamp - incoming.timestamp) }
+    }
+
+    /**
+     * 两个账本来源是否属于同一个支付平台。
+     *
+     * 账本里的 `source` 是 [TransactionSource] 名称，不是支付平台常量；截图和通知
+     * 都会写 `WECHAT` / `ALIPAY`，剩下的是手工、银行短信、其它页面。微信和支付宝
+     * 同额同方也是两笔钱，所以这里按平台比较，未知一律归为 OTHER 互相匹配。
+     */
+    private fun samePaymentPlatform(first: String, second: String): Boolean =
+        paymentPlatformOf(first) == paymentPlatformOf(second)
+
+    private fun paymentPlatformOf(source: String): String = when (source) {
+        TransactionSource.WECHAT.name -> TransactionSource.WECHAT.name
+        TransactionSource.ALIPAY.name -> TransactionSource.ALIPAY.name
+        else -> TransactionSource.OTHER.name
     }
 
     /**

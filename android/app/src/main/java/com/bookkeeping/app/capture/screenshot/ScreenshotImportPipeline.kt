@@ -284,8 +284,6 @@ object ScreenshotImportPipeline {
         capturedAtMs: Long,
         crossChannelRows: List<LedgerFingerprint>,
     ): LedgerFingerprint? {
-        // RED: 逻辑尚未实现，测试先行。
-        if (crossChannelRows.isNotEmpty() || crossChannelRows.isEmpty()) return null
         val amount = draft.amountCents?.takeIf { it > 0L } ?: return null
         val platform = platformOf(draft.pageIdentity)
         if (platform == CaptureCandidate.PLATFORM_UNKNOWN) return null
