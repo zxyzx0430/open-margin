@@ -229,7 +229,8 @@ object ScreenshotPageInterpreter {
                 reason = "no transaction fields",
             )
         }
-        // Horizontal page span, kept for the geometry-aware row ordering below.
+        // Horizontal page span: the only evidence of which side of a chat a
+        // transfer bubble is drawn on. Without real boxes there is no side.
         val boxedContent = content.filter { hasGeometry(it) }
         val pageLeft = boxedContent.minOfOrNull { it.left } ?: 0
         val pageRight = boxedContent.maxOfOrNull { it.right } ?: 0
