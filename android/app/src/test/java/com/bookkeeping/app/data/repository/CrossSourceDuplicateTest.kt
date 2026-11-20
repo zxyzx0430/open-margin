@@ -258,6 +258,18 @@ class CrossSourceDuplicateTest {
         )
     }
 
+    // WECHAT 与 ALIPAY 是两条真实支付通道：同额同方也不跨平台拦。
+    @Test
+    fun `another known payment platform is not a cross source duplicate`() {
+        val existing = ledgerRow(source = "ALIPAY")
+        val incoming = ledgerRow(id = 0, source = "WECHAT")
+        assertNull(
+            CrossSourceDuplicatePolicy.findMatch(
+                listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+            ),
+        )
+    }
+
     // 同一来源不归这里管：同来源的重复由 8 秒窗口 / 订单号负责。
     @Test
     fun `same source is not handled by the cross source window`() {

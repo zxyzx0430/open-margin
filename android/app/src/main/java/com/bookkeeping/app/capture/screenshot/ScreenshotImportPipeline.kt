@@ -263,8 +263,10 @@ object ScreenshotImportPipeline {
      * 层 1：账本里是否已有「同额、同向、同币种、时间邻近、但来源不同」的一条。
      *
      * `existing` 里的平台来自账本行：截图写入 WECHAT / ALIPAY，通知写入包名
-     * （com.tencent.mm…）因此是 UNKNOWN，SMS/无障碍/手工也是其它值。平台不同
-     * 就是来源不同，这正是旧查询 `source = :source` 永远查不到的跨来源场景。
+     * （com.tencent.mm…）因此是 UNKNOWN，SMS/无障碍/手工也是 UNKNOWN。只有
+     * UNKNOWN 这一侧才是旧查询 `source = :source` 永远查不到的跨来源场景；
+     * WECHAT 与 ALIPAY 是两条真实的支付通道，同额同方也不能互相顶替，
+     * 现有 deduplicate 的「另一个平台不链接」语义必须保留。
      *
      * 只用于把 AUTO_BOOK 降级为待确认：命中不等于同一笔，绝不代替用户判断。
      * 页面没有真实交易时间时，用截图时间做锚点并放宽到
@@ -287,7 +289,7 @@ object ScreenshotImportPipeline {
         val merchant = draft.merchantCandidates.firstOrNull()
         return existing
             .asSequence()
-            .filter { it.platform != platform }
+            .filter { it.platform == CaptureCandidate.PLATFORM_UNKNOWN }
             .filter { it.amountCents == amount }
             .filter { it.direction == draft.direction }
             .filter { normalizeCurrency(it.currency) == currency }

@@ -14,6 +14,7 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.local.entity.TransactionSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -743,11 +744,19 @@ object CrossSourceDuplicatePolicy {
                     existingOrderId != null && incomingOrderId != null ->
                         existingOrderId.equals(incomingOrderId, ignoreCase = true)
                     existing.source == incoming.source -> false
+                    // WECHAT 和 ALIPAY 是两条真实支付通道：同额同方也是两笔钱，
+                    // 截图侧对「另一个平台不链接」的既有语义在这里同样成立。
+                    isPaymentPlatformSource(existing.source) &&
+                        isPaymentPlatformSource(incoming.source) -> false
                     else -> merchantsSame(existing.merchant, incoming.merchant)
                 }
             }
             .minByOrNull { abs(it.timestamp - incoming.timestamp) }
     }
+
+    /** 截图/账单里能写进账本的支付平台来源（[TransactionSource] 的名称）。 */
+    private fun isPaymentPlatformSource(source: String): Boolean =
+        source == TransactionSource.WECHAT.name || source == TransactionSource.ALIPAY.name
 
     /**
      * 两个商户名是否明确指向同一家店。
