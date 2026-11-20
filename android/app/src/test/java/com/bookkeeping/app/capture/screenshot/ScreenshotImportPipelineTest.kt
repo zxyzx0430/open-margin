@@ -465,9 +465,11 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `same amount same merchant within two minutes links to the notification row`() {
-        // No order id on this page, so the merchant + amount + 2 minute window
-        // rule is what decides.
+    fun `same amount same merchant within two minutes asks instead of linking`() {
+        // No order id on this page, so nothing proves this is the row the
+        // notification capture stored a minute earlier. Two real payments to one
+        // shop can look exactly like this, so the candidate goes to review and
+        // is never linked silently. Only an equal order id may link.
         val page = alipayMedium() + block("2026-11-19 12:40", 160)
         val pageTime = ScreenshotPageInterpreter.interpret(page, capturedAt, zone)
             .drafts.first().eventTimeMs!!
@@ -482,8 +484,9 @@ class ScreenshotImportPipelineTest {
             ),
         )
         val plan = ScreenshotImportPipeline.plan(request(), page, existing, timeZone = zone)
-        assertEquals(Action.LINK_EXISTING, plan.decisions.single().action)
-        assertEquals(99L, plan.decisions.single().matchedTransactionId)
+        assertEquals(Action.ASK_USER, plan.decisions.single().action)
+        assertNull(plan.decisions.single().matchedTransactionId)
+        assertTrue(plan.bookings.isEmpty())
     }
 
     @Test
