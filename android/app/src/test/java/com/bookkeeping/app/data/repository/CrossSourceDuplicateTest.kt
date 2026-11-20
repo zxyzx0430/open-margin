@@ -20,19 +20,21 @@ import java.util.Calendar
 import java.util.TimeZone
 
 /**
- * 跨来源防重复。
+ * 防重复：同一笔钱不能被通知、截图、二次确认各记一次。
  *
- * 同一笔钱可能被通知（source = 包名，如 com.tencent.mm）、短信、无障碍、截图
- * （source = WECHAT / ALIPAY）各记一次。同一来源内的重复由 8 秒窗口拦截；跨来源
- * 没有强标识时不能静默吞并，只能保守处理：
+ * 关键事实（读代码得出，与任务描述里的假设不同）：通知和截图写进账本的
+ * `source` 都是 `WECHAT` / `ALIPAY`——包名只进通知指纹表，不进账本。所以「跨来源」
+ * 不能靠 `source` 字符串区分。真正的通道标记是 `captureObservedAtMs`：截图/卡片
+ * 采集会写它，通知、短信、无障碍转账提取器都不写。
  *
- * - 层 1：截图候选在入库前发现账本里已有「同额、同向、时间邻近、来源不同」的一条
- *   → 降级为待确认，不自动写入。
- * - 层 2：`insertIfNotDuplicate` 新增 `crossSourceWindowMs`；默认 0 = 旧行为，
- *   只有截图路径显式传窗口才启用跨来源拦截。
+ * 三个层次：
+ * - 层 1：截图候选入库前，账本里已有「同额、同向、同币种、同平台、时间邻近，
+ *   但没有截图 provenance」的一条 → 降级为待确认，不自动写入。
+ * - 层 2：[TransactionRepository.insertIfNotDuplicate] 新增 `crossSourceWindowMs`；
+ *   默认 0 = 旧行为，只有截图路径显式传窗口才启用。
  * - 层 3：同一张图里同额、同向、同商户出现两次 → 第二次交确认。
  *
- * 这里只覆盖纯 JVM 逻辑。Room 查询 / 真实入库 / 截图界面属于端到端范围，未在此验证。
+ * 这里只覆盖纯 JVM 逻辑。Room 查询、真实入库、截图界面属于端到端范围，未在此验证。
  */
 class CrossSourceDuplicateTest {
 
@@ -69,9 +71,9 @@ class CrossSourceDuplicateTest {
         block("订单号 1000123456789012", 220),
     )
 
-    /** 通知链路已入库的一条：source 是包名，所以 platform 对截图侧是 UNKNOWN。 */
-    private fun notificationRow(
-        platform: String = CaptureCandidate.PLATFORM_UNKNOWN,
+    /** 另一条通道（通知/短信/无障碍/手工）写下的账本行：没有截图 provenance。 */
+    private fun otherChannelRow(
+        platform: String = CaptureCandidate.PLATFORM_WECHAT,
         amountCents: Long = 3650,
         direction: String = CaptureCandidate.DIRECTION_EXPENSE,
         merchant: String = "便利店",
@@ -89,7 +91,10 @@ class CrossSourceDuplicateTest {
         currency = currency,
     )
 
-    /** 已入库的账本行（截图确认时 `insertIfNotDuplicate` 收到的同款实体）。 */
+    /**
+     * 账本行。默认是**通知通道**写的行：`source` 与截图相同（WECHAT/ALIPAY），
+     * 没有截图 provenance。`fromScreenshot = true` 模拟截图自己已入库的行。
+     */
     private fun ledgerRow(
         id: Long = 1,
         amountCents: Long = 500,
@@ -97,9 +102,10 @@ class CrossSourceDuplicateTest {
         currency: String = "CNY",
         merchant: String = "瑞幸咖啡",
         timestamp: Long = t0,
-        source: String = "com.tencent.mm",
+        source: String = "WECHAT",
         orderId: String? = null,
         eventTimeNeedsConfirmation: Boolean = false,
+        fromScreenshot: Boolean = false,
     ) = TransactionEntity(
         id = id,
         amountCents = amountCents,
@@ -111,6 +117,7 @@ class CrossSourceDuplicateTest {
         currency = currency,
         sourceTransactionId = orderId,
         eventTimeNeedsConfirmation = eventTimeNeedsConfirmation,
+        captureObservedAtMs = if (fromScreenshot) timestamp else null,
     )
 
     private fun draft(
@@ -137,15 +144,16 @@ class CrossSourceDuplicateTest {
         supportedPaymentPage = true,
     )
 
-    // ---------- 层 1：截图入库前的跨来源候选 ----------
+    // ---------- 层 1：截图入库前的跨通道候选 ----------
 
     @Test
-    fun `cross source ledger row demotes auto booking to review`() {
+    fun `another channel row demotes auto booking to review`() {
         val plan = ScreenshotImportPipeline.plan(
             request = request(),
             blocks = wechatMerchantSuccess(),
-            existing = listOf(notificationRow()),
+            existing = emptyList(),
             timeZone = zone,
+            crossChannelRows = listOf(otherChannelRow()),
         )
         val decision = plan.decisions.single()
         assertEquals(Action.ASK_USER, decision.action)
@@ -153,62 +161,70 @@ class CrossSourceDuplicateTest {
         assertEquals(77L, decision.matchedTransactionId!!)
     }
 
-    // 同一来源（截图自己已入库）由现有 deduplicate 处理，不能误降级。
-    // 商户不同，现有 deduplicate 判 CLEAR，所以这里只剩「不能按跨来源拦」这一条规则。
+    // 同一通道（截图自己已入库）由现有 deduplicate 处理，不归层 1。
     @Test
-    fun `same platform ledger row keeps auto booking`() {
+    fun `same channel row keeps auto booking`() {
         val plan = ScreenshotImportPipeline.plan(
             request = request(),
             blocks = wechatMerchantSuccess(),
-            existing = listOf(
-                notificationRow(
-                    platform = CaptureCandidate.PLATFORM_WECHAT,
-                    merchant = "另一家店",
-                ),
-            ),
+            existing = listOf(otherChannelRow(merchant = "另一家店")),
             timeZone = zone,
         )
         assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
     }
 
     @Test
-    fun `different merchant does not demote a cross source row`() {
+    fun `different merchant does not demote a cross channel row`() {
         val plan = ScreenshotImportPipeline.plan(
             request = request(),
             blocks = wechatMerchantSuccess(),
-            existing = listOf(notificationRow(merchant = "另一家店")),
+            existing = emptyList(),
             timeZone = zone,
+            crossChannelRows = listOf(otherChannelRow(merchant = "另一家店")),
+        )
+        assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
+    }
+
+    // 微信和支付宝同额同方是两笔钱，不能互相顶替。
+    @Test
+    fun `another payment platform is not a cross channel duplicate`() {
+        val plan = ScreenshotImportPipeline.plan(
+            request = request(),
+            blocks = wechatMerchantSuccess(),
+            existing = emptyList(),
+            timeZone = zone,
+            crossChannelRows = listOf(otherChannelRow(platform = CaptureCandidate.PLATFORM_ALIPAY)),
         )
         assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
     }
 
     /** 支付成功页没有日期时用截图时间做锚点：100 分钟前的通知仍要提示。 */
     @Test
-    fun `untimed page still matches an older cross source row`() {
+    fun `untimed page still matches an older cross channel row`() {
         val match = ScreenshotImportPipeline.crossSourceLedgerMatch(
             draft = draft(eventTimeMs = null, merchant = "瑞幸咖啡"),
             capturedAtMs = localTime(2026, 11, 19, 23, 29),
-            existing = listOf(notificationRow(amountCents = 500, merchant = "瑞幸咖啡")),
+            crossChannelRows = listOf(otherChannelRow(amountCents = 500, merchant = "瑞幸咖啡")),
         )
         assertNotNull(match)
         assertEquals(77L, match!!.transactionId)
     }
 
-    // ---------- 层 2：insertIfNotDuplicate 的跨来源窗口 ----------
+    // ---------- 层 2：insertIfNotDuplicate 的跨通道窗口 ----------
 
-    // 1. 默认 0：行为与改动前一致，不同来源不拦。
+    // 1. 默认 0：行为与改动前一致，另一条通道不拦。
     @Test
-    fun `default window keeps existing behaviour across sources`() {
-        val existing = ledgerRow(source = "com.tencent.mm")
-        val incoming = ledgerRow(id = 0, source = "WECHAT")
+    fun `default window keeps existing behaviour across channels`() {
+        val existing = ledgerRow(source = "WECHAT")
+        val incoming = ledgerRow(id = 0, source = "WECHAT", fromScreenshot = true)
         assertNull(CrossSourceDuplicatePolicy.findMatch(listOf(existing), incoming, windowMs = 0L))
     }
 
-    // 2. 窗口内、同额同方、来源不同 → 命中已有记录。
+    // 2. 窗口内、同额同方、另一条通道 → 命中已有记录。
     @Test
-    fun `cross source window returns the existing row`() {
-        val existing = ledgerRow(source = "com.tencent.mm")
-        val incoming = ledgerRow(id = 0, source = "WECHAT")
+    fun `cross channel window returns the existing row`() {
+        val existing = ledgerRow(source = "WECHAT")
+        val incoming = ledgerRow(id = 0, source = "WECHAT", fromScreenshot = true)
         val match = CrossSourceDuplicatePolicy.findMatch(
             candidates = listOf(existing),
             incoming = incoming,
@@ -220,9 +236,9 @@ class CrossSourceDuplicateTest {
 
     // 3. 金额不同 → 不拦。
     @Test
-    fun `different amount is not a cross source duplicate`() {
+    fun `different amount is not a cross channel duplicate`() {
         val existing = ledgerRow(amountCents = 500)
-        val incoming = ledgerRow(id = 0, amountCents = 800, source = "WECHAT")
+        val incoming = ledgerRow(id = 0, amountCents = 800, fromScreenshot = true)
         assertNull(
             CrossSourceDuplicatePolicy.findMatch(
                 listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
@@ -232,9 +248,9 @@ class CrossSourceDuplicateTest {
 
     // 4. 方向不同 → 不拦。
     @Test
-    fun `different direction is not a cross source duplicate`() {
+    fun `different direction is not a cross channel duplicate`() {
         val existing = ledgerRow(type = "EXPENSE")
-        val incoming = ledgerRow(id = 0, type = "INCOME", source = "WECHAT")
+        val incoming = ledgerRow(id = 0, type = "INCOME", fromScreenshot = true)
         assertNull(
             CrossSourceDuplicatePolicy.findMatch(
                 listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
@@ -244,11 +260,11 @@ class CrossSourceDuplicateTest {
 
     // 5. 时间超出窗口 → 不拦。
     @Test
-    fun `outside the window is not a cross source duplicate`() {
+    fun `outside the window is not a cross channel duplicate`() {
         val existing = ledgerRow(timestamp = t0)
         val incoming = ledgerRow(
             id = 0,
-            source = "WECHAT",
+            fromScreenshot = true,
             timestamp = t0 + CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS + 1_000L,
         )
         assertNull(
@@ -258,34 +274,10 @@ class CrossSourceDuplicateTest {
         )
     }
 
-    // WECHAT 与 ALIPAY 是两条真实支付通道：同额同方也不跨平台拦。
     @Test
-    fun `another known payment platform is not a cross source duplicate`() {
-        val existing = ledgerRow(source = "ALIPAY")
-        val incoming = ledgerRow(id = 0, source = "WECHAT")
-        assertNull(
-            CrossSourceDuplicatePolicy.findMatch(
-                listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
-            ),
-        )
-    }
-
-    // 同一来源不归这里管：同来源的重复由 8 秒窗口 / 订单号负责。
-    @Test
-    fun `same source is not handled by the cross source window`() {
-        val existing = ledgerRow(source = "WECHAT")
-        val incoming = ledgerRow(id = 0, source = "WECHAT")
-        assertNull(
-            CrossSourceDuplicatePolicy.findMatch(
-                listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
-            ),
-        )
-    }
-
-    @Test
-    fun `different merchant is not a cross source duplicate`() {
+    fun `different merchant is not a cross channel duplicate`() {
         val existing = ledgerRow(merchant = "瑞幸咖啡")
-        val incoming = ledgerRow(id = 0, merchant = "全家便利店", source = "WECHAT")
+        val incoming = ledgerRow(id = 0, merchant = "全家便利店", fromScreenshot = true)
         assertNull(
             CrossSourceDuplicatePolicy.findMatch(
                 listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
@@ -293,12 +285,41 @@ class CrossSourceDuplicateTest {
         )
     }
 
-    // 订单号相等是强标识：跨来源也成立。
+    // 订单号相等是强标识：即使商户名对不上也成立。
     @Test
-    fun `same order id matches across sources`() {
-        val existing = ledgerRow(source = "com.tencent.mm", orderId = "4200001234")
-        val incoming = ledgerRow(id = 0, source = "WECHAT", orderId = "4200001234", merchant = "另一家店")
+    fun `same order id matches across channels`() {
+        val existing = ledgerRow(orderId = "4200001234")
+        val incoming = ledgerRow(
+            id = 0,
+            orderId = "4200001234",
+            merchant = "另一家店",
+            fromScreenshot = true,
+        )
         assertNotNull(
+            CrossSourceDuplicatePolicy.findMatch(
+                listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+            ),
+        )
+    }
+
+    // 同一通道的行不归这里管：交给 8 秒窗口 / 订单号。
+    @Test
+    fun `same channel row is not blocked here`() {
+        val existing = ledgerRow(fromScreenshot = true)
+        val incoming = ledgerRow(id = 0, fromScreenshot = true)
+        assertNull(
+            CrossSourceDuplicatePolicy.findMatch(
+                listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+            ),
+        )
+    }
+
+    // 通知/短信/无障碍的调用不传窗口，非截图行永远不会被这里拦下。
+    @Test
+    fun `non screenshot caller is never blocked`() {
+        val existing = ledgerRow(fromScreenshot = true)
+        val incoming = ledgerRow(id = 0, fromScreenshot = false)
+        assertNull(
             CrossSourceDuplicatePolicy.findMatch(
                 listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
             ),
@@ -309,7 +330,11 @@ class CrossSourceDuplicateTest {
     @Test
     fun `uncertain event time is never blocked`() {
         val existing = ledgerRow()
-        val incoming = ledgerRow(id = 0, source = "WECHAT", eventTimeNeedsConfirmation = true)
+        val incoming = ledgerRow(
+            id = 0,
+            eventTimeNeedsConfirmation = true,
+            fromScreenshot = true,
+        )
         assertNull(
             CrossSourceDuplicatePolicy.findMatch(
                 listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
@@ -335,6 +360,16 @@ class CrossSourceDuplicateTest {
             ScreenshotImportPipeline.isSameMoneyAsEarlierDraft(
                 draft = draft(amountCents = 800),
                 earlier = draft(amountCents = 500),
+            ),
+        )
+    }
+
+    @Test
+    fun `different merchant twice in one image is not flagged`() {
+        assertFalse(
+            ScreenshotImportPipeline.isSameMoneyAsEarlierDraft(
+                draft = draft(merchant = "全家便利店"),
+                earlier = draft(merchant = "瑞幸咖啡"),
             ),
         )
     }

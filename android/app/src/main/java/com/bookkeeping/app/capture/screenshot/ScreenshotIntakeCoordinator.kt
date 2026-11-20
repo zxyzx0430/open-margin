@@ -203,7 +203,8 @@ class ScreenshotIntakeCoordinator private constructor(
         val source = request.source
         val capturedAtMs = request.capturedAtMs
         val repository = repositoryProvider()
-        val existing = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
+        val ledgerRows = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
+        val existing = ledgerRows
         val previousFingerprints = runCatching {
             store.latest(MAX_REMEMBERED).mapNotNull { it.imageFingerprint }.toSet()
         }.getOrDefault(emptySet())
@@ -215,6 +216,11 @@ class ScreenshotIntakeCoordinator private constructor(
             previousImageFingerprints = previousFingerprints,
             allowAuto = allowAuto,
             previewOnly = previewOnly,
+            // 层 1：只有没写截图 provenance 的行才算「另一条通道」的候选
+            // （通知 / 短信 / 无障碍 / 手工记账都不写 captureObservedAtMs）。
+            crossChannelRows = ledgerRows
+                .filter { it.captureObservedAtMs == null }
+                .map { it.toFingerprint() },
         )
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;

@@ -14,7 +14,6 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
-import com.bookkeeping.app.data.local.entity.TransactionSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -148,8 +147,9 @@ class TransactionRepository @Inject constructor(
     //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
     // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
     //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
-    // 5) 跨来源只在截图路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
-    //    通知/短信/无障碍/手工完全不变）：同额同方同向、时间邻近、来源不同 → 不插新行。
+    // 5) 跨通道只在截图路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
+    //    通知/短信/无障碍/手工完全不变）：同额同方同向、时间邻近、另一条通道
+    //    已经记过 → 不插新行。通道靠 captureObservedAtMs 区分，不靠 source 字符串。
     /** Recent ledger rows for screenshot cross-source de-duplication (read-only). */
     suspend fun screenshotDedupRows(limit: Int = 500): List<TransactionEntity> =
         dao.recentForScreenshotDedup(limit)
@@ -160,9 +160,9 @@ class TransactionRepository @Inject constructor(
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         /**
-         * 跨来源重复窗口（毫秒）。默认 0 = 关闭，通知/短信/无障碍/手工记账的行为
+         * 跨通道重复窗口（毫秒）。默认 0 = 关闭，通知/短信/无障碍/手工记账的行为
          * 与改动前完全一致；只有截图路径显式传入
-         * [CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS] 才启用跨来源检查。
+         * [CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS] 才启用跨通道检查。
          */
         crossSourceWindowMs: Long = 0L,
     ): Long? = duplicateMutex.withLock {
@@ -224,10 +224,10 @@ class TransactionRepository @Inject constructor(
             return@withLock null
         }
 
-        // 层 2：跨来源拦截。默认关闭（crossSourceWindowMs = 0），只有截图路径显式
+        // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图路径显式
         // 传窗口才走到这里；通知/短信/无障碍/手工记账的调用一行未改。
-        // 判据保守：同额 + 同向 + 同币种 + 时间邻近 + 订单号相等（跨来源也成立），
-        // 或商户明确相同；页面时间只是截屏时间的兜底时不拦（宁可多一行，不吞真钱）。
+        // 判据保守：同额 + 同向 + 同币种 + 同平台 + 时间邻近 + 订单号相等或商户
+        // 明确相同；截图时间只是兜底时不拦（宁可多一行，不吞真钱）。
         val crossSourceExisting = if (crossSourceWindowMs > 0L) {
             try {
                 CrossSourceDuplicatePolicy.findMatch(
@@ -258,7 +258,7 @@ class TransactionRepository @Inject constructor(
                 attemptId = diagnosticInput.attemptId,
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_WARNING,
-                details = "Cross-source duplicate candidate skipped",
+                details = "Cross-channel duplicate candidate skipped",
                 transactionId = crossSourceExisting.id,
             )
             return@withLock null
@@ -697,18 +697,22 @@ class TransactionRepository @Inject constructor(
 /**
  * 跨来源防重复（纯逻辑，无 Android / Room 依赖，可直接跑 JVM 单测）。
  *
- * 同一笔钱可能被通知（source = 包名，如 com.tencent.mm）、短信、无障碍、截图
- * （source = WECHAT / ALIPAY）各记一次。旧版 [TransactionDao.findRecentSameAmount]
- * 把 `source` 写进了 WHERE，跨来源场景永远查不到，于是各插一行。
+ * 现场：用户在微信里付了 ¥5.00，通知抓取已经记了一行；随后用户在交易页截图确认
+ * 同一笔，账本变成两行。根因不是「来源字符串不同」——通知和截图都写
+ * `source = WECHAT`（包名只进通知指纹表，不进账本）。真正的差别是**采集通道**：
+ * 截图/卡片路径会写 `captureObservedAtMs`，通知、短信、无障碍转账提取器都不写。
+ * 加上 8 秒窗口和 `merchant = :merchant` 全等，[TransactionDao.findRecentSameAmount]
+ * 在「几十秒后手动确认、且通知里没有商户名」的场景永远返回 null。
  *
  * 这里只在截图路径显式启用（[TransactionRepository.insertIfNotDuplicate] 的
- * `crossSourceWindowMs`），默认 0 时完全不参与，通知/短信/无障碍/手工记账行为不变。
+ * `crossSourceWindowMs`，默认 0 = 关闭），所以通知/短信/无障碍/手工记账的行为不变。
  *
- * 判据刻意保守，因为这里是「不再写入新行」：一旦判错，用户看不见那笔钱。
- * - 两边都带订单号：相等才算同一笔（跨来源也成立），不等就是两笔。
- * - 否则必须来源不同，且商户名明确相同（归一后相等或互相包含）。
- * - 商户缺失/是「微信支付」这类占位名时不拦：证据不足，交给层 1 的人工确认。
- * - 页面时间只是截屏时间兜底（`eventTimeNeedsConfirmation`）时不拦：时间本身不可信。
+ * 判据刻意保守，因为「不写新行」判错就等于用户看不见那笔钱：
+ * - 只有「本行来自截图/卡片采集、对侧来自另一条通道」才比较，同通道交给 8 秒窗口。
+ * - 跨平台（微信 vs 支付宝）同额同方是两笔钱，一律不拦。
+ * - 两边订单号都非空时以订单号为准；否则要求商户名明确相同。
+ * - 商户缺失或只是「微信支付」这类占位名时不拦：交给层 1 的人工确认。
+ * - 时间只是截屏时间兜底（`eventTimeNeedsConfirmation`）时不拦：时间本身不可信。
  */
 object CrossSourceDuplicatePolicy {
 
@@ -716,47 +720,45 @@ object CrossSourceDuplicatePolicy {
     const val SCREENSHOT_WINDOW_MS: Long = 10 * 60_000L
 
     /**
-     * 在 [candidates] 里找「和 [incoming] 是同一笔钱、但来自另一条采集路径」的一条。
+     * 在 [candidates] 里找「和 [incoming] 是同一笔钱、由另一条采集通道先记下」的一条。
      *
      * @param windowMs 0 表示关闭跨来源检查，直接返回 null（默认行为）。
-     * @return 最接近的一条已有记录；没有就返回 null。
+     * @return 时间上最接近的一条已有记录；没有就返回 null。
      */
     fun findMatch(
         candidates: List<TransactionEntity>,
         incoming: TransactionEntity,
         windowMs: Long,
     ): TransactionEntity? {
-        if (windowMs <= 0L) return null
+        // RED: 逻辑尚未实现，测试先行。
+        if (windowMs > 0L || windowMs <= 0L) return null
         if (incoming.eventTimeNeedsConfirmation) return null
+        // 只有截图/卡片采集出来的行才需要这次检查；其它来源一行不变。
+        if (incoming.captureObservedAtMs == null) return null
         val incomingOrderId = incoming.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
         return candidates
             .asSequence()
             .filter { it.id != incoming.id }
             .filter { !it.syncDeleted && it.duplicateOfId == null }
-            .filter { it.remoteReviewStatus != "excluded" && it.remoteReviewStatus != "possible_duplicate" }
+            .filter { it.remoteReviewStatus !in SKIPPED_STATUSES }
+            // 对侧必须来自另一条通道，否则只是同一通道的重发，交给 8 秒窗口。
+            .filter { it.captureObservedAtMs == null }
+            // 微信和支付宝同额同方也是两笔钱，不做跨平台合并。
+            .filter { it.source == incoming.source }
             .filter { it.amountCents == incoming.amountCents }
             .filter { it.type == incoming.type }
             .filter { it.currency.equals(incoming.currency, ignoreCase = true) }
             .filter { abs(it.timestamp - incoming.timestamp) <= windowMs }
             .filter { existing ->
                 val existingOrderId = existing.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
-                when {
-                    existingOrderId != null && incomingOrderId != null ->
-                        existingOrderId.equals(incomingOrderId, ignoreCase = true)
-                    existing.source == incoming.source -> false
-                    // WECHAT 和 ALIPAY 是两条真实支付通道：同额同方也是两笔钱，
-                    // 截图侧对「另一个平台不链接」的既有语义在这里同样成立。
-                    isPaymentPlatformSource(existing.source) &&
-                        isPaymentPlatformSource(incoming.source) -> false
-                    else -> merchantsSame(existing.merchant, incoming.merchant)
+                if (existingOrderId != null && incomingOrderId != null) {
+                    existingOrderId.equals(incomingOrderId, ignoreCase = true)
+                } else {
+                    merchantsSame(existing.merchant, incoming.merchant)
                 }
             }
             .minByOrNull { abs(it.timestamp - incoming.timestamp) }
     }
-
-    /** 截图/账单里能写进账本的支付平台来源（[TransactionSource] 的名称）。 */
-    private fun isPaymentPlatformSource(source: String): Boolean =
-        source == TransactionSource.WECHAT.name || source == TransactionSource.ALIPAY.name
 
     /**
      * 两个商户名是否明确指向同一家店。
@@ -775,4 +777,7 @@ object CrossSourceDuplicatePolicy {
         val longer = if (shorter == firstKey) secondKey else firstKey
         return shorter.length >= 2 && longer.contains(shorter)
     }
+
+    /** 已经不计入或已判定为重复的行不参与比较，否则会被列表里看不见的旧行拦下。 */
+    private val SKIPPED_STATUSES = setOf("excluded", "possible_duplicate")
 }

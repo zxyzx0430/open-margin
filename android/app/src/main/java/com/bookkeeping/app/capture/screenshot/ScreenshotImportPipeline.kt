@@ -54,6 +54,11 @@ object ScreenshotImportPipeline {
         allowAuto: Boolean = true,
         previewOnly: Boolean = false,
         timeZone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+        /**
+         * 由**另一条采集通道**写下的账本行（通知/短信/无障碍/手工：没有截图
+         * provenance）。层 1 只在这一组里找跨通道重复；传空表示不做该检查。
+         */
+        crossChannelRows: List<LedgerFingerprint> = emptyList(),
     ): ImportPlan {
         when (val validation = validate(request)) {
             is IntakeValidation.Rejected -> return ImportPlan(emptyList(), validation.reason)
@@ -107,11 +112,11 @@ object ScreenshotImportPipeline {
             if (action == Action.AUTO_BOOK && ScreenshotCapturePolicy.requiresConfirmation(draft.kind)) {
                 action = Action.ASK_USER
             }
-            // 层 1：账本里已经有同额、同向、时间邻近、但来源不同的一条。
+            // 层 1：账本里已经有同额、同向、时间邻近、但由另一条采集通道记下的一条。
             // 层 3：同一张图里已经出现过同额、同向、同商户的一条。
             // 两者都只降级为人工确认，绝不静默替用户判断「这是同一笔」。
             val crossSource = if (action == Action.AUTO_BOOK) {
-                crossSourceLedgerMatch(draft, request.capturedAtMs, existing)
+                crossSourceLedgerMatch(draft, request.capturedAtMs, crossChannelRows)
             } else {
                 null
             }
@@ -142,7 +147,7 @@ object ScreenshotImportPipeline {
                     }
                     mediumAsked = true
                     reason = when {
-                        crossSource != null -> "same amount already recorded from another source"
+                        crossSource != null -> "same amount already recorded from another channel"
                         sameImageRepeat -> "same amount appears twice in this screenshot"
                         ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
                             "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
@@ -260,25 +265,27 @@ object ScreenshotImportPipeline {
         decisions.filter { it.action == Action.ASK_USER }.minByOrNull { it.index }
 
     /**
-     * 层 1：账本里是否已有「同额、同向、同币种、时间邻近、但来源不同」的一条。
+     * 层 1：账本里是否已有「同额、同向、同币种、同平台、时间邻近，但**由另一条
+     * 采集通道**先记下」的一条。
      *
-     * `existing` 里的平台来自账本行：截图写入 WECHAT / ALIPAY，通知写入包名
-     * （com.tencent.mm…）因此是 UNKNOWN，SMS/无障碍/手工也是 UNKNOWN。只有
-     * UNKNOWN 这一侧才是旧查询 `source = :source` 永远查不到的跨来源场景；
-     * WECHAT 与 ALIPAY 是两条真实的支付通道，同额同方也不能互相顶替，
-     * 现有 deduplicate 的「另一个平台不链接」语义必须保留。
+     * 关键事实：通知和截图写进账本的 `source` 都是 `WECHAT` / `ALIPAY`——包名只进
+     * 通知指纹表，不进账本。所以「跨来源」不能用 `source` 区分，真正区分通道的是
+     * 截图 provenance（`captureObservedAtMs`）。调用方把**没有** provenance 的行
+     * 作为 [crossChannelRows] 传进来；同通道的重复仍由 [deduplicate] 处理。
      *
-     * 只用于把 AUTO_BOOK 降级为待确认：命中不等于同一笔，绝不代替用户判断。
-     * 页面没有真实交易时间时，用截图时间做锚点并放宽到
+     * 只把 AUTO_BOOK 降级为待确认：命中不等于同一笔，绝不代替用户判断。
+     * 页面没有真实交易时间时用截图时间做锚点并放宽到
      * [UNTIMED_CROSS_SOURCE_WINDOW_MS]，因为用户常常付款后过一阵才截图。
      *
-     * @return 最接近的一条账本行；没有就返回 null。
+     * @return 时间上最接近的一条账本行；没有就返回 null。
      */
     fun crossSourceLedgerMatch(
         draft: TransactionDraft,
         capturedAtMs: Long,
-        existing: List<LedgerFingerprint>,
+        crossChannelRows: List<LedgerFingerprint>,
     ): LedgerFingerprint? {
+        // RED: 逻辑尚未实现，测试先行。
+        if (crossChannelRows.isNotEmpty() || crossChannelRows.isEmpty()) return null
         val amount = draft.amountCents?.takeIf { it > 0L } ?: return null
         val platform = platformOf(draft.pageIdentity)
         if (platform == CaptureCandidate.PLATFORM_UNKNOWN) return null
@@ -287,9 +294,10 @@ object ScreenshotImportPipeline {
         val window = if (eventTime == null) UNTIMED_CROSS_SOURCE_WINDOW_MS else CROSS_SOURCE_WINDOW_MS
         val currency = normalizeCurrency(draft.currency)
         val merchant = draft.merchantCandidates.firstOrNull()
-        return existing
+        return crossChannelRows
             .asSequence()
-            .filter { it.platform == CaptureCandidate.PLATFORM_UNKNOWN }
+            // 微信和支付宝同额同方也是两笔钱，不跨平台提示。
+            .filter { it.platform == platform }
             .filter { it.amountCents == amount }
             .filter { it.direction == draft.direction }
             .filter { normalizeCurrency(it.currency) == currency }
