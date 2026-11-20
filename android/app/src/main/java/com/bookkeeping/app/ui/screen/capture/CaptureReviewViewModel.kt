@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
@@ -102,6 +103,7 @@ class CaptureReviewViewModel @Inject constructor(
                             attemptId = candidate.diagnosticAttemptId
                                 ?: TransactionDiagnostics.newAttemptId(),
                         ),
+                        crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
                     )
                 }
             }

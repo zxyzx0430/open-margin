@@ -1,5 +1,7 @@
 package com.bookkeeping.app.capture.screenshot
 
+import com.bookkeeping.app.data.repository.CaptureMergePolicy
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
@@ -52,6 +54,11 @@ object ScreenshotImportPipeline {
         allowAuto: Boolean = true,
         previewOnly: Boolean = false,
         timeZone: java.util.TimeZone = java.util.TimeZone.getDefault(),
+        /**
+         * 由**另一条采集通道**写下的账本行（通知/短信/无障碍/手工：没有截图
+         * provenance）。层 1 只在这一组里找跨通道重复；传空表示不做该检查。
+         */
+        crossChannelRows: List<LedgerFingerprint> = emptyList(),
     ): ImportPlan {
         when (val validation = validate(request)) {
             is IntakeValidation.Rejected -> return ImportPlan(emptyList(), validation.reason)
@@ -75,6 +82,7 @@ object ScreenshotImportPipeline {
         }
 
         val decisions = mutableListOf<CandidateDecision>()
+        val draftsSeenHere = mutableListOf<TransactionDraft>()
         var mediumAsked = false
         evidence.drafts.forEach { draft ->
             val dedup = deduplicate(draft, existing)
@@ -104,6 +112,18 @@ object ScreenshotImportPipeline {
             if (action == Action.AUTO_BOOK && ScreenshotCapturePolicy.requiresConfirmation(draft.kind)) {
                 action = Action.ASK_USER
             }
+            // 层 1：账本里已经有同额、同向、时间邻近、但由另一条采集通道记下的一条。
+            // 层 3：同一张图里已经出现过同额、同向、同商户的一条。
+            // 两者都只降级为人工确认，绝不静默替用户判断「这是同一笔」。
+            val crossSource = if (action == Action.AUTO_BOOK) {
+                crossSourceLedgerMatch(draft, request.capturedAtMs, crossChannelRows)
+            } else {
+                null
+            }
+            val sameImageRepeat = action == Action.AUTO_BOOK &&
+                draftsSeenHere.any { isSameMoneyAsEarlierDraft(draft, it) }
+            if (crossSource != null || sameImageRepeat) action = Action.ASK_USER
+            draftsSeenHere += draft
             var reason = draft.reason
             var matched: Long? = null
             when (action) {
@@ -127,6 +147,8 @@ object ScreenshotImportPipeline {
                     }
                     mediumAsked = true
                     reason = when {
+                        crossSource != null -> "same amount already recorded from another channel"
+                        sameImageRepeat -> "same amount appears twice in this screenshot"
                         ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
                             "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
                         assessment.tier == CaptureCandidate.TIER_HIGH ->
@@ -142,6 +164,10 @@ object ScreenshotImportPipeline {
                     action = Action.IGNORE
                     reason = draft.reason.ifBlank { "not a reliable transaction" }
                 }
+            }
+            if (matched == null && crossSource != null) {
+                // 只是「疑似」：记录被怀疑的那条，供待确认卡片/诊断追溯；不写库。
+                matched = crossSource.transactionId
             }
             decisions += CandidateDecision(
                 index = draft.index,
@@ -238,6 +264,78 @@ object ScreenshotImportPipeline {
     fun nextConfirmation(decisions: List<CandidateDecision>): CandidateDecision? =
         decisions.filter { it.action == Action.ASK_USER }.minByOrNull { it.index }
 
+    /**
+     * 层 1：账本里是否已有「同额、同向、同币种、同平台、时间邻近，但**由另一条
+     * 采集通道**先记下」的一条。
+     *
+     * 关键事实：通知和截图写进账本的 `source` 都是 `WECHAT` / `ALIPAY`——包名只进
+     * 通知指纹表，不进账本。所以「跨来源」不能用 `source` 区分，真正区分通道的是
+     * 截图 provenance（`captureObservedAtMs`）。调用方把**没有** provenance 的行
+     * 作为 [crossChannelRows] 传进来；同通道的重复仍由 [deduplicate] 处理。
+     *
+     * 只把 AUTO_BOOK 降级为待确认：命中不等于同一笔，绝不代替用户判断。
+     * 页面没有真实交易时间时用截图时间做锚点并放宽到
+     * [UNTIMED_CROSS_SOURCE_WINDOW_MS]，因为用户常常付款后过一阵才截图。
+     *
+     * @return 时间上最接近的一条账本行；没有就返回 null。
+     */
+    fun crossSourceLedgerMatch(
+        draft: TransactionDraft,
+        capturedAtMs: Long,
+        crossChannelRows: List<LedgerFingerprint>,
+    ): LedgerFingerprint? {
+        val amount = draft.amountCents?.takeIf { it > 0L } ?: return null
+        val platform = platformOf(draft.pageIdentity)
+        if (platform == CaptureCandidate.PLATFORM_UNKNOWN) return null
+        val eventTime = draft.eventTimeMs?.takeIf { it > 0L }
+        val anchor = eventTime ?: capturedAtMs
+        val window = if (eventTime == null) UNTIMED_CROSS_SOURCE_WINDOW_MS else CROSS_SOURCE_WINDOW_MS
+        val currency = normalizeCurrency(draft.currency)
+        val merchant = draft.merchantCandidates.firstOrNull()
+        return crossChannelRows
+            .asSequence()
+            // 微信和支付宝同额同方也是两笔钱，不跨平台提示。
+            .filter { it.platform == platform }
+            .filter { it.amountCents == amount }
+            .filter { it.direction == draft.direction }
+            .filter { normalizeCurrency(it.currency) == currency }
+            .filter { it.eventTimeMs <= 0L || kotlin.math.abs(it.eventTimeMs - anchor) <= window }
+            .filter { ledgerMerchantCompatible(merchant, it.merchant) }
+            .minByOrNull { row ->
+                if (row.eventTimeMs <= 0L) Long.MAX_VALUE else kotlin.math.abs(row.eventTimeMs - anchor)
+            }
+    }
+
+    /**
+     * 层 3：同一张图里已经出现过同额、同向、同商户的草稿。
+     *
+     * 账单列表页可能把同一笔钱列两次（或用户重复截图同一页），第二行不能静默
+     * 自动入账。商户缺失时无法断言「同方」，不在这里降级。
+     */
+    fun isSameMoneyAsEarlierDraft(draft: TransactionDraft, earlier: TransactionDraft): Boolean {
+        val amount = draft.amountCents?.takeIf { it > 0L } ?: return false
+        if (earlier.amountCents != amount) return false
+        if (earlier.direction != draft.direction) return false
+        if (normalizeCurrency(earlier.currency) != normalizeCurrency(draft.currency)) return false
+        val mine = draft.merchantCandidates.firstOrNull().orEmpty()
+        val theirs = earlier.merchantCandidates.firstOrNull().orEmpty()
+        if (!CaptureMergePolicy.hasMerchantInfo(mine)) return false
+        if (!CaptureMergePolicy.hasMerchantInfo(theirs)) return false
+        return CrossSourceDuplicatePolicy.merchantsSame(mine, theirs)
+    }
+
+    /**
+     * 层 1 的商户闸门：两边都有真实商户且明显不是一家 → 不可能是同一笔。
+     * 任何一边缺商户（含「未知商户」这类占位名）都放行，因为截图 OCR 常常读不到，
+     * 此时只能交用户确认，不能当作反证。
+     */
+    private fun ledgerMerchantCompatible(draftMerchant: String?, ledgerMerchant: String?): Boolean {
+        if (draftMerchant.isNullOrBlank() || ledgerMerchant.isNullOrBlank()) return true
+        if (!CaptureMergePolicy.hasMerchantInfo(draftMerchant)) return true
+        if (!CaptureMergePolicy.hasMerchantInfo(ledgerMerchant)) return true
+        return CrossSourceDuplicatePolicy.merchantsSame(draftMerchant, ledgerMerchant)
+    }
+
     private fun normalize(value: String?): String =
         value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "")
 
@@ -252,4 +350,14 @@ object ScreenshotImportPipeline {
     }
 
     private const val DEDUP_WINDOW_MS = 2L * 60 * 1000
+
+    /** 页面有真实交易时间时的跨来源询问窗口（与层 2 拦截窗口一致）。 */
+    private const val CROSS_SOURCE_WINDOW_MS = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS
+
+    /**
+     * 页面只有截图时间（支付成功页通常不显示日期）时的询问窗口。
+     * 沿用本仓库手工记账疑似重复「最宽 12 小时」的粗筛口径：这里只是多问一句，
+     * 不写库、不拦截，宽一点比静默重复更安全。
+     */
+    private const val UNTIMED_CROSS_SOURCE_WINDOW_MS = 12L * 60 * 60 * 1000
 }

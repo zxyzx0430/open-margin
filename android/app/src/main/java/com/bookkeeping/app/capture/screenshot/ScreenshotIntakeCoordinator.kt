@@ -12,6 +12,7 @@ import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
@@ -210,7 +211,8 @@ class ScreenshotIntakeCoordinator private constructor(
         val source = request.source
         val capturedAtMs = request.capturedAtMs
         val repository = repositoryProvider()
-        val existing = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
+        val ledgerRows = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
+        val existing = ledgerRows
         val previousFingerprints = runCatching {
             store.latest(MAX_REMEMBERED).mapNotNull { it.imageFingerprint }.toSet()
         }.getOrDefault(emptySet())
@@ -222,6 +224,11 @@ class ScreenshotIntakeCoordinator private constructor(
             previousImageFingerprints = previousFingerprints,
             allowAuto = allowAuto,
             previewOnly = previewOnly,
+            // 层 1：只有没写截图 provenance 的行才算「另一条通道」的候选
+            // （通知 / 短信 / 无障碍 / 手工记账都不写 captureObservedAtMs）。
+            crossChannelRows = ledgerRows
+                .filter { it.captureObservedAtMs == null }
+                .map { it.toFingerprint() },
         )
         val ocrSummary = "OCR ${blocks.size} 个文本块"
         plan.failure?.let { failure ->
@@ -339,9 +346,12 @@ class ScreenshotIntakeCoordinator private constructor(
                         val inserted = runCatching {
                             // Keep the ledger write inside this chain: same attempt id
                             // so the log reads capture → parse → dedup → save as one run.
+                            // The cross-source window is what stops the notification
+                            // capture of the same payment from landing a second row.
                             repo.insertIfNotDuplicate(
                                 entity,
                                 notifySuccess = false,
+                                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
                                 diagnosticInput = TransactionDiagnosticInput(
                                     attemptId = attemptId,
                                     callSite = CALL_SITE_INGEST,
@@ -460,6 +470,7 @@ class ScreenshotIntakeCoordinator private constructor(
                     attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
                     callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
                 ),
+                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
             )
         } catch (_: Exception) {
             return ConfirmationResult.FAILED
