@@ -73,6 +73,15 @@ internal object EnglishUiText {
         "这笔已经在账本里" to "This transaction is already in the ledger",
         "没有可记录的交易" to "No transaction to record",
         "（已更新 %d 笔旧记录）" to "(updated %d earlier item(s))",
+        // 截图导入页：一次列出全部候选，上下滑动逐笔确认。
+        "全部 %d 笔都在这里，上下滑动逐笔确认" to
+            "%d transactions are all on this page — scroll and confirm each one",
+        "全部处理完了" to "All done",
+        "已记 %d 笔 · 跳过 %d 笔" to "Recorded %d · Skipped %d",
+        "再选一张" to "Add another",
+        "高置信度" to "High confidence",
+        "低置信度" to "Low confidence",
+        "需要确认" to "Needs review",
         "重看引导" to "Replay the tour",
         "再次查看清衡的主要功能" to "See the main features again",
         "待更新组件：" to "Update components: ",
