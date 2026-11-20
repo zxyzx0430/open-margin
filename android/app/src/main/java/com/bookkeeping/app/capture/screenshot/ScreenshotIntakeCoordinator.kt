@@ -51,27 +51,13 @@ class ScreenshotIntakeCoordinator private constructor(
     constructor(ctx: Context) : this(
         context = ctx,
         store = CaptureCandidateStore(ctx),
-        repositoryProvider = {
-            runCatching {
-                EntryPointAccessors.fromApplication(
-                    ctx.applicationContext,
-                    ScreenshotImportEntryPoint::class.java,
-                ).transactionRepository()
-            }.getOrNull()
-        },
-        diagnosticSink = { note ->
-            runCatching {
-                EntryPointAccessors.fromApplication(
-                    ctx.applicationContext,
-                    ScreenshotImportEntryPoint::class.java,
-                ).transactionDiagnostics()
-            }.getOrNull()?.record(
-                attemptId = note.attemptId,
-                stage = note.stage,
-                result = note.result,
-                details = note.details,
-            )
-        },
+        repositoryProvider = { androidRepositoryOrNull(ctx) },
+        diagnosticSink = { note -> androidDiagnostics(ctx)?.record(
+            attemptId = note.attemptId,
+            stage = note.stage,
+            result = note.result,
+            details = note.details,
+        ) },
     )
 
     internal constructor(
@@ -485,6 +471,24 @@ class ScreenshotIntakeCoordinator private constructor(
         private const val MAX_REMEMBERED = 80
     }
 }
+
+/**
+ * Resolved outside the delegating constructor call on purpose: Kotlin refuses
+ * `runCatching { ... }` lambdas inside a `this(...)` delegation because the
+ * implicit receiver is not initialized yet ("Cannot access '<this>' before the
+ * instance has been initialized").
+ */
+private fun importEntryPoint(context: Context): ScreenshotImportEntryPoint =
+    EntryPointAccessors.fromApplication(
+        context.applicationContext,
+        ScreenshotImportEntryPoint::class.java,
+    )
+
+private fun androidRepositoryOrNull(context: Context): TransactionRepository? =
+    runCatching { importEntryPoint(context).transactionRepository() }.getOrNull()
+
+private fun androidDiagnostics(context: Context): TransactionDiagnostics? =
+    runCatching { importEntryPoint(context).transactionDiagnostics() }.getOrNull()
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
