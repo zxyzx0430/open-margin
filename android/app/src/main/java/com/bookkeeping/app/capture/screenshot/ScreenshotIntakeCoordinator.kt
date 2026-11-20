@@ -129,6 +129,7 @@ class ScreenshotIntakeCoordinator(
                     top = bounds?.top ?: 0,
                     right = bounds?.right ?: 0,
                     bottom = bounds?.bottom ?: 0,
+                    hasBounds = bounds != null,
                 )
             }
         }

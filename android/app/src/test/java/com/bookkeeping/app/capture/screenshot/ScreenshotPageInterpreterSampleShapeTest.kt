@@ -292,6 +292,40 @@ class ScreenshotPageInterpreterSampleShapeTest {
     }
 
     @Test
+    fun `null bounds page keeps completed status over a stray cancellation`() {
+        // PaddleOCR can return lines without boxes. Zeroed coordinates are not
+        // geometry, and a bare 已取消 must not override 交易成功 for the same card.
+        val blocks = listOf(
+            TextBlock(text = "微信支付"),
+            TextBlock(text = "收款方 便利店"),
+            TextBlock(text = "-¥36.50"),
+            TextBlock(text = "交易成功"),
+            TextBlock(text = "已取消"),
+        )
+        assertTrue(blocks.none { it.hasBounds })
+
+        val decision = plan(blocks).decisions.single()
+
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
+        assertEquals(Action.AUTO_BOOK, decision.action)
+    }
+
+    @Test
+    fun `a bare cancellation with unknown bounds still waits when nothing confirmed`() {
+        val blocks = listOf(
+            TextBlock(text = "微信支付"),
+            TextBlock(text = "转账给 张三"),
+            TextBlock(text = "-¥200.00"),
+            TextBlock(text = "已取消"),
+        )
+
+        val decision = plan(blocks).decisions.single()
+
+        assertEquals(CaptureCandidate.COMPLETION_CANCELLED, decision.draft.completionStatus)
+        assertEquals(Action.WAIT_FOR_EVIDENCE, decision.action)
+    }
+
+    @Test
     fun `cancelled voice call bubble beside payment does not cancel transfer`() {
         // Two separate columns model a payment card and an unrelated cancelled-call bubble.
         val blocks = listOf(

@@ -467,24 +467,34 @@ object ScreenshotPageInterpreter {
         else -> CaptureCandidate.KIND_PAYMENT
     }
 
+    /**
+     * Status evidence is read for this card only, and a bare cancellation is the
+     * weakest signal on a page: apps print 已取消 for unrelated cards, and OCR may
+     * return no boxes at all. A cancellation therefore only wins when it is
+     * attached to this card's amount and nothing confirmed the transaction —
+     * a completed confirmation of the same transaction always beats a stray
+     * 已取消.
+     */
     private fun completionOf(segment: List<TextBlock>): Pair<String, Boolean> {
         val amount = segment.firstOrNull { amountOf(it.text) != null }
-        val statusBlocks = segment.filter { block -> isCompletionMarker(block.text) }
-        val anchoredStatuses = statusBlocks.filterNot { block ->
-            isNonPaymentCallCancellation(block.text) ||
-                (amount != null && hasGeometry(block) && hasGeometry(amount) &&
-                    horizontalGap(block, amount) > statusHorizontalGapLimit(block, amount))
-        }
-        val paymentStatusText = anchoredStatuses.joinToString("\n") { it.text }
+        val statusBlocks = segment
+            .filter { block -> isCompletionMarker(block.text) }
+            .filterNot { block -> isNonPaymentCallCancellation(block.text) }
+            .filterNot { block -> isDetachedFromAmount(block, amount) }
+        val confirmedText = statusBlocks
+            .filterNot { block -> isBareCancellation(block.text) }
+            .joinToString("\n") { it.text }
         return when {
-            FAILED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_FAILED to true
-            PENDING_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_PENDING to true
-            CREATED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_CREATED to true
+            FAILED_MARKERS.any(confirmedText::contains) -> CaptureCandidate.COMPLETION_FAILED to true
+            PENDING_MARKERS.any(confirmedText::contains) -> CaptureCandidate.COMPLETION_PENDING to true
+            CREATED_MARKERS.any(confirmedText::contains) -> CaptureCandidate.COMPLETION_CREATED to true
             // Checked before CANCELLED: "退款已原路退回" means the refund landed.
-            REFUND_COMPLETED_MARKERS.any(paymentStatusText::contains) ->
+            REFUND_COMPLETED_MARKERS.any(confirmedText::contains) ->
                 CaptureCandidate.COMPLETION_COMPLETED to true
-            CANCELLED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_CANCELLED to true
-            COMPLETED_MARKERS.any(paymentStatusText::contains) -> CaptureCandidate.COMPLETION_COMPLETED to true
+            COMPLETED_MARKERS.any(confirmedText::contains) -> CaptureCandidate.COMPLETION_COMPLETED to true
+            statusBlocks.any { block ->
+                isBareCancellation(block.text) && isAttachedToAmount(block, amount)
+            } -> CaptureCandidate.COMPLETION_CANCELLED to true
             else -> CaptureCandidate.COMPLETION_UNKNOWN to false
         }
     }
@@ -497,13 +507,46 @@ object ScreenshotPageInterpreter {
     private fun isNonPaymentCallCancellation(text: String): Boolean =
         text.contains("已取消") && listOf("通话", "语音", "视频", "电话", "呼叫").any(text::contains)
 
+    /** A cancellation with no stronger status word in the same line. */
+    private fun isBareCancellation(text: String): Boolean {
+        if (CANCELLED_MARKERS.none(text::contains)) return false
+        val stronger = COMPLETED_MARKERS + REFUND_COMPLETED_MARKERS + PENDING_MARKERS +
+            CREATED_MARKERS + FAILED_MARKERS
+        return stronger.none(text::contains)
+    }
+
     private fun hasGeometry(block: TextBlock): Boolean =
-        block.right > block.left && block.bottom > block.top
+        block.hasBounds && block.right > block.left && block.bottom > block.top
 
     private fun horizontalGap(a: TextBlock, b: TextBlock): Int = when {
         a.right < b.left -> b.left - a.right
         b.right < a.left -> a.left - b.right
         else -> 0
+    }
+
+    /** A status line that real geometry places far away from the amount. */
+    private fun isDetachedFromAmount(block: TextBlock, amount: TextBlock?): Boolean {
+        if (amount == null) return false
+        if (!hasGeometry(block) || !hasGeometry(amount)) return false
+        return horizontalGap(block, amount) > statusHorizontalGapLimit(block, amount)
+    }
+
+    /**
+     * Same card, or a real overlapping/nearby box. Without OCR boxes the card
+     * split is all the evidence there is, and completed evidence has already won
+     * above if the page carried any.
+     */
+    private fun isAttachedToAmount(block: TextBlock, amount: TextBlock?): Boolean {
+        if (amount == null) return false
+        if (!hasGeometry(block) || !hasGeometry(amount)) return true
+        val verticalOverlap = block.bottom >= amount.top && amount.bottom >= block.top
+        if (verticalOverlap) return true
+        val verticalGap = when {
+            block.bottom < amount.top -> amount.top - block.bottom
+            amount.bottom < block.top -> block.top - amount.bottom
+            else -> 0
+        }
+        return verticalGap <= statusHorizontalGapLimit(block, amount)
     }
 
     private fun statusHorizontalGapLimit(a: TextBlock, b: TextBlock): Int =

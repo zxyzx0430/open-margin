@@ -28,6 +28,12 @@ data class TextBlock(
     val top: Int = 0,
     val right: Int = 0,
     val bottom: Int = 0,
+    /**
+     * False when the OCR engine returned no bounding box. The zeroed
+     * coordinates above are then a placeholder and must never be read as
+     * evidence that two lines overlap or sit on the same row.
+     */
+    val hasBounds: Boolean = left != 0 || top != 0 || right != 0 || bottom != 0,
 )
 
 /** Structured evidence read off the page; no raw OCR text is persisted. */
