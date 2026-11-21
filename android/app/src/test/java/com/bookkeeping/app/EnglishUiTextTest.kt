@@ -609,6 +609,19 @@ class EnglishUiTextTest {
     }
 
     @Test
+    fun eventTimeFixAndFabLabelsTranslate() {
+        val expected = mapOf(
+            "修改发生时间" to "Change transaction time",
+            "下一步" to "Next",
+            "正在打开截图记账" to "Opening screenshot capture",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
+
+    @Test
     fun siteUpdateLabelsTranslate() {
         val expected = mapOf(
             "应用更新" to "App updates",

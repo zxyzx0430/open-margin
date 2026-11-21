@@ -496,6 +496,17 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 详情页「时间待确认」的快捷修正：只改发生时间并清掉待确认标记。
+     *
+     * 不是全字段编辑，所以不复用 [saveTransaction]：那里按「时间有没有变」决定
+     * 是否清标记，用户原样确认时会留下标记。写入仍走 Repository 的窄接口，
+     * 同步语义由它统一处理。
+     */
+    fun confirmEventTime(original: TransactionEntity, timestampMs: Long) {
+        viewModelScope.launch { repository.updateEventTime(original, timestampMs) }
+    }
+
     fun saveMerchantRule(merchant: String, category: TransactionCategory) {
         if (merchant.isBlank()) return
         viewModelScope.launch { settings.rememberMerchantCategory(merchant, category) }

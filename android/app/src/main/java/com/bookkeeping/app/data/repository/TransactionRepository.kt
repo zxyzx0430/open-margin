@@ -88,6 +88,23 @@ internal fun LedgerInsertResult.toLegacyTransactionId(): Long? = when (this) {
     is LedgerInsertResult.Failed -> throw cause
 }
 
+/**
+ * 「时间待确认」被用户确认后的实体变换：只改发生时间并清掉待确认标记。
+ *
+ * 抽成纯函数是为了单测能断言「时间真的写进去了、标记真的清了」——Repository 的
+ * 落库路径依赖 Room 与 Context，纯 JVM 单测拿不到；这个函数是写入前唯一一步
+ * 字段加工，Repository 与测试共用同一份实现，不在测试里复制规则。
+ *
+ * 不复用 `TransactionEditRules.applyTo`：那条链路按「时间有没有变」决定是否清标记，
+ * 用户原样确认（选了同一个时间）时会留下标记，与「点了确认就是确认过」不符。
+ */
+internal fun TransactionEntity.withConfirmedEventTime(
+    timestampMs: Long,
+    needsConfirmation: Boolean = false,
+): TransactionEntity = copy(
+    timestamp = timestampMs,
+    eventTimeNeedsConfirmation = needsConfirmation,
+)
 
 // Repository：业务层与数据层的桥梁。
 // 上层（ViewModel）只跟 Repository 打交道，不直接接触 DAO/网络/SharedPreferences。
@@ -768,6 +785,33 @@ class TransactionRepository @Inject constructor(
             outputSummary = "已更新 #${transaction.id}",
         )
         requestSync(diagnosticInput, updated)
+    }
+
+    /**
+     * 详情页「时间待确认」的窄接口：只改发生时间并清掉待确认标记，其余字段不动。
+     *
+     * 落库与同步语义完全复用 [update]（syncDirty / syncModifiedMs / syncMutationId
+     * 由它统一写），所以网页端照常收到这次修改，没有第二套写入逻辑，也不动数据库版本。
+     */
+    suspend fun updateEventTime(
+        transaction: TransactionEntity,
+        timestampMs: Long,
+        needsConfirmation: Boolean = false,
+    ) {
+        val updated = transaction.withConfirmedEventTime(timestampMs, needsConfirmation)
+        // 时间与标记都没变：不写库、不产生同步任务。
+        if (updated.timestamp == transaction.timestamp &&
+            updated.eventTimeNeedsConfirmation == transaction.eventTimeNeedsConfirmation
+        ) {
+            return
+        }
+        update(
+            transaction = updated,
+            diagnosticInput = TransactionDiagnosticInput(
+                callSite = "TransactionRepository.updateEventTime",
+            ),
+            operationStage = TransactionDiagnostics.STAGE_EDIT,
+        )
     }
 
     suspend fun recordDiagnostic(

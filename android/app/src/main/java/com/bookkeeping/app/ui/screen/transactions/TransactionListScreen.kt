@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -50,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -70,11 +72,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.bookkeeping.app.capture.screenshot.ScreenshotImportActivity
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
@@ -133,6 +138,53 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+/**
+ * 账单页「+」的单击 / 双击判定。
+ *
+ * 手势本身在 [com.bookkeeping.app.ui.components.VoiceFab]（按住 0.75 秒是语音），
+ * 这里只决定一次「点按」算单击还是双击：第一次点先挂起，[DOUBLE_TAP_WINDOW_MS]
+ * 内再点一次算双击（直接进截图记账），否则按单击打开手动记账。
+ *
+ * 窗口取 250ms：单击最多延迟这么久，仍在「可接受」范围内；再长用户会觉得按钮没反应。
+ * 判定是纯函数，单测直接喂时间戳，不驱动真实手势。
+ */
+internal object LedgerFabTapRule {
+    /** 第二次点击必须落在第一次点击后的这段时间内。 */
+    const val DOUBLE_TAP_WINDOW_MS = 250L
+
+    /**
+     * @param firstTapAtMs 上一次点按的时间（没有挂起的单击时为 null）。
+     * @param nowMs 这一次点按的时间。
+     */
+    fun actionFor(firstTapAtMs: Long?, nowMs: Long): FabTapAction {
+        if (firstTapAtMs == null) return FabTapAction.PENDING_SINGLE
+        val elapsed = nowMs - firstTapAtMs
+        return if (elapsed in 0..DOUBLE_TAP_WINDOW_MS) {
+            FabTapAction.DOUBLE_TAP
+        } else {
+            FabTapAction.PENDING_SINGLE
+        }
+    }
+
+    /**
+     * 双击窗口到点时，这次挂起的单击是否还该执行。
+     *
+     * 期间来了第二下（`pendingTapAtMs` 被清空或换成新的时间）就作废；
+     * 仍然等于当初排程的那个时间，才走单击（手动记账）这条原路径。
+     */
+    fun singleStillPending(pendingTapAtMs: Long?, scheduledForMs: Long): Boolean =
+        pendingTapAtMs == scheduledForMs
+}
+
+/** 一次点按之后该做什么：挂起等第二下，还是立刻按双击处理。 */
+internal enum class FabTapAction {
+    /** 记下这次点击，窗口内没有第二下就按单击执行。 */
+    PENDING_SINGLE,
+
+    /** 窗口内第二次点击：走双击动作，并且取消挂起的单击。 */
+    DOUBLE_TAP,
+}
 
 private data class LedgerStatus(
     val captureText: String,
@@ -244,6 +296,22 @@ fun TransactionListScreen(
     }
 
     val context = LocalContext.current
+    val fabHaptics = LocalHapticFeedback.current
+
+    // 记账 FAB 的单击 / 双击：单击仍打开手动记账，但先等一个双击窗口确认不是双击；
+    // 双击直接进截图记账（复用同一个 ScreenshotImportActivity，不新建页面）。
+    var pendingFabTapAt by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(pendingFabTapAt) {
+        val tappedAt = pendingFabTapAt ?: return@LaunchedEffect
+        delay(LedgerFabTapRule.DOUBLE_TAP_WINDOW_MS)
+        // 窗口内来了第二下：pendingFabTapAt 已被清空或换值，这次单击作废。
+        if (!LedgerFabTapRule.singleStillPending(pendingFabTapAt, tappedAt)) return@LaunchedEffect
+        pendingFabTapAt = null
+        addDialogQuickEntry = ""
+        addDialogDiagnosticAttemptId = null
+        showAddDialog = true
+    }
+
     // 首次进账单页的「长按 + 开始说话」气泡：看过一次就写 seen，之后不再出现。
     val dismissVoiceHint: () -> Unit = {
         if (showVoiceHint) {
@@ -399,10 +467,31 @@ fun TransactionListScreen(
             Layout(
                 content = {
                     VoiceFab(
+                        // 单击：手动记账（延迟 250ms 等双击判定）；双击：截图记账。
                         onTap = {
-                            addDialogQuickEntry = ""
-                            addDialogDiagnosticAttemptId = null
-                            showAddDialog = true
+                            val now = SystemClock.uptimeMillis()
+                            when (LedgerFabTapRule.actionFor(pendingFabTapAt, now)) {
+                                FabTapAction.DOUBLE_TAP -> {
+                                    pendingFabTapAt = null
+                                    // 立即触感反馈：开页有延迟时也不是「毫无反应」。
+                                    fabHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    // 轻量反馈：先给一句再开页。
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar(
+                                            tr("正在打开截图记账"),
+                                            duration = SnackbarDuration.Short,
+                                        )
+                                    }
+                                    runCatching {
+                                        context.startActivity(
+                                            ScreenshotImportActivity.intent(context)
+                                        )
+                                    }
+                                }
+                                FabTapAction.PENDING_SINGLE -> {
+                                    pendingFabTapAt = now
+                                }
+                            }
                         },
                         // 达到长按阈值：立刻打开面板并开始录音（不等松手）。
                         onLongPressStart = {

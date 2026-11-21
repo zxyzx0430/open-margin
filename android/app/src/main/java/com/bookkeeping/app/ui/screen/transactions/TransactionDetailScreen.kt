@@ -12,12 +12,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,10 +31,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -90,6 +99,8 @@ fun TransactionDetailScreen(
     var editing by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
+    // 「时间待确认」标签点开后的日期 + 时间修正流程；取消不写库。
+    var fixingEventTime by remember { mutableStateOf(false) }
 
     if (editing && entry != null) {
         // 全屏编辑页替换详情页；保存/取消都回到这里，删除复用同一个二次确认。
@@ -148,6 +159,7 @@ fun TransactionDetailScreen(
             } else {
                 DetailContent(
                     entry = entry,
+                    onFixEventTime = { fixingEventTime = true },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
@@ -176,6 +188,18 @@ fun TransactionDetailScreen(
                 confirmingDelete = false
                 editing = false
                 onDeleted()
+            },
+        )
+    }
+
+    // 点「时间待确认」→ 先选日期、再选时间；两步都确认才写库，任何一步取消都不动。
+    if (fixingEventTime && entry != null) {
+        EventTimeFixFlow(
+            initialTimestamp = entry.timestamp,
+            onDismiss = { fixingEventTime = false },
+            onConfirm = { timestampMs ->
+                transactionViewModel.confirmEventTime(entry, timestampMs)
+                fixingEventTime = false
             },
         )
     }
@@ -232,6 +256,7 @@ private fun DetailHeader(
 @Composable
 private fun DetailContent(
     entry: TransactionEntity,
+    onFixEventTime: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val category = runCatching { TransactionCategory.valueOf(entry.category) }
@@ -254,15 +279,33 @@ private fun DetailContent(
             },
         )
         if (entry.eventTimeNeedsConfirmation) {
-            Text(
-                text = tr("时间待确认"),
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                style = MaterialTheme.typography.labelMedium,
+            // 可点击：点开日期 + 时间选择器，确认后写回发生时间并清掉这个标记。
+            // 编辑图标只是可点的提示，读屏靠 onClickLabel 说明动作。
+            Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.errorContainer)
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = tr("修改发生时间"),
+                        onClick = onFixEventTime,
+                    )
                     .padding(horizontal = 10.dp, vertical = 6.dp),
-            )
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = tr("时间待确认"),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Icon(
+                    imageVector = Icons.Outlined.Edit,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
         }
         if (entry.note.isNotBlank()) {
             NoteCard(note = entry.note)
@@ -591,6 +634,96 @@ private fun DeleteTransactionDialog(
             TextButton(onClick = onDismiss) { Text(tr("取消")) }
         },
     )
+}
+
+/**
+ * 「时间待确认」的修正流程：先选日期，再选时间，两步都确认才回调 [onConfirm]。
+ *
+ * 默认值一律取 [initialTimestamp]（这笔账当前的发生时间）：日期步保留原来的时分，
+ * 时间步保留刚选的日期。任何一步点取消都只关流程，不写库。
+ * 换算复用编辑页那组 `TransactionEditRules` 函数，不另造日期 / 时间语义。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EventTimeFixFlow(
+    initialTimestamp: Long,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit,
+) {
+    var pendingTimestamp by remember(initialTimestamp) { mutableLongStateOf(initialTimestamp) }
+    var choosingTime by remember(initialTimestamp) { mutableStateOf(false) }
+    var timeError by remember(initialTimestamp) { mutableStateOf<String?>(null) }
+
+    if (!choosingTime) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = TransactionEditRules.localDateToUtcMillis(pendingTimestamp),
+        )
+        DatePickerDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { utcDate ->
+                            pendingTimestamp =
+                                TransactionEditRules.applyUtcDateToMillis(utcDate, pendingTimestamp)
+                        }
+                        choosingTime = true
+                    },
+                ) { Text(tr("下一步")) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(tr("取消")) }
+            },
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    } else {
+        val timePickerState = rememberTimePickerState(
+            initialHour = TransactionEditRules.hourOf(pendingTimestamp),
+            initialMinute = TransactionEditRules.minuteOf(pendingTimestamp),
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(tr("时间")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TimePicker(state = timePickerState)
+                    timeError?.let { error ->
+                        Text(
+                            text = tr(error),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val candidate = TransactionEditRules.withLocalTime(
+                            pendingTimestamp,
+                            timePickerState.hour,
+                            timePickerState.minute,
+                        )
+                        val error = TransactionEditRules.timestampError(
+                            candidate,
+                            System.currentTimeMillis(),
+                        )
+                        if (error == null) {
+                            onConfirm(candidate)
+                        } else {
+                            // 与编辑页同一条规则：不写一个未来时间，留在弹窗里改。
+                            timeError = error
+                        }
+                    },
+                ) { Text(tr("确定")) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text(tr("取消")) }
+            },
+        )
+    }
 }
 
 private fun transactionAmount(transaction: TransactionEntity): String {
