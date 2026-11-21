@@ -57,6 +57,14 @@ object ScreenshotPageInterpreter {
     private val PENDING_MARKERS = listOf(
         "等待对方确认", "待收款", "待领取", "待对方接收", "处理中", "转账处理中", "对方未领取",
     )
+    /**
+     * 主语是对方的收款措辞。它们出现在付款方的结果页上：钱是我付出去的。
+     * 单独一条「收款」只说明页面在讲收款，方向由谁收款决定，所以这一组必须先于
+     * 裸「收款」判断生效。
+     */
+    private val COUNTERPARTY_RECEIVED_MARKERS = listOf(
+        "对方已收款", "对方已收到", "对方已领取", "已收款方",
+    )
     private val CREATED_MARKERS = listOf(
         "待付款", "等待付款", "已创建", "待支付", "订单已生成", "预计扣费", "先用后付",
     )
@@ -670,6 +678,12 @@ object ScreenshotPageInterpreter {
         if (amountLine.contains("-") || text.contains("支出") || text.contains("付款给") ||
             text.contains("收款方") || text.contains("商户全称")
         ) {
+            return CaptureCandidate.DIRECTION_EXPENSE
+        }
+        // 「对方已收款」的主语是对方，不是我：这是付款方看到的结果页，钱已经从我这里
+        // 付出去，必须记支出。裸的「收款」只能说明页面在讲一笔收款，只有对方做主语时
+        // 才反过来说明了我的方向；先判这一组，否则每一张支付成功页都会被记成收入。
+        if (COUNTERPARTY_RECEIVED_MARKERS.any(text::contains)) {
             return CaptureCandidate.DIRECTION_EXPENSE
         }
         // "支付宝" / "微信支付" contain 支付 but say nothing about direction.

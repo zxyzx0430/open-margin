@@ -64,6 +64,8 @@ class BookkeepingApplication : Application() {
         scheduleScreenshotRetention()
         // 新截图监听默认关闭；只有用户在设置里开启并授权后才会真正注册。
         runCatching { ScreenshotWatchController.start(this) }
+        // 观察者可能在上次进程里被 MIUI 静默丢掉回调：启动时按 _ID 水位补扫一次。
+        runCatching { ScreenshotWatchController.catchUp(this) }
     }
 
     /** 截图副本 / OCR 候选 / 诊断的 7 天清理，进程重启后仍然生效。 */
