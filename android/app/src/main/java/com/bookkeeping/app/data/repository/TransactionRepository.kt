@@ -26,6 +26,59 @@ import javax.inject.Singleton
 import java.util.UUID
 import kotlin.math.abs
 
+/**
+ * 一次去重入库的显式结果。
+ *
+ * `Long?` 无法区分「账本里已经有这笔钱」和「这次写入失败」：两条路径都只能拿到
+ * null，调用方一旦把异常折成 null（`runCatching { ... }.getOrNull()`），用户的
+ * 真钱就被当成「已跳过」蒸发。[insertIfNotDuplicateResult] 返回这个类型，
+ * 让成功 / 重复（且重复的判据）/ 失败（带原始异常）三态可分辨。
+ *
+ * [TransactionRepository.insertIfNotDuplicate] 的旧 `Long?` 契约由
+ * [toLegacyTransactionId] 无信息损失地保留，通知 / 短信 / 无障碍 / 手工记账
+ * 四条链路的行为不变。
+ */
+sealed interface LedgerInsertResult {
+    /** 新的一行已写入账本。 */
+    data class Inserted(val transactionId: Long) : LedgerInsertResult
+
+    /** 并入了已有行（同通道补全商户/订单号）；没有新行，但这笔钱已记账。 */
+    data class Merged(val transactionId: Long) : LedgerInsertResult
+
+    /** 没有写入，因为账本里已经有这笔钱；[reason] 说明是哪条判据命中的。 */
+    data class Duplicate(
+        val existingTransactionId: Long,
+        val reason: DuplicateReason,
+    ) : LedgerInsertResult
+
+    /** 没有写入，且写入过程抛了异常；调用方必须保留候选、允许重试。 */
+    data class Failed(val cause: Throwable) : LedgerInsertResult
+}
+
+/** 判定重复的判据；前两条是确定重复，跨通道命中只是启发式。 */
+enum class DuplicateReason {
+    /** 同来源 + 同订单号：同一笔被重复上报。 */
+    SOURCE_ORDER_ID,
+
+    /** 同来源 + 同商户 + 同金额 + 8 秒窗口：同一通道的重发。 */
+    SAME_SOURCE_WINDOW,
+
+    /** 跨采集通道的同额同方启发式命中：可能是同一笔，也可能只是金额巧合。 */
+    CROSS_SOURCE,
+}
+
+/**
+ * 旧 `Long?` 视图：成功（含并入）返回 id，重复返回 null，失败原样抛出同一个
+ * 异常实例。这正是 [LedgerInsertResult] 出现之前四条既有调用方看到的契约。
+ */
+internal fun LedgerInsertResult.toLegacyTransactionId(): Long? = when (this) {
+    is LedgerInsertResult.Inserted -> transactionId
+    is LedgerInsertResult.Merged -> transactionId
+    is LedgerInsertResult.Duplicate -> null
+    is LedgerInsertResult.Failed -> throw cause
+}
+
+
 // Repository：业务层与数据层的桥梁。
 // 上层（ViewModel）只跟 Repository 打交道，不直接接触 DAO/网络/SharedPreferences。
 // 好处：将来加缓存、加远程同步、切换数据源都只改这里，不动 UI。
@@ -197,7 +250,49 @@ class TransactionRepository @Inject constructor(
          * [CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS] 才启用跨通道检查。
          */
         crossSourceWindowMs: Long = 0L,
-    ): Long? = duplicateMutex.withLock {
+    ): Long? = insertIfNotDuplicateResult(
+        transaction = transaction,
+        windowMs = windowMs,
+        notifySuccess = notifySuccess,
+        diagnosticInput = diagnosticInput,
+        crossSourceWindowMs = crossSourceWindowMs,
+    ).toLegacyTransactionId()
+
+    /**
+     * 与 [insertIfNotDuplicate] 完全同一套去重规则，但把「为什么没写」讲清楚：
+     * 重复（含跨通道启发式）与写入失败不再共用一个 null。
+     *
+     * 写入异常被收敛成 [LedgerInsertResult.Failed]（[CancellationException] 除外），
+     * 调用方据此保留候选、记录真实异常并允许重试；旧入口仍会把同一个异常实例
+     * 原样抛出。
+     */
+    suspend fun insertIfNotDuplicateResult(
+        transaction: TransactionEntity,
+        windowMs: Long = 8_000L,
+        notifySuccess: Boolean = true,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+        crossSourceWindowMs: Long = 0L,
+    ): LedgerInsertResult = try {
+        insertIfNotDuplicateLocked(
+            transaction = transaction,
+            windowMs = windowMs,
+            notifySuccess = notifySuccess,
+            diagnosticInput = diagnosticInput,
+            crossSourceWindowMs = crossSourceWindowMs,
+        )
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        LedgerInsertResult.Failed(failure)
+    }
+
+    private suspend fun insertIfNotDuplicateLocked(
+        transaction: TransactionEntity,
+        windowMs: Long,
+        notifySuccess: Boolean,
+        diagnosticInput: TransactionDiagnosticInput,
+        crossSourceWindowMs: Long,
+    ): LedgerInsertResult = duplicateMutex.withLock {
         val callSite = diagnosticInput.callSite ?: "TransactionRepository.insertIfNotDuplicate"
         val money = DiagnosticSummary.amountWithMerchant(
             amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
@@ -235,7 +330,10 @@ class TransactionRepository @Inject constructor(
                     inputSummary = money,
                     outputSummary = "命中已有 #${matched.id}（订单号相同），跳过写入",
                 )
-                return@withLock null
+                return@withLock LedgerInsertResult.Duplicate(
+                    existingTransactionId = matched.id,
+                    reason = DuplicateReason.SOURCE_ORDER_ID,
+                )
             }
         }
         val existing = try {
@@ -270,7 +368,10 @@ class TransactionRepository @Inject constructor(
                 inputSummary = money,
                 outputSummary = "命中已有 #${existing.id}，跳过写入",
             )
-            return@withLock null
+            return@withLock LedgerInsertResult.Duplicate(
+                existingTransactionId = existing.id,
+                reason = DuplicateReason.SAME_SOURCE_WINDOW,
+            )
         }
 
         // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图路径显式
@@ -310,7 +411,10 @@ class TransactionRepository @Inject constructor(
                 details = "Cross-channel duplicate candidate skipped",
                 transactionId = crossSourceExisting.id,
             )
-            return@withLock null
+            return@withLock LedgerInsertResult.Duplicate(
+                existingTransactionId = crossSourceExisting.id,
+                reason = DuplicateReason.CROSS_SOURCE,
+            )
         }
 
         // 同一笔支付被两条采集路径各扫一次（通知文本缺商户、支付成功页有商户）：
@@ -365,7 +469,7 @@ class TransactionRepository @Inject constructor(
                     )
                 }
             }
-            return@withLock merged.id
+            return@withLock LedgerInsertResult.Merged(merged.id)
         }
 
         val similar = try {
@@ -418,8 +522,14 @@ class TransactionRepository @Inject constructor(
         if (id > 0L) {
             CaptureHealth.onTransactionSaved(context)
             KeepAliveService.refreshStatus(context)
+            LedgerInsertResult.Inserted(id)
+        } else {
+            // Room 的 REPLACE 冲突不会抛异常，只返回 -1；账本里没有这一行，
+            // 绝不能把它当成「已跳过」。交给调用方保留候选并重试。
+            LedgerInsertResult.Failed(
+                IllegalStateException("ledger insert returned non-positive id=$id"),
+            )
         }
-        id
     }
 
     /** 自动合并的目标：窗口内证据最充分的同来源记录，优先 id 最小（先入库）的那条。 */
