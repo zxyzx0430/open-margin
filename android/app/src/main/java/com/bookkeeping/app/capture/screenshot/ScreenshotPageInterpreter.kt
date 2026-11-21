@@ -179,6 +179,16 @@ object ScreenshotPageInterpreter {
     private val TIME_ONLY_REGEX = Regex("(\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
     private val RELATIVE_DAY_REGEX = Regex("大前天|前天|昨天|昨日|今天|今日")
 
+    /**
+     * `周四` / `星期四` / `周天` at the start of a row: the weekday form of a
+     * chat date separator. A shop such as `周六福` is not a weekday, so the
+     * token must not be glued to more text.
+     */
+    private val WEEKDAY_REGEX = Regex(
+        "^\\s*(?:周|星期)([一二三四五六日天])(?=\\s|$|\\d)",
+        RegexOption.MULTILINE,
+    )
+
     fun interpret(
         blocks: List<TextBlock>,
         capturedAtMs: Long,
@@ -436,6 +446,14 @@ object ScreenshotPageInterpreter {
      * the vertically nearest anchor, so the merchant header above the *next*
      * amount is not appended to the previous card.
      *
+     * A whole row that is only a timestamp is the exception: chat apps print
+     * `周四 22:01` above the message it dates, so the nearest amount is the card
+     * *above* it and the row would carry the wrong clock. On a page with several
+     * boxed amounts such a row joins the nearest amount below it instead, and
+     * when nothing follows it the row describes none of the cards. A page with a
+     * single amount is never split, so its own timestamp under the amount stays
+     * where it is.
+     *
      * OCR boxes are optional, and a missing box must never delete money. Only a
      * line with real geometry may be placed by distance, and only against an
      * anchor that also has one: an all-zero placeholder box would make every
@@ -485,6 +503,24 @@ object ScreenshotPageInterpreter {
                 // A boxed line needs a boxed amount to be measured against;
                 // without one there is no row it could be proven to belong to.
                 boxedAnchors.isEmpty() -> Unit
+                // A chat date separator is a row of its own printed *above* the
+                // message it belongs to: `周四 22:01`, `昨天 02:17`. Measuring
+                // by distance hands it to the card above, which then steals its
+                // neighbour's clock (and leaves this card with the next
+                // separator). A standalone timestamp therefore goes to the
+                // nearest card below it, and to no card at all when it is the
+                // last row on the page. Only a page with several boxed amounts
+                // needs this: on a one-card page every row is that card's own
+                // field, including the timestamp printed under its amount,
+                // which must not be dropped. In-card fields also keep the
+                // distance rule, because they carry a label
+                // (`发生时间 2026-11-21 17:13`) and are not standalone rows.
+                boxedAnchors.size > 1 && unboxedCard < 0 && isStandaloneTimestampLine(block.text) -> {
+                    boxedAnchors
+                        .filter { anchors[it].top > block.top }
+                        .minByOrNull { anchors[it].top }
+                        ?.let { segments[it] += block }
+                }
                 else -> {
                     var best = boxedAnchors.first()
                     var bestDistance = Long.MAX_VALUE
@@ -938,14 +974,43 @@ object ScreenshotPageInterpreter {
         return false
     }
 
-    /** `21:46`, `昨天 14:01`, `11月19日 20:10`, `2026-11-19 20:15`: never a shop. */
+    /** `21:46`, `昨天 14:01`, `周四 22:01`, `11月19日 20:10`, `2026-11-19 20:15`: never a shop. */
     private fun isTimeOrDateLine(line: String): Boolean {
-        val stripped = RELATIVE_DAY_REGEX.replace(line, " ").trim()
+        val stripped = WEEKDAY_REGEX.replace(RELATIVE_DAY_REGEX.replace(line, " "), " ").trim()
         if (TIME_ONLY_REGEX.matchEntire(stripped) != null) return true
         if (DATE_TIME_REGEX.containsMatchIn(line)) return true
         if (MONTH_DAY_TIME_REGEX.containsMatchIn(line)) return true
         return line.contains("月") && line.contains("日")
     }
+
+    /**
+     * A row that is nothing but a timestamp: `22:01`, `周四 22:01`,
+     * `昨天 14:01`, `11月19日 20:10`, `2026-11-19 20:15`. Anchored to the whole
+     * row on purpose: an in-card field such as `发生时间 2026-11-21 17:13`
+     * carries a label and stays part of the card it is printed in.
+     */
+    private fun isStandaloneTimestampLine(line: String): Boolean {
+        val text = line.trim()
+        if (text.isEmpty() || amountOf(text) != null) return false
+        val bare = WEEKDAY_REGEX.replace(RELATIVE_DAY_REGEX.replace(text, " "), " ").trim()
+        return TIME_ONLY_REGEX.matchEntire(bare) != null ||
+            DATE_TIME_REGEX.matchEntire(bare) != null ||
+            MONTH_DAY_TIME_REGEX.matchEntire(bare) != null
+    }
+
+    /** Calendar weekday constant for a `周一` / `星期一` token, or null. */
+    private fun weekdayOf(text: String): Int? =
+        WEEKDAY_REGEX.find(text)?.groupValues?.get(1)?.let { day ->
+            when (day) {
+                "一" -> Calendar.MONDAY
+                "二" -> Calendar.TUESDAY
+                "三" -> Calendar.WEDNESDAY
+                "四" -> Calendar.THURSDAY
+                "五" -> Calendar.FRIDAY
+                "六" -> Calendar.SATURDAY
+                else -> Calendar.SUNDAY
+            }
+        }
 
     /**
      * Field labels ("退款金额"), status words ("交易成功") and sentences with
@@ -1036,6 +1101,30 @@ object ScreenshotPageInterpreter {
                     set(Calendar.HOUR_OF_DAY, match.groupValues[1].toInt())
                     set(Calendar.MINUTE, match.groupValues[2].toInt())
                     set(Calendar.SECOND, match.groupValues[3].ifBlank { "0" }.toInt())
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis.takeIf {
+                    it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS)
+                }
+            }.getOrNull()
+        }
+        // A chat separator may name the weekday instead of a date: `周四 22:01`
+        // read on a Saturday is the Thursday three days back, while `周六`
+        // read on a Saturday is today. Resolve the weekday against the capture
+        // moment's own local date, so month and year boundaries fall out of the
+        // calendar arithmetic instead of a hand-written table. Without exactly
+        // one clock there is no evidence, and the capture day's HH:mm must not
+        // be invented for it.
+        weekdayOf(text)?.let { weekday ->
+            val clock = times.singleOrNull() ?: return null
+            return runCatching {
+                Calendar.getInstance(timeZone).apply {
+                    timeInMillis = capturedAtMs
+                    isLenient = false
+                    val daysBack = (get(Calendar.DAY_OF_WEEK) - weekday + 7) % 7
+                    add(Calendar.DAY_OF_YEAR, -daysBack)
+                    set(Calendar.HOUR_OF_DAY, clock.groupValues[1].toInt())
+                    set(Calendar.MINUTE, clock.groupValues[2].toInt())
+                    set(Calendar.SECOND, clock.groupValues[3].ifBlank { "0" }.toInt())
                     set(Calendar.MILLISECOND, 0)
                 }.timeInMillis.takeIf {
                     it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS)
