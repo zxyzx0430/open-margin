@@ -45,6 +45,7 @@ object UpdateInstallFlow {
         DOWNLOAD_FAILED,
         SIZE_MISMATCH,
         DIGEST_MISMATCH,
+        SIGNATURE_MISMATCH,
     }
 
     enum class InstallOutcome {
@@ -67,7 +68,17 @@ object UpdateInstallFlow {
     ): File? {
         val file = apkFile(context, update) ?: return null
         return when (ApkIntegrity.verify(file, update.apkSizeBytes, update.apkSha256)) {
-            ApkCheck.OK -> file
+            ApkCheck.OK -> {
+                // Third gate: a file with the right bytes must also carry the
+                // same signing certificate as the installed app.
+                val apk = file ?: return null
+                if (ApkSignatureVerifier.matchesInstalled(context, apk)) {
+                    apk
+                } else {
+                    runCatching { apk.delete() }
+                    null
+                }
+            }
             ApkCheck.MISSING -> null
             ApkCheck.SIZE_MISMATCH, ApkCheck.DIGEST_MISMATCH -> {
                 // Leftovers from an interrupted or tampered download must never
@@ -140,7 +151,16 @@ object UpdateInstallFlow {
                     emit(DownloadEvent.Verifying)
                     val file = apkFile(context, update)
                     when (ApkIntegrity.verify(file, update.apkSizeBytes, update.apkSha256)) {
-                        ApkCheck.OK -> emit(DownloadEvent.Completed(file!!))
+                        ApkCheck.OK -> {
+                            if (file != null &&
+                                ApkSignatureVerifier.matchesInstalled(context, file)
+                            ) {
+                                emit(DownloadEvent.Completed(file))
+                            } else {
+                                file?.let { runCatching { it.delete() } }
+                                emit(DownloadEvent.Failed(Failure.SIGNATURE_MISMATCH))
+                            }
+                        }
                         ApkCheck.SIZE_MISMATCH -> {
                             file?.let { runCatching { it.delete() } }
                             emit(DownloadEvent.Failed(Failure.SIZE_MISMATCH))

@@ -7,6 +7,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.bookkeeping.app.notification.CaptureNotifier
 import com.bookkeeping.app.notification.KeepAliveService
+import com.bookkeeping.app.update.UpdateNotifier
 
 /**
  * User-selected Android UI language. Persistence is independent of bookkeeping
@@ -50,6 +51,7 @@ object AppLanguage {
             // Channel names are user-visible; rebuild them in the new language.
             KeepAliveService.ensureChannel(context)
             CaptureNotifier.ensureChannel(context)
+            UpdateNotifier.ensureChannel(context)
         }
         return ok
     }

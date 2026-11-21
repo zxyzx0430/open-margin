@@ -25,6 +25,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.AlertDialog
@@ -91,10 +92,15 @@ import java.util.Date
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.update.GitHubReleaseUpdateChecker
+import com.bookkeeping.app.update.SiteUpdateChecker
+import com.bookkeeping.app.update.SiteUpdateCoordinator
+import com.bookkeeping.app.update.SiteUpdatePolicy
+import com.bookkeeping.app.update.SiteUpdatePrefs
 import com.bookkeeping.app.update.UpdateComponentScope
 import com.bookkeeping.app.update.UpdateInstallFlow
 import com.bookkeeping.app.update.UpdatePresentation
 import com.bookkeeping.app.update.UpdateVersionPolicy
+import com.bookkeeping.app.update.asCheckResult
 import com.bookkeeping.app.sync.SyncState
 import com.bookkeeping.app.sync.SyncStateKind
 import com.bookkeeping.app.sync.endpointHost
@@ -137,6 +143,9 @@ fun SettingsScreen(
     onReplayOnboarding: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
+    // 账单页横幅的「查看」：滚到「关于与更新」卡片。
+    focusUpdateCard: Boolean = false,
+    onUpdateCardFocused: () -> Unit = {},
 ) {
     val keepAlive by viewModel.keepAliveEnabled.collectAsState()
     val successNotifications by viewModel.successNotificationsEnabled.collectAsState()
@@ -191,6 +200,26 @@ fun SettingsScreen(
     var exportFeedback by remember { mutableStateOf<String?>(null) }
     var exportInProgress by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
+    val settingsListState = rememberLazyListState()
+
+    LaunchedEffect(focusUpdateCard) {
+        if (focusUpdateCard) {
+            // The about card is the third item from the end (section header,
+            // card, then the ROM header/card). Deriving the index from the
+            // current list avoids a hard-coded position drifting.
+            delay(200)
+            var total = settingsListState.layoutInfo.totalItemsCount
+            var attempts = 0
+            while (total < 3 && attempts < 10) {
+                delay(50)
+                total = settingsListState.layoutInfo.totalItemsCount
+                attempts++
+            }
+            val target = if (total >= 3) total - 3 else 0
+            runCatching { settingsListState.animateScrollToItem(target) }
+            onUpdateCardFocused()
+        }
+    }
 
     LaunchedEffect(openAutomationSetup) {
         if (openAutomationSetup) {
@@ -287,6 +316,7 @@ fun SettingsScreen(
         },
     ) { innerPadding ->
         LazyColumn(
+            state = settingsListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
@@ -1451,7 +1481,10 @@ private fun LanguageCard() {
 
 /** Stable-release check that downloads the APK and hands it to the system installer. */
 @Composable
-private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit) {
+private fun AboutUpdateCard(
+    onOpenAbout: () -> Unit,
+    onOpenFeedback: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
@@ -1460,6 +1493,26 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit)
     }
     var installDialog by remember { mutableStateOf<InstallDialogState?>(null) }
     var downloadJob by remember { mutableStateOf<Job?>(null) }
+
+    // The site manifest is the primary channel; the GitHub check remains the
+    // fallback when zxyzx.me is unreachable.
+    val packageName = context.packageName
+    val officialBuild = SiteUpdatePolicy.canAutoDownload(packageName)
+    val testBuild = SiteUpdatePolicy.isTestPackage(packageName)
+    val sitePrefs = remember { SiteUpdatePrefs(context) }
+    var autoDownload by remember { mutableStateOf(sitePrefs.autoDownloadEnabled()) }
+    var bannerEnabled by remember { mutableStateOf(sitePrefs.bannerEnabled()) }
+    var previewBanner by remember { mutableStateOf(sitePrefs.previewBannerEnabled()) }
+    var siteUpdate by remember {
+        mutableStateOf<SiteUpdatePolicy.SiteUpdateManifest?>(null)
+    }
+
+    LaunchedEffect(officialBuild) {
+        if (!officialBuild) return@LaunchedEffect
+        siteUpdate = withContext(Dispatchers.IO) {
+            SiteUpdateCoordinator.refreshIfDue(context)
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose { downloadJob?.cancel() }
@@ -1561,6 +1614,103 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit)
             subtitle = tr("邮件或 GitHub Issue"),
             onClick = onOpenFeedback,
         )
+        if (officialBuild) {
+            SettingsRowDivider()
+            SettingsSwitchRow(
+                icon = Icons.Filled.Notifications,
+                title = tr("新版本提醒"),
+                subtitle = tr("账单页显示新版本横幅"),
+                checked = bannerEnabled,
+                onCheckedChange = { enabled ->
+                    bannerEnabled = enabled
+                    sitePrefs.setBannerEnabled(enabled)
+                },
+            )
+            SettingsRowDivider()
+            SettingsSwitchRow(
+                icon = Icons.Filled.Sync,
+                title = tr("自动下载并安装新版本"),
+                subtitle = tr("后台下载并校验签名，安装仍需确认"),
+                checked = autoDownload,
+                onCheckedChange = { enabled ->
+                    autoDownload = enabled
+                    sitePrefs.setAutoDownloadEnabled(enabled)
+                    if (enabled) {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                SiteUpdateCoordinator.onAutoDownloadEnabled(context)
+                            }
+                            siteUpdate = SiteUpdateCoordinator.cachedManifest(context)
+                        }
+                    }
+                },
+            )
+        }
+        if (testBuild) {
+            SettingsRowDivider()
+            SettingsSwitchRow(
+                icon = Icons.Filled.Visibility,
+                title = tr("预览更新提醒"),
+                subtitle = tr("仅测试包：显示样例横幅，不下载"),
+                checked = previewBanner,
+                onCheckedChange = { enabled ->
+                    previewBanner = enabled
+                    sitePrefs.setPreviewBannerEnabled(enabled)
+                },
+            )
+        }
+        if (officialBuild) {
+            siteUpdate?.let { update ->
+                SettingsRowDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = tr("发现新版本") + " v" + update.versionName,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        UpdatePresentation.formatSize(update.size)?.let { size ->
+                            Text(
+                                text = size,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    TextButton(
+                        enabled = !checking,
+                        onClick = {
+                            scope.launch {
+                                val check = update.asCheckResult()
+                                val verified = withContext(Dispatchers.IO) {
+                                    UpdateInstallFlow.verifiedDownload(context, check)
+                                }
+                                installDialog = InstallDialogState(
+                                    update = check,
+                                    stage = if (verified != null) {
+                                        InstallStage.READY
+                                    } else {
+                                        InstallStage.PROMPT
+                                    },
+                                )
+                            }
+                        },
+                    ) {
+                        Text(tr("下载"), maxLines = 1, softWrap = false)
+                    }
+                }
+            }
+        }
         SettingsRowDivider()
         Column(
             Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -1574,17 +1724,65 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit)
                     result = null
                     installDialog = null
                     scope.launch {
-                        val checked = withContext(Dispatchers.IO) {
-                            GitHubReleaseUpdateChecker.checkStable()
-                        }
+                        var siteFound: SiteUpdatePolicy.SiteUpdateManifest? = null
+                        val checked: GitHubReleaseUpdateChecker.CheckResult? =
+                            withContext(Dispatchers.IO) {
+                                if (!officialBuild) {
+                                    // Test build: site-first check still runs so the
+                                    // manifest path can be inspected, but the
+                                    // download button stays disabled below.
+                                    return@withContext when (val site = SiteUpdateChecker.check()) {
+                                        is SiteUpdateChecker.Result.Available ->
+                                            site.manifest.asCheckResult()
+                                        SiteUpdateChecker.Result.UpToDate ->
+                                            GitHubReleaseUpdateChecker.CheckResult.UpToDate
+                                        SiteUpdateChecker.Result.Unavailable ->
+                                            GitHubReleaseUpdateChecker.checkStable()
+                                    }
+                                }
+                                when (val site = SiteUpdateChecker.check()) {
+                                    is SiteUpdateChecker.Result.Available -> {
+                                        SiteUpdateCoordinator.rememberFoundManifest(
+                                            context,
+                                            site.manifest,
+                                            site.rawJson,
+                                        )
+                                        siteFound = site.manifest
+                                        null
+                                    }
+                                    SiteUpdateChecker.Result.UpToDate ->
+                                        GitHubReleaseUpdateChecker.CheckResult.UpToDate
+                                    SiteUpdateChecker.Result.Unavailable ->
+                                        GitHubReleaseUpdateChecker.checkStable()
+                                }
+                            }
                         result = checked
+                        siteFound?.let { siteUpdate = it }
                         checking = false
                         if (checked is GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable &&
                             checked.apkUrl != null
                         ) {
-                            val verified = UpdateInstallFlow.verifiedDownload(context, checked)
+                            if (officialBuild) {
+                                val verified = withContext(Dispatchers.IO) {
+                                    UpdateInstallFlow.verifiedDownload(context, checked)
+                                }
+                                installDialog = InstallDialogState(
+                                    update = checked,
+                                    stage = if (verified != null) {
+                                        InstallStage.READY
+                                    } else {
+                                        InstallStage.PROMPT
+                                    },
+                                )
+                            }
+                        } else if (siteFound != null && officialBuild) {
+                            val found = siteFound ?: return@launch
+                            val check = found.asCheckResult()
+                            val verified = withContext(Dispatchers.IO) {
+                                UpdateInstallFlow.verifiedDownload(context, check)
+                            }
                             installDialog = InstallDialogState(
-                                update = checked,
+                                update = check,
                                 stage = if (verified != null) {
                                     InstallStage.READY
                                 } else {
@@ -1669,17 +1867,21 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit)
                                 modifier = Modifier.weight(1f),
                             )
                             TextButton(
+                                enabled = officialBuild && !checking,
                                 onClick = {
-                                    val verified =
-                                        UpdateInstallFlow.verifiedDownload(context, state)
-                                    installDialog = InstallDialogState(
-                                        update = state,
-                                        stage = if (verified != null) {
-                                            InstallStage.READY
-                                        } else {
-                                            InstallStage.PROMPT
-                                        },
-                                    )
+                                    scope.launch {
+                                        val verified = withContext(Dispatchers.IO) {
+                                            UpdateInstallFlow.verifiedDownload(context, state)
+                                        }
+                                        installDialog = InstallDialogState(
+                                            update = state,
+                                            stage = if (verified != null) {
+                                                InstallStage.READY
+                                            } else {
+                                                InstallStage.PROMPT
+                                            },
+                                        )
+                                    }
                                 },
                             ) {
                                 Text(
@@ -1687,6 +1889,13 @@ private fun AboutUpdateCard(onOpenAbout: () -> Unit, onOpenFeedback: () -> Unit)
                                     maxLines = 1,
                                     softWrap = false,
                                     overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (!officialBuild) {
+                                Text(
+                                    text = tr("测试包仅预览，不下载安装"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
@@ -1853,6 +2062,8 @@ private fun installFailureText(reason: UpdateInstallFlow.Failure): String = when
     UpdateInstallFlow.Failure.SIZE_MISMATCH,
     UpdateInstallFlow.Failure.DIGEST_MISMATCH,
     -> tr("下载文件校验失败，已删除，请重试")
+    UpdateInstallFlow.Failure.SIGNATURE_MISMATCH ->
+        tr("安装包签名与当前应用不一致，已删除")
     UpdateInstallFlow.Failure.REJECTED_URL -> tr("更新地址不受信任，已取消下载")
     else -> tr("下载失败，请重试")
 }

@@ -117,13 +117,18 @@ import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.stats.StatsPeriod
+import com.bookkeeping.app.ui.components.SiteUpdateBanner
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimary
 import com.bookkeeping.app.ui.theme.QingSurface
 import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.update.SiteUpdateCoordinator
+import com.bookkeeping.app.update.SiteUpdatePolicy
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -146,6 +151,8 @@ fun TransactionListScreen(
     drilldown: StatsLedgerDrilldown? = null,
     onDrilldownConsumed: () -> Unit = {},
     onOpenDetail: (Long) -> Unit = {},
+    // 账单页「发现新版本」横幅的「查看」：跳到设置页关于与更新卡片。
+    onOpenUpdateSettings: () -> Unit = {},
     // 长按 FAB 达到录音阈值的落点由外部注入：RootNavigation 立刻打开录音面板并开始录音。
     // 账单页本身不碰麦克风、不写库；点按 + 打开手动新建面板。
     onVoiceEntry: () -> Unit = {},
@@ -197,6 +204,10 @@ fun TransactionListScreen(
     var latestFeedbackSaveSequence by remember { mutableIntStateOf(0) }
     var scrollTargetTransactionId by remember { mutableStateOf<Long?>(null) }
     var highlightedTransactionId by remember { mutableStateOf<Long?>(null) }
+    var siteUpdateBanner by remember {
+        mutableStateOf<SiteUpdatePolicy.BannerState?>(null)
+    }
+    var updateBannerRefresh by remember { mutableIntStateOf(0) }
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -262,10 +273,27 @@ fun TransactionListScreen(
                 notificationListenerEnabled = NotificationListenerHelper.isEnabled(context)
                 pageRecognitionEnabled = isPageRecognitionEnabled(context)
                 statusRefresh++
+                updateBannerRefresh++
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // 进入账单页静默检查：距上次超过 24 小时才联网，不转圈、不阻塞 UI。
+    // 测试包不联网，只按「预览更新提醒」开关渲染样例横幅。
+    LaunchedEffect(updateBannerRefresh, context) {
+        val packageName = context.packageName
+        if (!SiteUpdatePolicy.canShowBanner(packageName)) {
+            siteUpdateBanner = null
+            return@LaunchedEffect
+        }
+        if (SiteUpdatePolicy.isOfficialPackage(packageName)) {
+            withContext(Dispatchers.IO) {
+                SiteUpdateCoordinator.refreshIfDue(context)
+            }
+        }
+        siteUpdateBanner = SiteUpdateCoordinator.bannerFor(context)
     }
 
     val status by produceState(
@@ -331,9 +359,11 @@ fun TransactionListScreen(
     }
     val duplicatesIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
+        (if (siteUpdateBanner != null) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0)
     val dayGroupsStartIndex = 6 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
+        (if (siteUpdateBanner != null) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0) +
         (if (duplicateCandidates.isNotEmpty()) 1 else 0)
 
@@ -517,6 +547,20 @@ fun TransactionListScreen(
                             }
                         },
                         error = true,
+                    )
+                }
+            }
+
+            if (siteUpdateBanner != null) {
+                item(key = "site_update_banner") {
+                    val banner = siteUpdateBanner ?: return@item
+                    SiteUpdateBanner(
+                        versionName = banner.versionName,
+                        onView = onOpenUpdateSettings,
+                        onDismiss = {
+                            SiteUpdateCoordinator.dismissBanner(context, banner.versionCode)
+                            siteUpdateBanner = null
+                        },
                     )
                 }
             }

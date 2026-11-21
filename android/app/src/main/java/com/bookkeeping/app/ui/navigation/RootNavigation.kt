@@ -102,6 +102,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     var notificationEnabled by remember { mutableStateOf(NotificationListenerHelper.isEnabled(context)) }
     var waitingForAccess by rememberSaveable { mutableStateOf(false) }
     var leftForAccess by rememberSaveable { mutableStateOf(false) }
+    var focusUpdateSettings by remember { mutableStateOf(false) }
     val postNotificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun finishOnboarding(skipped: Boolean) {
@@ -241,6 +242,16 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         drilldown = pendingLedgerDrilldown,
                         onDrilldownConsumed = { pendingLedgerDrilldown = null },
                         onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
+                        onOpenUpdateSettings = {
+                            focusUpdateSettings = true
+                            navController.navigate(BottomNavItem.Settings.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
                         // 长按达到阈值：立刻打开录音面板并开始录音。面板已经开着就不再开第二个会话。
                         onVoiceEntry = {
                             if (!voiceSheetOpen) voiceSheetOpen = true
@@ -353,6 +364,8 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                             navController.navigate(AppRoutes.TRANSACTION_DIAGNOSTICS)
                         },
                         onReplayOnboarding = onboarding::restart,
+                        focusUpdateCard = focusUpdateSettings,
+                        onUpdateCardFocused = { focusUpdateSettings = false },
                     )
                 }
             }
