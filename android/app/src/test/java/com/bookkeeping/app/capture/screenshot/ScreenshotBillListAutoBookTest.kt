@@ -97,6 +97,7 @@ class ScreenshotBillListAutoBookTest {
         assertEquals(2, evidence.drafts.size)
         assertEquals(setOf(800L, 2350L), evidence.drafts.mapNotNull { it.amountCents }.toSet())
         assertTrue(evidence.drafts.all { it.settledBillRow })
+        assertTrue(evidence.drafts.all { it.completionInferredFromList })
         assertTrue(evidence.drafts.all { it.completionStatus == CaptureCandidate.COMPLETION_COMPLETED })
         assertTrue(evidence.drafts.all { it.completionExplicit })
 
@@ -119,7 +120,55 @@ class ScreenshotBillListAutoBookTest {
         assertTrue(draft.amountUnambiguous)
         assertEquals(CaptureCandidate.KIND_PAYMENT, draft.kind)
         assertTrue(draft.supportedPaymentPage)
+        assertTrue(draft.completionInferredFromList)
         assertEquals("settled bill list row", draft.reason)
+    }
+
+    /**
+     * Requirement: a list proves money moved, it does not prove a transfer was
+     * accepted. 转账给 张三 without any status word is completed only by the
+     * list's own context, so the completion is inferred — the user confirms it.
+     */
+    @Test
+    fun `a transfer row inferred from the list still asks`() {
+        val blocks = listOf(blockAt("微信支付", 20, 10, 160)) +
+            row("祐迎迎生鲜超市(岭南店)", "¥ 8.00", 100) +
+            row("转账给 张三", "¥ 6.00", 360, payment = "使用零钱支付")
+
+        val transfer = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone)
+            .drafts.single { it.amountCents == 600L }
+        assertEquals(CaptureCandidate.KIND_TRANSFER, transfer.kind)
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, transfer.direction)
+        assertTrue(transfer.settledBillRow)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, transfer.completionStatus)
+        assertTrue(transfer.completionExplicit)
+        assertTrue(transfer.completionInferredFromList)
+
+        val result = plan(blocks)
+        val decision = result.decisions.single { it.draft.amountCents == 600L }
+        assertEquals(Action.ASK_USER, decision.action)
+        assertEquals(setOf(800L), result.bookings.mapNotNull { it.draft.amountCents }.toSet())
+    }
+
+    /**
+     * The other half of the same rule: when the page does print the transfer's
+     * own status word, the completion is stated, not inferred, and it books.
+     */
+    @Test
+    fun `a list row that prints its own transfer status is still auto booked`() {
+        val blocks = listOf(blockAt("微信支付", 20, 10, 160)) +
+            row("祐迎迎生鲜超市(岭南店)", "¥ 8.00", 100) +
+            row("转账给 张三", "¥ 6.00", 360, status = "转账成功", payment = "使用零钱支付")
+
+        val transfer = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone)
+            .drafts.single { it.amountCents == 600L }
+        assertEquals(CaptureCandidate.KIND_TRANSFER, transfer.kind)
+        assertTrue(transfer.completionExplicit)
+        assertFalse(transfer.completionInferredFromList)
+
+        val result = plan(blocks)
+        assertTrue(result.decisions.all { it.action == Action.AUTO_BOOK })
+        assertEquals(setOf(800L, 600L), result.bookings.mapNotNull { it.draft.amountCents }.toSet())
     }
 
     // ---- every unfinished word on one row keeps that row out of the ledger ----
@@ -188,6 +237,7 @@ class ScreenshotBillListAutoBookTest {
         assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, draft.completionStatus)
         assertFalse(draft.completionExplicit)
         assertFalse(draft.settledBillRow)
+        assertFalse(draft.completionInferredFromList)
 
         val result = plan(blocks)
         assertEquals(Action.ASK_USER, result.decisions.single().action)

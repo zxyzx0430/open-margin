@@ -97,6 +97,7 @@ object ScreenshotImportPipeline {
                     directionExplicit = draft.directionExplicit,
                     completionStatus = draft.completionStatus,
                     completionExplicit = draft.completionExplicit,
+                    completionInferredFromList = draft.completionInferredFromList,
                     kind = draft.kind,
                     conflictingFields = evidence.conflictingFields,
                     duplicateResult = dedup.first,
@@ -160,6 +161,12 @@ object ScreenshotImportPipeline {
                         sameImageRepeat -> "same amount appears twice in this screenshot"
                         ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
                             "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
+                        // A list row infers completion from its place in the
+                        // list; that is enough for a payment, not for a
+                        // transfer, whose state word the list never prints.
+                        draft.kind == CaptureCandidate.KIND_TRANSFER &&
+                            draft.completionInferredFromList ->
+                            "transfer completion inferred from a bill list; needs confirmation"
                         assessment.tier == CaptureCandidate.TIER_HIGH ->
                             "high confidence but auto booking disabled"
                         else -> "needs user confirmation"
