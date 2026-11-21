@@ -95,6 +95,7 @@ import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDirection
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewMapping
+import com.bookkeeping.app.ui.screen.capture.LikelyDuplicateNotice
 import com.bookkeeping.app.ui.theme.BookkeepingAppTheme
 import dagger.hilt.android.EntryPointAccessors
 import java.text.SimpleDateFormat
@@ -954,6 +955,9 @@ private fun ImportCandidateCard(
                     )
                 }
             }
+
+            // 与待确认弹窗共用同一句提示和同一套文案，避免两个入口解释不一致。
+            LikelyDuplicateNotice(candidate)
 
             if (needsDirection) {
                 if (directionChoice == null) {

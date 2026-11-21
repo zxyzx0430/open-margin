@@ -346,6 +346,8 @@ private fun CaptureCandidateCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // 跨通道弱证据命中的候选仍可记入账本，这里只说明为什么要他核对、和哪一笔像。
+                LikelyDuplicateNotice(candidate)
                 if (needsDirection) {
                     if (directionChoice == null) {
                         Text(
@@ -447,6 +449,44 @@ private fun CaptureCandidateCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * 「疑似与账本里已有的一笔重复」提示，待确认弹窗与导入候选卡共用。
+ *
+ * 只做展示：命中去重弱证据的候选仍保持 PENDING，用户依旧可以选择记入账本或不记这笔，
+ * 这里只是把「为什么让你核对」「和哪一笔像」说出来。
+ */
+@Composable
+internal fun LikelyDuplicateNotice(
+    candidate: CaptureCandidate,
+    modifier: Modifier = Modifier,
+) {
+    val text = likelyDuplicateNoticeText(candidate) ?: return
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.tertiary,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier,
+    )
+}
+
+/**
+ * 是否显示「疑似重复」提示以及文案怎么拼（纯函数，不依赖 Compose）。
+ *
+ * 只有 [CaptureCandidate.reason] 等于 [CaptureCandidate.REASON_LIKELY_DUPLICATE] 才显示；
+ * [CaptureCandidate.matchedTransactionId] 仅在大于 0 时作为已有记录标识附在末尾。
+ * 金额、商户、方向、状态、置信度等其他字段不参与判断。
+ */
+internal fun likelyDuplicateNoticeText(candidate: CaptureCandidate): String? {
+    if (candidate.reason != CaptureCandidate.REASON_LIKELY_DUPLICATE) return null
+    val existingId = candidate.matchedTransactionId?.takeIf { it > 0L }
+    return if (existingId != null) {
+        tr("疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #%d）").format(existingId)
+    } else {
+        tr("疑似与账本里已有的一笔重复，请核对后再决定")
     }
 }
 
