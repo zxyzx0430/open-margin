@@ -16,6 +16,12 @@ import java.io.File
 class UpdateInstallActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Last-line package gate: a test build must never open the installer,
+        // even if some stale notification or explicit intent reaches here.
+        if (!SiteUpdatePolicy.canAutoDownload(packageName)) {
+            finish()
+            return
+        }
         val fileName = intent.getStringExtra(EXTRA_APK_FILE_NAME)
         val safeName = fileName ?: run {
             finish()
