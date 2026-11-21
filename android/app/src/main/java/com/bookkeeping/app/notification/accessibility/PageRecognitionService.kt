@@ -15,6 +15,9 @@ import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDet
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
+import com.bookkeeping.app.data.repository.DuplicateReason
+import com.bookkeeping.app.data.repository.LedgerInsertResult
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
@@ -675,20 +678,53 @@ open class PageRecognitionService : AccessibilityService() {
                             )
                             return@forEachIndexed
                         }
-                        val inserted = repository.insertIfNotDuplicate(
-                            mappedTransaction,
+                        // 页面识别属于「另一条采集通道」：账本里可能已有一条通知/短信
+                        // 记下的同额同方同平台记录。必须在这里显式传跨通道窗口——
+                        // 默认 0 会让 CrossSourceDuplicatePolicy 整层跳过，这正是
+                        // 「通知记一笔、点开页面又记一笔」的根因。
+                        // 强证据（两侧同订单号）→ 不插新行，候选标记为已入账；
+                        // 弱证据（通知缺商户 / 占位名，页面有真实商户）→ 同样不插新行，
+                        // 但候选必须留在待确认列表并写明「疑似与已有记录重复」。
+                        val result = repository.insertIfNotDuplicateResult(
+                            transaction = mappedTransaction,
                             windowMs = PAGE_DEDUP_WINDOW_MS,
                             notifySuccess = false,
                             diagnosticInput = input,
+                            crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                            holdWeakCrossSourceMatch = true,
                         )
-                        store.mark(
-                            stored,
-                            if (inserted != null && inserted > 0L) {
-                                CaptureCandidate.STATUS_APPROVED
-                            } else {
-                                CaptureCandidate.STATUS_IGNORED
-                            },
-                        )
+                        when (PageCaptureResultPolicy.of(result)) {
+                            PageCaptureOutcome.APPROVED ->
+                                store.mark(stored, CaptureCandidate.STATUS_APPROVED)
+
+                            PageCaptureOutcome.IGNORED ->
+                                store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+
+                            PageCaptureOutcome.HOLD_FOR_REVIEW -> {
+                                val existingId = (result as LedgerInsertResult.Duplicate)
+                                    .existingTransactionId
+                                store.mark(
+                                    stored.copy(
+                                        reason = CaptureCandidate.REASON_LIKELY_DUPLICATE,
+                                        matchedTransactionId = existingId,
+                                    ),
+                                    CaptureCandidate.STATUS_PENDING,
+                                )
+                                repository.recordDiagnostic(
+                                    attemptId = input.attemptId,
+                                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                                    result = TransactionDiagnostics.RESULT_WARNING,
+                                    details = "Page capture held as possible cross-channel duplicate",
+                                    outputSummary = "疑似与已有 #$existingId 重复，保留待确认",
+                                )
+                            }
+
+                            PageCaptureOutcome.RETRY -> {
+                                val failure = (result as LedgerInsertResult.Failed).cause
+                                throw (failure as? Exception)
+                                    ?: IllegalStateException("page capture insert failed", failure)
+                            }
+                        }
                     } catch (failure: Exception) {
                         transaction?.let {
                             // Preserve retryability after a transient database error.
@@ -827,6 +863,43 @@ open class PageRecognitionService : AccessibilityService() {
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
             ).orEmpty()
             return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+        }
+    }
+}
+
+/** 页面识别拿到仓库结果之后要做什么；纯逻辑，方便 JVM 单测覆盖每条分支。 */
+enum class PageCaptureOutcome {
+    /** 已写入账本（新行或并入已有行）。 */
+    APPROVED,
+
+    /** 已确认是同一笔（同通道重发 / 跨通道同订单号），不再写第二行。 */
+    IGNORED,
+
+    /** 疑似与已有记录重复：不写新行，但候选必须留在待确认列表。 */
+    HOLD_FOR_REVIEW,
+
+    /** 写入失败：保留候选、记录异常，允许下次重试。 */
+    RETRY,
+}
+
+/**
+ * 把 [LedgerInsertResult] 翻译成页面识别的候选状态。
+ *
+ * 关键区分：[DuplicateReason.CROSS_SOURCE_WEAK] 是「弱证据」，只说明候选可能与
+ * 账本里某条通知记录是同一笔，并不等于已经入账；把它当 [PageCaptureOutcome.IGNORED]
+ * 会让候选从待确认列表消失，用户再也看不到这笔钱。所以它必须走
+ * [PageCaptureOutcome.HOLD_FOR_REVIEW]。
+ */
+object PageCaptureResultPolicy {
+    fun of(result: LedgerInsertResult): PageCaptureOutcome = when (result) {
+        is LedgerInsertResult.Inserted, is LedgerInsertResult.Merged ->
+            PageCaptureOutcome.APPROVED
+        is LedgerInsertResult.Failed -> PageCaptureOutcome.RETRY
+        is LedgerInsertResult.Duplicate -> when (result.reason) {
+            DuplicateReason.CROSS_SOURCE_WEAK -> PageCaptureOutcome.HOLD_FOR_REVIEW
+            DuplicateReason.SOURCE_ORDER_ID,
+            DuplicateReason.SAME_SOURCE_WINDOW,
+            DuplicateReason.CROSS_SOURCE -> PageCaptureOutcome.IGNORED
         }
     }
 }
