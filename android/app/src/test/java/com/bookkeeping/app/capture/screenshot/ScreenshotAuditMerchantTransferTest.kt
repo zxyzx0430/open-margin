@@ -1,7 +1,9 @@
 package com.bookkeeping.app.capture.screenshot
 
+import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
+import com.bookkeeping.app.ui.screen.capture.CaptureReviewDirection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -15,7 +17,8 @@ import java.util.TimeZone
  *    amount (icon row, payment method, timestamp), so the shop must still be
  *    found when the row directly above the amount is rejected;
  *  - a WeChat chat transfer bubble is an amount plus 已被接收 / 已收款 / 待接收
- *    plus 转账, and used to produce no candidate at all.
+ *    plus 转账, and used to produce no candidate at all. 待接收 is drawn on both
+ *    sides of the chat, so it must never decide the direction by itself.
  *
  * No screenshot bytes and no raw OCR dump are stored here.
  */
@@ -264,5 +267,173 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, decision.draft.direction)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
         assertEquals(Action.AUTO_BOOK, decision.action)
+    }
+
+    // ---- 待接收: the state word is drawn on both sides of the chat ----
+
+    /** OCR lines with no bounding box at all: no bubble side can be derived. */
+    private fun textOnly(vararg lines: String) = lines.map { TextBlock(text = it) }
+
+    /** The same waiting bubble drawn at a known horizontal position. */
+    private fun waitingTransferPage(amountLeft: Int, amountRight: Int) = listOf(
+        blockAt("在吗", 60, 120, 220),
+        blockAt("晚上一起吃饭", 420, 120, 760),
+        blockAt("¥200.00", amountLeft, 200, amountRight),
+        blockAt("待接收", amountLeft + 10, 240, amountRight - 10),
+        blockAt("转账", amountLeft + 10, 280, amountRight - 10),
+    )
+
+    /**
+     * 待接收 appears on the sender's bubble (money already left me, waiting for
+     * the other side) and on the receiver's (waiting for me). Without a bubble
+     * side the word proves no direction, so the draft must stay UNKNOWN and the
+     * review chain must refuse to book it before the user picks 我收钱 / 我付钱.
+     */
+    @Test
+    fun `waiting transfer without geometry stays direction unknown and needs a pick`() {
+        val blocks = textOnly("¥200.00", "待接收", "转账")
+
+        val evidence = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone)
+
+        assertEquals(1, evidence.drafts.size)
+        val draft = evidence.drafts.single()
+        assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_UNKNOWN, draft.direction)
+        assertFalse("an unproven direction is not explicit", draft.directionExplicit)
+        assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, draft.completionStatus)
+        assertFalse("待接收 is not a completion marker", draft.completionExplicit)
+        assertTrue(draft.supportedPaymentPage)
+        // The reason may say the direction is still open, never that it is income.
+        assertTrue(draft.reason.contains("direction"))
+        assertFalse(draft.reason.contains("income", ignoreCase = true))
+        assertFalse(draft.reason.contains("expense", ignoreCase = true))
+
+        // No one-tap income booking: the candidate cannot be confirmed until a
+        // direction is picked, and either pick is accepted.
+        val result = plan(blocks)
+        val decision = result.decisions.single()
+        assertNotEquals(Action.AUTO_BOOK, decision.action)
+        assertTrue(result.bookings.isEmpty())
+
+        val candidate = ScreenshotCandidateFactory.create(
+            decision = decision,
+            source = IntakeSource.SHARE,
+            capturedAtMs = capturedAt,
+            imageFingerprint = FINGERPRINT,
+        )
+        assertEquals(CaptureCandidate.DIRECTION_UNKNOWN, candidate.direction)
+        assertFalse(candidate.directionExplicit)
+        assertTrue(CaptureReviewDirection.requiresSelection(candidate))
+        assertFalse(
+            "an unpicked direction must not reach the ledger",
+            CaptureReviewDirection.canConfirm(candidate, null),
+        )
+        assertFalse(CaptureBookGate.mayConfirm(candidate))
+        assertTrue(
+            CaptureReviewDirection.canConfirm(candidate, CaptureCandidate.DIRECTION_EXPENSE),
+        )
+        assertTrue(
+            CaptureReviewDirection.canConfirm(candidate, CaptureCandidate.DIRECTION_INCOME),
+        )
+    }
+
+    @Test
+    fun `waiting transfer on the sender side with geometry is an expense`() {
+        val draft = ScreenshotPageInterpreter
+            .interpret(waitingTransferPage(amountLeft = 80, amountRight = 300), capturedAt, zone)
+            .drafts.single()
+
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
+        assertTrue(draft.directionExplicit)
+        assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+        assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, draft.completionStatus)
+        assertFalse(draft.completionExplicit)
+    }
+
+    @Test
+    fun `waiting transfer on the receiver side with geometry is an income`() {
+        val draft = ScreenshotPageInterpreter
+            .interpret(waitingTransferPage(amountLeft = 500, amountRight = 720), capturedAt, zone)
+            .drafts.single()
+
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, draft.direction)
+        assertTrue(draft.directionExplicit)
+        assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+        assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, draft.completionStatus)
+        assertFalse(draft.completionExplicit)
+    }
+
+    @Test
+    fun `waiting transfer in the middle with geometry stays unknown`() {
+        val draft = ScreenshotPageInterpreter
+            .interpret(waitingTransferPage(amountLeft = 300, amountRight = 480), capturedAt, zone)
+            .drafts.single()
+
+        assertEquals(CaptureCandidate.DIRECTION_UNKNOWN, draft.direction)
+        assertFalse(draft.directionExplicit)
+        assertEquals(CaptureCandidate.COMPLETION_UNKNOWN, draft.completionStatus)
+        assertFalse(draft.completionExplicit)
+    }
+
+    // ---- regression: the words that do identify their side keep their meaning ----
+
+    @Test
+    fun `accepted transfer without geometry stays a sender expense that is unfinished`() {
+        val blocks = textOnly("¥200.00", "已被接收", "转账")
+
+        val draft = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone).drafts.single()
+
+        assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
+        assertTrue(draft.directionExplicit)
+        assertNotEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+        assertFalse(draft.completionExplicit)
+    }
+
+    @Test
+    fun `received transfer without geometry stays an income that is completed`() {
+        val blocks = textOnly("¥200.00", "已收款", "转账")
+
+        val draft = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone).drafts.single()
+
+        assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, draft.direction)
+        assertTrue(draft.directionExplicit)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+        assertTrue(draft.completionExplicit)
+    }
+
+    /** Guard: non-transfer WeChat / Alipay pages still use the text rules. */
+    @Test
+    fun `ordinary wechat and alipay pages keep their direction`() {
+        val wechatPaid = listOf(
+            block("微信支付", 10),
+            block("收款方 便利店", 40),
+            block("-¥36.50", 80),
+            block("当前状态", 120),
+            block("交易成功", 140),
+        )
+        val alipayPaid = listOf(
+            block("支付宝", 10),
+            block("交易成功", 40),
+            block("¥18.00", 80),
+            block("付款方式 余额宝", 120),
+        )
+        val alipayReceived = listOf(
+            block("支付宝", 10),
+            block("收款成功", 40),
+            block("¥88.00", 80),
+        )
+
+        listOf(wechatPaid, alipayPaid).forEach { page ->
+            val draft = ScreenshotPageInterpreter.interpret(page, capturedAt, zone).drafts.single()
+            assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
+            assertTrue(draft.directionExplicit)
+        }
+        val incoming = ScreenshotPageInterpreter
+            .interpret(alipayReceived, capturedAt, zone)
+            .drafts.single()
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, incoming.direction)
+        assertTrue(incoming.directionExplicit)
     }
 }
