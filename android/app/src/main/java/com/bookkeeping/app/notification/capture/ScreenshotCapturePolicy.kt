@@ -54,6 +54,17 @@ object ScreenshotCapturePolicy {
         val action: Action,
     )
 
+    /**
+     * Admission gate for one draft.
+     *
+     * Order matters: an unfinished payment waits, an exact duplicate links, and
+     * only then is the draft asked to prove it is a transaction at all. A page
+     * that shows a usable amount but no readable 支出 / 收入 word is still a
+     * transaction — the user is asked to pick the direction instead of the
+     * payment being dropped. Anything that fails the transaction-shaped gate
+     * (no amount, ambiguous amount, contradictory fields, not transaction-like)
+     * is ignored, exactly as before.
+     */
     fun assess(
         evidence: Evidence,
         allowAuto: Boolean,
@@ -66,14 +77,32 @@ object ScreenshotCapturePolicy {
         if (evidence.duplicateResult == DuplicateResult.EXACT_MATCH) {
             return Assessment(CaptureCandidate.TIER_HIGH, Action.LINK_EXISTING)
         }
-        val usefulCandidate = evidence.transactionLike &&
+        // What the page must prove before it may become a card at all: it has
+        // to look like money, the amount has to be singular and in range, and
+        // the page must not contradict itself. A scenery photo, a chat
+        // screenshot or a page whose two amounts disagree keeps returning
+        // IGNORE — those are not transactions and must not become cards.
+        val transactionShaped = evidence.transactionLike &&
             evidence.amountCents?.let { it in 1..CaptureCandidate.MAX_CENTS } == true &&
-            evidence.amountUnambiguous &&
-            evidence.direction in setOf(
-                CaptureCandidate.DIRECTION_EXPENSE,
-                CaptureCandidate.DIRECTION_INCOME,
-            ) && evidence.directionExplicit && !evidence.conflictingFields
-        if (!usefulCandidate) return Assessment(CaptureCandidate.TIER_LOW, Action.IGNORE)
+            evidence.amountUnambiguous && !evidence.conflictingFields
+        if (!transactionShaped) return Assessment(CaptureCandidate.TIER_LOW, Action.IGNORE)
+        val directionReadable = evidence.direction in setOf(
+            CaptureCandidate.DIRECTION_EXPENSE,
+            CaptureCandidate.DIRECTION_INCOME,
+        ) && evidence.directionExplicit
+        if (!directionReadable) {
+            // 金额、商户、平台都清楚，只是页面上没有 支出 / 收入 / 付款给 / 收款
+            // 这类字样：这是识别不出方向的**交易**，不是非交易图。旧的
+            // TIER_LOW + IGNORE 会把它静默丢掉，用户既看不到卡也不知道少了一笔；
+            // 复核卡本来就能让用户点选方向（[CaptureReviewDirection]），
+            // [CaptureBookGate.mayConfirm] 也只放行显式方向，所以这里交给人选一次。
+            return if (evidence.direction == CaptureCandidate.DIRECTION_UNKNOWN) {
+                Assessment(CaptureCandidate.TIER_MEDIUM, Action.ASK_USER)
+            } else {
+                // 其它读不出来的取值不是 UI 能提供的选项，仍然不进收件箱。
+                Assessment(CaptureCandidate.TIER_LOW, Action.IGNORE)
+            }
+        }
 
         val high = evidence.supportedPaymentPage && evidence.paymentPlatformKnown &&
             completion == CaptureCandidate.COMPLETION_COMPLETED &&
