@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.screen.capture
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.local.entity.TransactionCategory
@@ -13,6 +14,7 @@ import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.notification.capture.RestoreOutcome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -34,10 +36,18 @@ class CaptureReviewViewModel @Inject constructor(
 
     data class UiState(
         val pending: List<CaptureCandidate> = emptyList(),
+        /** Ignored cards the user can bring back into review. */
+        val ignored: List<CaptureCandidate> = emptyList(),
+        /** The dialog body shows the ignored list instead of the pending list. */
+        val showingIgnored: Boolean = false,
         /** A full-list reload is running; per-card writes use [busyIds]. */
         val busy: Boolean = false,
         /** Cards with a write in flight. One card never blocks another. */
         val busyIds: Set<String> = emptySet(),
+        /** An undo/restore write is in flight; both lists are stale until it lands. */
+        val restoring: Boolean = false,
+        /** The card just ignored, while its undo window is still open. */
+        val undo: CaptureIgnoreUndo.Offer? = null,
         val message: String? = null,
     )
 
@@ -53,19 +63,24 @@ class CaptureReviewViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(busy = true) }
-            val pending = withContext(Dispatchers.IO) { store.pending() }
-            queue.replacePending(pending)
+            val snapshot = withContext(Dispatchers.IO) { store.pending() to store.ignored() }
+            queue.replacePending(snapshot.first)
+            _state.update { it.copy(ignored = snapshot.second) }
             publish()
         }
     }
 
     private fun publish(message: String? = _state.value.message) {
-        _state.value = UiState(
-            pending = queue.pending(),
-            busy = false,
-            busyIds = queue.busyIds(),
-            message = message,
-        )
+        // copy() instead of a fresh UiState: the undo offer and the ignored list
+        // must survive a list reload, or a passing refresh would eat the undo.
+        _state.update {
+            it.copy(
+                pending = queue.pending(),
+                busy = false,
+                busyIds = queue.busyIds(),
+                message = message,
+            )
+        }
     }
 
     fun approve(
@@ -146,7 +161,9 @@ class CaptureReviewViewModel @Inject constructor(
                 return@launch
             }
             queue.finish(resolved.candidateId)
-            queue.replacePending(withContext(Dispatchers.IO) { store.pending() })
+            val snapshot = withContext(Dispatchers.IO) { store.pending() to store.ignored() }
+            queue.replacePending(snapshot.first)
+            _state.update { it.copy(ignored = snapshot.second) }
             publish(
                 message = when {
                     inserted -> AppLanguage.tr(context, "已记入账本")
@@ -156,6 +173,12 @@ class CaptureReviewViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Ignore one card, then offer to take it back for [CaptureIgnoreUndo.WINDOW_MS].
+     *
+     * The card is never deleted: it becomes IGNORED and stays in [CaptureCandidateStore.ignored],
+     * so a missed tap costs a trip to the ignored list, not a lost bill.
+     */
     fun ignore(candidate: CaptureCandidate) {
         // Only the same card is refused while it writes; a tap on another card
         // is never dropped, which is what made users tap twice.
@@ -167,11 +190,94 @@ class CaptureReviewViewModel @Inject constructor(
             }
             val outcome = queue.settleIgnore(candidate, marked)
             if (outcome == IgnoreOutcome.IGNORED) {
-                queue.replacePending(withContext(Dispatchers.IO) { store.pending() })
+                val snapshot = withContext(Dispatchers.IO) { store.pending() to store.ignored() }
+                queue.replacePending(snapshot.first)
+                _state.update {
+                    it.copy(
+                        ignored = snapshot.second,
+                        undo = CaptureIgnoreUndo.Offer(candidate, SystemClock.elapsedRealtime()),
+                    )
+                }
             }
             publish(message = AppLanguage.tr(context, CaptureReviewText.ignore(outcome)))
             if (outcome == IgnoreOutcome.MARK_FAILED) {
                 recordFailure(candidate, "ignore: store.mark returned false")
+            }
+        }
+    }
+
+    /** Take back the card ignored a moment ago; the ledger was never touched. */
+    fun undoIgnore() {
+        val offer = _state.value.undo ?: return
+        if (!offer.isOpen(SystemClock.elapsedRealtime())) {
+            _state.update {
+                it.copy(
+                    undo = null,
+                    message = AppLanguage.tr(context, CaptureReviewText.UNDO_EXPIRED),
+                )
+            }
+            return
+        }
+        restore(offer.candidate, viaUndo = true)
+    }
+
+    /** The dialog calls this when the countdown reaches zero; a late call is a no-op. */
+    fun expireUndo() {
+        val offer = _state.value.undo ?: return
+        if (offer.isOpen(SystemClock.elapsedRealtime())) return
+        _state.update {
+            it.copy(
+                undo = null,
+                message = AppLanguage.tr(context, CaptureReviewText.UNDO_CLOSED),
+            )
+        }
+    }
+
+    /** Open/close the "已忽略的截图" recovery list. */
+    fun showIgnored(show: Boolean) {
+        _state.update { it.copy(showingIgnored = show) }
+        if (!show) return
+        viewModelScope.launch {
+            val ignored = withContext(Dispatchers.IO) { store.ignored() }
+            _state.update { it.copy(ignored = ignored) }
+        }
+    }
+
+    /** Bring one card from the ignored list back to review. Never books it. */
+    fun restoreIgnored(candidate: CaptureCandidate) = restore(candidate, viaUndo = false)
+
+    private fun restore(candidate: CaptureCandidate, viaUndo: Boolean) {
+        if (_state.value.restoring) return
+        val candidateId = candidate.candidateId
+        _state.update { it.copy(restoring = true) }
+        viewModelScope.launch {
+            val outcome = withContext(Dispatchers.IO) { store.restore(candidateId) }
+            val snapshot = withContext(Dispatchers.IO) { store.pending() to store.ignored() }
+            if (outcome == RestoreOutcome.RESTORED) {
+                queue.replacePending(snapshot.first)
+            }
+            _state.update {
+                it.copy(
+                    ignored = snapshot.second,
+                    restoring = false,
+                    // Only the offer that pointed at this card is spent.
+                    undo = it.undo?.takeIf { offer ->
+                        !(viaUndo && offer.candidate.candidateId == candidateId)
+                    },
+                )
+            }
+            publish(
+                message = AppLanguage.tr(
+                    context,
+                    if (outcome == RestoreOutcome.RESTORED && viaUndo) {
+                        CaptureReviewText.UNDONE
+                    } else {
+                        CaptureReviewText.restore(outcome)
+                    },
+                ),
+            )
+            if (outcome == RestoreOutcome.WRITE_FAILED) {
+                recordFailure(candidate, "restore: store.restore returned WRITE_FAILED")
             }
         }
     }
@@ -301,13 +407,59 @@ class CaptureReviewQueue(initial: List<CaptureCandidate> = emptyList()) {
     }
 }
 
+/**
+ * The short window in which the last ignore can be taken back.
+ *
+ * Ignoring must not be a one-way door: for [WINDOW_MS] the dialog still offers
+ * "撤销", and afterwards the same card can be restored from the ignored list.
+ * Clock readings are arguments, so the boundary is testable without a device.
+ */
+object CaptureIgnoreUndo {
+    /** Long enough to notice a mis-tap, short enough to stay out of the way. */
+    const val WINDOW_MS = 5_000L
+
+    /** Strictly before the deadline: at exactly 5 s the offer is already gone. */
+    fun isOpen(ignoredAtMs: Long, nowMs: Long): Boolean =
+        nowMs >= ignoredAtMs && nowMs - ignoredAtMs < WINDOW_MS
+
+    fun remainingMs(ignoredAtMs: Long, nowMs: Long): Long =
+        (ignoredAtMs + WINDOW_MS - nowMs).coerceIn(0L, WINDOW_MS)
+
+    /** The card the dialog may take back, plus the clock reading that started it. */
+    data class Offer(val candidate: CaptureCandidate, val ignoredAtMs: Long) {
+        fun isOpen(nowMs: Long): Boolean = CaptureIgnoreUndo.isOpen(ignoredAtMs, nowMs)
+        fun remainingMs(nowMs: Long): Long = CaptureIgnoreUndo.remainingMs(ignoredAtMs, nowMs)
+        /** The card to restore, or null once the window has closed. */
+        fun take(nowMs: Long): CaptureCandidate? = candidate.takeIf { isOpen(nowMs) }
+    }
+}
+
 /** User-visible source strings for ignore outcomes; translated at the UI edge. */
 object CaptureReviewText {
     const val IGNORED = "扫描结果已忽略"
     const val IGNORE_FAILED = "候选状态未能更新，请重试"
 
+    /** Undo result: the card is pending again and nothing reached the ledger. */
+    const val UNDONE = "已撤销忽略，这笔已回到待确认"
+    const val UNDO_EXPIRED = "撤销已过期，可在「已忽略的截图」里找回"
+    const val UNDO_CLOSED = "已忽略，可在「已忽略的截图」里找回"
+
+    /** Restore from the ignored list. */
+    const val RESTORED = "已找回，这笔回到待确认"
+    const val RESTORE_NOT_FOUND = "找不到这笔截图，可能已被清理"
+    const val RESTORE_EXPIRED = "这笔截图已超过 7 天保留期，无法找回"
+    const val RESTORE_NOT_IGNORED = "这笔截图已不在忽略列表里"
+
     fun ignore(outcome: IgnoreOutcome): String = when (outcome) {
         IgnoreOutcome.IGNORED -> IGNORED
         IgnoreOutcome.MARK_FAILED -> IGNORE_FAILED
+    }
+
+    fun restore(outcome: RestoreOutcome): String = when (outcome) {
+        RestoreOutcome.RESTORED -> RESTORED
+        RestoreOutcome.NOT_FOUND -> RESTORE_NOT_FOUND
+        RestoreOutcome.EXPIRED -> RESTORE_EXPIRED
+        RestoreOutcome.NOT_IGNORED -> RESTORE_NOT_IGNORED
+        RestoreOutcome.WRITE_FAILED -> IGNORE_FAILED
     }
 }

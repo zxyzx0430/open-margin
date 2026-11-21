@@ -70,6 +70,61 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
             .take(limit.coerceIn(1, MAX_ENTRIES))
 
     /**
+     * Cards that were ignored, newest first, for the recovery list.
+     *
+     * Same identity rule as [pending]: one screenshot can hold two payments and
+     * they stay two rows, so restoring one never hides or resurrects the other.
+     * The store has a single IGNORED status for both user taps and automatic
+     * skips, so both kinds show up here; the user decides which ones to bring
+     * back.
+     */
+    fun ignored(limit: Int = 50): List<CaptureCandidate> =
+        latest(MAX_ENTRIES)
+            .filter { it.status == CaptureCandidate.STATUS_IGNORED }
+            .distinctBy { it.candidateId }
+            .sortedByDescending { it.capturedAtMs }
+            .take(limit.coerceIn(1, MAX_ENTRIES))
+
+    /**
+     * Put one ignored card back into review.
+     *
+     * Only a PENDING status record is appended: nothing here touches the ledger,
+     * so the user still has to confirm the card. [nowMs] is a parameter so the
+     * retention boundary is testable without waiting seven days, and the lookup
+     * deliberately runs before [pruneExpiredLocked] so a record that is expired
+     * but still on disk answers [RestoreOutcome.EXPIRED] instead of vanishing
+     * into "not found".
+     */
+    fun restore(candidateId: String, nowMs: Long = System.currentTimeMillis()): RestoreOutcome =
+        synchronized(lock) {
+            if (candidateId.isBlank()) return@synchronized RestoreOutcome.NOT_FOUND
+            val record = readAll().lastOrNull { it.candidateId == candidateId }
+            when {
+                record == null -> RestoreOutcome.NOT_FOUND
+                ScreenshotRetention.isExpired(record.capturedAtMs, nowMs) ->
+                    RestoreOutcome.EXPIRED
+                record.status != CaptureCandidate.STATUS_IGNORED -> RestoreOutcome.NOT_IGNORED
+                !dir.exists() && !dir.mkdirs() -> RestoreOutcome.WRITE_FAILED
+                else -> {
+                    val written = runCatching {
+                        indexFile.appendText(
+                            record.copy(status = CaptureCandidate.STATUS_PENDING)
+                                .toJson().toString() + "\n",
+                        )
+                        trimIndex()
+                        true
+                    }.getOrDefault(false)
+                    if (written) {
+                        runCatching { pruneExpiredLocked(nowMs) }
+                        RestoreOutcome.RESTORED
+                    } else {
+                        RestoreOutcome.WRITE_FAILED
+                    }
+                }
+            }
+        }
+
+    /**
      * Return one unambiguous waiting item for later state evidence.
      *
      * Delegates to [ScreenshotWaitingCorrelation] so the screenshot coordinator,
@@ -175,3 +230,19 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
         private const val INDEX_TMP_NAME = "candidates.jsonl.tmp"
     }
 }
+
+/**
+ * Why [CaptureCandidateStore.restore] did or did not bring a card back.
+ *
+ * Every failure keeps a distinct value: "已过期" and "找不到" are different
+ * stories for the user, and a silent success on a cleaned-up screenshot is the
+ * bug this type exists to prevent.
+ */
+enum class RestoreOutcome {
+    RESTORED,
+    NOT_FOUND,
+    EXPIRED,
+    NOT_IGNORED,
+    WRITE_FAILED,
+}
+
