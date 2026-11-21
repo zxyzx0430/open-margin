@@ -607,4 +607,22 @@ class EnglishUiTextTest {
             assertEquals(translated, EnglishUiText.translate(source))
         }
     }
+
+    @Test
+    fun siteUpdateLabelsTranslate() {
+        val expected = mapOf(
+            "应用更新" to "App updates",
+            "新版本已下载，点此安装" to "New version downloaded. Tap to install",
+            "新版本提醒" to "New version banner",
+            "自动下载并安装新版本" to "Download and install updates automatically",
+            "预览更新提醒" to "Preview update banner",
+            "测试包仅预览，不下载安装" to "Test build: preview only, no download or install",
+            "安装包签名与当前应用不一致，已删除" to
+                "APK signature does not match this app; file deleted",
+        )
+        expected.forEach { (source, translated) ->
+            assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))
+            assertEquals(translated, EnglishUiText.translate(source))
+        }
+    }
 }

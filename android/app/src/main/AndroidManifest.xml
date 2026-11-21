@@ -180,6 +180,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/update_file_paths" />
         </provider>
+
+        <!-- 自动更新下载完成的通知点开这里：复用同一 FileProvider 逻辑拉起系统安装器。
+             系统仍会要求用户点一次「安装」，不存在静默安装。 -->
+        <activity
+            android:name=".update.UpdateInstallActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 
 </manifest>

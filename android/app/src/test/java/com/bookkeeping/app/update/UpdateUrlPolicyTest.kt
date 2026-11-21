@@ -42,6 +42,40 @@ class UpdateUrlPolicyTest {
         assertFalse(UpdateUrlPolicy.isAllowedAssetUrl(""))
     }
 
+    @Test fun siteInstallerDownloadsAreAccepted() {
+        assertTrue(
+            UpdateUrlPolicy.isAllowedAssetUrl(
+                "https://zxyzx.me/open-margin/installer/open-margin-1.41-52e84095.apk"
+            )
+        )
+        assertEquals(
+            "open-margin-1.41-52e84095.apk",
+            UpdateUrlPolicy.fileNameOf(
+                "https://zxyzx.me/open-margin/installer/open-margin-1.41-52e84095.apk"
+            ),
+        )
+        assertFalse(
+            UpdateUrlPolicy.isAllowedAssetUrl(
+                "http://zxyzx.me/open-margin/installer/open-margin-1.41-52e84095.apk"
+            )
+        )
+        assertFalse(
+            UpdateUrlPolicy.isAllowedAssetUrl(
+                "https://evil.zxyzx.me/open-margin/installer/open-margin-1.41-52e84095.apk"
+            )
+        )
+        assertFalse(
+            UpdateUrlPolicy.isAllowedAssetUrl(
+                "https://zxyzx.me/open-margin/installer/nested/open-margin-1.41-52e84095.apk"
+            )
+        )
+        assertFalse(
+            UpdateUrlPolicy.isAllowedAssetUrl(
+                "https://zxyzx.me/open-margin/installer/../open-margin-1.41-52e84095.apk"
+            )
+        )
+    }
+
     @Test fun assetNamesStaySimpleAndApkOnly() {
         assertTrue(UpdateUrlPolicy.isSafeApkName("open-margin-v1.2.4-signed.apk"))
         assertFalse(UpdateUrlPolicy.isSafeApkName("open-margin-v1.2.4-signed.apk.exe"))
