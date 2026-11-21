@@ -293,7 +293,9 @@ fun TransactionListScreen(
                 SiteUpdateCoordinator.refreshIfDue(context)
             }
         }
-        siteUpdateBanner = SiteUpdateCoordinator.bannerFor(context)
+        siteUpdateBanner = withContext(Dispatchers.IO) {
+            SiteUpdateCoordinator.bannerFor(context)
+        }
     }
 
     val status by produceState(
