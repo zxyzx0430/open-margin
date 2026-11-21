@@ -53,7 +53,11 @@ class KeepAliveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel(this)
-        val notification = CaptureStatusNotifier.build(this, startedAtMs)
+        // A fresh service start must repaint even when the text matches the previous
+        // run: startForeground re-attaches the notification, so the remembered
+        // content from an older process (or an older start) must not suppress it.
+        CaptureStatusNotifier.forget()
+        val notification = CaptureStatusNotifier.buildForStartForeground(this, startedAtMs)
 
         val started = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -94,6 +98,8 @@ class KeepAliveService : Service() {
     override fun onDestroy() {
         isRunning = false
         stopUptimeTicker()
+        // Do not carry a remembered signature into the next service run.
+        CaptureStatusNotifier.forget()
         if (screenReceiverRegistered) {
             runCatching { unregisterReceiver(screenReceiver) }
             screenReceiverRegistered = false
@@ -124,6 +130,9 @@ class KeepAliveService : Service() {
         uptimeTicker = scope.launch {
             while (isActive) {
                 CaptureHealth.onHeartbeat(this@KeepAliveService)
+                // Stays at 1s so the "已断开 N 秒" countdown keeps ticking;
+                // CaptureStatusNotifier skips notify() whenever the visible text is
+                // unchanged, so a healthy service no longer re-posts every second.
                 refreshStatus(this@KeepAliveService)
                 delay(1_000L)
             }
