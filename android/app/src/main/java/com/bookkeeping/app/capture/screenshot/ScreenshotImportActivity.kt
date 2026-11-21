@@ -85,6 +85,9 @@ import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
+import com.bookkeeping.app.data.repository.DuplicateReason
+import com.bookkeeping.app.data.repository.LedgerInsertResult
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.tr
@@ -341,6 +344,17 @@ class ScreenshotImportActivity : ComponentActivity() {
             runOnUiThread {
                 when (outcome) {
                     WriteOutcome.SAVED -> review.value = review.value.save(candidate.candidateId)
+                    is WriteOutcome.SuspectedDuplicate -> {
+                        // 仓库已经先试过合并；这里剩下的是无法安全合并的跨通道匹配。
+                        // 卡片留在待确认，绝不因为「已在账本中」把用户的信息丢掉。
+                        Toast.makeText(
+                            this@ScreenshotImportActivity,
+                            tr("疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #%d）")
+                                .format(outcome.existingTransactionId),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        review.value = review.value.fail(candidate.candidateId)
+                    }
                     WriteOutcome.ALREADY_EXISTS -> {
                         Toast.makeText(
                             this@ScreenshotImportActivity,
@@ -384,35 +398,56 @@ class ScreenshotImportActivity : ComponentActivity() {
         } catch (_: Exception) {
             return@withContext WriteOutcome.FAILED
         }
-        val inserted: Long? = try {
-            repo.insertIfNotDuplicate(
-                entity,
+        val inserted: LedgerInsertResult = try {
+            repo.insertIfNotDuplicateResult(
+                transaction = entity,
                 notifySuccess = false,
                 diagnosticInput = TransactionDiagnosticInput(
                     attemptId = candidate.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
                 ),
+                // 审阅页的确认同样是「截图通道」：账本里可能已有通知记下的同一笔。
+                // 用户已经确认要记，就把截图的商户/订单号并进那一行，而不是再插一行、
+                // 也不是把卡片当成「已存在」丢掉。
+                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                // 用户确认时同样把「检测到但合不了」的跨通道疑似重复留在待确认，
+                // 不悄悄写成第二行。
+                holdWeakCrossSourceMatch = true,
+                mergeConfirmedCrossSource = true,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             return@withContext WriteOutcome.FAILED
         }
-        if (inserted != null && inserted > 0L) {
-            store.mark(candidate, CaptureCandidate.STATUS_APPROVED)
-            if (merchant.isNotBlank()) {
-                try {
-                    settings.recordCategoryLearning(merchant, category)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    // Category learning is best effort; the booking already landed.
+        return@withContext when (inserted) {
+            is LedgerInsertResult.Inserted, is LedgerInsertResult.Merged -> {
+                store.mark(candidate, CaptureCandidate.STATUS_APPROVED)
+                if (merchant.isNotBlank()) {
+                    try {
+                        settings.recordCategoryLearning(merchant, category)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // Category learning is best effort; the booking already landed.
+                    }
+                }
+                WriteOutcome.SAVED
+            }
+            is LedgerInsertResult.Duplicate -> when (inserted.reason) {
+                // 跨通道的同一笔只有在无法安全合并时才会走到这里（商户矛盾、
+                // 订单号矛盾、超出合并窗口）：卡片保留待确认，账本不动。
+                DuplicateReason.CROSS_SOURCE,
+                DuplicateReason.CROSS_SOURCE_WEAK,
+                -> WriteOutcome.SuspectedDuplicate(inserted.existingTransactionId)
+                // 同一通道的精确重发：账本已经有这一行，卡片可以收起。
+                DuplicateReason.SOURCE_ORDER_ID,
+                DuplicateReason.SAME_SOURCE_WINDOW,
+                -> {
+                    store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
+                    WriteOutcome.ALREADY_EXISTS
                 }
             }
-            WriteOutcome.SAVED
-        } else {
-            // The ledger already holds this transaction: nothing was written now.
-            store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
-            WriteOutcome.ALREADY_EXISTS
+            is LedgerInsertResult.Failed -> WriteOutcome.FAILED
         }
     }
 
@@ -464,7 +499,13 @@ class ScreenshotImportActivity : ComponentActivity() {
     }
 }
 
-private enum class WriteOutcome { SAVED, ALREADY_EXISTS, NOT_WRITABLE, FAILED }
+private sealed interface WriteOutcome {
+    data object SAVED : WriteOutcome
+    data object ALREADY_EXISTS : WriteOutcome
+    data class SuspectedDuplicate(val existingTransactionId: Long) : WriteOutcome
+    data object NOT_WRITABLE : WriteOutcome
+    data object FAILED : WriteOutcome
+}
 
 /**
  * What the user typed for one row.

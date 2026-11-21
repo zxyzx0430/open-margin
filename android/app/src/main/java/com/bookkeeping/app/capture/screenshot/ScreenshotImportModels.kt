@@ -133,10 +133,12 @@ data class ImportPlan(
     val repeatImage: Boolean = false,
 ) {
     /**
-     * Rows the caller may write. Transfer / refund / red packet / withdrawal
-     * kinds are filtered here as a second lock: even if a future decision path
-     * marks one as auto, no caller can reach the ledger with it before the
-     * user confirms.
+     * Rows the caller may write. Refund / red packet / withdrawal kinds are
+     * filtered here as a second lock: even if a future decision path marks one
+     * as auto, no caller can reach the ledger with it before the user confirms.
+     * Transfers are no longer unconditional: [ScreenshotCapturePolicy] only
+     * lets a completed, direction-explicit transfer from a known platform reach
+     * [Action.AUTO_BOOK], so a transfer that got here passed those gates.
      */
     val bookings: List<CandidateDecision>
         get() = decisions.filter {

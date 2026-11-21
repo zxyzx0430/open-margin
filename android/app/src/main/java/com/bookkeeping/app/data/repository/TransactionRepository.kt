@@ -42,7 +42,7 @@ sealed interface LedgerInsertResult {
     /** 新的一行已写入账本。 */
     data class Inserted(val transactionId: Long) : LedgerInsertResult
 
-    /** 并入了已有行（同通道补全商户/订单号）；没有新行，但这笔钱已记账。 */
+    /** 并入了已有行（同通道或跨通道补全商户/订单号）；没有新行，但这笔钱已记账。 */
     data class Merged(val transactionId: Long) : LedgerInsertResult
 
     /** 没有写入，因为账本里已经有这笔钱；[reason] 说明是哪条判据命中的。 */
@@ -247,9 +247,12 @@ class TransactionRepository @Inject constructor(
     // 5) 跨通道只在截图/页面路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
     //    通知/短信/手工完全不变）：同额同方同向、时间邻近、另一条通道已经记过
     //    → 不插新行。通道靠 captureObservedAtMs 区分，不靠 source 字符串。
-    //    只有两侧同一订单号时才直接当重复（CROSS_SOURCE）；一侧没商户、另一侧有
-    //    商户的弱证据只在调用方传 holdWeakCrossSourceMatch = true 时处理：
-    //    同样不插新行，但结果标成 CROSS_SOURCE_WEAK，调用方必须保留候选待确认。
+    //    两侧同一订单号是强证据（CROSS_SOURCE）；一侧没商户、另一侧有商户的弱证据
+    //    只在调用方传 holdWeakCrossSourceMatch = true 时计算。弱证据命中后先试
+    //    「一侧缺商户」的自动合并（120s 窗口内），能合就并入已有行返回 Merged，
+    //    合不了才返回 CROSS_SOURCE_WEAK，调用方保留候选待确认。
+    //    用户显式确认时（mergeConfirmedCrossSource = true）强证据也允许把截图里
+    //    更完整的字段并进已有行，而不是只回一句「已存在」。
     /** Recent ledger rows for screenshot cross-source de-duplication (read-only). */
     suspend fun screenshotDedupRows(limit: Int = 500): List<TransactionEntity> =
         dao.recentForScreenshotDedup(limit)
@@ -295,6 +298,12 @@ class TransactionRepository @Inject constructor(
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         crossSourceWindowMs: Long = 0L,
         holdWeakCrossSourceMatch: Boolean = false,
+        /**
+         * 用户已经在审阅页确认「这笔要记」：跨通道强证据命中的同一笔不再只回
+         * 「已存在」，而是把本次截图里更完整的商户/订单号/capture 溯源并进
+         * 已有行（不新增行）。默认 false，自动采集路径的语义不变。
+         */
+        mergeConfirmedCrossSource: Boolean = false,
     ): LedgerInsertResult = try {
         insertIfNotDuplicateLocked(
             transaction = transaction,
@@ -303,6 +312,7 @@ class TransactionRepository @Inject constructor(
             diagnosticInput = diagnosticInput,
             crossSourceWindowMs = crossSourceWindowMs,
             holdWeakCrossSourceMatch = holdWeakCrossSourceMatch,
+            mergeConfirmedCrossSource = mergeConfirmedCrossSource,
         )
     } catch (cancelled: CancellationException) {
         throw cancelled
@@ -317,6 +327,7 @@ class TransactionRepository @Inject constructor(
         diagnosticInput: TransactionDiagnosticInput,
         crossSourceWindowMs: Long,
         holdWeakCrossSourceMatch: Boolean,
+        mergeConfirmedCrossSource: Boolean = false,
     ): LedgerInsertResult = duplicateMutex.withLock {
         val callSite = diagnosticInput.callSite ?: "TransactionRepository.insertIfNotDuplicate"
         val money = DiagnosticSummary.amountWithMerchant(
@@ -401,9 +412,13 @@ class TransactionRepository @Inject constructor(
 
         // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图/页面路径显式
         // 传窗口才走到这里；通知/短信/手工记账的调用一行未改。
-        // 强证据（两侧同一订单号）→ 直接当重复；弱证据（一侧没有商户信息，另一侧有
-        // 真实商户）只在 holdWeakCrossSourceMatch = true 时返回 CROSS_SOURCE_WEAK，
-        // 由调用方把候选留在待确认列表，绝不静默丢弃。
+        //
+        // 判定顺序刻意是「先看能不能合并，再决定是否拦下」：
+        // - 强证据（两侧同一订单号）默认仍然只报 CROSS_SOURCE；只有用户显式确认
+        //   （mergeConfirmedCrossSource）时才允许把截图里更完整的字段并进已有行。
+        // - 弱证据（一侧没有商户信息，另一侧有真实商户）命中时，先拿命中的那条做
+        //   「一侧缺商户」的自动合并判定；能合就直接并入（Merged），不再把用户
+        //   拦在待确认卡片前。合不了才返回 CROSS_SOURCE_WEAK 交人工确认。
         val crossSourceMatch = if (crossSourceWindowMs > 0L) {
             try {
                 CrossSourceDuplicatePolicy.findMatchDetailed(
@@ -430,35 +445,49 @@ class TransactionRepository @Inject constructor(
         } else {
             null
         }
+        // 由跨通道命中直接确定要并入的已有行（弱证据自动合并 / 用户确认后的强证据补全）。
+        var crossChannelMergeTarget: TransactionEntity? = null
         if (crossSourceMatch != null) {
             val weak = crossSourceMatch.strength == CrossSourceDuplicatePolicy.MatchStrength.WEAK
-            diagnostics.record(
-                attemptId = diagnosticInput.attemptId,
-                stage = TransactionDiagnostics.STAGE_DEDUP,
-                result = TransactionDiagnostics.RESULT_WARNING,
-                details = if (weak) {
-                    "Cross-channel weak duplicate held for review"
-                } else {
-                    "Cross-channel duplicate candidate skipped"
-                },
-                transactionId = crossSourceMatch.transaction.id,
-                callSite = callSite,
-                inputSummary = money,
-                outputSummary = if (weak) {
-                    "疑似与已有 #${crossSourceMatch.transaction.id} 重复，保留待确认"
-                } else {
-                    "命中已有 #${crossSourceMatch.transaction.id}（跨通道同订单号），跳过写入"
-                },
+            val matched = crossSourceMatch.transaction
+            val disposition = CaptureMergePolicy.crossChannelDisposition(
+                matched = matched,
+                incoming = transaction,
+                weak = weak,
+                confirmedByUser = mergeConfirmedCrossSource,
             )
-            return@withLock LedgerInsertResult.Duplicate(
-                existingTransactionId = crossSourceMatch.transaction.id,
-                reason = if (weak) DuplicateReason.CROSS_SOURCE_WEAK else DuplicateReason.CROSS_SOURCE,
-            )
+            if (disposition == CaptureMergePolicy.CrossChannelDisposition.MERGE_INTO_EXISTING) {
+                crossChannelMergeTarget = matched
+            } else {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = if (weak) {
+                        "Cross-channel weak duplicate held for review"
+                    } else {
+                        "Cross-channel duplicate candidate skipped"
+                    },
+                    transactionId = matched.id,
+                    callSite = callSite,
+                    inputSummary = money,
+                    outputSummary = if (weak) {
+                        "疑似与已有 #${matched.id} 重复，保留待确认"
+                    } else {
+                        "命中已有 #${matched.id}（跨通道同订单号），跳过写入"
+                    },
+                )
+                return@withLock LedgerInsertResult.Duplicate(
+                    existingTransactionId = matched.id,
+                    reason = if (weak) DuplicateReason.CROSS_SOURCE_WEAK else DuplicateReason.CROSS_SOURCE,
+                )
+            }
         }
 
         // 同一笔支付被两条采集路径各扫一次（通知文本缺商户、支付成功页有商户）：
-        // 合成一条，写回先入库的行，不再让用户确认。
-        val mergeTarget = try {
+        // 合成一条，写回先入库的行，不再让用户确认。跨通道已经确定合并目标的，
+        // 直接用它，不再重复查一遍窗口。
+        val mergeTarget = crossChannelMergeTarget ?: try {
             findAutoMergeTarget(transaction)
         } catch (failure: Exception) {
             diagnostics.record(
@@ -473,15 +502,24 @@ class TransactionRepository @Inject constructor(
         }
         if (mergeTarget != null) {
             val merged = CaptureMergePolicy.mergeInto(mergeTarget, transaction)
+            val crossChannel = crossChannelMergeTarget != null
             diagnostics.record(
                 attemptId = diagnosticInput.attemptId,
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_WARNING,
-                details = "Candidate merged into existing transaction",
+                details = if (crossChannel) {
+                    "Cross-channel match merged into existing transaction"
+                } else {
+                    "Candidate merged into existing transaction"
+                },
                 transactionId = merged.id,
                 callSite = callSite,
                 inputSummary = money,
-                outputSummary = "并入已有 #${merged.id}，补全商户与订单号",
+                outputSummary = if (crossChannel) {
+                    "跨通道同一笔，并入已有 #${merged.id}，补全商户与订单号"
+                } else {
+                    "并入已有 #${merged.id}，补全商户与订单号"
+                },
             )
             update(merged, diagnosticInput, operationStage = TransactionDiagnostics.STAGE_CAPTURE)
             CaptureHealth.onTransactionSaved(context)

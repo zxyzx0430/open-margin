@@ -203,12 +203,12 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(20_000L, cancelled.draft.amountCents)
         assertEquals(20_000L, received.draft.amountCents)
         assertEquals(Action.WAIT_FOR_EVIDENCE, cancelled.action)
-        // A received transfer is complete money but still not ordinary income:
-        // it waits for the user instead of being booked.
+        // 已收款 is a settled incoming transfer in a known direction: it is
+        // booked automatically instead of asking for a redundant confirmation.
         assertEquals(CaptureCandidate.KIND_TRANSFER, received.draft.kind)
-        assertEquals(Action.ASK_USER, received.action)
-        assertTrue(result.bookings.isEmpty())
-        assertEquals(received.index, result.needsConfirmation.single().index)
+        assertEquals(Action.AUTO_BOOK, received.action)
+        assertEquals(listOf(20_000L), result.bookings.map { it.draft.amountCents })
+        assertTrue(result.needsConfirmation.isEmpty())
     }
 
     @Test
@@ -409,7 +409,9 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(1, result.decisions.size)
         val transfer = result.decisions.single()
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, transfer.draft.completionStatus)
-        assertEquals(Action.ASK_USER, transfer.action)
+        // The unrelated cancelled call bubble must not downgrade a settled
+        // transfer: it keeps its completed status and is booked like any other.
+        assertEquals(Action.AUTO_BOOK, transfer.action)
         assertEquals("张三", transfer.draft.merchantCandidates.single())
     }
 
@@ -425,7 +427,9 @@ class ScreenshotPageInterpreterSampleShapeTest {
         val decision = plan(blocks).decisions.single()
 
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, decision.action)
+        // Same rule as above: an isolated cancellation elsewhere on the page
+        // must not re-open the confirmation step for a settled transfer.
+        assertEquals(Action.AUTO_BOOK, decision.action)
     }
 
     @Test

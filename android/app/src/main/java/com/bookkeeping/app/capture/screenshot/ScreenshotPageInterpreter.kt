@@ -622,9 +622,10 @@ object ScreenshotPageInterpreter {
      * position may decide the direction there; without that position the draft
      * stays DIRECTION_UNKNOWN and the user has to pick.
      *
-     * Only 已收款 proves the money arrived. 已被接收 and 待接收 describe the
-     * counterparty's action, not a settled entry, so they are surfaced for
-     * confirmation instead of being booked or claimed as completed.
+     * Only 已收款 proves the money arrived. 已被接收 / 已接收 prove the money left
+     * me and the other side took it: the transfer is settled, so those bubbles
+     * are completed expenses. 待接收 describes a transfer that has not landed
+     * yet, so it stays unfinished and direction-unknown.
      */
     private data class TransferBubble(
         val direction: String?,
@@ -635,10 +636,12 @@ object ScreenshotPageInterpreter {
     private fun transferBubbleOf(text: String): TransferBubble? {
         if (!text.contains("转账")) return null
         return when {
+            // The counterparty accepted: the money has left this account and the
+            // transfer is final. This is the sender-side completion, not a wait.
             text.contains("已被接收") || text.contains("已接收") -> TransferBubble(
                 direction = CaptureCandidate.DIRECTION_EXPENSE,
-                completionStatus = CaptureCandidate.COMPLETION_UNKNOWN,
-                completionExplicit = false,
+                completionStatus = CaptureCandidate.COMPLETION_COMPLETED,
+                completionExplicit = true,
             )
             // 待接收 appears on both sides of the chat, so it cannot prove a
             // direction. Keep the unfinished meaning only; the bubble's side or

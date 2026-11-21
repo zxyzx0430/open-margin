@@ -156,7 +156,7 @@ class ScreenshotAuditMerchantTransferTest {
     )
 
     @Test
-    fun `accepted transfer bubble becomes an expense candidate that is not completed`() {
+    fun `accepted transfer bubble becomes a completed expense that is auto booked`() {
         val evidence = ScreenshotPageInterpreter.interpret(sentTransferBubblePage(), capturedAt, zone)
 
         assertEquals(1, evidence.drafts.size)
@@ -164,20 +164,23 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
         assertTrue(draft.directionExplicit)
-        assertNotEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
-        assertFalse(draft.completionExplicit)
+        // 已被接收 means the counterparty took the money: the transfer is final
+        // and the expense is complete, not an open question for the user.
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+        assertTrue(draft.completionExplicit)
         assertTrue(draft.supportedPaymentPage)
         // The chat text above the bubble is not a merchant.
         assertTrue(draft.merchantCandidates.isEmpty())
 
         val result = plan(sentTransferBubblePage())
         assertEquals(1, result.decisions.size)
-        assertEquals(Action.ASK_USER, result.decisions.single().action)
-        assertTrue(result.bookings.isEmpty())
+        assertEquals(Action.AUTO_BOOK, result.decisions.single().action)
+        assertEquals(1, result.bookings.size)
+        assertTrue(result.needsConfirmation.isEmpty())
     }
 
     @Test
-    fun `received transfer bubble becomes an income candidate`() {
+    fun `received transfer bubble becomes a completed income that is auto booked`() {
         val evidence = ScreenshotPageInterpreter.interpret(receivedTransferBubblePage(), capturedAt, zone)
 
         assertEquals(1, evidence.drafts.size)
@@ -186,13 +189,14 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(CaptureCandidate.DIRECTION_INCOME, draft.direction)
         assertTrue(draft.directionExplicit)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+        assertTrue(draft.completionExplicit)
 
         val result = plan(receivedTransferBubblePage())
         assertEquals(1, result.decisions.size)
         val decision = result.decisions.single()
-        assertEquals(Action.ASK_USER, decision.action)
-        assertTrue(result.bookings.isEmpty())
-        assertEquals(1, result.needsConfirmation.size)
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        assertEquals(1, result.bookings.size)
+        assertTrue(result.needsConfirmation.isEmpty())
     }
 
     @Test
@@ -239,8 +243,11 @@ class ScreenshotAuditMerchantTransferTest {
 
         val result = plan(blocks)
         assertEquals(2, result.decisions.size)
-        assertTrue(result.decisions.all { it.action == Action.ASK_USER })
-        assertTrue(result.bookings.isEmpty())
+        // Two settled transfers in opposite directions are two real rows; both
+        // may book automatically, but neither may be merged into the other.
+        assertTrue(result.decisions.all { it.action == Action.AUTO_BOOK })
+        assertEquals(2, result.bookings.size)
+        assertTrue(result.needsConfirmation.isEmpty())
     }
 
     /**
@@ -378,7 +385,7 @@ class ScreenshotAuditMerchantTransferTest {
     // ---- regression: the words that do identify their side keep their meaning ----
 
     @Test
-    fun `accepted transfer without geometry stays a sender expense that is unfinished`() {
+    fun `accepted transfer without geometry stays a completed sender expense`() {
         val blocks = textOnly("¥200.00", "已被接收", "转账")
 
         val draft = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone).drafts.single()
@@ -386,8 +393,10 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
         assertTrue(draft.directionExplicit)
-        assertNotEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
-        assertFalse(draft.completionExplicit)
+        // The word alone identifies the side and the settled state, so no box is
+        // needed to prove either one.
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+        assertTrue(draft.completionExplicit)
     }
 
     @Test
