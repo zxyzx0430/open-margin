@@ -30,8 +30,10 @@ import java.util.TimeZone
  * 三个层次：
  * - 层 1：截图候选入库前，账本里已有「同额、同向、同币种、同平台、时间邻近，
  *   但没有截图 provenance」的一条 → 降级为待确认，不自动写入。
- * - 层 2：[TransactionRepository.insertIfNotDuplicate] 新增 `crossSourceWindowMs`；
- *   默认 0 = 旧行为，只有截图路径显式传窗口才启用。
+ * - 层 2：[TransactionRepository.insertIfNotDuplicate] 的 `crossSourceWindowMs`；
+ *   默认 0 = 旧行为，只有截图路径显式传窗口才启用。这一层只在**两侧都存在且完全相同
+ *   的平台内订单号**时才判定「同一笔」；缺 ID、单侧 ID、ID 不同一律不拦，交给
+ *   自动合并 / 疑似重复标记 / 正常插入。
  * - 层 3：同一张图里同额、同向、同商户出现两次 → 第二次交确认。
  *
  * 这里只覆盖纯 JVM 逻辑。Room 查询、真实入库、截图界面属于端到端范围，未在此验证。
@@ -220,11 +222,12 @@ class CrossSourceDuplicateTest {
         assertNull(CrossSourceDuplicatePolicy.findMatch(listOf(existing), incoming, windowMs = 0L))
     }
 
-    // 2. 窗口内、同额同方、另一条通道 → 命中已有记录。
+    // 2. 窗口内、同额同方、另一条通道、两侧同一订单号 → 命中已有记录。
+    //    订单号是唯一证据：没有它就只能交给后面的疑似重复/人工确认（见下方层 2b）。
     @Test
     fun `cross channel window returns the existing row`() {
-        val existing = ledgerRow(source = "WECHAT")
-        val incoming = ledgerRow(id = 0, source = "WECHAT", fromScreenshot = true)
+        val existing = ledgerRow(source = "WECHAT", orderId = "4200001234")
+        val incoming = ledgerRow(id = 0, source = "WECHAT", orderId = "4200001234", fromScreenshot = true)
         val match = CrossSourceDuplicatePolicy.findMatch(
             candidates = listOf(existing),
             incoming = incoming,
@@ -285,21 +288,168 @@ class CrossSourceDuplicateTest {
         )
     }
 
-    // 订单号相等是强标识：即使商户名对不上也成立。
+    // ---------- 层 2b：跨来源自动匹配只认「两侧都有且完全相同」的订单号 ----------
+
+    private fun crossSourceMatch(
+        existing: TransactionEntity,
+        incoming: TransactionEntity,
+    ): TransactionEntity? = CrossSourceDuplicatePolicy.findMatch(
+        candidates = listOf(existing),
+        incoming = incoming,
+        windowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+    )
+
+    // 商户、金额、方向、币种、10 分钟内全都一致，但两边都没有订单号：
+    // 只能说明「可能又是同一家店的一笔」，不能当作同一笔。
+    @Test
+    fun `no order id on either side is never an automatic match`() {
+        val existing = ledgerRow(merchant = "瑞幸咖啡")
+        val incoming = ledgerRow(id = 0, merchant = "瑞幸咖啡", fromScreenshot = true)
+        assertNull(crossSourceMatch(existing, incoming))
+    }
+
+    // 只有一侧有订单号：单边 ID 不是证据，不能据此吞掉另一笔。
+    @Test
+    fun `order id on only one side is never an automatic match`() {
+        val withId = ledgerRow(orderId = "4200001234")
+        val withoutId = ledgerRow()
+        assertNull(crossSourceMatch(withId, ledgerRow(id = 0, fromScreenshot = true)))
+        assertNull(crossSourceMatch(withoutId, ledgerRow(id = 0, orderId = "4200001234", fromScreenshot = true)))
+    }
+
+    @Test
+    fun `different order ids are never an automatic match`() {
+        val existing = ledgerRow(orderId = "4200001234")
+        val incoming = ledgerRow(id = 0, orderId = "4200009999", fromScreenshot = true)
+        assertNull(crossSourceMatch(existing, incoming))
+    }
+
+    // 两侧订单号相同、商户也指向同一家：同一笔支付被两条通道各扫一次，按预期命中。
     @Test
     fun `same order id matches across channels`() {
+        val existing = ledgerRow(orderId = "4200001234")
+        val incoming = ledgerRow(id = 0, orderId = " 4200001234 ", fromScreenshot = true)
+        val match = crossSourceMatch(existing, incoming)
+        assertNotNull(match)
+        assertEquals(existing.id, match!!.id)
+    }
+
+    // 10 分钟窗口仍然适用：同一订单号超出窗口不在本层判定，交给后续合并/人工复核。
+    @Test
+    fun `same order id outside the window is not matched here`() {
         val existing = ledgerRow(orderId = "4200001234")
         val incoming = ledgerRow(
             id = 0,
             orderId = "4200001234",
-            merchant = "另一家店",
+            timestamp = t0 + CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS + 1_000L,
             fromScreenshot = true,
         )
-        assertNotNull(
-            CrossSourceDuplicatePolicy.findMatch(
-                listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+        assertNull(crossSourceMatch(existing, incoming))
+    }
+
+    // 微信和支付宝的订单号不是同一个命名空间：字符串相同也不能跨平台顶替。
+    @Test
+    fun `same order id text on another platform is not a match`() {
+        val existing = ledgerRow(source = "ALIPAY", orderId = "4200001234")
+        val incoming = ledgerRow(id = 0, source = "WECHAT", orderId = "4200001234", fromScreenshot = true)
+        assertNull(crossSourceMatch(existing, incoming))
+    }
+
+    // 订单号相同但商户明确对不上：数据自相矛盾，与 CaptureMergePolicy 同一口径交人工确认，
+    // 不在这一层静默吞掉，也不自动合并。
+    @Test
+    fun `same order id with a contradictory merchant needs manual review`() {
+        val existing = ledgerRow(orderId = "4200001234", timestamp = t0)
+        val incoming = ledgerRow(
+            id = 0,
+            orderId = "4200001234",
+            merchant = "另一家店",
+            timestamp = t0 + 60_000L,
+            fromScreenshot = true,
+        )
+        assertNull(crossSourceMatch(existing, incoming))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(existing), incoming))
+        assertTrue(DuplicateReviewPolicy.shouldFlag(existing, incoming))
+    }
+
+    // 订单号相同、但通知侧没有商户：订单号本身已是强证据，这一层照常命中，
+    // 不会因为商户缺失退化成两行（与 CaptureMergePolicy 同一口径）。
+    @Test
+    fun `same order id with a missing merchant still matches`() {
+        val existing = ledgerRow(orderId = "4200001234", merchant = "")
+        val incoming = ledgerRow(id = 0, orderId = "4200001234", timestamp = t0 + 30_000L, fromScreenshot = true)
+        val match = crossSourceMatch(existing, incoming)
+        assertNotNull(match)
+        assertEquals(existing.id, match!!.id)
+        assertTrue(CaptureMergePolicy.isSamePayment(existing, incoming))
+    }
+
+    // 占位商户（「微信支付」「未知商户」…）和缺商户都不是「同方」的证据：
+    // 没有订单号时一律不匹配。
+    @Test
+    fun `placeholder merchants never prove a cross channel duplicate`() {
+        assertNull(
+            crossSourceMatch(
+                ledgerRow(merchant = "微信支付"),
+                ledgerRow(id = 0, merchant = "微信支付", fromScreenshot = true),
             ),
         )
+        assertNull(
+            crossSourceMatch(
+                ledgerRow(merchant = "瑞幸咖啡"),
+                ledgerRow(id = 0, merchant = "未知商户", fromScreenshot = true),
+            ),
+        )
+        assertNull(
+            crossSourceMatch(
+                ledgerRow(merchant = ""),
+                ledgerRow(id = 0, merchant = "", fromScreenshot = true),
+            ),
+        )
+    }
+
+    // ---------- 调用链：不自动匹配之后必须继续到合并 / 疑似重复 / 正常插入 ----------
+
+    /**
+     * 复刻 [TransactionRepository.insertIfNotDuplicate] 在跨来源层返回 null 之后的决策：
+     * [CaptureMergePolicy.findMergeTarget]（只认两侧相同订单号，120 秒内）→
+     * [DuplicateReviewPolicy.shouldFlag]（3 分钟内同额即标疑似）→ 仍然插入。
+     *
+     * Room 查询由 DAO 的 SQL 保证：`findRecentByAmount` / `findRecentSimilar` 只按
+     * 金额 + 方向 + 币种 + 时间粗筛，不会因为「同商户同金额」而提前返回 null。
+     */
+    @Test
+    fun `no order id keeps both rows and flags the second for review`() {
+        val existing = ledgerRow(merchant = "瑞幸咖啡", timestamp = t0)
+        val incoming = ledgerRow(
+            id = 0,
+            merchant = "瑞幸咖啡",
+            timestamp = t0 + 60_000L,
+            fromScreenshot = true,
+        )
+        assertNull(crossSourceMatch(existing, incoming))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(existing), incoming))
+        assertTrue(DuplicateReviewPolicy.shouldFlag(existing, incoming))
+
+        val ledger = mutableListOf(existing)
+        ledger += incoming.copy(
+            duplicateOfId = existing.id,
+            remoteReviewStatus = "possible_duplicate",
+        )
+        assertEquals(2, ledger.size)
+        assertNull(ledger[0].duplicateOfId)
+        assertEquals(existing.id, ledger[1].duplicateOfId)
+        assertEquals("possible_duplicate", ledger[1].remoteReviewStatus)
+    }
+
+    // 单侧订单号同样走不到自动合并，但必须留在账本里等用户确认。
+    @Test
+    fun `one sided order id still reaches review instead of being dropped`() {
+        val existing = ledgerRow(orderId = "4200001234", timestamp = t0)
+        val incoming = ledgerRow(id = 0, timestamp = t0 + 60_000L, fromScreenshot = true)
+        assertNull(crossSourceMatch(existing, incoming))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(existing), incoming))
+        assertTrue(DuplicateReviewPolicy.shouldFlag(existing, incoming))
     }
 
     // 同一通道的行不归这里管：交给 8 秒窗口 / 订单号。
