@@ -8,13 +8,19 @@ import kotlin.math.abs
 /**
  * 采集自动合并规则：同一条支付凭据被两条采集路径各扫一次时，合成一条记录。
  *
- * 唯一允许自动合并的证据是强标识（订单号 / 交易号）相等：两条记录必须都带
- * 非空的 `sourceTransactionId` 且相等。金额、商户、方向、币种和 120 秒窗口
- * 只是必要条件，单独拿出来不足以证明是同一笔——同一商户连续两笔同额消费很
- * 常见，静默并掉会让账本少一笔钱，而多出来的一行用户自己删得掉。
+ * 主证据是强标识（订单号 / 交易号）相等：两条记录都带非空的
+ * `sourceTransactionId` 且相等，见 [isSamePayment]。金额、商户、方向、币种和
+ * 120 秒窗口只是必要条件，单独拿出来不足以证明是同一笔——同一商户连续两笔同额
+ * 消费很常见，静默并掉会让账本少一笔钱，而多出来的一行用户自己删得掉。
  *
- * 因此没有订单号时本规则一律返回 false，两笔各自入库；可能与既有记录重复的
- * 行由 [DuplicateReviewPolicy] 标注后交用户确认，绝不自动吞并。
+ * 唯一补充的例外是**跨通道且一侧完全没有商户信息**（[isSamePaymentWithOneSidedMerchant]）：
+ * 通知正文常常只有「微信支付」这种占位名、永远没有订单号，而用户随后点开的支付
+ * 成功页有真实商户。这种不对称只能靠「另一侧有商户 + 其余条件全同」来合，且必须
+ * 一侧是页面/截图采集（带 `captureObservedAtMs`）、另一侧是通知/短信/手工（不带）。
+ * 同通道的重复仍然只走 8 秒窗口和订单号，绝不仅凭金额 + 时间合并。
+ *
+ * 因此「同商户同额、两侧都没有订单号」仍然一律返回 false，两笔各自入库；可能与
+ * 既有记录重复的行由 [DuplicateReviewPolicy] 标注后交用户确认，绝不自动吞并。
  *
  * 纯逻辑，无 Android 依赖，可直接跑 JVM 单测。
  *
@@ -95,13 +101,7 @@ object CaptureMergePolicy {
      * 即使订单号相同——数据自相矛盾，交人工确认。
      */
     fun isSamePayment(existing: TransactionEntity, candidate: TransactionEntity): Boolean {
-        if (existing.id != 0L && existing.id == candidate.id) return false
-        if (existing.syncDeleted || candidate.syncDeleted) return false
-        if (existing.amountCents != candidate.amountCents) return false
-        if (existing.type != candidate.type) return false
-        if (!existing.currency.equals(candidate.currency, ignoreCase = true)) return false
-        if (existing.source != candidate.source) return false
-        if (abs(existing.timestamp - candidate.timestamp) > AUTO_MERGE_WINDOW_MS) return false
+        if (!sameShape(existing, candidate)) return false
 
         // 唯一证据：两边带同一个强标识。没有订单号就不合并。
         val existingOrderId = existing.sourceTransactionId?.trim().orEmpty()
@@ -114,6 +114,57 @@ object CaptureMergePolicy {
             MerchantRules.normalize(existing.merchant),
             MerchantRules.normalize(candidate.merchant),
         )
+    }
+
+    /**
+     * 跨通道的一条补充规则：一侧完全没有商户信息（空，或「微信支付」这类占位名），
+     * 另一侧有真实商户，且金额/方向/币种/来源/时间窗全部一致时，允许合成一条。
+     *
+     * 为什么需要：通知正文常常只有「微信支付」，[com.bookkeeping.app.notification.NotificationParser]
+     * 既拿不到商户、也永远没有订单号；用户随后点开支付成功页，页面抓到真实商户和
+     * （有时）订单号。旧规则要求两侧都有同一订单号，于是这一对永远合并不了，账本
+     * 多出一行——用户实测的「通知记一笔、点开页面又记一笔」正是它。
+     *
+     * 边界（测试逐个钉死）：
+     * - 必须跨通道：一侧带 `captureObservedAtMs`（页面/截图），另一侧不带
+     *   （通知/短信/手工）。同通道的重复交给 8 秒窗口和订单号。
+     * - 两侧都有真实商户 → 返回 false，交回 [isSamePayment]（必须订单号相等）。
+     * - 两侧都没有商户信息 → 返回 false：只剩金额 + 时间，不足以证明是同一笔。
+     * - 两侧都有订单号但不同 → 返回 false：明确是两笔支付。
+     *
+     * 合并只补全字段（[mergeInto] 保留 id/时间/金额），不会删除任何金额。
+     */
+    fun isSamePaymentWithOneSidedMerchant(
+        existing: TransactionEntity,
+        candidate: TransactionEntity,
+    ): Boolean {
+        if (!sameShape(existing, candidate)) return false
+        if ((existing.captureObservedAtMs != null) == (candidate.captureObservedAtMs != null)) {
+            return false
+        }
+        val existingHasMerchant = hasMerchantInfo(existing.merchant)
+        val candidateHasMerchant = hasMerchantInfo(candidate.merchant)
+        if (existingHasMerchant == candidateHasMerchant) return false
+        val existingOrderId = existing.sourceTransactionId?.trim().orEmpty()
+        val candidateOrderId = candidate.sourceTransactionId?.trim().orEmpty()
+        if (existingOrderId.isNotEmpty() && candidateOrderId.isNotEmpty() &&
+            !existingOrderId.equals(candidateOrderId, ignoreCase = true)
+        ) {
+            return false
+        }
+        return true
+    }
+
+    /** 金额/方向/币种/来源/时间窗：比较两条记录之前必须先过这一关。 */
+    private fun sameShape(existing: TransactionEntity, candidate: TransactionEntity): Boolean {
+        if (existing.id != 0L && existing.id == candidate.id) return false
+        if (existing.syncDeleted || candidate.syncDeleted) return false
+        if (existing.amountCents != candidate.amountCents) return false
+        if (existing.type != candidate.type) return false
+        if (!existing.currency.equals(candidate.currency, ignoreCase = true)) return false
+        if (existing.source != candidate.source) return false
+        if (abs(existing.timestamp - candidate.timestamp) > AUTO_MERGE_WINDOW_MS) return false
+        return true
     }
 
     /**
@@ -170,19 +221,23 @@ object CaptureMergePolicy {
     }
 
     /**
-     * 从窗口内同金额的候选行里挑出自动合并的目标：带同一个订单号、id 最小
-     * （先入库）的那条。没有强标识时返回 null，交回 [DuplicateReviewPolicy]
-     * 标注后由用户确认。
+     * 从窗口内同金额的候选行里挑出自动合并的目标。
+     *
+     * 先找强证据（同一个订单号）；没有强证据时再看「一侧完全没商户信息」的跨通道
+     * 补充规则（[isSamePaymentWithOneSidedMerchant]）。同组内取 id 最小（先入库）的
+     * 那条。两条规则都不成立时返回 null，交回 [DuplicateReviewPolicy] 标注后由用户确认。
      */
     fun findMergeTarget(
         candidates: List<TransactionEntity>,
         incoming: TransactionEntity,
-    ): TransactionEntity? =
-        candidates
-            .asSequence()
-            .filter { canReceiveMerge(it) }
-            .filter { isSamePayment(it, incoming) }
+    ): TransactionEntity? {
+        val mergeable = candidates.filter { canReceiveMerge(it) }
+        val strong = mergeable.filter { isSamePayment(it, incoming) }
+        if (strong.isNotEmpty()) return strong.minByOrNull { it.id }
+        return mergeable
+            .filter { isSamePaymentWithOneSidedMerchant(it, incoming) }
             .minByOrNull { it.id }
+    }
 
     /** 一次性纠正的结果：保留 [keep]（已补全），把 [absorbed] 标成已合并。 */
     data class RepairPlan(

@@ -138,6 +138,13 @@ data class CaptureCandidate(
         const val STATUS_IGNORED = "IGNORED"
         const val STATUS_WAITING = "WAITING_EVIDENCE"
         const val STATUS_LINKED = "LINKED_EXISTING"
+
+        /**
+         * 候选与账本里已有记录疑似同一笔（跨通道弱证据：另一侧是通知，只有「微信支付」
+         * 占位名）时写进 [reason] 的说明。这类候选保持 [STATUS_PENDING]，由用户在
+         * 待确认列表里决定是否记入账本，不会被当成重复悄悄丢掉。
+         */
+        const val REASON_LIKELY_DUPLICATE = "疑似与已有记录重复"
         const val INTAKE_MEDIASTORE = "MEDIASTORE"
         const val INTAKE_SHARE = "SHARE"
         const val INTAKE_PHOTO_PICKER = "PHOTO_PICKER"

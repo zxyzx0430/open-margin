@@ -63,8 +63,18 @@ enum class DuplicateReason {
     /** 同来源 + 同商户 + 同金额 + 8 秒窗口：同一通道的重发。 */
     SAME_SOURCE_WINDOW,
 
-    /** 跨采集通道的同额同方启发式命中：可能是同一笔，也可能只是金额巧合。 */
+    /** 跨采集通道的同额同方强证据命中（两侧同一订单号）：已确认是同一笔。 */
     CROSS_SOURCE,
+
+    /**
+     * 跨采集通道的**弱证据**命中：一侧没有商户信息（通知的「微信支付」占位名）、
+     * 另一侧有真实商户，金额/方向/币种/平台/时间全同。
+     *
+     * 只在调用方显式要求（`holdWeakCrossSourceMatch = true`）时返回，表示
+     * 「没有写新行，但这不一定是同一笔」。调用方必须把候选留在待确认列表，
+     * 绝不能当成已入账把候选丢掉。
+     */
+    CROSS_SOURCE_WEAK,
 }
 
 /**
@@ -230,11 +240,16 @@ class TransactionRepository @Inject constructor(
     // 2) 8s 内同来源同商户同金额 → 跳过（同一通道重发）。
     // 3) 120s 内同来源同金额，且商户/订单号互证 → 自动合并进先入库的那条：
     //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
+    //    跨通道的一侧缺商户（通知占位名）+ 另一侧有真实商户也走这里，见
+    //    CaptureMergePolicy.isSamePaymentWithOneSidedMerchant。
     // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
     //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
-    // 5) 跨通道只在截图路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
-    //    通知/短信/无障碍/手工完全不变）：同额同方同向、时间邻近、另一条通道
-    //    已经记过 → 不插新行。通道靠 captureObservedAtMs 区分，不靠 source 字符串。
+    // 5) 跨通道只在截图/页面路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
+    //    通知/短信/手工完全不变）：同额同方同向、时间邻近、另一条通道已经记过
+    //    → 不插新行。通道靠 captureObservedAtMs 区分，不靠 source 字符串。
+    //    只有两侧同一订单号时才直接当重复（CROSS_SOURCE）；一侧没商户、另一侧有
+    //    商户的弱证据只在调用方传 holdWeakCrossSourceMatch = true 时处理：
+    //    同样不插新行，但结果标成 CROSS_SOURCE_WEAK，调用方必须保留候选待确认。
     /** Recent ledger rows for screenshot cross-source de-duplication (read-only). */
     suspend fun screenshotDedupRows(limit: Int = 500): List<TransactionEntity> =
         dao.recentForScreenshotDedup(limit)
@@ -245,17 +260,24 @@ class TransactionRepository @Inject constructor(
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         /**
-         * 跨通道重复窗口（毫秒）。默认 0 = 关闭，通知/短信/无障碍/手工记账的行为
-         * 与改动前完全一致；只有截图路径显式传入
+         * 跨通道重复窗口（毫秒）。默认 0 = 关闭，通知/短信/手工记账的行为
+         * 与改动前完全一致；截图/页面路径显式传入
          * [CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS] 才启用跨通道检查。
          */
         crossSourceWindowMs: Long = 0L,
+        /**
+         * 跨通道只有弱证据（一侧没有商户信息）时也不插新行，但把结果标成
+         * [DuplicateReason.CROSS_SOURCE_WEAK] 让调用方保留候选待确认。
+         * 默认 false：除页面识别外的调用方行为不变。
+         */
+        holdWeakCrossSourceMatch: Boolean = false,
     ): Long? = insertIfNotDuplicateResult(
         transaction = transaction,
         windowMs = windowMs,
         notifySuccess = notifySuccess,
         diagnosticInput = diagnosticInput,
         crossSourceWindowMs = crossSourceWindowMs,
+        holdWeakCrossSourceMatch = holdWeakCrossSourceMatch,
     ).toLegacyTransactionId()
 
     /**
@@ -272,6 +294,7 @@ class TransactionRepository @Inject constructor(
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         crossSourceWindowMs: Long = 0L,
+        holdWeakCrossSourceMatch: Boolean = false,
     ): LedgerInsertResult = try {
         insertIfNotDuplicateLocked(
             transaction = transaction,
@@ -279,6 +302,7 @@ class TransactionRepository @Inject constructor(
             notifySuccess = notifySuccess,
             diagnosticInput = diagnosticInput,
             crossSourceWindowMs = crossSourceWindowMs,
+            holdWeakCrossSourceMatch = holdWeakCrossSourceMatch,
         )
     } catch (cancelled: CancellationException) {
         throw cancelled
@@ -292,6 +316,7 @@ class TransactionRepository @Inject constructor(
         notifySuccess: Boolean,
         diagnosticInput: TransactionDiagnosticInput,
         crossSourceWindowMs: Long,
+        holdWeakCrossSourceMatch: Boolean,
     ): LedgerInsertResult = duplicateMutex.withLock {
         val callSite = diagnosticInput.callSite ?: "TransactionRepository.insertIfNotDuplicate"
         val money = DiagnosticSummary.amountWithMerchant(
@@ -374,13 +399,14 @@ class TransactionRepository @Inject constructor(
             )
         }
 
-        // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图路径显式
-        // 传窗口才走到这里；通知/短信/无障碍/手工记账的调用一行未改。
-        // 判据保守：同额 + 同向 + 同币种 + 同平台 + 时间邻近 + 两侧同一订单号；
-        // 截图时间只是兜底时不拦（宁可多一行，不吞真钱）。
-        val crossSourceExisting = if (crossSourceWindowMs > 0L) {
+        // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图/页面路径显式
+        // 传窗口才走到这里；通知/短信/手工记账的调用一行未改。
+        // 强证据（两侧同一订单号）→ 直接当重复；弱证据（一侧没有商户信息，另一侧有
+        // 真实商户）只在 holdWeakCrossSourceMatch = true 时返回 CROSS_SOURCE_WEAK，
+        // 由调用方把候选留在待确认列表，绝不静默丢弃。
+        val crossSourceMatch = if (crossSourceWindowMs > 0L) {
             try {
-                CrossSourceDuplicatePolicy.findMatch(
+                CrossSourceDuplicatePolicy.findMatchDetailed(
                     candidates = dao.findRecentByAmount(
                         amountCents = transaction.amountCents,
                         type = transaction.type,
@@ -390,6 +416,7 @@ class TransactionRepository @Inject constructor(
                     ),
                     incoming = transaction,
                     windowMs = crossSourceWindowMs,
+                    allowWeakEvidence = holdWeakCrossSourceMatch,
                 )
             } catch (failure: Exception) {
                 diagnostics.record(
@@ -403,17 +430,29 @@ class TransactionRepository @Inject constructor(
         } else {
             null
         }
-        if (crossSourceExisting != null) {
+        if (crossSourceMatch != null) {
+            val weak = crossSourceMatch.strength == CrossSourceDuplicatePolicy.MatchStrength.WEAK
             diagnostics.record(
                 attemptId = diagnosticInput.attemptId,
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_WARNING,
-                details = "Cross-channel duplicate candidate skipped",
-                transactionId = crossSourceExisting.id,
+                details = if (weak) {
+                    "Cross-channel weak duplicate held for review"
+                } else {
+                    "Cross-channel duplicate candidate skipped"
+                },
+                transactionId = crossSourceMatch.transaction.id,
+                callSite = callSite,
+                inputSummary = money,
+                outputSummary = if (weak) {
+                    "疑似与已有 #${crossSourceMatch.transaction.id} 重复，保留待确认"
+                } else {
+                    "命中已有 #${crossSourceMatch.transaction.id}（跨通道同订单号），跳过写入"
+                },
             )
             return@withLock LedgerInsertResult.Duplicate(
-                existingTransactionId = crossSourceExisting.id,
-                reason = DuplicateReason.CROSS_SOURCE,
+                existingTransactionId = crossSourceMatch.transaction.id,
+                reason = if (weak) DuplicateReason.CROSS_SOURCE_WEAK else DuplicateReason.CROSS_SOURCE,
             )
         }
 
@@ -582,15 +621,27 @@ class TransactionRepository @Inject constructor(
         update(transaction.copy(duplicateOfId = null, remoteReviewStatus = "confirmed"))
     }
 
-    // D05 影子模式：持久记录通知指纹，返回 true 表示这条证据以前处理过
-    // （疑似重放）。当前阶段只记录与计数，不改变 insertIfNotDuplicate 的
-    // 入库决策；跨渠道拦截要等 D06 双端核验通过后才启用（蓝图铁律）。
-    // Shadow only: never blocks an insert yet.
+    /**
+     * 上一条同指纹通知的持久记录；没记录过返回 null。
+     *
+     * 指纹只在入库成功之后才写入（见 [recordNoticeFingerprint]），所以非 null 就
+     * 表示这条通知对应的钱已经在账本里，同一指纹的重投递可以安全跳过。
+     */
+    suspend fun findProcessedNotice(fingerprint: String): ProcessedNoticeEntity? =
+        processedNoticeDao.find(fingerprint)
+
+    /**
+     * 记录 / 续期一条**已经成功入账**的通知指纹（重放检测用；只存哈希，不存原文）。
+     *
+     * 记录时机是入库成功之后，而不是解析之后：写入失败（数据库异常、进程被杀）时
+     * 指纹不存在，用户再点一次通知还能重新入账，不会被重放检测误拦——重放检测
+     * 只允许「同一条通知重复投递」少记一次，绝不允许把没入账的钱当成已入账。
+     */
     suspend fun recordNoticeFingerprint(
         fingerprint: String,
         source: String,
         seenMs: Long,
-    ): Boolean = duplicateMutex.withLock {
+    ) = duplicateMutex.withLock {
         val inserted = processedNoticeDao.insertIgnore(
             ProcessedNoticeEntity(
                 fingerprint = fingerprint,
@@ -602,9 +653,6 @@ class TransactionRepository @Inject constructor(
         )
         if (inserted == -1L) {
             processedNoticeDao.touch(fingerprint, seenMs)
-            true
-        } else {
-            false
         }
     }
 
@@ -903,26 +951,28 @@ class TransactionRepository @Inject constructor(
 /**
  * 跨来源防重复（纯逻辑，无 Android / Room 依赖，可直接跑 JVM 单测）。
  *
- * 现场：用户在微信里付了 ¥5.00，通知抓取已经记了一行；随后用户在交易页截图确认
- * 同一笔，账本变成两行。根因不是「来源字符串不同」——通知和截图都写
- * `source = WECHAT`（包名只进通知指纹表，不进账本）。真正的差别是**采集通道**：
- * 截图/卡片路径会写 `captureObservedAtMs`，通知、短信、无障碍转账提取器都不写。
+ * 现场：用户在微信里付了 ¥5.00，通知抓取已经记了一行；随后用户点开交易详情页，
+ * 无障碍识别又抓到同一笔，账本变成两行。根因不是「来源字符串不同」——通知和截图
+ * 都写 `source = WECHAT`（包名只进通知指纹表，不进账本）。真正的差别是**采集通道**：
+ * 截图/卡片/页面识别会写 `captureObservedAtMs`，通知、短信、无障碍转账提取器都不写。
  * 加上 8 秒窗口和 `merchant = :merchant` 全等，[TransactionDao.findRecentSameAmount]
- * 在「几十秒后手动确认、且通知里没有商户名」的场景永远返回 null。
+ * 在「几十秒后点开页面、且通知里没有商户名」的场景永远返回 null。
  *
- * 这里只在截图路径显式启用（[TransactionRepository.insertIfNotDuplicate] 的
- * `crossSourceWindowMs`，默认 0 = 关闭），所以通知/短信/无障碍/手工记账的行为不变。
+ * 这里只在截图/页面路径显式启用（[TransactionRepository.insertIfNotDuplicate] 的
+ * `crossSourceWindowMs`，默认 0 = 关闭），所以通知/短信/手工记账的行为不变。
  *
- * 判据刻意保守，因为「不写新行」判错就等于用户看不见那笔钱：
- * - 只有「本行来自截图/卡片采集、对侧来自另一条通道」才比较，同通道交给 8 秒窗口。
- * - 跨平台（微信 vs 支付宝）同额同方是两笔钱，一律不拦。
- * - **唯一能证明「同一笔」的证据是两侧都存在且相等的平台内订单号**；缺 ID、只有
- *   单侧有 ID、两侧 ID 不同一律不拦，交回后续的自动合并 / 疑似重复 / 正常插入。
- * - 商户、金额、方向、币种、时间窗只是必要条件，单独拿出来不足以判定同一笔：
- *   同一家店十分钟内完全可能再花一次同样的钱。
- * - 订单号相同但两边商户都明确且相互矛盾时不拦：数据自相矛盾，交人工确认，
- *   与 [CaptureMergePolicy.isSamePayment] 同一口径。
- * - 时间只是截屏时间兜底（`eventTimeNeedsConfirmation`）时不拦：时间本身不可信。
+ * 判据分两级，因为「不写新行」判错就等于用户看不见那笔钱：
+ * - **强证据**：两侧都存在且相等的平台内订单号（[MatchStrength.STRONG]）。命中即
+ *   确认是同一笔，直接不插新行。
+ * - **弱证据**（[MatchStrength.WEAK]，只有调用方显式允许时才计算）：一侧完全没有
+ *   商户信息（空 / 「微信支付」这类占位名），另一侧有真实商户，金额、方向、币种、
+ *   平台、时间窗全部一致。通知通道永远拿不到订单号，这是唯一能对上页面记录的线索；
+ *   命中后调用方**必须把候选留在待确认列表**，不能当成已入账丢掉。
+ *
+ * 两级都要求：本行来自页面/截图采集（`captureObservedAtMs` 非空）、对侧来自另一条
+ * 通道（该字段为空）、同平台、同额、同向、同币种、时间在窗口内。跨平台（微信 vs
+ * 支付宝）同额同方是两笔钱，一律不拦。时间只是截屏时间兜底
+ * （`eventTimeNeedsConfirmation`）时不拦：时间本身不可信。
  */
 object CrossSourceDuplicatePolicy {
 
@@ -930,27 +980,56 @@ object CrossSourceDuplicatePolicy {
     const val SCREENSHOT_WINDOW_MS: Long = 10 * 60_000L
 
     /**
-     * 在 [candidates] 里找「和 [incoming] 是同一笔钱、由另一条采集通道先记下」的一条。
-     *
-     * 只有两侧都带非空且相等的平台内订单号时才可能命中：金额 + 商户 + 时间只是
-     * 必要条件，缺 ID / 单侧 ID / 不同 ID 一律返回 null，让调用方继续走
-     * 自动合并（同样只认订单号）、疑似重复标记和正常插入，绝不在这里静默丢掉一行。
+     * 弱证据的窗口单独收窄到 3 分钟：支付成功页是付款后立刻点开的，而 10 分钟足够
+     * 让「同一家店连续两笔同额消费」误撞。3 分钟与
+     * [DuplicateReviewPolicy.WINDOW_MS] 同一量级。
+     */
+    const val WEAK_EVIDENCE_WINDOW_MS: Long = 3 * 60_000L
+
+    /** 命中的强度：[STRONG] 是同一笔的强证据，[WEAK] 只是「疑似」，必须留给用户确认。 */
+    enum class MatchStrength { STRONG, WEAK }
+
+    /** 一条命中：哪条已有记录，以及证据强度。 */
+    data class Match(
+        val transaction: TransactionEntity,
+        val strength: MatchStrength,
+    )
+
+    /**
+     * 只返回**强证据**命中（两侧同一订单号），既有调用方的语义与改动前完全一致。
      *
      * @param windowMs 0 表示关闭跨来源检查，直接返回 null（默认行为）。
-     * @return 时间上最接近的一条已有记录；没有就返回 null。
      */
     fun findMatch(
         candidates: List<TransactionEntity>,
         incoming: TransactionEntity,
         windowMs: Long,
-    ): TransactionEntity? {
+    ): TransactionEntity? = findMatchDetailed(
+        candidates = candidates,
+        incoming = incoming,
+        windowMs = windowMs,
+        allowWeakEvidence = false,
+    )?.takeIf { it.strength == MatchStrength.STRONG }?.transaction
+
+    /**
+     * 在 [candidates] 里找「和 [incoming] 是同一笔钱、由另一条采集通道先记下」的一条，
+     * 并说明是强证据还是弱证据。
+     *
+     * @param allowWeakEvidence true 时，两侧都没有可比较的订单号、但一侧有真实商户而
+     *   另一侧没有商户信息，也可以返回 [MatchStrength.WEAK]。
+     * @return 时间上最接近的一条已有记录；没有就返回 null。
+     */
+    fun findMatchDetailed(
+        candidates: List<TransactionEntity>,
+        incoming: TransactionEntity,
+        windowMs: Long,
+        allowWeakEvidence: Boolean = false,
+    ): Match? {
         if (windowMs <= 0L) return null
         if (incoming.eventTimeNeedsConfirmation) return null
-        // 只有截图/卡片采集出来的行才需要这次检查；其它来源一行不变。
+        // 只有截图/卡片/页面采集出来的行才需要这次检查；其它来源一行不变。
         if (incoming.captureObservedAtMs == null) return null
-        // 本行没有订单号：没有任何能证明「同一笔」的强标识，不在这里拦。
-        val incomingOrderId = incoming.platformOrderId() ?: return null
-        return candidates
+        val pool = candidates
             .asSequence()
             .filter { it.id != incoming.id }
             .filter { !it.syncDeleted && it.duplicateOfId == null }
@@ -963,11 +1042,43 @@ object CrossSourceDuplicatePolicy {
             .filter { it.type == incoming.type }
             .filter { it.currency.equals(incoming.currency, ignoreCase = true) }
             .filter { abs(it.timestamp - incoming.timestamp) <= windowMs }
-            // 订单号必须两侧都存在且相等；单侧 ID 不是证据，缺 ID 更不是。
-            .filter { existing -> existing.platformOrderId()?.equals(incomingOrderId, ignoreCase = true) == true }
-            // 订单号相同但商户名明确对不上：数据自相矛盾，交人工，不在这里吞掉。
-            .filter { existing -> !merchantsContradict(existing.merchant, incoming.merchant) }
+            .toList()
+
+        // 强证据：订单号必须两侧都存在且相等；单侧 ID 不是证据，缺 ID 更不是。
+        val incomingOrderId = incoming.platformOrderId()
+        if (incomingOrderId != null) {
+            val strong = pool.asSequence()
+                .filter { existing ->
+                    existing.platformOrderId()?.equals(incomingOrderId, ignoreCase = true) == true
+                }
+                // 订单号相同但商户名明确对不上：数据自相矛盾，交人工，不在这里吞掉。
+                .filter { existing -> !merchantsContradict(existing.merchant, incoming.merchant) }
+                .minByOrNull { abs(it.timestamp - incoming.timestamp) }
+            if (strong != null) return Match(strong, MatchStrength.STRONG)
+        }
+
+        if (!allowWeakEvidence) return null
+        // 弱证据：一侧完全没有商户信息、另一侧有真实商户。两侧都有商户（哪怕不同）
+        // 或两侧都没有商户都不算——前者可能是两家店，后者只剩金额 + 时间。
+        val weakWindowMs = minOf(windowMs, WEAK_EVIDENCE_WINDOW_MS)
+        val weak = pool.asSequence()
+            .filter { abs(it.timestamp - incoming.timestamp) <= weakWindowMs }
+            .filter { oneSideHasMerchantInfo(it.merchant, incoming.merchant) }
+            // 两侧都有订单号但不同 → 明确是两笔，不做弱匹配。
+            .filter { existing -> !orderIdsContradict(existing, incoming) }
             .minByOrNull { abs(it.timestamp - incoming.timestamp) }
+        return weak?.let { Match(it, MatchStrength.WEAK) }
+    }
+
+    /** 恰好一侧有商户信息：通知侧的「微信支付」占位名与空名字都算没有。 */
+    private fun oneSideHasMerchantInfo(first: String, second: String): Boolean =
+        CaptureMergePolicy.hasMerchantInfo(first) != CaptureMergePolicy.hasMerchantInfo(second)
+
+    /** 两侧都有订单号且不同 → 两笔不同的支付；单侧有 ID 不矛盾（通知永远没有）。 */
+    private fun orderIdsContradict(first: TransactionEntity, second: TransactionEntity): Boolean {
+        val firstId = first.platformOrderId() ?: return false
+        val secondId = second.platformOrderId() ?: return false
+        return !firstId.equals(secondId, ignoreCase = true)
     }
 
     /** 平台内订单号：空白等于没有。比较前先按平台过滤，所以不会跨平台比较。 */
