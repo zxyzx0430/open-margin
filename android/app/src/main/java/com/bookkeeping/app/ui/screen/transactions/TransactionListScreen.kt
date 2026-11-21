@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -297,6 +298,15 @@ fun TransactionListScreen(
 
     val context = LocalContext.current
     val fabHaptics = LocalHapticFeedback.current
+    // 读屏用户的双击是「激活」，不是手势双击：不参与双击判定，激活照旧立刻开手动记账。
+    val accessibilityManager = remember(context) {
+        context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    }
+    val openManualEntry: () -> Unit = {
+        addDialogQuickEntry = ""
+        addDialogDiagnosticAttemptId = null
+        showAddDialog = true
+    }
 
     // 记账 FAB 的单击 / 双击：单击仍打开手动记账，但先等一个双击窗口确认不是双击；
     // 双击直接进截图记账（复用同一个 ScreenshotImportActivity，不新建页面）。
@@ -307,9 +317,7 @@ fun TransactionListScreen(
         // 窗口内来了第二下：pendingFabTapAt 已被清空或换值，这次单击作废。
         if (!LedgerFabTapRule.singleStillPending(pendingFabTapAt, tappedAt)) return@LaunchedEffect
         pendingFabTapAt = null
-        addDialogQuickEntry = ""
-        addDialogDiagnosticAttemptId = null
-        showAddDialog = true
+        openManualEntry()
     }
 
     // 首次进账单页的「长按 + 开始说话」气泡：看过一次就写 seen，之后不再出现。
@@ -469,27 +477,33 @@ fun TransactionListScreen(
                     VoiceFab(
                         // 单击：手动记账（延迟 250ms 等双击判定）；双击：截图记账。
                         onTap = {
-                            val now = SystemClock.uptimeMillis()
-                            when (LedgerFabTapRule.actionFor(pendingFabTapAt, now)) {
-                                FabTapAction.DOUBLE_TAP -> {
-                                    pendingFabTapAt = null
-                                    // 立即触感反馈：开页有延迟时也不是「毫无反应」。
-                                    fabHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    // 轻量反馈：先给一句再开页。
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar(
-                                            tr("正在打开截图记账"),
-                                            duration = SnackbarDuration.Short,
-                                        )
+                            if (accessibilityManager?.isTouchExplorationEnabled == true) {
+                                // TalkBack 激活：保持原来的单击行为，不延迟、不判双击。
+                                pendingFabTapAt = null
+                                openManualEntry()
+                            } else {
+                                val now = SystemClock.uptimeMillis()
+                                when (LedgerFabTapRule.actionFor(pendingFabTapAt, now)) {
+                                    FabTapAction.DOUBLE_TAP -> {
+                                        pendingFabTapAt = null
+                                        // 立即触感反馈：开页有延迟时也不是「毫无反应」。
+                                        fabHaptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        // 轻量反馈：先给一句再开页。
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                tr("正在打开截图记账"),
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                        }
+                                        runCatching {
+                                            context.startActivity(
+                                                ScreenshotImportActivity.intent(context)
+                                            )
+                                        }
                                     }
-                                    runCatching {
-                                        context.startActivity(
-                                            ScreenshotImportActivity.intent(context)
-                                        )
+                                    FabTapAction.PENDING_SINGLE -> {
+                                        pendingFabTapAt = now
                                     }
-                                }
-                                FabTapAction.PENDING_SINGLE -> {
-                                    pendingFabTapAt = now
                                 }
                             }
                         },
