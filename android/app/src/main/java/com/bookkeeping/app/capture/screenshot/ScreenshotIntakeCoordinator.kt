@@ -15,6 +15,8 @@ import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
+import com.bookkeeping.app.data.repository.DuplicateReason
+import com.bookkeeping.app.data.repository.LedgerInsertResult
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
@@ -38,6 +40,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
+ * The one ledger write this coordinator performs.
+ *
+ * Production wraps [TransactionRepository.insertIfNotDuplicateResult], whose
+ * result distinguishes inserted / duplicate (with the matching rule) / failed.
+ * The seam exists so a plain JVM test can drive all three without Room.
+ */
+internal interface ScreenshotLedgerWriter {
+    suspend fun insert(entity: TransactionEntity, attemptId: String): LedgerInsertResult
+}
+
+/**
  * Android glue for every screenshot intake. It owns URI access, decoding and
  * OCR; all admission decisions come from [ScreenshotImportPipeline] so the three
  * entry points cannot drift apart.
@@ -47,6 +60,8 @@ class ScreenshotIntakeCoordinator private constructor(
     private val store: CaptureCandidateStore,
     private val repositoryProvider: () -> TransactionRepository?,
     private val diagnosticSink: suspend (DiagnosticStep) -> Unit,
+    /** Null means "build one from [repositoryProvider]"; tests inject a fake. */
+    private val ledgerWriter: ScreenshotLedgerWriter?,
 ) {
     /**
      * Android entry point: URI access, decoding and OCR all come from [context].
@@ -58,13 +73,15 @@ class ScreenshotIntakeCoordinator private constructor(
         store = CaptureCandidateStore(ctx),
         repositoryProvider = { androidRepositoryOrNull(ctx) },
         diagnosticSink = { step -> androidDiagnostics(ctx)?.record(step.copy(callSite = step.callSite ?: CALL_SITE_INGEST)) },
+        ledgerWriter = null,
     )
 
     internal constructor(
         store: CaptureCandidateStore,
         repositoryProvider: () -> TransactionRepository? = { null },
         diagnosticSink: suspend (DiagnosticStep) -> Unit = {},
-    ) : this(null, store, repositoryProvider, diagnosticSink)
+        ledgerWriter: ScreenshotLedgerWriter? = null,
+    ) : this(null, store, repositoryProvider, diagnosticSink, ledgerWriter)
 
     data class Outcome(
         val booked: Int = 0,
@@ -72,6 +89,14 @@ class ScreenshotIntakeCoordinator private constructor(
         val waiting: Int = 0,
         val linked: Int = 0,
         val ignored: Int = 0,
+        /** Subset of [ignored]: the ledger already had this payment (a real duplicate). */
+        val duplicates: Int = 0,
+        /**
+         * Candidates whose ledger or candidate write failed. They stay PENDING and
+         * retryable, so [pending] includes them; a failure is never counted as
+         * [ignored].
+         */
+        val failed: Int = 0,
         /** Waiting candidates this import settled with later evidence. */
         val superseded: Int = 0,
         val failure: FailureReason? = null,
@@ -227,6 +252,26 @@ class ScreenshotIntakeCoordinator private constructor(
         val capturedAtMs = request.capturedAtMs
         val rawText = pageRawText ?: DiagnosticRawText.ocrLines(blocks.toRawLines())
         val repository = repositoryProvider()
+        // One write path for AUTO_BOOK. The repository result says whether the
+        // money landed, was already there (and why), or the write failed; null
+        // (no repository, no fake) keeps the old "hold for review" behaviour.
+        val insertLedger: ScreenshotLedgerWriter? = ledgerWriter
+            ?: repository?.let { repo ->
+                object : ScreenshotLedgerWriter {
+                    override suspend fun insert(
+                        entity: TransactionEntity,
+                        attemptId: String,
+                    ): LedgerInsertResult = repo.insertIfNotDuplicateResult(
+                        transaction = entity,
+                        notifySuccess = false,
+                        crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                        diagnosticInput = TransactionDiagnosticInput(
+                            attemptId = attemptId,
+                            callSite = CALL_SITE_INGEST,
+                        ),
+                    )
+                }
+            }
         val ledgerRows = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
         val existing = ledgerRows
         val previousFingerprints = runCatching {
@@ -322,6 +367,8 @@ class ScreenshotIntakeCoordinator private constructor(
         var waiting = 0
         var linked = 0
         var ignored = 0
+        var duplicates = 0
+        var failed = 0
         var superseded = 0
         // Preview / allowAuto=false must not touch anything: a waiting card is
         // only closed once this import produced a real outcome for its own card.
@@ -340,7 +387,18 @@ class ScreenshotIntakeCoordinator private constructor(
             )
             val stored = store.save(candidate, bytes)
             if (stored == null) {
-                ignored++
+                // save() returns null when the candidate is invalid or when its
+                // index write fails. Neither is "the ledger already has it";
+                // counting it as skipped is how money disappeared silently.
+                failed++
+                recordWriteFailure(
+                    attemptId = attemptId,
+                    code = "CANDIDATE_STORE_WRITE_FAILED",
+                    cause = null,
+                    inputSummary = candidateSummary ?: ocrSummary,
+                    rawText = rawText,
+                    outputSummary = "候选卡片未保存",
+                )
                 return@forEach
             }
             createdHere += stored.candidateId
@@ -352,7 +410,7 @@ class ScreenshotIntakeCoordinator private constructor(
                         pending++
                         return@forEach
                     }
-                    repository?.let { repo ->
+                    insertLedger?.let { writer ->
                         val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
                         val entity = CaptureReviewMapping.toTransactionEntity(
                             candidate = candidate,
@@ -363,29 +421,79 @@ class ScreenshotIntakeCoordinator private constructor(
                                 contextText = merchant,
                             ).category,
                         )
-                        val inserted = runCatching {
-                            // Keep the ledger write inside this chain: same attempt id
-                            // so the log reads capture → parse → dedup → save as one run.
-                            // The cross-source window is what stops the notification
-                            // capture of the same payment from landing a second row.
-                            repo.insertIfNotDuplicate(
-                                entity,
-                                notifySuccess = false,
-                                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
-                                diagnosticInput = TransactionDiagnosticInput(
+                        // Keep the ledger write inside this chain: same attempt id
+                        // so the log reads capture → parse → dedup → save as one run.
+                        // The result is explicit; a thrown write is folded into
+                        // Failed instead of being flattened into "duplicate".
+                        val result = try {
+                            writer.insert(entity, attemptId)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            LedgerInsertResult.Failed(failure)
+                        }
+                        when (result) {
+                            is LedgerInsertResult.Inserted -> {
+                                store.mark(stored, CaptureCandidate.STATUS_APPROVED)
+                                booked++
+                                bookedIds += result.transactionId
+                                applied = true
+                            }
+                            is LedgerInsertResult.Merged -> {
+                                // Folded into an existing row: no new row, but the
+                                // payment is recorded. Unchanged from before.
+                                store.mark(stored, CaptureCandidate.STATUS_APPROVED)
+                                booked++
+                                bookedIds += result.transactionId
+                                applied = true
+                            }
+                            is LedgerInsertResult.Duplicate -> {
+                                if (result.reason == DuplicateReason.CROSS_SOURCE) {
+                                    // A cross-channel hit is a heuristic: the other
+                                    // channel's row can be a different payment. Keep
+                                    // the card for the user instead of closing it.
+                                    store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                                    pending++
+                                    recordStep(
+                                        attemptId = attemptId,
+                                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                                        result = TransactionDiagnostics.RESULT_WARNING,
+                                        details = "Cross-channel match kept for confirmation",
+                                        callSite = CALL_SITE_INGEST,
+                                        inputSummary = candidateSummary ?: ocrSummary,
+                                        outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
+                                    )
+                                } else {
+                                    // Same source + same order id, or same merchant
+                                    // and amount inside the 8s window: definite.
+                                    store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+                                    ignored++
+                                    duplicates++
+                                    recordStep(
+                                        attemptId = attemptId,
+                                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                                        result = TransactionDiagnostics.RESULT_WARNING,
+                                        details = "Duplicate confirmed by ledger (${result.reason.name})",
+                                        callSite = CALL_SITE_INGEST,
+                                        inputSummary = candidateSummary ?: ocrSummary,
+                                        outputSummary = "已存在 #${result.existingTransactionId}，跳过",
+                                    )
+                                }
+                            }
+                            is LedgerInsertResult.Failed -> {
+                                // Never IGNORED: the card stays retryable and the
+                                // real exception goes to diagnostics.
+                                store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                                pending++
+                                failed++
+                                recordWriteFailure(
                                     attemptId = attemptId,
-                                    callSite = CALL_SITE_INGEST,
-                                ),
-                            )
-                        }.getOrNull()
-                        if (inserted != null && inserted > 0L) {
-                            store.mark(stored, CaptureCandidate.STATUS_APPROVED)
-                            booked++
-                            bookedIds += inserted
-                            applied = true
-                        } else {
-                            store.mark(stored, CaptureCandidate.STATUS_IGNORED)
-                            ignored++
+                                    code = "LEDGER_WRITE_FAILED",
+                                    cause = result.cause,
+                                    inputSummary = candidateSummary ?: ocrSummary,
+                                    rawText = rawText,
+                                )
+                            }
                         }
                     } ?: run {
                         // No repository (Hilt unavailable): the card is still
@@ -434,6 +542,7 @@ class ScreenshotIntakeCoordinator private constructor(
             attemptId = attemptId,
             stage = TransactionDiagnostics.STAGE_SAVE,
             result = when {
+                failed > 0 -> TransactionDiagnostics.RESULT_WARNING
                 booked > 0 || pending > 0 || waiting > 0 || linked > 0 -> TransactionDiagnostics.RESULT_SUCCESS
                 else -> TransactionDiagnostics.RESULT_WARNING
             },
@@ -442,14 +551,14 @@ class ScreenshotIntakeCoordinator private constructor(
             callSite = CALL_SITE_INGEST,
             inputSummary = "${plan.decisions.size} 笔候选",
             outputSummary = buildString {
-                append(
-                    DiagnosticSummary.counts(
-                        "入账" to booked,
-                        "待确认" to pending,
-                        "等待" to waiting,
-                        "跳过" to ignored + linked,
-                    ),
+                val counts = mutableListOf(
+                    "入账" to booked,
+                    "待确认" to pending,
+                    "等待" to waiting,
+                    "跳过" to ignored + linked,
                 )
+                if (failed > 0) counts += "失败" to failed
+                append(DiagnosticSummary.counts(*counts.toTypedArray()))
                 if (!CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)) append(" · 预览模式，未写入账本")
             },
             rawText = rawText,
@@ -460,6 +569,8 @@ class ScreenshotIntakeCoordinator private constructor(
             waiting = waiting,
             linked = linked,
             ignored = ignored,
+            duplicates = duplicates,
+            failed = failed,
             superseded = superseded,
             autoBookAllowed = allowAuto && !previewOnly,
             confirmationCandidates = confirmationCandidates,
@@ -483,25 +594,63 @@ class ScreenshotIntakeCoordinator private constructor(
             merchant = merchant,
             category = category,
         )
-        val inserted = try {
-            repository.insertIfNotDuplicate(
-                entity,
+        val attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId()
+        val result = try {
+            repository.insertIfNotDuplicateResult(
+                transaction = entity,
                 notifySuccess = false,
                 diagnosticInput = TransactionDiagnosticInput(
-                    attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
+                    attemptId = attemptId,
                     callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
                 ),
                 crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
             )
-        } catch (_: Exception) {
-            return ConfirmationResult.FAILED
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            LedgerInsertResult.Failed(failure)
         }
-        return if (inserted != null && inserted > 0L) {
-            store.mark(current, CaptureCandidate.STATUS_APPROVED)
-            ConfirmationResult.SAVED
-        } else {
-            store.mark(current, CaptureCandidate.STATUS_IGNORED)
-            ConfirmationResult.ALREADY_EXISTS
+        return when (result) {
+            is LedgerInsertResult.Inserted, is LedgerInsertResult.Merged -> {
+                store.mark(current, CaptureCandidate.STATUS_APPROVED)
+                ConfirmationResult.SAVED
+            }
+            is LedgerInsertResult.Duplicate -> {
+                if (result.reason == DuplicateReason.CROSS_SOURCE) {
+                    // The cross-channel rule is a heuristic; an explicit user
+                    // confirmation must not close the card silently. Leave it
+                    // PENDING and report the suspected match.
+                    recordStep(
+                        attemptId = attemptId,
+                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                        result = TransactionDiagnostics.RESULT_WARNING,
+                        details = "Cross-channel match kept for confirmation",
+                        callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
+                        inputSummary = DiagnosticSummary.amountWithMerchant(
+                            amount = DiagnosticSummary.amount(
+                                type = current.direction,
+                                amountCents = current.amountCents ?: 0L,
+                            ),
+                            merchant = merchant,
+                        ),
+                        outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
+                    )
+                    ConfirmationResult.ALREADY_EXISTS
+                } else {
+                    store.mark(current, CaptureCandidate.STATUS_IGNORED)
+                    ConfirmationResult.ALREADY_EXISTS
+                }
+            }
+            is LedgerInsertResult.Failed -> {
+                // Card stays PENDING; the real exception is now traceable.
+                recordWriteFailure(
+                    attemptId = attemptId,
+                    code = "LEDGER_WRITE_FAILED",
+                    cause = result.cause,
+                    callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
+                )
+                ConfirmationResult.FAILED
+            }
         }
     }
 
@@ -534,6 +683,38 @@ class ScreenshotIntakeCoordinator private constructor(
             details = note.details,
             callSite = CALL_SITE_INGEST,
             inputSummary = inputSummary,
+            rawText = rawText,
+        )
+    }
+
+    /**
+     * A recognised candidate could not be written. This is never a "skip": the
+     * candidate is kept (or reported as not stored), so diagnostics must carry
+     * what actually broke — a stable code plus the real exception class and
+     * message, clipped, and never page content.
+     */
+    private suspend fun recordWriteFailure(
+        attemptId: String,
+        code: String,
+        cause: Throwable?,
+        callSite: String = CALL_SITE_INGEST,
+        inputSummary: String? = null,
+        rawText: String? = null,
+        outputSummary: String = "写入失败，候选保留待确认",
+    ) {
+        val details = if (cause == null) {
+            code
+        } else {
+            "$code · ${cause.javaClass.simpleName}: ${cause.message.orEmpty()}"
+        }
+        recordStep(
+            attemptId = attemptId,
+            stage = TransactionDiagnostics.STAGE_SAVE,
+            result = TransactionDiagnostics.RESULT_FAILURE,
+            details = DiagnosticSummary.clip(details).orEmpty(),
+            callSite = callSite,
+            inputSummary = inputSummary,
+            outputSummary = outputSummary,
             rawText = rawText,
         )
     }
