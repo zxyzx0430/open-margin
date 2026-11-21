@@ -145,6 +145,14 @@ data class CaptureCandidate(
          * 待确认列表里决定是否记入账本，不会被当成重复悄悄丢掉。
          */
         const val REASON_LIKELY_DUPLICATE = "疑似与已有记录重复"
+
+        /**
+         * 同一张截图里出现了两条同额、同向、同商户的草稿，第二笔写进 [reason] 的说明。
+         * 与 [REASON_LIKELY_DUPLICATE] 分开：那条断言「账本里已有一笔」（可带
+         * [matchedTransactionId]），这条断言「这张图里还有一条」，两者不能合成一句，
+         * 否则会给用户一个不存在的账本记录号。
+         */
+        const val REASON_SAME_IMAGE_REPEAT = "同一张截图里出现了重复记录"
         const val INTAKE_MEDIASTORE = "MEDIASTORE"
         const val INTAKE_SHARE = "SHARE"
         const val INTAKE_PHOTO_PICKER = "PHOTO_PICKER"

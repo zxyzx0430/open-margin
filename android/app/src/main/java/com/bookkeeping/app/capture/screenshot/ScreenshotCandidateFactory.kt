@@ -34,7 +34,7 @@ object ScreenshotCandidateFactory {
             capturedAtMs = capturedAtMs,
             screenshotPath = null,
             confidence = confidence,
-            reason = decision.reason.take(80).ifBlank { "screenshot" },
+            reason = reasonOf(decision),
             kind = draft.kind,
             eventTimeMs = eventTime,
             direction = draft.direction,
@@ -61,6 +61,19 @@ object ScreenshotCandidateFactory {
             matchedTransactionId = decision.matchedTransactionId,
             ledgerWriteAllowed = decision.ledgerWriteAllowed,
         )
+    }
+
+    /**
+     * Stored reason for the card.
+     *
+     * A duplicate hint replaces the pipeline's prose with the exact constant the
+     * review UI keys on, so the hint does not depend on the wording of
+     * [CandidateDecision.reason]. Everything else keeps the free-text reason.
+     */
+    private fun reasonOf(decision: CandidateDecision): String = when (decision.duplicateHint) {
+        DuplicateHint.CROSS_CHANNEL -> CaptureCandidate.REASON_LIKELY_DUPLICATE
+        DuplicateHint.SAME_IMAGE -> CaptureCandidate.REASON_SAME_IMAGE_REPEAT
+        DuplicateHint.NONE -> decision.reason.take(80).ifBlank { "screenshot" }
     }
 
     private fun platformOf(pageIdentity: String): String = when {
