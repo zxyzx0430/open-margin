@@ -275,8 +275,8 @@ class TransactionRepository @Inject constructor(
 
         // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图路径显式
         // 传窗口才走到这里；通知/短信/无障碍/手工记账的调用一行未改。
-        // 判据保守：同额 + 同向 + 同币种 + 同平台 + 时间邻近 + 订单号相等或商户
-        // 明确相同；截图时间只是兜底时不拦（宁可多一行，不吞真钱）。
+        // 判据保守：同额 + 同向 + 同币种 + 同平台 + 时间邻近 + 两侧同一订单号；
+        // 截图时间只是兜底时不拦（宁可多一行，不吞真钱）。
         val crossSourceExisting = if (crossSourceWindowMs > 0L) {
             try {
                 CrossSourceDuplicatePolicy.findMatch(
@@ -806,8 +806,12 @@ class TransactionRepository @Inject constructor(
  * 判据刻意保守，因为「不写新行」判错就等于用户看不见那笔钱：
  * - 只有「本行来自截图/卡片采集、对侧来自另一条通道」才比较，同通道交给 8 秒窗口。
  * - 跨平台（微信 vs 支付宝）同额同方是两笔钱，一律不拦。
- * - 两边订单号都非空时以订单号为准；否则要求商户名明确相同。
- * - 商户缺失或只是「微信支付」这类占位名时不拦：交给层 1 的人工确认。
+ * - **唯一能证明「同一笔」的证据是两侧都存在且相等的平台内订单号**；缺 ID、只有
+ *   单侧有 ID、两侧 ID 不同一律不拦，交回后续的自动合并 / 疑似重复 / 正常插入。
+ * - 商户、金额、方向、币种、时间窗只是必要条件，单独拿出来不足以判定同一笔：
+ *   同一家店十分钟内完全可能再花一次同样的钱。
+ * - 订单号相同但两边商户都明确且相互矛盾时不拦：数据自相矛盾，交人工确认，
+ *   与 [CaptureMergePolicy.isSamePayment] 同一口径。
  * - 时间只是截屏时间兜底（`eventTimeNeedsConfirmation`）时不拦：时间本身不可信。
  */
 object CrossSourceDuplicatePolicy {
@@ -817,6 +821,10 @@ object CrossSourceDuplicatePolicy {
 
     /**
      * 在 [candidates] 里找「和 [incoming] 是同一笔钱、由另一条采集通道先记下」的一条。
+     *
+     * 只有两侧都带非空且相等的平台内订单号时才可能命中：金额 + 商户 + 时间只是
+     * 必要条件，缺 ID / 单侧 ID / 不同 ID 一律返回 null，让调用方继续走
+     * 自动合并（同样只认订单号）、疑似重复标记和正常插入，绝不在这里静默丢掉一行。
      *
      * @param windowMs 0 表示关闭跨来源检查，直接返回 null（默认行为）。
      * @return 时间上最接近的一条已有记录；没有就返回 null。
@@ -830,7 +838,8 @@ object CrossSourceDuplicatePolicy {
         if (incoming.eventTimeNeedsConfirmation) return null
         // 只有截图/卡片采集出来的行才需要这次检查；其它来源一行不变。
         if (incoming.captureObservedAtMs == null) return null
-        val incomingOrderId = incoming.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
+        // 本行没有订单号：没有任何能证明「同一笔」的强标识，不在这里拦。
+        val incomingOrderId = incoming.platformOrderId() ?: return null
         return candidates
             .asSequence()
             .filter { it.id != incoming.id }
@@ -844,15 +853,25 @@ object CrossSourceDuplicatePolicy {
             .filter { it.type == incoming.type }
             .filter { it.currency.equals(incoming.currency, ignoreCase = true) }
             .filter { abs(it.timestamp - incoming.timestamp) <= windowMs }
-            .filter { existing ->
-                val existingOrderId = existing.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
-                if (existingOrderId != null && incomingOrderId != null) {
-                    existingOrderId.equals(incomingOrderId, ignoreCase = true)
-                } else {
-                    merchantsSame(existing.merchant, incoming.merchant)
-                }
-            }
+            // 订单号必须两侧都存在且相等；单侧 ID 不是证据，缺 ID 更不是。
+            .filter { existing -> existing.platformOrderId()?.equals(incomingOrderId, ignoreCase = true) == true }
+            // 订单号相同但商户名明确对不上：数据自相矛盾，交人工，不在这里吞掉。
+            .filter { existing -> !merchantsContradict(existing.merchant, incoming.merchant) }
             .minByOrNull { abs(it.timestamp - incoming.timestamp) }
+    }
+
+    /** 平台内订单号：空白等于没有。比较前先按平台过滤，所以不会跨平台比较。 */
+    private fun TransactionEntity.platformOrderId(): String? =
+        sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
+
+    /**
+     * 两边都有真实商户、且明确不是同一家 → 数据自相矛盾。
+     * 任一侧缺商户（含「微信支付」这类占位名）都不算矛盾：订单号相同已经足够。
+     */
+    private fun merchantsContradict(first: String, second: String): Boolean {
+        if (!CaptureMergePolicy.hasMerchantInfo(first)) return false
+        if (!CaptureMergePolicy.hasMerchantInfo(second)) return false
+        return !merchantsSame(first, second)
     }
 
     /**
