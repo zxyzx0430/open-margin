@@ -602,6 +602,7 @@ internal object EnglishUiText {
         "请先选择收支方向" to "Choose expense or income first",
         "扫描截图" to "Scan screenshot",
         "查看大图" to "View full size",
+        "整图" to "Fit to screen",
         "置信度" to "Confidence",
         "候选：" to "Candidates: ",
         "单号" to "Order ",
