@@ -75,6 +75,16 @@ enum class DuplicateReason {
      * 绝不能当成已入账把候选丢掉。
      */
     CROSS_SOURCE_WEAK,
+
+    /**
+     * 同一笔支付的强身份命中：商户名相同、金额/方向/币种相同、事件时间相同
+     * （页面只印到分钟，故按同一分钟比较），**不受** 8 秒 / 10 分钟窗口限制。
+     *
+     * 真机场景：17:11 已入账的 5.00，17:58 再截同一张支付页，页面上的交易时间
+     * 仍是 17:11。只看窗口认不出，会再写一行或再问用户一次；身份相同则直接
+     * 判为已存在。见 [SamePaymentIdentity]。
+     */
+    SAME_PAGE_IDENTITY,
 }
 
 /**
@@ -410,6 +420,55 @@ class TransactionRepository @Inject constructor(
             )
         }
 
+        // 层 1.5：同一笔钱的强身份匹配 —— 同商户 + 同金额/方向/币种 + 同交易时间。
+        // 不受 8 秒 / 10 分钟窗口限制：17:11 入账的 5.00，17:58 再截同一张支付页，
+        // 页面上的交易时间仍是 17:11；只按窗口比对会认不出，于是又写一行 / 又问
+        // 用户一次。身份相同就不是新的一笔。默认只在截图/页面路径
+        // （crossSourceWindowMs > 0）启用，通知 / 短信 / 手工记账不变。
+        val identityMatch = if (crossSourceWindowMs > 0L) {
+            try {
+                SamePaymentIdentity.findMatch(
+                    candidates = dao.recentForScreenshotDedup(IDENTITY_SCAN_LIMIT),
+                    incoming = transaction,
+                )
+            } catch (failure: Exception) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = diagnosticError(failure),
+                    callSite = callSite,
+                    inputSummary = money,
+                )
+                throw failure
+            }
+        } else {
+            null
+        }
+        var identityMergeTarget: TransactionEntity? = null
+        if (identityMatch != null) {
+            if (mergeConfirmedCrossSource) {
+                // 用户已经在审阅页确认要记：把这次截图里更完整的字段并进已有行，
+                // 不再只回一句「已存在」。
+                identityMergeTarget = identityMatch
+            } else {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Same payment identity already recorded",
+                    transactionId = identityMatch.id,
+                    callSite = callSite,
+                    inputSummary = money,
+                    outputSummary = "命中已有 #${identityMatch.id}（同商户、同金额、同交易时间），跳过写入",
+                )
+                return@withLock LedgerInsertResult.Duplicate(
+                    existingTransactionId = identityMatch.id,
+                    reason = DuplicateReason.SAME_PAGE_IDENTITY,
+                )
+            }
+        }
+
         // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图/页面路径显式
         // 传窗口才走到这里；通知/短信/手工记账的调用一行未改。
         //
@@ -487,38 +546,41 @@ class TransactionRepository @Inject constructor(
         // 同一笔支付被两条采集路径各扫一次（通知文本缺商户、支付成功页有商户）：
         // 合成一条，写回先入库的行，不再让用户确认。跨通道已经确定合并目标的，
         // 直接用它，不再重复查一遍窗口。
-        val mergeTarget = crossChannelMergeTarget ?: try {
-            findAutoMergeTarget(transaction)
-        } catch (failure: Exception) {
-            diagnostics.record(
-                attemptId = diagnosticInput.attemptId,
-                stage = TransactionDiagnostics.STAGE_DEDUP,
-                result = TransactionDiagnostics.RESULT_FAILURE,
-                details = diagnosticError(failure),
-                callSite = callSite,
-                inputSummary = money,
-            )
-            throw failure
-        }
+        val mergeTarget = crossChannelMergeTarget
+            ?: identityMergeTarget
+            ?: try {
+                findAutoMergeTarget(transaction)
+            } catch (failure: Exception) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_FAILURE,
+                    details = diagnosticError(failure),
+                    callSite = callSite,
+                    inputSummary = money,
+                )
+                throw failure
+            }
         if (mergeTarget != null) {
             val merged = CaptureMergePolicy.mergeInto(mergeTarget, transaction)
             val crossChannel = crossChannelMergeTarget != null
+            val identityMerge = !crossChannel && identityMergeTarget != null
             diagnostics.record(
                 attemptId = diagnosticInput.attemptId,
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_WARNING,
-                details = if (crossChannel) {
-                    "Cross-channel match merged into existing transaction"
-                } else {
-                    "Candidate merged into existing transaction"
+                details = when {
+                    crossChannel -> "Cross-channel match merged into existing transaction"
+                    identityMerge -> "Same payment identity merged into existing transaction"
+                    else -> "Candidate merged into existing transaction"
                 },
                 transactionId = merged.id,
                 callSite = callSite,
                 inputSummary = money,
-                outputSummary = if (crossChannel) {
-                    "跨通道同一笔，并入已有 #${merged.id}，补全商户与订单号"
-                } else {
-                    "并入已有 #${merged.id}，补全商户与订单号"
+                outputSummary = when {
+                    crossChannel -> "跨通道同一笔，并入已有 #${merged.id}，补全商户与订单号"
+                    identityMerge -> "同商户、同金额、同交易时间，并入已有 #${merged.id}，补全字段"
+                    else -> "并入已有 #${merged.id}，补全商户与订单号"
                 },
             )
             update(merged, diagnosticInput, operationStage = TransactionDiagnostics.STAGE_CAPTURE)
@@ -984,6 +1046,12 @@ class TransactionRepository @Inject constructor(
 
     companion object {
         const val POSSIBLE_DUPLICATE_WINDOW_MS: Long = DuplicateReviewPolicy.WINDOW_MS
+
+        /**
+         * 身份比对只读最近这些账本行。与截图管线读取的粗筛同一规模：
+         * 再早的行既不会被截图管线看见，也不会成为「隔几十分钟再截一次」的对象。
+         */
+        private const val IDENTITY_SCAN_LIMIT = 500
     }
 }
 /**

@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureBookGate
@@ -72,7 +73,14 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
             ).category,
         )
         val inserted = try {
-            repository.insertIfNotDuplicate(entity, notifySuccess = false)
+            // 截图通道的写入都走同一套查重：账本里可能已经有这笔钱（同一张图
+            // 早前入账、或通知先记了一笔）。跨通道窗口 + 同商户同金额同交易
+            // 时间的强身份判定都在 repository 里，这里不另开一套规则。
+            repository.insertIfNotDuplicate(
+                transaction = entity,
+                notifySuccess = false,
+                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+            )
         } catch (_: Exception) {
             return
         }

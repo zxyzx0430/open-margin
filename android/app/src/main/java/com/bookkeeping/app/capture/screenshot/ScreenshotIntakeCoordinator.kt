@@ -23,6 +23,7 @@ import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
 import com.bookkeeping.app.notification.capture.ScreenshotWaitingCorrelation
+import com.bookkeeping.app.notification.capture.TERMINAL_CANDIDATE_STATUSES
 import com.bookkeeping.app.ocr.MlKitOcrEngine
 import com.bookkeeping.app.ocr.OcrEngine
 import com.bookkeeping.app.ocr.PaddleOcrEngine
@@ -186,6 +187,23 @@ class ScreenshotIntakeCoordinator private constructor(
             recordFailure(attemptId, FailureReason.UNREADABLE, inputSummary)
             return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
+        val fingerprint = sha256(bytes)
+        // 同一张图的每个候选都已经定局（入账 / 已忽略 / 已关联）：不必再 OCR 一遍，
+        // 更不能把 APPROVED 的卡片重新变成待确认。这是「MediaStore 多次回调」在
+        // 识别之前就该被挡住的那一层。
+        val remembered = runCatching { store.byImageFingerprint(fingerprint) }.getOrDefault(emptyList())
+        if (remembered.isNotEmpty() && remembered.all { it.status in TERMINAL_CANDIDATE_STATUSES }) {
+            recordStep(
+                attemptId = attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "Same image already settled; re-ingest ignored",
+                callSite = CALL_SITE_INGEST,
+                inputSummary = inputSummary,
+                outputSummary = "同一张截图已处理过（${remembered.map { it.status }.distinct().joinToString("/")}），本次未识别、未写入",
+            )
+            return Outcome(repeatImage = true, autoBookAllowed = autoBookAllowed)
+        }
         val decoded = runCatching { decode(bytes) }.getOrNull()
         if (decoded == null) {
             recordFailure(attemptId, FailureReason.DECODE_FAILED, inputSummary)
@@ -230,7 +248,7 @@ class ScreenshotIntakeCoordinator private constructor(
             request = request,
             blocks = blocks,
             bytes = bytes,
-            fingerprint = sha256(bytes),
+            fingerprint = fingerprint,
             attemptId = attemptId,
             allowAuto = allowAuto,
             previewOnly = previewOnly,
@@ -392,6 +410,7 @@ class ScreenshotIntakeCoordinator private constructor(
         var duplicates = 0
         var failed = 0
         var superseded = 0
+        var terminalSkipped = 0
         // Preview / allowAuto=false must not touch anything: a waiting card is
         // only closed once this import produced a real outcome for its own card.
         val settleAllowed = CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)
@@ -407,6 +426,22 @@ class ScreenshotIntakeCoordinator private constructor(
                 imageFingerprint = fingerprint,
                 diagnosticAttemptId = attemptId,
             )
+            // 同一个 candidateId 已经有定论：这张图/这笔钱被再次 ingest 了。
+            // 不写第二条账本行，也不把 APPROVED 拖回 PENDING/IGNORED。
+            val previous = store.findByCandidateId(candidate.candidateId)
+            if (previous != null && previous.status in TERMINAL_CANDIDATE_STATUSES) {
+                terminalSkipped++
+                recordStep(
+                    attemptId = attemptId,
+                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Candidate already settled (${previous.status}); duplicate ingest ignored",
+                    callSite = CALL_SITE_INGEST,
+                    inputSummary = candidateSummary ?: ocrSummary,
+                    outputSummary = "候选 ${candidate.candidateId.take(8)} 已是 ${previous.status}，本次不再识别/写入",
+                )
+                return@forEach
+            }
             val stored = store.save(candidate, bytes)
             if (stored == null) {
                 // save() returns null when the candidate is invalid or when its
@@ -491,13 +526,23 @@ class ScreenshotIntakeCoordinator private constructor(
                                             outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
                                         )
                                     }
-                                    // Same channel + same order id, or same merchant
-                                    // and amount inside the 8s window: a definite
-                                    // re-report, safe to close without asking.
+                                    // Same channel + same order id, same merchant and
+                                    // amount inside the 8s window, or the same merchant,
+                                    // amount and event minute (a page screenshotted again
+                                    // 47 minutes later): a definite re-report, safe to
+                                    // close without asking.
                                     DuplicateReason.SAME_SOURCE_WINDOW,
+                                    DuplicateReason.SAME_PAGE_IDENTITY,
                                     DuplicateReason.SOURCE_ORDER_ID -> {
-                                        store.mark(stored, CaptureCandidate.STATUS_IGNORED)
-                                        ignored++
+                                        if (markIgnoredUnlessApproved(
+                                                candidate = stored,
+                                                attemptId = attemptId,
+                                                inputSummary = candidateSummary ?: ocrSummary,
+                                                rawText = rawText,
+                                            )
+                                        ) {
+                                            ignored++
+                                        }
                                         duplicates++
                                         recordStep(
                                             attemptId = attemptId,
@@ -549,8 +594,15 @@ class ScreenshotIntakeCoordinator private constructor(
                     linked++
                 }
                 Action.IGNORE -> {
-                    store.mark(stored, CaptureCandidate.STATUS_IGNORED)
-                    ignored++
+                    if (markIgnoredUnlessApproved(
+                            candidate = stored,
+                            attemptId = attemptId,
+                            inputSummary = candidateSummary ?: ocrSummary,
+                            rawText = rawText,
+                        )
+                    ) {
+                        ignored++
+                    }
                 }
             }
             // Only evidence that became its own written or reviewable item may
@@ -603,6 +655,9 @@ class ScreenshotIntakeCoordinator private constructor(
             duplicates = duplicates,
             failed = failed,
             superseded = superseded,
+            // 整张图都是已定局的候选：这次 ingest 没有产生任何新结果，等同重复截图。
+            repeatImage = terminalSkipped > 0 &&
+                booked + pending + waiting + linked + ignored + failed == 0,
             autoBookAllowed = allowAuto && !previewOnly,
             confirmationCandidates = confirmationCandidates,
         )
@@ -702,6 +757,36 @@ class ScreenshotIntakeCoordinator private constructor(
     fun ignoreCandidate(candidate: CaptureCandidate): Boolean {
         val current = store.pending().firstOrNull { it.candidateId == candidate.candidateId } ?: return false
         return store.mark(current, CaptureCandidate.STATUS_IGNORED)
+    }
+
+    /**
+     * 自动路径的「标记为已忽略」，带一道不可逆检查。
+     *
+     * 重复 ingest 命中自己刚写入的那一行时，DuplicateReason 仍会把它判成重复；
+     * 但那笔钱已经在账本里，候选也已经是 APPROVED，再 mark(IGNORED) 就把它
+     * 拖进「已忽略的截图」，用户以为漏账。这里先查一次状态，跳过并留下诊断；
+     * 新候选第一次判 IGNORE 时状态是 PENDING，路径不变。
+     */
+    private suspend fun markIgnoredUnlessApproved(
+        candidate: CaptureCandidate,
+        attemptId: String,
+        inputSummary: String?,
+        rawText: String?,
+    ): Boolean {
+        if (store.findByCandidateId(candidate.candidateId)?.status == CaptureCandidate.STATUS_APPROVED) {
+            recordStep(
+                attemptId = attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "candidate already approved; duplicate ingest ignored",
+                callSite = CALL_SITE_INGEST,
+                inputSummary = inputSummary,
+                outputSummary = "候选已入账，重复 ingest 未改写状态",
+                rawText = rawText,
+            )
+            return false
+        }
+        return store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
     }
 
     fun close() {

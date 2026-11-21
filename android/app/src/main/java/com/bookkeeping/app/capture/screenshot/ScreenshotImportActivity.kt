@@ -442,6 +442,7 @@ class ScreenshotImportActivity : ComponentActivity() {
                 // 同一通道的精确重发：账本已经有这一行，卡片可以收起。
                 DuplicateReason.SOURCE_ORDER_ID,
                 DuplicateReason.SAME_SOURCE_WINDOW,
+                DuplicateReason.SAME_PAGE_IDENTITY,
                 -> {
                     store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
                     WriteOutcome.ALREADY_EXISTS

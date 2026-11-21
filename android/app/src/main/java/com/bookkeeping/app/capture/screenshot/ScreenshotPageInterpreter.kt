@@ -112,6 +112,15 @@ object ScreenshotPageInterpreter {
     private const val MERCHANT_LOOKUP_LINES = 4
 
     /**
+     * 明确的收款方标签，按「谁更具体」排序。`商户名称` / `商户全称` 是退款到账
+     * 通知页写收款方的方式；`对方` 是聊天/转账页的写法。带标签的值优先级高于
+     * 无标签的邻近文本，图标上的单个字母才不会顶替真正的商户。
+     */
+    private val MERCHANT_LABELS = listOf(
+        "商户名称", "商户全称", "收款方", "收款人", "对方", "付款给", "转账给",
+    )
+
+    /**
      * The footer a bill-list card prints under its amount. A detail page is
      * already open, so it never prints one below the amount.
      */
@@ -883,9 +892,11 @@ object ScreenshotPageInterpreter {
         max(MIN_STATUS_HORIZONTAL_GAP, max(a.bottom - a.top, b.bottom - b.top) * 4)
 
     private fun merchantOf(segment: List<TextBlock>, amountBlock: TextBlock): List<String> {
-        val labels = listOf("收款方", "付款给", "转账给", "商户全称", "对方", "收款人")
-        segment.forEachIndexed { index, block ->
-            labels.forEach { label ->
+        // 标签优先，且标签之间也按「谁更明确」排序：真机退款页明写
+        // `商户名称  自来充`，而图标上只有一个字母 Q；旧逻辑只认
+        // 收款方/商户全称，于是把图标角标当成了商户，tier 掉到 MEDIUM。
+        MERCHANT_LABELS.forEach { label ->
+            segment.forEachIndexed { index, block ->
                 if (block.text.startsWith(label) || block.text.contains("$label：") ||
                     block.text.contains("$label:")
                 ) {
@@ -956,6 +967,10 @@ object ScreenshotPageInterpreter {
         val text = value?.trim().orEmpty()
         if (text.isEmpty() || text.length > 40) return null
         if (!allowDigit && text.any(Char::isDigit)) return null
+        if (text in MERCHANT_LABELS) return null
+        // 图标 / 角标上的短拉丁串（"Q"、"JD"、"A."）不是商户名。真机退款页把
+        // 图标上的 Q 读成了商户，tier 因此掉到 MEDIUM；中文单字（"何"）不受影响。
+        if (isIconBadge(text)) return null
         if (text.contains('¥') || text.contains('￥') || text.endsWith("元")) return null
         if (MERCHANT_STOPWORDS.any { text == it || text.endsWith(it) || text.startsWith(it) }) return null
         val status = COMPLETED_MARKERS + REFUND_COMPLETED_MARKERS + CANCELLED_MARKERS +
@@ -964,6 +979,13 @@ object ScreenshotPageInterpreter {
         if (status.any(text::contains)) return null
         return text
     }
+
+    /**
+     * 一个 / 两个字符、全是 ASCII 字母或符号的文本：图标上的品牌首字母、未读角标。
+     * 真实商户很少只有一两个拉丁字符；中文单字（转账对方常常只写姓）不在此列。
+     */
+    private fun isIconBadge(text: String): Boolean =
+        text.length <= 2 && text.all { it.code < 128 && !it.isDigit() }
 
     private fun eventTimeOf(text: String, capturedAtMs: Long, timeZone: TimeZone): Long? {
         DATE_TIME_REGEX.find(text)?.let { match ->

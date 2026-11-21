@@ -50,9 +50,12 @@ object ScreenshotCandidateFactory {
             },
             eventTimeNeedsConfirmation = needsConfirmation,
             imageFingerprint = imageFingerprint,
-            candidateId = UUID.nameUUIDFromBytes(
-                "$imageFingerprint|${decision.index}|${draft.amountCents}|${draft.direction}".toByteArray(),
-            ).toString(),
+            candidateId = candidateId(
+                imageFingerprint = imageFingerprint,
+                index = decision.index,
+                amountCents = draft.amountCents,
+                direction = draft.direction,
+            ),
             supportedPaymentPage = draft.supportedPaymentPage,
             transactionLike = true,
             amountUnambiguous = draft.amountUnambiguous,
@@ -62,6 +65,19 @@ object ScreenshotCandidateFactory {
             ledgerWriteAllowed = decision.ledgerWriteAllowed,
         )
     }
+
+    /**
+     * 候选的稳定身份：同一张图（同一 SHA-256）、同一草稿序号、同一金额与方向
+     * 必然得到同一个 id。重复 ingest 因此能认出「这笔已经处理过」。
+     */
+    fun candidateId(
+        imageFingerprint: String,
+        index: Int,
+        amountCents: Long?,
+        direction: String,
+    ): String = UUID.nameUUIDFromBytes(
+        "$imageFingerprint|$index|$amountCents|$direction".toByteArray(),
+    ).toString()
 
     /**
      * Stored reason for the card.

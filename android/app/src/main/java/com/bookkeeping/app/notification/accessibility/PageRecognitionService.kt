@@ -899,6 +899,8 @@ object PageCaptureResultPolicy {
             DuplicateReason.CROSS_SOURCE_WEAK -> PageCaptureOutcome.HOLD_FOR_REVIEW
             DuplicateReason.SOURCE_ORDER_ID,
             DuplicateReason.SAME_SOURCE_WINDOW,
+            // 同商户 + 同金额 + 同交易分钟：同一笔钱的强身份命中，不是新的一笔。
+            DuplicateReason.SAME_PAGE_IDENTITY,
             DuplicateReason.CROSS_SOURCE -> PageCaptureOutcome.IGNORED
         }
     }

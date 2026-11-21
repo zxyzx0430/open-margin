@@ -17,6 +17,13 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
         synchronized(lock) {
             if (!dir.exists() && !dir.mkdirs()) return null
             runCatching { pruneExpiredLocked() }
+            // APPROVED 是终态：这笔钱已经写进账本。重复 ingest 同一张截图
+            // （MediaStore 多次回调 / 兜底扫描）会算出同一个 candidateId，
+            // 再 append 一条 PENDING 就是把它从「已入账」拖回待确认/已忽略，
+            // 用户看到「账本有、候选说漏了」。拒绝写入，调用方保留原记录。
+            if (lastRecordLocked(candidate.candidateId)?.status == CaptureCandidate.STATUS_APPROVED) {
+                return null
+            }
             val screenshotPath = screenshot
                 ?.takeIf { it.isNotEmpty() && it.size <= MAX_SCREENSHOT_BYTES }
                 ?.let { bytes ->
@@ -51,6 +58,36 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
     fun findByImageFingerprint(fingerprint: String): CaptureCandidate? = synchronized(lock) {
         runCatching { pruneExpiredLocked() }
         readAll().lastOrNull { it.imageFingerprint == fingerprint }
+    }
+
+    /**
+     * The card recorded under [candidateId], or null.
+     *
+     * candidateId is derived from the image fingerprint, the draft index and the
+     * money, so the same screenshot read twice resolves to the same card. That is
+     * what lets the intake coordinator recognise a re-ingest before it writes a
+     * second ledger row or revives a card that is already settled.
+     */
+    fun findByCandidateId(candidateId: String): CaptureCandidate? = synchronized(lock) {
+        if (candidateId.isBlank()) return@synchronized null
+        runCatching { pruneExpiredLocked() }
+        lastRecordLocked(candidateId)
+    }
+
+    /**
+     * Every card recorded for one image, newest record per candidateId.
+     *
+     * One screenshot can hold two payments; they stay two cards. Used by the
+     * intake coordinator to stop before OCR when every card of this exact image
+     * is already settled (APPROVED / IGNORED / LINKED).
+     */
+    fun byImageFingerprint(fingerprint: String): List<CaptureCandidate> = synchronized(lock) {
+        runCatching { pruneExpiredLocked() }
+        val collapsed = linkedMapOf<String, CaptureCandidate>()
+        readAll()
+            .filter { it.imageFingerprint == fingerprint }
+            .forEach { collapsed[it.candidateId] = it }
+        collapsed.values.toList()
     }
 
     /**
@@ -139,6 +176,14 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
     fun mark(candidate: CaptureCandidate, status: String): Boolean {
         if (status !in CaptureCandidate.STATUSES) return false
         synchronized(lock) {
+            // APPROVED 是终态，只能来自一次成功的账本写入。之后的任何 mark
+            // （IGNORED / PENDING / WAITING / LINKED）都不得把它降级：重复 ingest
+            // 命中自己刚写入的那一行时，旧代码正是用一条 IGNORED 把已入账的卡片
+            // 拖进「已忽略的截图」，于是同一笔钱「账本有、候选说已忽略」。
+            // 重复写 APPROVED 本身是幂等成功，不再追加一条记录。
+            if (lastRecordLocked(candidate.candidateId)?.status == CaptureCandidate.STATUS_APPROVED) {
+                return status == CaptureCandidate.STATUS_APPROVED
+            }
             if (!dir.exists() && !dir.mkdirs()) return false
             return runCatching {
                 indexFile.appendText(candidate.copy(status = status).toJson().toString() + "\n")
@@ -166,6 +211,10 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
             }
         }.getOrElse { emptyList() }
     }
+
+    /** Newest record for one candidateId; readers keep the last line per id. */
+    private fun lastRecordLocked(candidateId: String): CaptureCandidate? =
+        readAll().lastOrNull { it.candidateId == candidateId }
 
     private fun trimIndex() {
         if (!indexFile.isFile) return
@@ -245,4 +294,17 @@ enum class RestoreOutcome {
     NOT_IGNORED,
     WRITE_FAILED,
 }
+
+/**
+ * 已经有定论的候选状态：入账、已忽略、已关联到账本里的一行。
+ *
+ * 同一张截图被重复 ingest（MediaStore 多次回调 / 兜底扫描）时，这些状态都不该
+ * 再被识别一遍、更不该再写一行账；只有 APPROVED 是**不可逆**的，其余两个
+ * 仍可由用户在「已忽略的截图」里 restore 回待确认。
+ */
+internal val TERMINAL_CANDIDATE_STATUSES = setOf(
+    CaptureCandidate.STATUS_APPROVED,
+    CaptureCandidate.STATUS_IGNORED,
+    CaptureCandidate.STATUS_LINKED,
+)
 

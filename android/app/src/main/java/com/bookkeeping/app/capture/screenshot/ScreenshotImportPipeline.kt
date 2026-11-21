@@ -2,6 +2,7 @@ package com.bookkeeping.app.capture.screenshot
 
 import com.bookkeeping.app.data.repository.CaptureMergePolicy
 import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
+import com.bookkeeping.app.data.repository.SamePaymentIdentity
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
@@ -217,6 +218,13 @@ object ScreenshotImportPipeline {
      *    without a real event time) return AMBIGUOUS, which routes the
      *    candidate to human review. Nothing is merged silently: swallowing a
      *    real payment loses money from the ledger, while asking costs one tap.
+     * 2b. The one exception is the strong identity in [SamePaymentIdentity]:
+     *    same merchant and amount **and the same event minute**. A page only
+     *    prints minutes, so the same payment screenshotted again 47 minutes
+     *    later still carries the identical transaction time; that is the same
+     *    payment, not a second purchase, and it links to the existing row
+     *    without a second prompt. A row whose time is missing, or only the
+     *    capture time, never matches.
      * 3. Different merchants mean different transactions (two shops can charge
      *    the same amount a minute apart), so those stay CLEAR.
      */
@@ -254,6 +262,22 @@ object ScreenshotImportPipeline {
         if (sameShape.isEmpty()) {
             return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
         }
+        // 强身份：同商户 + 同金额/方向/币种 + 同交易分钟 = 同一笔，不受 2 分钟窗口
+        // 限制。真机：17:11 入账的 5.00，17:58 再截同一张支付页，页面上的交易时间
+        // 仍然是 17:11 —— 只看窗口会认不出，于是又问用户一次。时间缺失或只是截图
+        // 兜底时间时不判定（见 SamePaymentIdentity）。
+        val identity = sameShape.filter { row ->
+            SamePaymentIdentity.eventTimesMatch(
+                row.eventTimeMs.takeIf { it > 0L },
+                draft.eventTimeMs,
+            ) && SamePaymentIdentity.merchantsMatch(row.merchant, merchant)
+        }
+        when {
+            identity.size == 1 ->
+                return ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to identity.single().transactionId
+            // 账本里已经有两行同身份记录：指向哪一行都不确定，交人工。
+            identity.size > 1 -> return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
+        }
         // Without a real transaction time nothing can be placed inside (or
         // outside) the window, so the match stays reviewable.
         if (draft.eventTimeMs == null) {
@@ -274,7 +298,7 @@ object ScreenshotImportPipeline {
         val identified = inWindow.filter { normalize(it.merchant) == merchant }
         // Two distinct payments to one shop in the same two minutes look exactly
         // like this, and nothing here can tell them apart: ask, never link.
-        // Only the order id branch above may ever return EXACT_MATCH.
+        // Only an order id or the strong identity above may return EXACT_MATCH.
         return when {
             identified.isEmpty() -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
             else -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
