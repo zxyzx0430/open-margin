@@ -65,6 +65,10 @@ internal object EnglishUiText {
         "这笔交易已在账本中" to "This transaction is already in the ledger",
         "暂时无法记录，请稍后重试" to "Unable to record it right now; try again later",
         "仅预览，不能记入账本" to "Preview only; cannot be added to the ledger",
+        "疑似与账本里已有的一笔重复，请核对后再决定" to
+            "This looks like an entry already in the ledger; check both before you decide",
+        "疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #%d）" to
+            "This looks like an entry already in the ledger; check both before you decide (existing entry #%d)",
         "正在识别截图" to "Reading the screenshot",
         "选择图片" to "Choose image",
         "当前系统不支持图片选择器" to "This system has no photo picker",
