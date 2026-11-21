@@ -607,6 +607,26 @@ internal object EnglishUiText {
         "候选：" to "Candidates: ",
         "单号" to "Order ",
         "忽略" to "Ignore",
+        "不记这笔" to "Don't record this",
+        "已忽略的截图" to "Ignored screenshots",
+        "返回待确认" to "Back to review",
+        "撤销" to "Undo",
+        "已忽略，%d 秒内可撤销" to "Ignored; undo within %d s",
+        "恢复为待确认" to "Restore to review",
+        "恢复后回到待确认，由你重新确认后才写入账本。" to
+            "Restoring puts it back in review; nothing is booked until you confirm it again.",
+        "没有被忽略的截图" to "No ignored screenshots",
+        "截图保留 7 天，过期或被清理后无法找回。" to
+            "Screenshots are kept for 7 days; once expired or cleaned up they cannot be restored.",
+        "已撤销忽略，这笔已回到待确认" to "Ignore undone; this record is back in review",
+        "撤销已过期，可在「已忽略的截图」里找回" to
+            "Undo has expired; find it under Ignored screenshots",
+        "已忽略，可在「已忽略的截图」里找回" to "Ignored; find it under Ignored screenshots",
+        "已找回，这笔回到待确认" to "Restored; this record is back in review",
+        "找不到这笔截图，可能已被清理" to "Screenshot not found; it may have been cleaned up",
+        "这笔截图已超过 7 天保留期，无法找回" to
+            "This screenshot is past its 7-day retention and cannot be restored",
+        "这笔截图已不在忽略列表里" to "This screenshot is no longer in the ignored list",
         "记入账本" to "Add to ledger",
         "商户" to "Merchant",
         "金额" to "Amount",

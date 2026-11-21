@@ -1,6 +1,7 @@
 package com.bookkeeping.app.ui.screen.capture
 
 import android.graphics.BitmapFactory
+import android.os.SystemClock
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +59,7 @@ import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.theme.QingIncome
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -93,10 +96,26 @@ fun CaptureReviewDialog(
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
+                    // 次要入口：忽略过的卡片不删除，都能从这里找回来。
+                    TextButton(onClick = { viewModel.showIgnored(!state.showingIgnored) }) {
+                        Text(
+                            if (state.showingIgnored) {
+                                tr("返回待确认")
+                            } else if (state.ignored.isEmpty()) {
+                                tr("已忽略的截图")
+                            } else {
+                                tr("已忽略的截图") + " (${state.ignored.size})"
+                            },
+                        )
+                    }
                     TextButton(onClick = onDismiss) { Text(tr("关闭")) }
                 }
                 Text(
-                    text = tr("扫描只在本机保存结构化字段和截图，确认后才会写入账本。"),
+                    text = if (state.showingIgnored) {
+                        tr("恢复后回到待确认，由你重新确认后才写入账本。")
+                    } else {
+                        tr("扫描只在本机保存结构化字段和截图，确认后才会写入账本。")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -107,13 +126,47 @@ fun CaptureReviewDialog(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 }
-                if (state.busy) {
+                state.undo?.let { offer ->
+                    CaptureUndoRow(
+                        offer = offer,
+                        restoring = state.restoring,
+                        onUndo = { viewModel.undoIgnore() },
+                        onExpired = { viewModel.expireUndo() },
+                    )
+                }
+                if (state.busy || state.restoring) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
                     ) { CircularProgressIndicator() }
                 }
-                if (state.pending.isEmpty()) {
+                if (state.showingIgnored) {
+                    if (state.ignored.isEmpty()) {
+                        Text(
+                            text = tr("没有被忽略的截图"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text(
+                            text = tr("截图保留 7 天，过期或被清理后无法找回。"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            items(state.ignored, key = { "ignored:${it.candidateId}" }) { candidate ->
+                                IgnoredCandidateRow(
+                                    candidate = candidate,
+                                    restoring = state.restoring,
+                                    onRestore = { viewModel.restoreIgnored(candidate) },
+                                )
+                            }
+                        }
+                    }
+                } else if (state.pending.isEmpty()) {
                     Text(
                         text = tr("没有待确认扫描结果"),
                         style = MaterialTheme.typography.bodyMedium,
@@ -381,7 +434,8 @@ private fun CaptureCandidateCard(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     TextButton(onClick = onIgnore, enabled = !busy) {
-                        Text(tr("忽略"))
+                        // “忽略”听起来像扔掉；这张卡片其实还能从“已忽略的截图”找回。
+                        Text(tr("不记这笔"))
                     }
                     Button(
                         onClick = { onApprove(merchant, category, directionChoice) },
@@ -394,4 +448,138 @@ private fun CaptureCandidateCard(
             }
         }
     }
+}
+
+/**
+ * 忽略之后的限时撤销条。倒计时不能只靠组合重组：这里每 200ms 读一次时钟，
+ * 归零后通知 ViewModel 收回入口，超时就真的没有“撤销”可点了。
+ */
+@Composable
+private fun CaptureUndoRow(
+    offer: CaptureIgnoreUndo.Offer,
+    restoring: Boolean,
+    onUndo: () -> Unit,
+    onExpired: () -> Unit,
+) {
+    var remainingMs by remember(offer.candidate.candidateId, offer.ignoredAtMs) {
+        mutableStateOf(offer.remainingMs(SystemClock.elapsedRealtime()))
+    }
+    LaunchedEffect(offer.candidate.candidateId, offer.ignoredAtMs) {
+        while (true) {
+            remainingMs = offer.remainingMs(SystemClock.elapsedRealtime())
+            if (remainingMs <= 0L) {
+                onExpired()
+                break
+            }
+            delay(200L)
+        }
+    }
+    val seconds = ((remainingMs + 999L) / 1000L).coerceAtLeast(1L)
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = tr("已忽略，%d 秒内可撤销").format(seconds),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onUndo, enabled = !restoring) { Text(tr("撤销")) }
+        }
+    }
+}
+
+/** “已忽略的截图”里的一行：只有“恢复为待确认”，没有直接入账的入口。 */
+@Composable
+private fun IgnoredCandidateRow(
+    candidate: CaptureCandidate,
+    restoring: Boolean,
+    onRestore: () -> Unit,
+) {
+    val thumbnail by produceState<ImageBitmap?>(initialValue = null, candidate.screenshotPath) {
+        value = candidate.screenshotPath?.let { path ->
+            withContext(Dispatchers.IO) {
+                val options = BitmapFactory.Options().apply { inSampleSize = 8 }
+                BitmapFactory.decodeFile(path, options)?.asImageBitmap()
+            }
+        }
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val image = thumbnail
+            if (image != null) {
+                Image(
+                    bitmap = image,
+                    contentDescription = tr("扫描截图"),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                )
+            } else {
+                CategoryIcon(
+                    category = CaptureReviewMapping.defaultCategory(candidate),
+                    size = 48.dp,
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = captureAmountLabel(candidate),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
+                if (merchant.isNotBlank()) {
+                    Text(
+                        text = merchant,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                    )
+                }
+                Text(
+                    text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
+                        .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = onRestore, enabled = !restoring) {
+                Text(tr("恢复为待确认"))
+            }
+        }
+    }
+}
+
+/** 方向未知时只显示 ¥：不把待确认的交易先写成支出。 */
+private fun captureAmountLabel(candidate: CaptureCandidate): String {
+    val cents = candidate.amountCents ?: return tr("金额待补")
+    val unknown = candidate.direction == CaptureCandidate.DIRECTION_UNKNOWN &&
+        candidate.kind != CaptureCandidate.KIND_REFUND
+    val income = candidate.kind == CaptureCandidate.KIND_REFUND ||
+        candidate.direction == CaptureCandidate.DIRECTION_INCOME
+    val prefix = when {
+        unknown -> "¥"
+        income -> "+¥"
+        else -> "−¥"
+    }
+    return prefix + "%.2f".format(Locale.CHINA, cents / 100.0)
 }
