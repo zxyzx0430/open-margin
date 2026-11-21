@@ -63,6 +63,15 @@ data class TransactionDraft(
     val currency: String = "CNY",
     val pageIdentity: String = "",
     val supportedPaymentPage: Boolean = false,
+    /**
+     * True when this draft is one row of a settled bill list (several amount
+     * cards, each carrying its own `账单详情 >` footer or payment-method row,
+     * and no unfinished word on the card itself). A bill list only prints money
+     * that already moved, so such a row is booked without a second tap.
+     * Kept on the draft so the review card and the tests can tell a list row
+     * apart from a detail page that merely happened to say nothing.
+     */
+    val settledBillRow: Boolean = false,
     val reason: String = "",
 )
 

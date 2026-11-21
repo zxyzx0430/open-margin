@@ -21,6 +21,10 @@ import kotlin.math.max
  *    the page keeps one expected-deduction amount and waits for evidence;
  *  - refund arrival pages describe one incoming refund, so an amount repeated in
  *    the header and in the "退款金额" row stays one refund draft;
+ *  - a bill list shows several settled rows at once. Its rows carry no status
+ *    word, because a list only prints money that already moved: a row with no
+ *    unfinished word is finished. A single-amount page is a detail page and
+ *    keeps asking, so the rule can never relax a real detail screenshot;
  *  - app chrome (记账日报 / 本月统计) and narration ("充电订单-预付4元") are not
  *    transactions at all.
  */
@@ -103,6 +107,23 @@ object ScreenshotPageInterpreter {
 
     /** How many rows above the amount a shop name may sit on a bill-list card. */
     private const val MERCHANT_LOOKUP_LINES = 4
+
+    /**
+     * The footer a bill-list card prints under its amount. A detail page is
+     * already open, so it never prints one below the amount.
+     */
+    private val BILL_ROW_FOOTERS = listOf("账单详情", "交易详情")
+
+    /** The payment-method sentence every bill-list card carries. */
+    private fun isPaymentMethodRow(line: String): Boolean {
+        val text = line.trim()
+        if (text.contains("支付方式") || text.contains("付款方式")) return true
+        return text.startsWith("使用") && text.contains("支付")
+    }
+
+    /** Any of these words means the row's money has not settled. */
+    private val NON_FINAL_MARKERS =
+        PENDING_MARKERS + CREATED_MARKERS + CANCELLED_MARKERS + FAILED_MARKERS
 
     /**
      * WeChat chat transfer bubbles: the amount, the counterparty's action and
@@ -238,6 +259,10 @@ object ScreenshotPageInterpreter {
         // one card must not retype, complete or suppress another payment card on
         // the same page, and a future-debit marker must not hide its neighbour.
         val cards = mergeRepeatedRefundCards(segments)
+        // A bill list prints only money that already moved, so a row with no
+        // unfinished word is settled. Card-level, because one list screenshot
+        // can hold several rows and one unfinished row must not stop the rest.
+        val settledRowCards = settledBillRowCards(cards)
         val refundCard = cards.associate { card -> card.index to carriesAny(card.blocks, REFUND_PAGE_MARKERS) }
         val futureDebitCard = cards.associate { card ->
             card.index to carriesAny(card.blocks, FUTURE_DEBIT_MARKERS)
@@ -271,6 +296,20 @@ object ScreenshotPageInterpreter {
                 drafts = emptyList(),
                 reason = "no transaction fields",
             )
+        }
+        if (settledRowCards.isNotEmpty()) {
+            drafts = drafts.map { draft ->
+                if (draft.index !in settledRowCards) return@map draft
+                val row = draft.copy(settledBillRow = true)
+                // An explicit status word always wins; only a row that said
+                // nothing at all is read as settled.
+                if (draft.completionStatus != CaptureCandidate.COMPLETION_UNKNOWN) return@map row
+                row.copy(
+                    completionStatus = CaptureCandidate.COMPLETION_COMPLETED,
+                    completionExplicit = true,
+                    reason = "settled bill list row",
+                )
+            }
         }
         if (futureDebitCard.containsValue(true) || deductionCard.containsValue(true)) {
             val anyFutureDebit = futureDebitCard.containsValue(true)
@@ -463,6 +502,48 @@ object ScreenshotPageInterpreter {
 
     private fun carriesAny(blocks: List<TextBlock>, markers: List<String>): Boolean =
         blocks.any { block -> markers.any { block.text.contains(it) } }
+
+    /**
+     * Rows of a settled bill list, by card index.
+     *
+     * A list is several amount cards on one page, each printing a bare amount
+     * plus its own `账单详情 >` footer or payment-method sentence. A detail page
+     * prints labelled sub-totals (订单金额 / 商品金额 / 实付金额) instead, so a
+     * labelled amount disqualifies the whole page: those cards are parts of one
+     * transaction, not separate rows.
+     *
+     * A single-amount page is a detail page and is never upgraded here: without
+     * a visible 支付成功 it still has to ask.
+     */
+    private fun settledBillRowCards(cards: List<Card>): Set<Int> {
+        if (cards.size < 2) return emptySet()
+        val amounts = cards.flatMap { card -> card.blocks.filter { amountOf(it.text) != null } }
+        if (amounts.isEmpty()) return emptySet()
+        if (amounts.any { block -> !isPlainCurrencyLine(block.text) }) return emptySet()
+        return cards
+            .filter { card -> isSettledBillRow(card.blocks) }
+            .map { card -> card.index }
+            .toSet()
+    }
+
+    private fun isSettledBillRow(blocks: List<TextBlock>): Boolean {
+        val amount = blocks.singleOrNull { amountOf(it.text) != null } ?: return false
+        // 待收款 / 已取消 / 支付失败 / 待付款 all mean the money has not settled.
+        // The word is read anywhere in the card, bound to the amount or not.
+        if (carriesAny(blocks, NON_FINAL_MARKERS)) return false
+        val footer = blocks.any { block ->
+            BILL_ROW_FOOTERS.any(block.text::contains) &&
+                hasGeometry(block) && hasGeometry(amount) && block.top >= amount.top
+        }
+        if (footer) return true
+        return blocks.any { block -> isPaymentMethodRow(block.text) }
+    }
+
+    /** A bare `¥8.00` / `-¥8.00` / `8.00元` line, the shape a list row prints. */
+    private fun isPlainCurrencyLine(line: String): Boolean {
+        val text = line.trim()
+        return CURRENCY_LINE_REGEX.find(text) != null || YUAN_LINE_REGEX.matchEntire(text) != null
+    }
 
     /**
      * A refund page repeats the same money twice: once as the header amount and
