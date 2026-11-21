@@ -470,36 +470,45 @@ class ScreenshotIntakeCoordinator private constructor(
                                 applied = true
                             }
                             is LedgerInsertResult.Duplicate -> {
-                                if (result.reason == DuplicateReason.CROSS_SOURCE) {
-                                    // A cross-channel hit is a heuristic: the other
-                                    // channel's row can be a different payment. Keep
-                                    // the card for the user instead of closing it.
-                                    store.mark(stored, CaptureCandidate.STATUS_PENDING)
-                                    pending++
-                                    recordStep(
-                                        attemptId = attemptId,
-                                        stage = TransactionDiagnostics.STAGE_DEDUP,
-                                        result = TransactionDiagnostics.RESULT_WARNING,
-                                        details = "Cross-channel match kept for confirmation",
-                                        callSite = CALL_SITE_INGEST,
-                                        inputSummary = candidateSummary ?: ocrSummary,
-                                        outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
-                                    )
-                                } else {
-                                    // Same source + same order id, or same merchant
-                                    // and amount inside the 8s window: definite.
-                                    store.mark(stored, CaptureCandidate.STATUS_IGNORED)
-                                    ignored++
-                                    duplicates++
-                                    recordStep(
-                                        attemptId = attemptId,
-                                        stage = TransactionDiagnostics.STAGE_DEDUP,
-                                        result = TransactionDiagnostics.RESULT_WARNING,
-                                        details = "Duplicate confirmed by ledger (${result.reason.name})",
-                                        callSite = CALL_SITE_INGEST,
-                                        inputSummary = candidateSummary ?: ocrSummary,
-                                        outputSummary = "已存在 #${result.existingTransactionId}，跳过",
-                                    )
+                                when (result.reason) {
+                                    // Every cross-channel hit is a heuristic, weak
+                                    // evidence included: the other channel's row can
+                                    // be a different payment. Keep the card for the
+                                    // user; never let a new reason fall through to
+                                    // "ignored" just because nobody updated this
+                                    // branch.
+                                    DuplicateReason.CROSS_SOURCE,
+                                    DuplicateReason.CROSS_SOURCE_WEAK -> {
+                                        store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                                        pending++
+                                        recordStep(
+                                            attemptId = attemptId,
+                                            stage = TransactionDiagnostics.STAGE_DEDUP,
+                                            result = TransactionDiagnostics.RESULT_WARNING,
+                                            details = "Cross-channel match kept for confirmation (${result.reason.name})",
+                                            callSite = CALL_SITE_INGEST,
+                                            inputSummary = candidateSummary ?: ocrSummary,
+                                            outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
+                                        )
+                                    }
+                                    // Same channel + same order id, or same merchant
+                                    // and amount inside the 8s window: a definite
+                                    // re-report, safe to close without asking.
+                                    DuplicateReason.SAME_SOURCE_WINDOW,
+                                    DuplicateReason.SOURCE_ORDER_ID -> {
+                                        store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+                                        ignored++
+                                        duplicates++
+                                        recordStep(
+                                            attemptId = attemptId,
+                                            stage = TransactionDiagnostics.STAGE_DEDUP,
+                                            result = TransactionDiagnostics.RESULT_WARNING,
+                                            details = "Duplicate confirmed by ledger (${result.reason.name})",
+                                            callSite = CALL_SITE_INGEST,
+                                            inputSummary = candidateSummary ?: ocrSummary,
+                                            outputSummary = "已存在 #${result.existingTransactionId}，跳过",
+                                        )
+                                    }
                                 }
                             }
                             is LedgerInsertResult.Failed -> {

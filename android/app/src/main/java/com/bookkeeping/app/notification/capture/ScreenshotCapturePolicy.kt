@@ -103,7 +103,11 @@ object ScreenshotCapturePolicy {
     /** True for kinds that may only reach the ledger after the user confirms. */
     fun requiresConfirmation(kind: String): Boolean = kind in CONFIRM_ONLY_KINDS
 
-    private val NON_FINAL_STATUSES = setOf(
+    /**
+     * Completion states that mean the money has not settled (or never will).
+     * Shared with [CaptureBookGate.mayConfirm] so the two gates cannot drift.
+     */
+    internal val NON_FINAL_STATUSES = setOf(
         CaptureCandidate.COMPLETION_PENDING,
         CaptureCandidate.COMPLETION_CREATED,
         CaptureCandidate.COMPLETION_CANCELLED,
