@@ -453,7 +453,10 @@ private fun CaptureCandidateCard(
 }
 
 /**
- * 「疑似与账本里已有的一笔重复」提示，待确认弹窗与导入候选卡共用。
+ * 「疑似重复」提示，待确认弹窗与导入候选卡共用。
+ *
+ * 两种来源共用这个组件：账本里可能已有同额的一笔（跨通道弱证据），或同一张截图里
+ * 出现了两条同额、同向、同商户的记录。后者没有账本记录号，文案单列。
  *
  * 只做展示：命中去重弱证据的候选仍保持 PENDING，用户依旧可以选择记入账本或不记这笔，
  * 这里只是把「为什么让你核对」「和哪一笔像」说出来。
@@ -476,19 +479,29 @@ internal fun LikelyDuplicateNotice(
 /**
  * 是否显示「疑似重复」提示以及文案怎么拼（纯函数，不依赖 Compose）。
  *
- * 只有 [CaptureCandidate.reason] 等于 [CaptureCandidate.REASON_LIKELY_DUPLICATE] 才显示；
- * [CaptureCandidate.matchedTransactionId] 仅在大于 0 时作为已有记录标识附在末尾。
+ * 只认两个明确原因常量，不做前缀/包含匹配：
+ * - [CaptureCandidate.REASON_LIKELY_DUPLICATE]：账本里可能已有同额的一笔
+ *   （跨通道弱证据）。[CaptureCandidate.matchedTransactionId] 仅在大于 0 时作为
+ *   已有记录标识附在末尾。
+ * - [CaptureCandidate.REASON_SAME_IMAGE_REPEAT]：同一张截图里出现了两条同额、
+ *   同向、同商户的记录。这时没有账本记录可指，文案不能写「账本里已有一笔」。
+ *
  * 金额、商户、方向、状态、置信度等其他字段不参与判断。
  */
-internal fun likelyDuplicateNoticeText(candidate: CaptureCandidate): String? {
-    if (candidate.reason != CaptureCandidate.REASON_LIKELY_DUPLICATE) return null
-    val existingId = candidate.matchedTransactionId?.takeIf { it > 0L }
-    return if (existingId != null) {
-        tr("疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #%d）").format(existingId)
-    } else {
-        tr("疑似与账本里已有的一笔重复，请核对后再决定")
+internal fun likelyDuplicateNoticeText(candidate: CaptureCandidate): String? =
+    when (candidate.reason) {
+        CaptureCandidate.REASON_LIKELY_DUPLICATE -> {
+            val existingId = candidate.matchedTransactionId?.takeIf { it > 0L }
+            if (existingId != null) {
+                tr("疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #%d）").format(existingId)
+            } else {
+                tr("疑似与账本里已有的一笔重复，请核对后再决定")
+            }
+        }
+        CaptureCandidate.REASON_SAME_IMAGE_REPEAT ->
+            tr("同一张截图里有金额、商户相同的记录，请核对是否重复")
+        else -> null
     }
-}
 
 /**
  * 忽略之后的限时撤销条。倒计时不能只靠组合重组：这里每 200ms 读一次时钟，

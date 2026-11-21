@@ -4,6 +4,7 @@ import com.bookkeeping.app.i18n.EnglishUiText
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,6 +121,38 @@ class LikelyDuplicateNoticeTest {
             "This looks like an entry already in the ledger; check both before you decide " +
                 "(existing entry #12)",
             EnglishUiText.translate(withId).format(12L),
+        )
+    }
+
+    /**
+     * 同一张截图里出现两条同额同商户记录：这是另一种断言（图里还有一条，不是账本里已有一笔），
+     * 所以有自己的常量与文案，也不能凭空拼出账本记录号。
+     */
+    @Test
+    fun sameImageRepeatShowsItsOwnNoticeWithoutALedgerIdentifier() {
+        val notice = likelyDuplicateNoticeText(
+            candidate(
+                reason = CaptureCandidate.REASON_SAME_IMAGE_REPEAT,
+                matchedTransactionId = 12L,
+            ),
+        )
+        assertEquals("同一张截图里有金额、商户相同的记录，请核对是否重复", notice)
+        assertFalse(notice!!.contains("#"))
+        // 与「账本里已有一笔」是两句不同的话，不能混用。
+        assertNotEquals(
+            likelyDuplicateNoticeText(candidate()),
+            notice,
+        )
+    }
+
+    @Test
+    fun sameImageRepeatTemplateHasAnEnglishEntry() {
+        val base = "同一张截图里有金额、商户相同的记录，请核对是否重复"
+        assertTrue(EnglishUiText.hasTranslation(base))
+        assertEquals(
+            "This screenshot has records with the same amount and merchant; " +
+                "check whether they are duplicates",
+            EnglishUiText.translate(base),
         )
     }
 }

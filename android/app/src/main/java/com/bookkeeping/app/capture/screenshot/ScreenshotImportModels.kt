@@ -113,6 +113,35 @@ data class ScreenshotIntakeRequest(
     val imageFingerprint: String? = null,
 )
 
+/**
+ * Why a draft that looked bookable was still held for the user.
+ *
+ * Structured evidence, not a reason string: a caller (and the review card) can
+ * branch on this without comparing prose, and a wording change can no longer
+ * silence the hint. [ScreenshotCandidateFactory] turns it into
+ * [com.bookkeeping.app.notification.capture.CaptureCandidate.reason], which is
+ * what the stored card and the review UI read.
+ */
+enum class DuplicateHint {
+    /** Not a duplicate: any other reason held the draft (or it was auto booked). */
+    NONE,
+
+    /**
+     * 层 1: the ledger already holds the same money, written by another intake
+     * channel (notification / SMS / accessibility / manual). A resemblance, not
+     * an identity, so the draft asks; [CandidateDecision.matchedTransactionId]
+     * points at the suspected row.
+     */
+    CROSS_CHANNEL,
+
+    /**
+     * 层 3: the same amount, direction and merchant already appeared earlier in
+     * this image. There is no ledger row to point at — the duplicate is the
+     * sibling draft, which may itself have been booked.
+     */
+    SAME_IMAGE,
+}
+
 /** What the pipeline decided for one draft. */
 data class CandidateDecision(
     val index: Int,
@@ -125,6 +154,8 @@ data class CandidateDecision(
     val matchedTransactionId: Long? = null,
     /** False for preview-only/allowAuto=false imports; persisted across review paths. */
     val ledgerWriteAllowed: Boolean = true,
+    /** Why this draft was demoted to review; [DuplicateHint.NONE] for every other reason. */
+    val duplicateHint: DuplicateHint = DuplicateHint.NONE,
 )
 
 data class ImportPlan(

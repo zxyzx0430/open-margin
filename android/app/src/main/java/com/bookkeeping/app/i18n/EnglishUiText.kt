@@ -1447,6 +1447,8 @@ internal object EnglishUiText {
         "用户确认导入账单" to "User confirmed bill import",
         "确认导入失败" to "Confirmed import failed",
         "确认导入已完成" to "Confirmed import committed",
+        "同一张截图里有金额、商户相同的记录，请核对是否重复" to
+            "This screenshot has records with the same amount and merchant; check whether they are duplicates",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(

@@ -124,6 +124,14 @@ object ScreenshotImportPipeline {
                 draftsSeenHere.any { isSameMoneyAsEarlierDraft(draft, it) }
             if (crossSource != null || sameImageRepeat) action = Action.ASK_USER
             draftsSeenHere += draft
+            // 结构化标记：只描述「为什么被降级」。跨通道与同图重复是两种不同的断言
+            //（前者指向账本里的一行，后者指向同一张图里的另一条草稿），所以不合并。
+            // 动作判定顺序不变：这一步只读上面已经算好的结果。
+            val duplicateHint = when {
+                crossSource != null -> DuplicateHint.CROSS_CHANNEL
+                sameImageRepeat -> DuplicateHint.SAME_IMAGE
+                else -> DuplicateHint.NONE
+            }
             var reason = draft.reason
             var matched: Long? = null
             when (action) {
@@ -142,6 +150,7 @@ object ScreenshotImportPipeline {
                             draft = draft,
                             queued = true,
                             ledgerWriteAllowed = allowAuto && !previewOnly,
+                            duplicateHint = duplicateHint,
                         )
                         return@forEach
                     }
@@ -177,6 +186,7 @@ object ScreenshotImportPipeline {
                 draft = draft,
                 matchedTransactionId = matched,
                 ledgerWriteAllowed = allowAuto && !previewOnly,
+                duplicateHint = duplicateHint,
             )
         }
         return ImportPlan(decisions)
