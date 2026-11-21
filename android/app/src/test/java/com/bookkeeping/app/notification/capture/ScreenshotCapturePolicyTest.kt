@@ -44,6 +44,7 @@ class ScreenshotCapturePolicyTest {
         amountUnambiguous: Boolean = true,
         conflictingFields: Boolean = false,
         duplicateResult: DuplicateResult = DuplicateResult.CLEAR,
+        completionInferredFromList: Boolean = false,
     ) = Evidence(
         supportedPaymentPage = supported,
         paymentPlatformKnown = platformKnown,
@@ -54,6 +55,7 @@ class ScreenshotCapturePolicyTest {
         directionExplicit = directionExplicit,
         completionStatus = completion,
         completionExplicit = completionExplicit,
+        completionInferredFromList = completionInferredFromList,
         kind = kind,
         conflictingFields = conflictingFields,
         duplicateResult = duplicateResult,
@@ -118,6 +120,27 @@ class ScreenshotCapturePolicyTest {
         val assessment = ScreenshotCapturePolicy.assess(unknownPlatform, allowAuto = true)
         assertEquals(TIER_MEDIUM, assessment.tier)
         assertEquals(Action.ASK_USER, assessment.action)
+    }
+
+    @Test
+    fun `transfer whose completion is only inferred from a bill list still asks`() {
+        // 账单列表行没有状态词：COMPLETED 是从「它在已成交列表里」推断出来的。
+        // 普通支付可以据此入账，转账不行——列表没有写 已被接收 / 已收款。
+        val inferred = evidence(kind = KIND_TRANSFER, completionInferredFromList = true)
+
+        assertFalse(ScreenshotCapturePolicy.transferAutoBookAllowed(inferred))
+        val assessment = ScreenshotCapturePolicy.assess(inferred, allowAuto = true)
+        // 金额与方向都是硬的，缺的只是页面那句状态词：高置信，但仍要一次确认。
+        assertEquals(TIER_HIGH, assessment.tier)
+        assertEquals(Action.ASK_USER, assessment.action)
+    }
+
+    @Test
+    fun `a payment whose completion is inferred from a bill list still books`() {
+        // 回归：这轮列表自动入账的成果只对转账收紧，普通支付不得被连坐。
+        val inferred = evidence(kind = KIND_PAYMENT, completionInferredFromList = true)
+
+        assertEquals(Action.AUTO_BOOK, ScreenshotCapturePolicy.assess(inferred, allowAuto = true).action)
     }
 
     // ---------- 硬约束：其余 kind 一律不得放宽 ----------

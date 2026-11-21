@@ -168,6 +168,8 @@ class ScreenshotAuditMerchantTransferTest {
         // and the expense is complete, not an open question for the user.
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
         assertTrue(draft.completionExplicit)
+        // The word is printed in the bubble, so nothing is inferred from layout.
+        assertFalse(draft.completionInferredFromList)
         assertTrue(draft.supportedPaymentPage)
         // The chat text above the bubble is not a merchant.
         assertTrue(draft.merchantCandidates.isEmpty())

@@ -16,8 +16,9 @@ object ScreenshotCapturePolicy {
      * Transfers are deliberately **not** in this set any more. A completed
      * transfer that names its own direction (已被接收 / 已收款) and comes from a
      * known platform is a settled payment, so [transferAutoBookAllowed] lets it
-     * through. Anything weaker — 待接收, unknown completion, unproven direction
-     * — still goes to [Action.ASK_USER] through that same function.
+     * through. Anything weaker — 待接收, unknown completion, a completion
+     * inferred only from a bill-list row, unproven direction — still goes to
+     * [Action.ASK_USER] through that same function.
      */
     val CONFIRM_ONLY_KINDS = setOf(
         CaptureCandidate.KIND_REFUND,
@@ -35,6 +36,14 @@ object ScreenshotCapturePolicy {
         val directionExplicit: Boolean,
         val completionStatus: String,
         val completionExplicit: Boolean,
+        /**
+         * True when the completed state was inferred from the page's layout
+         * (one row of a settled bill list) rather than read from a status word.
+         * For an ordinary payment that is enough; for a transfer it is not,
+         * because a list row never prints 已被接收 / 已收款. See
+         * [transferAutoBookAllowed].
+         */
+        val completionInferredFromList: Boolean = false,
         val kind: String = CaptureCandidate.KIND_PAYMENT,
         val conflictingFields: Boolean = false,
         val duplicateResult: DuplicateResult = DuplicateResult.CLEAR,
@@ -87,16 +96,22 @@ object ScreenshotCapturePolicy {
     }
 
     /**
-     * 已完成、方向、平台三者都显式时，转账才允许自动入账。
+     * 已完成、方向、平台三者都显式、且完成态由页面明说时，转账才允许自动入账。
      *
      * 待接收（方向未知、未完成）、状态不明、状态词与气泡位置矛盾（方向被置为
      * UNKNOWN）、平台未知的转账都返回 false，继续走人工确认；`allowAuto` /
      * `previewOnly` 仍由 [assess] 单独把关，不在这里放宽。
+     *
+     * [Evidence.completionInferredFromList] 也必须为 false：账单列表行没有状态
+     * 词，`COMPLETED` 是从「它在账单列表里」推断出来的。列表能证明一笔普通支付
+     * 已成交（列表只列已成交的钱），但转账是否真的被接收，只能由气泡里的
+     * 已被接收 / 已收款证明；推断出来的完成态对转账证据不足，仍要用户确认。
      */
     fun transferAutoBookAllowed(evidence: Evidence): Boolean =
         evidence.kind == CaptureCandidate.KIND_TRANSFER &&
             evidence.completionStatus == CaptureCandidate.COMPLETION_COMPLETED &&
             evidence.completionExplicit &&
+            !evidence.completionInferredFromList &&
             evidence.directionExplicit &&
             evidence.paymentPlatformKnown
 

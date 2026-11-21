@@ -67,11 +67,23 @@ data class TransactionDraft(
      * True when this draft is one row of a settled bill list (several amount
      * cards, each carrying its own `账单详情 >` footer or payment-method row,
      * and no unfinished word on the card itself). A bill list only prints money
-     * that already moved, so such a row is booked without a second tap.
-     * Kept on the draft so the review card and the tests can tell a list row
-     * apart from a detail page that merely happened to say nothing.
+     * that already moved, so an ordinary payment row is booked without a second
+     * tap. Kept on the draft so the review card and the tests can tell a list
+     * row apart from a detail page that merely happened to say nothing.
      */
     val settledBillRow: Boolean = false,
+    /**
+     * True when [completionStatus] is not printed anywhere on the page: the row
+     * is a settled bill list row and the list itself is the only reason to
+     * believe the money moved.
+     *
+     * That inference is enough for an ordinary payment (a bill list only lists
+     * settled money), but it is not a status word. A transfer's completion is
+     * proved by 已被接收 / 已收款 in the chat bubble; a list row never prints
+     * those words, so [ScreenshotCapturePolicy.transferAutoBookAllowed] keeps
+     * such a row for the user. Always false when the page stated the status.
+     */
+    val completionInferredFromList: Boolean = false,
     val reason: String = "",
 )
 

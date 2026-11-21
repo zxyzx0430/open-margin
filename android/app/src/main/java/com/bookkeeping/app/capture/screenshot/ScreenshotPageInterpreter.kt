@@ -23,8 +23,11 @@ import kotlin.math.max
  *    the header and in the "退款金额" row stays one refund draft;
  *  - a bill list shows several settled rows at once. Its rows carry no status
  *    word, because a list only prints money that already moved: a row with no
- *    unfinished word is finished. A single-amount page is a detail page and
- *    keeps asking, so the rule can never relax a real detail screenshot;
+ *    unfinished word is finished. That completion is inferred from the list,
+ *    which is enough for an ordinary payment but never for a transfer — a list
+ *    never prints 已被接收 / 已收款, so the transfer keeps asking. A
+ *    single-amount page is a detail page and keeps asking too, so the rule can
+ *    never relax a real detail screenshot;
  *  - app chrome (记账日报 / 本月统计) and narration ("充电订单-预付4元") are not
  *    transactions at all.
  */
@@ -302,11 +305,13 @@ object ScreenshotPageInterpreter {
                 if (draft.index !in settledRowCards) return@map draft
                 val row = draft.copy(settledBillRow = true)
                 // An explicit status word always wins; only a row that said
-                // nothing at all is read as settled.
+                // nothing at all is read as settled — and that completion is
+                // then inferred from the list, not stated by the page.
                 if (draft.completionStatus != CaptureCandidate.COMPLETION_UNKNOWN) return@map row
                 row.copy(
                     completionStatus = CaptureCandidate.COMPLETION_COMPLETED,
                     completionExplicit = true,
+                    completionInferredFromList = true,
                     reason = "settled bill list row",
                 )
             }
