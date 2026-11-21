@@ -85,7 +85,7 @@ class SiteUpdateWorker(
                 prefs.clearPendingDownload()
                 Result.success()
             }
-            null -> Result.retry()
+            else -> Result.retry()
         }
     }
 
