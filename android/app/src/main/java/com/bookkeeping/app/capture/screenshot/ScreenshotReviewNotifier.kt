@@ -117,13 +117,24 @@ object ScreenshotReviewNotifier {
     private fun reviewReason(candidate: CaptureCandidate): String = when {
         !candidate.ledgerWriteAllowed -> tr("仅预览，不能记入账本")
         candidate.kind in setOf(
-            CaptureCandidate.KIND_TRANSFER,
             CaptureCandidate.KIND_REFUND,
             CaptureCandidate.KIND_RED_PACKET,
             CaptureCandidate.KIND_WITHDRAWAL,
         ) -> tr("这类交易需要人工确认")
         candidate.reason.contains("auto booking disabled") -> tr("自动记账已关闭")
+        // Transfers are not in the "always manual" group any more: a completed
+        // transfer with a proven direction and platform can auto-book. Explain
+        // which proof is still missing instead of telling the user the whole
+        // kind needs manual confirmation.
+        candidate.kind == CaptureCandidate.KIND_TRANSFER &&
+            candidate.direction !in setOf(
+                CaptureCandidate.DIRECTION_INCOME,
+                CaptureCandidate.DIRECTION_EXPENSE,
+            ) -> tr("转账方向待确认，请先选择收入或支出")
         !candidate.completionExplicit -> tr("截图未明确显示交易状态")
+        candidate.kind == CaptureCandidate.KIND_TRANSFER &&
+            candidate.completionStatus != CaptureCandidate.COMPLETION_COMPLETED ->
+            tr("转账尚未成功，暂不能记账")
         candidate.eventTimeNeedsConfirmation -> tr("截图时间为暂用时间，请核对交易时间")
         else -> tr("请核对截图识别结果")
     }

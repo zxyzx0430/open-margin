@@ -48,6 +48,8 @@ internal object EnglishUiText {
         "交易失败" to "Failed",
         "交易状态未识别" to "Status unknown",
         "这类交易需要人工确认" to "This transaction type needs manual confirmation",
+        "转账方向待确认，请先选择收入或支出" to "The transfer direction needs confirmation; choose income or expense first",
+        "转账尚未成功，暂不能记账" to "The transfer has not succeeded yet; it cannot be recorded now",
         "自动记账已关闭" to "Automatic booking is off",
         "截图未明确显示交易状态" to "The screenshot does not clearly show the transaction status",
         "截图时间为暂用时间，请核对交易时间" to "The screenshot time is a temporary fallback; check the transaction time",
