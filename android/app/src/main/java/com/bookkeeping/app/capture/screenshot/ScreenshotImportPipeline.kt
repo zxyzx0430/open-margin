@@ -161,6 +161,10 @@ object ScreenshotImportPipeline {
                         sameImageRepeat -> "same amount appears twice in this screenshot"
                         ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
                             "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
+                        // 金额读到了、方向没读到：卡片的第一个动作是让用户点 支出/收入，
+                        // 这句写进候选 reason，方便诊断时区分「问方向」和「问重复」。
+                        draft.direction == CaptureCandidate.DIRECTION_UNKNOWN ->
+                            "transaction direction not readable; asking the user to pick"
                         // A list row infers completion from its place in the
                         // list; that is enough for a payment, not for a
                         // transfer, whose state word the list never prints.

@@ -45,10 +45,11 @@ class ScreenshotCapturePolicyTest {
         conflictingFields: Boolean = false,
         duplicateResult: DuplicateResult = DuplicateResult.CLEAR,
         completionInferredFromList: Boolean = false,
+        transactionLike: Boolean = true,
     ) = Evidence(
         supportedPaymentPage = supported,
         paymentPlatformKnown = platformKnown,
-        transactionLike = true,
+        transactionLike = transactionLike,
         amountCents = amountCents,
         amountUnambiguous = amountUnambiguous,
         direction = direction,
@@ -99,9 +100,10 @@ class ScreenshotCapturePolicyTest {
         )
 
         assertFalse(ScreenshotCapturePolicy.transferAutoBookAllowed(unknownDirection))
-        // 方向都没有的草稿不是「问一句」，而是根本不能当交易：沿用原有 IGNORE，
-        // 无论如何都不会产生一次账本写入。
-        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(unknownDirection, allowAuto = true).action)
+        // 方向读不出来不等于「不是交易」：金额、商户、平台都清楚时，静默丢掉会
+        // 让用户完全不知道少了一笔。改成问一句，由用户在待确认卡上点 支出/收入；
+        // 方向未显式前 CaptureBookGate 仍然拒绝写入，所以永远不会有账本写入。
+        assertEquals(Action.ASK_USER, ScreenshotCapturePolicy.assess(unknownDirection, allowAuto = true).action)
     }
 
     @Test
@@ -141,6 +143,116 @@ class ScreenshotCapturePolicyTest {
         val inferred = evidence(kind = KIND_PAYMENT, completionInferredFromList = true)
 
         assertEquals(Action.AUTO_BOOK, ScreenshotCapturePolicy.assess(inferred, allowAuto = true).action)
+    }
+
+    // ---------- 方向未知但其它证据充分：问一句，不是静默丢掉 ----------
+
+    @Test
+    fun `unknown direction with a usable amount asks the user instead of ignoring`() {
+        // 金额、平台、状态都清楚，只是页面上没有方向词：这是一笔交易，
+        // 旧语义直接 IGNORE（不建卡、不提示），用户永远不知道少了一笔。
+        val unknown = evidence(direction = DIRECTION_UNKNOWN, directionExplicit = false)
+
+        val assessment = ScreenshotCapturePolicy.assess(unknown, allowAuto = true)
+        assertEquals(TIER_MEDIUM, assessment.tier)
+        assertEquals(Action.ASK_USER, assessment.action)
+    }
+
+    @Test
+    fun `unknown direction never auto books even when every other gate is high`() {
+        // completed + 平台已知 + 完成态显式：普通支付这里会 AUTO_BOOK。
+        // 方向没读到就必须先问，绝不允许借高置信直接记账。
+        val unknown = evidence(direction = DIRECTION_UNKNOWN, directionExplicit = false)
+
+        assertEquals(
+            Action.ASK_USER,
+            ScreenshotCapturePolicy.assess(unknown, allowAuto = true).action,
+        )
+        assertEquals(
+            Action.ASK_USER,
+            ScreenshotCapturePolicy.assess(unknown, allowAuto = false).action,
+        )
+        assertEquals(
+            Action.ASK_USER,
+            ScreenshotCapturePolicy.assess(unknown, allowAuto = true, previewOnly = true).action,
+        )
+    }
+
+    @Test
+    fun `a non transaction page is still ignored whatever the direction says`() {
+        // 风景照 / 聊天截图：transactionLike=false，任何方向取值都不能把它变成卡。
+        listOf(DIRECTION_UNKNOWN, DIRECTION_EXPENSE, DIRECTION_INCOME).forEach { direction ->
+            val photo = evidence(
+                direction = direction,
+                directionExplicit = direction != DIRECTION_UNKNOWN,
+                transactionLike = false,
+            )
+            assertEquals(
+                "$direction must stay ignored on a non transaction page",
+                Action.IGNORE,
+                ScreenshotCapturePolicy.assess(photo, allowAuto = true).action,
+            )
+        }
+    }
+
+    @Test
+    fun `an ambiguous amount is still ignored even with an unknown direction`() {
+        val ambiguous = evidence(
+            direction = DIRECTION_UNKNOWN,
+            directionExplicit = false,
+            amountUnambiguous = false,
+        )
+
+        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(ambiguous, allowAuto = true).action)
+    }
+
+    @Test
+    fun `conflicting fields are still ignored even with an unknown direction`() {
+        val conflicting = evidence(
+            direction = DIRECTION_UNKNOWN,
+            directionExplicit = false,
+            conflictingFields = true,
+        )
+
+        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(conflicting, allowAuto = true).action)
+    }
+
+    @Test
+    fun `a missing or out of range amount is still ignored with an unknown direction`() {
+        listOf(null, 0L, -1L, CaptureCandidate.MAX_CENTS + 1).forEach { amount ->
+            val bad = evidence(
+                direction = DIRECTION_UNKNOWN,
+                directionExplicit = false,
+                amountCents = amount,
+            )
+            assertEquals(
+                "amount=$amount must not become a card",
+                Action.IGNORE,
+                ScreenshotCapturePolicy.assess(bad, allowAuto = true).action,
+            )
+        }
+    }
+
+    @Test
+    fun `a direction that is neither readable nor unknown stays ignored`() {
+        // 只有 UNKNOWN 是 UI 能提供选项的状态；其它读不出来的取值照旧不进收件箱。
+        val broken = evidence(direction = "SOMETHING_ELSE", directionExplicit = true)
+
+        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(broken, allowAuto = true).action)
+    }
+
+    @Test
+    fun `an unfinished direction-unknown payment still waits before asking`() {
+        // 非终态优先：钱还没到，先等证据，而不是先问方向。
+        val pending = evidence(
+            direction = DIRECTION_UNKNOWN,
+            directionExplicit = false,
+            completion = CaptureCandidate.COMPLETION_PENDING,
+        )
+
+        val assessment = ScreenshotCapturePolicy.assess(pending, allowAuto = true)
+        assertEquals(TIER_LOW, assessment.tier)
+        assertEquals(Action.WAIT_FOR_EVIDENCE, assessment.action)
     }
 
     // ---------- 硬约束：其余 kind 一律不得放宽 ----------

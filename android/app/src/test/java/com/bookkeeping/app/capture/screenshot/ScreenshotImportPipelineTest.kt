@@ -179,8 +179,10 @@ class ScreenshotImportPipelineTest {
 
         val amountOnly = listOf(block("支付宝", 10), block("¥18.00", 40), block("商品说明", 80))
         val unknownDirection = ScreenshotImportPipeline.plan(request(), amountOnly, emptyList())
+        // 平台已知、金额唯一、只有方向读不出来：这是交易，进待确认让用户选方向，
+        // 不再静默 IGNORE；bookings 仍然为空（ASK_USER 从不写账）。
         assertEquals(
-            Action.IGNORE,
+            Action.ASK_USER,
             unknownDirection.decisions.single().action,
         )
         assertTrue(unknownDirection.bookings.isEmpty())

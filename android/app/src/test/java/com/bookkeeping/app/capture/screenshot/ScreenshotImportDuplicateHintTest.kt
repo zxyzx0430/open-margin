@@ -239,7 +239,7 @@ class ScreenshotImportDuplicateHintTest {
     }
 
     @Test
-    fun `an ignored page carries no hint`() {
+    fun `a direction-unknown page asks without a duplicate hint`() {
         val amountOnly = listOf(
             block("支付宝", 10),
             block("¥18.00", 40),
@@ -252,6 +252,43 @@ class ScreenshotImportDuplicateHintTest {
             timeZone = zone,
         ).decisions.single()
 
+        // 平台已知、金额唯一、方向读不出来：这笔进待确认让用户选方向（不再静默
+        // IGNORE），但它不是重复，所以仍然不许带任何「疑似重复」提示。
+        assertEquals(Action.ASK_USER, decision.action)
+        assertEquals(DuplicateHint.NONE, decision.duplicateHint)
+        assertNull(likelyDuplicateNoticeText(candidateOf(decision)))
+    }
+
+    @Test
+    fun `a non transaction page is ignored without a duplicate hint`() {
+        // 风景照 / 聊天截图：没有平台、没有金额，连候选都不该生成。
+        val photo = listOf(block("IMG_20261119_123456", 10), block("HDR", 40))
+        val photoPlan = ScreenshotImportPipeline.plan(
+            request = request(),
+            blocks = photo,
+            existing = emptyList(),
+            timeZone = zone,
+        )
+        assertEquals(FailureReason.UNKNOWN_PAGE, photoPlan.failure)
+        assertTrue(photoPlan.decisions.isEmpty())
+        assertTrue(photoPlan.bookings.isEmpty())
+
+        // 真正的 IGNORE 决策（同一张卡片上有两个不同金额，读不准）：仍然不进
+        // 账本，也不该显示「疑似重复」——它跟重复无关。
+        val twoAmounts = listOf(
+            TextBlock(text = "支付宝"),
+            TextBlock(text = "¥18.00"),
+            TextBlock(text = "¥28.00"),
+            TextBlock(text = "商品说明"),
+        )
+        val decision = ScreenshotImportPipeline.plan(
+            request = request(),
+            blocks = twoAmounts,
+            existing = emptyList(),
+            timeZone = zone,
+        ).decisions.single()
+
+        assertFalse("两个不同金额不能被当成一笔唯一的钱", decision.draft.amountUnambiguous)
         assertEquals(Action.IGNORE, decision.action)
         assertEquals(DuplicateHint.NONE, decision.duplicateHint)
         assertNull(likelyDuplicateNoticeText(candidateOf(decision)))
