@@ -88,6 +88,74 @@ object CaptureMergePolicy {
             transaction.remoteReviewStatus !in NON_MERGEABLE_STATUSES
 
     /**
+     * 用户显式确认「这笔要记」时，把截图里的信息并进账本里已有的同一笔。
+     *
+     * 场景：通知先记了一行（商户是「微信支付」占位名、没有订单号），用户随后在
+     * 审阅页点开详情并确认，截图里有真实商户（有时还有订单号）。旧实现只回一句
+     * 「已在账本中」，等于让用户白确认一次，那一行的商户永远停在占位名。
+     *
+     * 只在两条记录确实能证明是同一笔时返回非空，规则完全复用本对象：
+     * - 强标识相等（[isSamePayment]），或
+     * - 跨通道一侧完全没有商户信息（[isSamePaymentWithOneSidedMerchant]）。
+     *
+     * 返回要写回**已有行**的那一条（id / 时间 / 金额不变，只补全字段）；
+     * 商户矛盾、订单号矛盾、超出窗口、对侧不可合并时返回 null，调用方保持
+     * 「已存在，待确认」，绝不猜测。
+     */
+    fun planConfirmedMerge(
+        existing: TransactionEntity,
+        incoming: TransactionEntity,
+    ): TransactionEntity? {
+        if (!canReceiveMerge(existing)) return null
+        val sameTransaction = isSamePayment(existing, incoming) ||
+            isSamePaymentWithOneSidedMerchant(existing, incoming)
+        if (!sameTransaction) return null
+        return mergeInto(existing, incoming)
+    }
+
+    /**
+     * 跨通道命中之后该怎么处置。
+     *
+     * 这是层 2 的唯一判定点，仓库与单测共用同一段逻辑：
+     * - 弱证据（一侧没有商户信息）且满足 [isSamePaymentWithOneSidedMerchant]
+     *   → 直接合并；不满足就保留待确认。
+     * - 强证据（两侧同一订单号）：自动路径一律保留待确认（[DuplicateReason.CROSS_SOURCE]），
+     *   只有用户已经在审阅页显式确认（[confirmedByUser]）时才允许
+     *   [planConfirmedMerge] 把截图里更完整的字段补进已有行。
+     */
+    fun crossChannelDisposition(
+        matched: TransactionEntity,
+        incoming: TransactionEntity,
+        weak: Boolean,
+        confirmedByUser: Boolean,
+    ): CrossChannelDisposition {
+        if (weak) {
+            val canMerge = canReceiveMerge(matched) &&
+                isSamePaymentWithOneSidedMerchant(matched, incoming)
+            return if (canMerge) {
+                CrossChannelDisposition.MERGE_INTO_EXISTING
+            } else {
+                CrossChannelDisposition.HOLD_FOR_REVIEW
+            }
+        }
+        val canMerge = confirmedByUser && planConfirmedMerge(matched, incoming) != null
+        return if (canMerge) {
+            CrossChannelDisposition.MERGE_INTO_EXISTING
+        } else {
+            CrossChannelDisposition.HOLD_FOR_REVIEW
+        }
+    }
+
+    /** 跨通道命中的处置结果。 */
+    enum class CrossChannelDisposition {
+        /** 并入命中那条已有行（补全字段，不新增行，不问用户）。 */
+        MERGE_INTO_EXISTING,
+
+        /** 保留候选待确认；账本不写。 */
+        HOLD_FOR_REVIEW,
+    }
+
+    /**
      * 判定两条记录是同一笔支付。
      *
      * 硬条件：金额、方向、币种、来源全部相同，且时间差 ≤ [AUTO_MERGE_WINDOW_MS]。

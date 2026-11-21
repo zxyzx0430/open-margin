@@ -48,6 +48,12 @@ import kotlinx.coroutines.sync.withLock
  */
 internal interface ScreenshotLedgerWriter {
     suspend fun insert(entity: TransactionEntity, attemptId: String): LedgerInsertResult
+
+    /**
+     * 用户在审阅页显式确认后的写入。与 [insert] 同一套查重，但跨通道命中同一笔时
+     * 允许把本次截图里更完整的商户/订单号/capture 溯源并进已有行（不新增行）。
+     */
+    suspend fun confirm(entity: TransactionEntity, attemptId: String): LedgerInsertResult
 }
 
 /**
@@ -268,6 +274,22 @@ class ScreenshotIntakeCoordinator private constructor(
                         diagnosticInput = TransactionDiagnosticInput(
                             attemptId = attemptId,
                             callSite = CALL_SITE_INGEST,
+                        ),
+                    )
+
+                    override suspend fun confirm(
+                        entity: TransactionEntity,
+                        attemptId: String,
+                    ): LedgerInsertResult = repo.insertIfNotDuplicateResult(
+                        transaction = entity,
+                        notifySuccess = false,
+                        crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                        // 用户已经确认这笔要记：命中的跨通道同一笔直接补全字段，
+                        // 不再只回一句「已在账本中」。
+                        mergeConfirmedCrossSource = true,
+                        diagnosticInput = TransactionDiagnosticInput(
+                            attemptId = attemptId,
+                            callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
                         ),
                     )
                 }
@@ -582,7 +604,9 @@ class ScreenshotIntakeCoordinator private constructor(
         val current = store.pending().firstOrNull { it.candidateId == candidate.candidateId }
             ?: return ConfirmationResult.ALREADY_HANDLED
         if (!CaptureBookGate.mayConfirm(current)) return ConfirmationResult.NOT_WRITABLE
-        val repository = repositoryProvider() ?: return ConfirmationResult.FAILED
+        // 生产走 repository；JVM 测试通过 ledgerWriter 走同一套确认语义。
+        val writer = ledgerWriter
+        val repository = if (writer == null) repositoryProvider() else null
         val merchant = current.merchantCandidates.firstOrNull().orEmpty()
         val category = CaptureReviewMapping.classificationFor(
             candidate = current,
@@ -596,15 +620,24 @@ class ScreenshotIntakeCoordinator private constructor(
         )
         val attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId()
         val result = try {
-            repository.insertIfNotDuplicateResult(
-                transaction = entity,
-                notifySuccess = false,
-                diagnosticInput = TransactionDiagnosticInput(
-                    attemptId = attemptId,
-                    callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
-                ),
-                crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
-            )
+            when {
+                writer != null -> writer.confirm(entity, attemptId)
+                repository != null -> repository.insertIfNotDuplicateResult(
+                    transaction = entity,
+                    notifySuccess = false,
+                    diagnosticInput = TransactionDiagnosticInput(
+                        attemptId = attemptId,
+                        callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
+                    ),
+                    crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                    // 用户已经确认「这笔要记」：跨通道命中的同一笔直接补全字段，
+                    // 不新增行，也不再只回一句「已在账本中」。窗口外检测到的疑似
+                    // 重复仍然返回 CROSS_SOURCE_WEAK，卡片留在待确认。
+                    holdWeakCrossSourceMatch = true,
+                    mergeConfirmedCrossSource = true,
+                )
+                else -> return ConfirmationResult.FAILED
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -616,15 +649,18 @@ class ScreenshotIntakeCoordinator private constructor(
                 ConfirmationResult.SAVED
             }
             is LedgerInsertResult.Duplicate -> {
-                if (result.reason == DuplicateReason.CROSS_SOURCE) {
-                    // The cross-channel rule is a heuristic; an explicit user
-                    // confirmation must not close the card silently. Leave it
-                    // PENDING and report the suspected match.
+                if (result.reason == DuplicateReason.CROSS_SOURCE ||
+                    result.reason == DuplicateReason.CROSS_SOURCE_WEAK
+                ) {
+                    // 仓库已经先试过合并；走到这里说明两条记录不可能合成一条
+                    // （商户矛盾、订单号矛盾、超出 120 秒窗口、对侧不可合并）。
+                    // 跨通道只是启发式，显式确认也不能替用户吞掉一笔，所以保留
+                    // 候选 PENDING 并写明疑似匹配的那条。
                     recordStep(
                         attemptId = attemptId,
                         stage = TransactionDiagnostics.STAGE_DEDUP,
                         result = TransactionDiagnostics.RESULT_WARNING,
-                        details = "Cross-channel match kept for confirmation",
+                        details = "Cross-channel match could not be merged; kept for confirmation",
                         callSite = "ScreenshotIntakeCoordinator.confirmCandidate",
                         inputSummary = DiagnosticSummary.amountWithMerchant(
                             amount = DiagnosticSummary.amount(
@@ -633,7 +669,7 @@ class ScreenshotIntakeCoordinator private constructor(
                             ),
                             merchant = merchant,
                         ),
-                        outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
+                        outputSummary = "疑似 #${result.existingTransactionId}（另一通道，无法合并），保留待确认",
                     )
                     ConfirmationResult.ALREADY_EXISTS
                 } else {

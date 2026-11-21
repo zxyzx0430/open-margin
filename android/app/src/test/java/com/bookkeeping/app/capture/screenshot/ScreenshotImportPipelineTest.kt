@@ -204,17 +204,19 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `completed transfer is held for confirmation and writes nothing`() {
+    fun `completed transfer is auto booked like any other settled payment`() {
         val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), emptyList(), timeZone = zone)
         val decision = plan.decisions.single()
         assertEquals(CaptureCandidate.KIND_TRANSFER, decision.draft.kind)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
-        // Confidence is still high; only the booking action is withheld.
+        assertTrue(decision.draft.completionExplicit)
+        assertTrue(decision.draft.directionExplicit)
         assertEquals(CaptureCandidate.TIER_HIGH, decision.tier)
-        assertEquals(Action.ASK_USER, decision.action)
-        assertNothingBooked(plan)
-        assertEquals(1, plan.needsConfirmation.size)
-        assertEquals(decision.index, ScreenshotImportPipeline.nextConfirmation(plan.decisions)?.index)
+        // A transfer that names its counterparty, a settled status and a known
+        // platform is a completed payment: no extra confirmation step.
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        assertEquals(1, plan.bookings.size)
+        assertTrue(plan.needsConfirmation.isEmpty())
     }
 
     @Test
@@ -260,8 +262,8 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `a forged auto booking for a transfer never reaches the booking list`() {
-        val draft = ScreenshotPageInterpreter.interpret(wechatSuccess(), capturedAt, zone).drafts.single()
+    fun `a forged auto booking for a refund never reaches the booking list`() {
+        val draft = ScreenshotPageInterpreter.interpret(wechatRefundArrival(), capturedAt, zone).drafts.single()
         val plan = ImportPlan(
             listOf(
                 CandidateDecision(
@@ -273,8 +275,10 @@ class ScreenshotImportPipelineTest {
                 ),
             ),
         )
-        // The model layer is the last lock: only payment kinds can ever appear
-        // in ImportPlan.bookings, whatever a decision claims.
+        // The model layer is the last lock: refund / red packet / withdrawal can
+        // never appear in ImportPlan.bookings, whatever a decision claims.
+        // Completed transfers are allowed now, but only after the policy gates
+        // (completed + explicit direction + known platform) have passed.
         assertTrue(plan.bookings.isEmpty())
     }
 
