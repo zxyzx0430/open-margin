@@ -270,8 +270,9 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     if (BuildConfig.DEBUG) Log.d(TAG, "Notice repost skipped (already booked)")
                     return@launch
                 }
-                // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复。
-                // 不跨来源自动合并，避免把独立的支付误删。
+                // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复；
+                // 跨通道只在「一侧缺商户、另一侧有真实商户」时由 CaptureMergePolicy
+                // 合成一行，绝不把两笔都有商户的同额支付并掉。
                 val id = repository.insertIfNotDuplicate(parsed, diagnosticInput = diagnosticInput)
                 // 入库成功（新行 / 8 秒内已存在）之后才记指纹：写入失败时下一次
                 // 重投递还能重新入账。

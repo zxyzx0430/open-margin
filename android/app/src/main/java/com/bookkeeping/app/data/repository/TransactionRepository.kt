@@ -240,6 +240,8 @@ class TransactionRepository @Inject constructor(
     // 2) 8s 内同来源同商户同金额 → 跳过（同一通道重发）。
     // 3) 120s 内同来源同金额，且商户/订单号互证 → 自动合并进先入库的那条：
     //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
+    //    跨通道的一侧缺商户（通知占位名）+ 另一侧有真实商户也走这里，见
+    //    CaptureMergePolicy.isSamePaymentWithOneSidedMerchant。
     // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
     //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
     // 5) 跨通道只在截图/页面路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
