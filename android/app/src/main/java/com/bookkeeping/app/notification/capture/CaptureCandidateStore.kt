@@ -53,8 +53,11 @@ class CaptureCandidateStore internal constructor(
             if (!dir.exists() && !dir.mkdirs()) {
                 return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
             }
-            val allowInitialHistory = createdDirectory || isNewCandidateHistoryLocked()
             runCatching { pruneExpiredLocked(nowMs) }
+            // Recovery can consume the first-save metadata journal. Re-evaluate
+            // initial-history eligibility afterward, or the cached false from
+            // before recovery rejects the first retry on an empty history.
+            val allowInitialHistory = createdDirectory || isNewCandidateHistoryLocked()
             val existing = readLatestCandidatesStrict()
                 ?: return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
             if (!ensureLegacyCandidateHistoryMigrationLocked(nowMs, existing)) {

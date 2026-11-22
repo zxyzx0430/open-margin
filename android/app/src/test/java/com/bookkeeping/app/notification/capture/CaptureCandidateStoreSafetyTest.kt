@@ -852,6 +852,55 @@ class CaptureCandidateStoreSafetyTest {
     }
 
     @Test
+    fun `first candidate save retries after metadata journal recovery before index replacement`() {
+        val root = Files.createTempDirectory("candidate-store-first-save-retry")
+        try {
+            val capturedAt = System.currentTimeMillis()
+            val firstCandidate = candidate("first-save-after-journal", capturedAtMs = capturedAt)
+                .copy(imageFingerprint = "8".repeat(64))
+            val directory = root.resolve("page_capture")
+            assertFalse("the fixture starts without candidate history", Files.exists(directory))
+
+            var interrupted = false
+            try {
+                CaptureCandidateStore(
+                    filesRoot = root.toFile(),
+                    writeFaultInjector = { point ->
+                        if (point == CandidateHistoryWriteFaultPoint.AFTER_CANDIDATE_METADATA_JOURNAL_REPLACEMENT) {
+                            throw IllegalStateException("fixture process interruption")
+                        }
+                    },
+                ).saveWithResult(firstCandidate, null, nowMs = capturedAt)
+            } catch (_: IllegalStateException) {
+                interrupted = true
+            }
+            assertTrue("fault injection interrupts the first save", interrupted)
+            assertFalse("index replacement has not happened", Files.exists(directory.resolve("candidates.jsonl")))
+            assertFalse("history metadata has not been replaced", Files.exists(directory.resolve("candidates.meta")))
+            assertTrue("the write-ahead journal is durable", Files.isRegularFile(directory.resolve("candidates.meta-write-ahead")))
+
+            // One retry on a new store instance must recover the journal and save.
+            val reopened = CaptureCandidateStore(root.toFile())
+            val retry = reopened.saveWithResult(firstCandidate, null, nowMs = capturedAt)
+            assertTrue("the first retry must not reject the candidate", retry is CandidateSaveResult.Saved)
+            val saved = (retry as CandidateSaveResult.Saved).candidate
+            assertEquals(firstCandidate.candidateId, saved.candidateId)
+            assertEquals(CaptureCandidate.STATUS_PENDING, saved.status)
+            assertEquals(firstCandidate.imageFingerprint, saved.imageFingerprint)
+            assertEquals(listOf(firstCandidate.candidateId), reopened.pending().map { it.candidateId })
+            assertTrue("successful retry leaves a durable history sidecar", Files.isRegularFile(directory.resolve("candidates.meta")))
+            assertFalse("successful retry consumes the recovered journal", Files.exists(directory.resolve("candidates.meta-write-ahead")))
+
+            val durable = CaptureCandidateStore(root.toFile())
+            assertEquals(listOf(firstCandidate.candidateId), durable.latest().map { it.candidateId })
+            assertEquals(ImageFingerprintLookup.Match, durable.lookupImageFingerprint(firstCandidate.imageFingerprint!!, capturedAt))
+            assertEquals(ImageFingerprintLookup.CleanNoMatch, durable.lookupImageFingerprint("9".repeat(64), capturedAt))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `candidate metadata journal reconstructs missing metadata for the exact old index after interruption`() {
         val root = Files.createTempDirectory("candidate-store-meta-wal-old-state")
         try {
