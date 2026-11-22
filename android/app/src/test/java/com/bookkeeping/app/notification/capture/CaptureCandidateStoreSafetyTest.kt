@@ -852,6 +852,129 @@ class CaptureCandidateStoreSafetyTest {
     }
 
     @Test
+    fun `candidate metadata journal reconstructs missing metadata for the exact old index after interruption`() {
+        val root = Files.createTempDirectory("candidate-store-meta-wal-old-state")
+        try {
+            val first = candidate("meta-old-first", capturedAtMs = System.currentTimeMillis())
+                .copy(imageFingerprint = "3".repeat(64))
+            val second = candidate("meta-old-second", capturedAtMs = first.capturedAtMs + 1L)
+                .copy(imageFingerprint = "4".repeat(64))
+            assertTrue(CaptureCandidateStore(root.toFile()).saveWithResult(first, null) is CandidateSaveResult.Saved)
+
+            var interrupted = false
+            try {
+                CaptureCandidateStore(
+                    filesRoot = root.toFile(),
+                    writeFaultInjector = { point ->
+                        if (point == CandidateHistoryWriteFaultPoint.AFTER_CANDIDATE_METADATA_JOURNAL_REPLACEMENT) {
+                            throw IllegalStateException("fixture process interruption")
+                        }
+                    },
+                ).saveWithResult(second, null)
+            } catch (_: IllegalStateException) {
+                interrupted = true
+            }
+            assertTrue(interrupted)
+
+            val directory = root.resolve("page_capture")
+            val journal = directory.resolve("candidates.meta-write-ahead")
+            assertTrue(Files.isRegularFile(journal))
+            Files.delete(directory.resolve("candidates.meta"))
+
+            val reopened = CaptureCandidateStore(root.toFile())
+            assertEquals(ImageFingerprintLookup.CleanNoMatch, reopened.lookupImageFingerprint("e".repeat(64)))
+            assertFalse("old-state recovery consumes the journal", Files.exists(journal))
+            assertEquals(listOf(first.candidateId), reopened.pending().map { it.candidateId })
+            assertTrue(reopened.saveWithResult(second, null) is CandidateSaveResult.Saved)
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `candidate metadata journal repairs a corrupt sidecar for the exact new index after interruption`() {
+        val root = Files.createTempDirectory("candidate-store-meta-wal-new-state")
+        try {
+            val first = candidate("meta-new-first", capturedAtMs = System.currentTimeMillis())
+                .copy(imageFingerprint = "5".repeat(64))
+            val second = candidate("meta-new-second", capturedAtMs = first.capturedAtMs + 1L)
+                .copy(imageFingerprint = "6".repeat(64))
+            assertTrue(CaptureCandidateStore(root.toFile()).saveWithResult(first, null) is CandidateSaveResult.Saved)
+
+            var interrupted = false
+            try {
+                CaptureCandidateStore(
+                    filesRoot = root.toFile(),
+                    writeFaultInjector = { point ->
+                        if (point == CandidateHistoryWriteFaultPoint.AFTER_CANDIDATE_METADATA_INDEX_REPLACEMENT) {
+                            throw IllegalStateException("fixture process interruption")
+                        }
+                    },
+                ).saveWithResult(second, null)
+            } catch (_: IllegalStateException) {
+                interrupted = true
+            }
+            assertTrue(interrupted)
+
+            val directory = root.resolve("page_capture")
+            val journal = directory.resolve("candidates.meta-write-ahead")
+            assertTrue(Files.isRegularFile(journal))
+            Files.write(directory.resolve("candidates.meta"), "broken metadata\n".toByteArray())
+
+            val reopened = CaptureCandidateStore(root.toFile())
+            assertEquals(ImageFingerprintLookup.Match, reopened.lookupImageFingerprint("6".repeat(64)))
+            assertEquals(ImageFingerprintLookup.CleanNoMatch, reopened.lookupImageFingerprint("e".repeat(64)))
+            assertFalse("new-state recovery consumes the journal", Files.exists(journal))
+            assertEquals(
+                listOf(first.candidateId, second.candidateId),
+                reopened.pending().map { it.candidateId },
+            )
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `candidate metadata journal remains fail closed for an index matching neither recorded state`() {
+        val root = Files.createTempDirectory("candidate-store-meta-wal-unmatched")
+        try {
+            val capturedAt = System.currentTimeMillis()
+            val first = candidate("meta-mismatch-first", capturedAtMs = capturedAt)
+                .copy(imageFingerprint = "7".repeat(64))
+            val second = candidate("meta-mismatch-second", capturedAtMs = capturedAt + 1L)
+            assertTrue(CaptureCandidateStore(root.toFile()).saveWithResult(first, null) is CandidateSaveResult.Saved)
+
+            try {
+                CaptureCandidateStore(
+                    filesRoot = root.toFile(),
+                    writeFaultInjector = { point ->
+                        if (point == CandidateHistoryWriteFaultPoint.AFTER_CANDIDATE_METADATA_INDEX_REPLACEMENT) {
+                            throw IllegalStateException("fixture process interruption")
+                        }
+                    },
+                ).saveWithResult(second, null)
+            } catch (_: IllegalStateException) {
+                // The new index is on disk, but the write-ahead intent remains.
+            }
+
+            val directory = root.resolve("page_capture")
+            val journal = directory.resolve("candidates.meta-write-ahead")
+            assertTrue(Files.isRegularFile(journal))
+            val unrecorded = candidate("meta-mismatch-unrecorded", capturedAtMs = capturedAt + 2L)
+            Files.write(
+                directory.resolve("candidates.jsonl"),
+                (unrecorded.toJson().toString() + "\n").toByteArray(),
+            )
+
+            val reopened = CaptureCandidateStore(root.toFile())
+            assertTrue(reopened.lookupImageFingerprint("e".repeat(64)) is ImageFingerprintLookup.Unavailable)
+            assertTrue("unmatched index state must retain the write-ahead intent", Files.exists(journal))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `metadata replacement failure is reported and exact journal state recovers after restart`() {
         val root = Files.createTempDirectory("candidate-store-meta-write-failure")
         try {
@@ -862,6 +985,10 @@ class CaptureCandidateStoreSafetyTest {
             val second = candidate("metadata-second", capturedAtMs = first.capturedAtMs + 1L)
                 .copy(imageFingerprint = "2".repeat(64))
             assertTrue(store.saveWithResult(first, null) is CandidateSaveResult.Saved)
+            assertTrue(
+                "the first save must have a verified metadata sidecar before inducing replacement failure",
+                Files.isRegularFile(directory.resolve("candidates.meta")),
+            )
 
             // Force replaceFile(candidates.meta.tmp, candidates.meta, ...) to
             // fail after the new candidate index has been atomically replaced.

@@ -75,7 +75,7 @@ class CaptureIgnoreUndoTest {
         File(dir, "candidates.jsonl").appendText(candidate.toJson().toString() + "\n")
     }
 
-    /** Every status record the store kept for one card, oldest first. */
+    /** Current compacted status rows the store keeps for one card. */
     private fun statuses(root: File, candidateId: String): List<String> {
         val index = File(File(root, "page_capture"), "candidates.jsonl")
         if (!index.isFile) return emptyList()

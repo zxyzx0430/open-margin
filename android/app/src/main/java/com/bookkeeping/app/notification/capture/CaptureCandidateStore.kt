@@ -11,6 +11,9 @@ internal enum class CandidateHistoryWriteFaultPoint {
     AFTER_JOURNAL_REPLACEMENT,
     AFTER_INDEX_REPLACEMENT,
     BEFORE_CHECKPOINT_REPLACEMENT,
+    AFTER_CANDIDATE_METADATA_JOURNAL_REPLACEMENT,
+    AFTER_CANDIDATE_METADATA_INDEX_REPLACEMENT,
+    BEFORE_CANDIDATE_METADATA_REPLACEMENT,
 }
 
 /** Local candidate inbox; it never writes the ledger. */
@@ -26,6 +29,7 @@ class CaptureCandidateStore internal constructor(
     private val dir = File(filesRoot, "page_capture")
     private val indexFile = File(dir, "candidates.jsonl")
     private val candidateHistoryMetadataFile = File(dir, CANDIDATE_HISTORY_METADATA_NAME)
+    private val candidateHistoryMetadataJournalFile = File(dir, CANDIDATE_HISTORY_METADATA_JOURNAL_NAME)
     private val legacyCandidateHistoryFile = File(dir, LEGACY_CANDIDATE_HISTORY_NAME)
     private val legacyCandidateHistoryJournalFile = File(dir, LEGACY_CANDIDATE_HISTORY_JOURNAL_NAME)
     private val imageFingerprintFile = File(dir, "image-fingerprints.jsonl")
@@ -49,6 +53,7 @@ class CaptureCandidateStore internal constructor(
             if (!dir.exists() && !dir.mkdirs()) {
                 return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
             }
+            val allowInitialHistory = createdDirectory || isNewCandidateHistoryLocked()
             runCatching { pruneExpiredLocked(nowMs) }
             val existing = readLatestCandidatesStrict()
                 ?: return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
@@ -144,8 +149,9 @@ class CaptureCandidateStore internal constructor(
                 newlyWrittenScreenshot?.let { deleteScreenshotIfUnreferenced(it, existing, nowMs) }
                 return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.INDEX_FULL)
             }
-            if (!writeCandidateIndexLocked(retained, allowInitialHistory = createdDirectory)) {
-                newlyWrittenScreenshot?.let { deleteScreenshotIfUnreferenced(it, existing, nowMs) }
+            if (!writeCandidateIndexLocked(retained, allowInitialHistory = allowInitialHistory)) {
+                val current = readLatestCandidatesStrict() ?: existing
+                newlyWrittenScreenshot?.let { deleteScreenshotIfUnreferenced(it, current, nowMs) }
                 return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
             }
             stored.imageFingerprint?.takeIf(String::isNotBlank)?.let {
@@ -194,7 +200,12 @@ class CaptureCandidateStore internal constructor(
             return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
                 ?: ImageFingerprintLookup.Unavailable("legacy candidate history recovery pending")
         }
-        if (indexFile.isFile && !candidateHistoryMetadataFile.exists()) {
+        if (!recoverCandidateHistoryMetadataJournalLocked()) {
+            markImageFingerprintIndexUnavailableLocked()
+            return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                ?: ImageFingerprintLookup.Unavailable("candidate history metadata recovery pending")
+        }
+        if (indexFile.isFile && !candidateHistoryIsCompleteLocked()) {
             val history = readLatestCandidatesStrict()
             if (history != null && !ensureLegacyCandidateHistoryMigrationLocked(nowMs, history)) {
                 return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
@@ -348,6 +359,9 @@ class CaptureCandidateStore internal constructor(
     fun restore(candidateId: String, nowMs: Long = System.currentTimeMillis()): RestoreOutcome =
         synchronized(lock) {
             if (candidateId.isBlank()) return@synchronized RestoreOutcome.NOT_FOUND
+            if (!recoverLegacyCandidateHistoryJournalLocked() ||
+                !recoverCandidateHistoryMetadataJournalLocked()
+            ) return@synchronized RestoreOutcome.WRITE_FAILED
             val latest = readLatestCandidatesStrict() ?: return@synchronized RestoreOutcome.WRITE_FAILED
             val record = latest.lastOrNull { it.candidateId == candidateId }
             when {
@@ -390,6 +404,9 @@ class CaptureCandidateStore internal constructor(
         if (status !in CaptureCandidate.STATUSES) return false
         synchronized(lock) {
             if (!dir.exists() && !dir.mkdirs()) return false
+            if (!recoverLegacyCandidateHistoryJournalLocked() ||
+                !recoverCandidateHistoryMetadataJournalLocked()
+            ) return false
             val latest = readLatestCandidatesStrict() ?: return false
             val current = latest.lastOrNull { it.candidateId == candidate.candidateId }
                 ?: return false
@@ -465,7 +482,16 @@ class CaptureCandidateStore internal constructor(
         allowInitialHistory: Boolean = false,
         allowLegacyMigration: Boolean = false,
     ): Boolean {
-        if (!recoverLegacyCandidateHistoryJournalLocked()) return false
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return false
+
+        val existing = readLatestCandidatesStrict() ?: return false
+        if (indexFile.isFile && !candidateHistoryIsCompleteLocked() &&
+            !legacyCandidateHistoryFile.exists()
+        ) {
+            if (!ensureLegacyCandidateHistoryMigrationLocked(System.currentTimeMillis(), existing)) return false
+        }
         val legacyBarrier = if (legacyCandidateHistoryFile.exists()) {
             readLegacyHistoryBarrierLocked()?.takeIf(::legacyHistoryCheckpointMatchesIndex) ?: return false
         } else {
@@ -486,7 +512,25 @@ class CaptureCandidateStore internal constructor(
             ) return false
         }
         val canAdvanceHistoryMetadata = candidateHistoryIsCompleteLocked() ||
-            (allowInitialHistory && isNewCandidateHistoryLocked()) || allowLegacyMigration
+            (allowInitialHistory && hasNoCandidateHistoryArtifactsLocked()) || allowLegacyMigration
+        if (!canAdvanceHistoryMetadata && legacyBarrier == null) return false
+        val metadataJournalRequired = canAdvanceHistoryMetadata && legacyBarrier == null
+        val oldHistoryState = if (metadataJournalRequired) {
+            readCandidateHistoryIndexStateLocked() ?: return false
+        } else {
+            null
+        }
+        val newHistoryState = if (metadataJournalRequired) {
+            candidateHistoryIndexState(ordered.size, content)
+        } else {
+            null
+        }
+        if (metadataJournalRequired) {
+            if (!writeCandidateHistoryMetadataJournalLocked(oldHistoryState!!, newHistoryState!!)) return false
+            writeFaultInjector?.invoke(
+                CandidateHistoryWriteFaultPoint.AFTER_CANDIDATE_METADATA_JOURNAL_REPLACEMENT,
+            )
+        }
         if (legacyBarrier != null) {
             val oldBytes = runCatching { indexFile.readBytes() }.getOrNull() ?: return false
             val oldRows = readLatestCandidatesStrict() ?: return false
@@ -498,6 +542,11 @@ class CaptureCandidateStore internal constructor(
             writeFaultInjector?.invoke(CandidateHistoryWriteFaultPoint.AFTER_JOURNAL_REPLACEMENT)
         }
         if (!replaceFileAtomically(File(dir, INDEX_TMP_NAME), indexFile, content)) return false
+        if (metadataJournalRequired) {
+            writeFaultInjector?.invoke(
+                CandidateHistoryWriteFaultPoint.AFTER_CANDIDATE_METADATA_INDEX_REPLACEMENT,
+            )
+        }
         if (legacyBarrier != null) {
             writeFaultInjector?.invoke(CandidateHistoryWriteFaultPoint.AFTER_INDEX_REPLACEMENT)
         }
@@ -513,14 +562,27 @@ class CaptureCandidateStore internal constructor(
             if (!deleteLegacyCandidateHistoryJournalLocked()) return false
         }
         if (canAdvanceHistoryMetadata) {
-            val metadata = (fingerprintMetadata(ordered.size, content) + "\n")
-                .toByteArray(Charsets.UTF_8)
-            if (metadata.size > MAX_CANDIDATE_METADATA_BYTES) return false
-            // A metadata write failure leaves the candidate itself stored, but
-            // the stale or absent metadata keeps future negative lookups unsafe.
-            replaceFile(File(dir, CANDIDATE_HISTORY_METADATA_TMP_NAME), candidateHistoryMetadataFile, metadata)
+            if (!writeCandidateHistoryMetadataLocked(ordered.size, content)) {
+                markImageFingerprintIndexUnavailableLocked()
+                return false
+            }
+            if (metadataJournalRequired && !deleteCandidateHistoryMetadataJournalLocked()) return false
         }
         return true
+    }
+
+    private fun writeCandidateHistoryMetadataLocked(candidateCount: Int, content: ByteArray): Boolean {
+        val metadata = (fingerprintMetadata(candidateCount, content) + "\n")
+            .toByteArray(Charsets.UTF_8)
+        if (metadata.size > MAX_CANDIDATE_METADATA_BYTES) return false
+        writeFaultInjector?.invoke(CandidateHistoryWriteFaultPoint.BEFORE_CANDIDATE_METADATA_REPLACEMENT)
+        if (!replaceFileAtomically(File(dir, CANDIDATE_HISTORY_METADATA_TMP_NAME), candidateHistoryMetadataFile, metadata)) {
+            return false
+        }
+        return runCatching {
+            candidateHistoryMetadataFile.isFile &&
+                candidateHistoryMetadataFile.readText().trim() == fingerprintMetadata(candidateCount, content)
+        }.getOrDefault(false)
     }
 
     private fun candidateHistoryIsCompleteLocked(): Boolean {
@@ -533,17 +595,169 @@ class CaptureCandidateStore internal constructor(
         }.getOrDefault(false)
     }
 
-    private fun isNewCandidateHistoryLocked(): Boolean =
+    private fun hasNoCandidateHistoryArtifactsLocked(): Boolean =
         !indexFile.exists() &&
             !File(dir, INDEX_TMP_NAME).exists() &&
             !candidateHistoryMetadataFile.exists() &&
             !File(dir, CANDIDATE_HISTORY_METADATA_TMP_NAME).exists() &&
+            !candidateHistoryMetadataJournalFile.exists() &&
+            !File(dir, CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME).exists() &&
             !legacyCandidateHistoryFile.exists() &&
+            !legacyCandidateHistoryJournalFile.exists() &&
             !File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists() &&
             !imageFingerprintFile.exists() &&
             !imageFingerprintMetadataFile.exists() &&
             !File(dir, FINGERPRINT_TMP_NAME).exists() &&
             !File(dir, FINGERPRINT_METADATA_TMP_NAME).exists()
+
+    private fun isNewCandidateHistoryLocked(): Boolean =
+        hasNoCandidateHistoryArtifactsLocked() &&
+            dir.listFiles().orEmpty().none {
+                it.name.startsWith("shot_") && it.extension.equals("jpg", ignoreCase = true)
+            }
+
+    private data class CandidateHistoryIndexState(
+        val exists: Boolean,
+        val candidateCount: Int,
+        val indexBytes: Long,
+        val indexSha256: String,
+    )
+
+    private data class CandidateHistoryMetadataJournal(
+        val oldIndex: CandidateHistoryIndexState,
+        val newIndex: CandidateHistoryIndexState,
+    )
+
+    private fun candidateHistoryIndexState(candidateCount: Int, content: ByteArray) =
+        CandidateHistoryIndexState(true, candidateCount, content.size.toLong(), sha256(content))
+
+    private fun readCandidateHistoryIndexStateLocked(): CandidateHistoryIndexState? = runCatching {
+        if (!indexFile.exists()) {
+            return@runCatching CandidateHistoryIndexState(
+                exists = false,
+                candidateCount = 0,
+                indexBytes = 0L,
+                indexSha256 = sha256(ByteArray(0)),
+            )
+        }
+        if (!indexFile.isFile || readLatestCandidatesStrict() == null) return@runCatching null
+        val content = indexFile.readBytes()
+        CandidateHistoryIndexState(
+            exists = true,
+            candidateCount = indexFile.readLines().size,
+            indexBytes = content.size.toLong(),
+            indexSha256 = sha256(content),
+        )
+    }.getOrNull()
+
+    private fun candidateHistoryMetadataMatchesStateLocked(state: CandidateHistoryIndexState): Boolean {
+        if (!state.exists) return !indexFile.exists() && !candidateHistoryMetadataFile.exists()
+        if (!indexFile.isFile || !candidateHistoryMetadataFile.isFile) return false
+        return runCatching {
+            val content = indexFile.readBytes()
+            content.size.toLong() == state.indexBytes &&
+                sha256(content) == state.indexSha256 &&
+                indexFile.readLines().size == state.candidateCount &&
+                candidateHistoryMetadataFile.readText().trim() == fingerprintMetadata(state.candidateCount, content)
+        }.getOrDefault(false)
+    }
+
+    private fun writeCandidateHistoryMetadataJournalLocked(
+        oldIndex: CandidateHistoryIndexState,
+        newIndex: CandidateHistoryIndexState,
+    ): Boolean {
+        if (candidateHistoryMetadataJournalFile.exists() || !newIndex.exists) return false
+        val content = candidateHistoryMetadataJournal(oldIndex, newIndex)
+        if (content.size > MAX_CANDIDATE_HISTORY_JOURNAL_BYTES) return false
+        return replaceFileAtomically(
+            File(dir, CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME),
+            candidateHistoryMetadataJournalFile,
+            content,
+        ) && candidateHistoryMetadataJournalFile.isFile &&
+            runCatching { candidateHistoryMetadataJournalFile.readBytes().contentEquals(content) }.getOrDefault(false)
+    }
+
+    private fun candidateHistoryMetadataJournal(
+        oldIndex: CandidateHistoryIndexState,
+        newIndex: CandidateHistoryIndexState,
+    ): ByteArray = listOf(
+        "v1",
+        if (oldIndex.exists) 1 else 0,
+        oldIndex.candidateCount,
+        oldIndex.indexBytes,
+        oldIndex.indexSha256,
+        if (newIndex.exists) 1 else 0,
+        newIndex.candidateCount,
+        newIndex.indexBytes,
+        newIndex.indexSha256,
+    ).joinToString(":", postfix = "\n").toByteArray(Charsets.UTF_8)
+
+    private fun readCandidateHistoryMetadataJournalLocked(): CandidateHistoryMetadataJournal? {
+        if (!candidateHistoryMetadataJournalFile.isFile ||
+            candidateHistoryMetadataJournalFile.length() > MAX_CANDIDATE_HISTORY_JOURNAL_BYTES
+        ) return null
+        return runCatching {
+            val fields = candidateHistoryMetadataJournalFile.readText().trim().split(':')
+            if (fields.size != 9 || fields[0] != "v1") return@runCatching null
+            fun state(offset: Int): CandidateHistoryIndexState? {
+                val exists = when (fields[offset]) {
+                    "0" -> false
+                    "1" -> true
+                    else -> return null
+                }
+                val count = fields[offset + 1].toInt().takeIf { it >= 0 } ?: return null
+                val bytes = fields[offset + 2].toLong().takeIf { it >= 0L } ?: return null
+                val digest = fields[offset + 3].takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+                    ?: return null
+                if (!exists && (count != 0 || bytes != 0L || digest != sha256(ByteArray(0)))) return null
+                CandidateHistoryIndexState(exists, count, bytes, digest)
+            }
+            val oldIndex = state(1) ?: return@runCatching null
+            val newIndex = state(5)?.takeIf { it.exists } ?: return@runCatching null
+            CandidateHistoryMetadataJournal(oldIndex, newIndex)
+        }.getOrNull()
+    }
+
+    /** Repair only the exact old/new index state captured by the durable intent. */
+    private fun recoverCandidateHistoryMetadataJournalLocked(): Boolean {
+        if (!candidateHistoryMetadataJournalFile.exists()) {
+            val temporary = File(dir, CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME)
+            if (!temporary.exists()) return true
+            if (!temporary.isFile) return false
+            return temporary.delete() || !temporary.exists()
+        }
+        if (!candidateHistoryMetadataJournalFile.isFile) return false
+        val journal = readCandidateHistoryMetadataJournalLocked() ?: return false
+        val current = readCandidateHistoryIndexStateLocked() ?: return false
+        val currentIsOld = current == journal.oldIndex
+        val currentIsNew = current == journal.newIndex
+        if (!currentIsOld && !currentIsNew) return false
+
+        val expected = if (currentIsNew) journal.newIndex else journal.oldIndex
+        if (expected.exists) {
+            val content = runCatching { indexFile.readBytes() }.getOrNull() ?: return false
+            if (content.size.toLong() != expected.indexBytes ||
+                sha256(content) != expected.indexSha256 ||
+                indexFile.readLines().size != expected.candidateCount
+            ) return false
+            if (!candidateHistoryMetadataMatchesStateLocked(expected) &&
+                !writeCandidateHistoryMetadataLocked(expected.candidateCount, content)
+            ) return false
+            if (!candidateHistoryMetadataMatchesStateLocked(expected)) return false
+        } else if (indexFile.exists() || candidateHistoryMetadataFile.exists()) {
+            return false
+        }
+        val indexTemporary = File(dir, INDEX_TMP_NAME)
+        if (indexTemporary.exists() && !indexTemporary.delete() && indexTemporary.exists()) return false
+        return deleteCandidateHistoryMetadataJournalLocked()
+    }
+
+    private fun deleteCandidateHistoryMetadataJournalLocked(): Boolean {
+        if (candidateHistoryMetadataJournalFile.exists() &&
+            !candidateHistoryMetadataJournalFile.delete() && candidateHistoryMetadataJournalFile.exists()
+        ) return false
+        return !candidateHistoryMetadataJournalFile.exists()
+    }
 
     private fun candidateIndexWithinBudget(candidates: List<CaptureCandidate>): Boolean {
         val ordered = canonicalCandidates(candidates)
@@ -560,8 +774,14 @@ class CaptureCandidateStore internal constructor(
         nowMs: Long,
         candidates: List<CaptureCandidate>,
     ): Boolean {
-        if (!recoverLegacyCandidateHistoryJournalLocked()) return false
-        if (candidateHistoryMetadataFile.exists() || !indexFile.isFile) return true
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return false
+        if (!indexFile.exists()) return !candidateHistoryMetadataFile.exists() && !legacyCandidateHistoryFile.exists()
+        if (!indexFile.isFile || (candidateHistoryMetadataFile.exists() && !candidateHistoryMetadataFile.isFile)) {
+            return false
+        }
+        if (candidateHistoryIsCompleteLocked()) return true
         if (legacyCandidateHistoryFile.exists()) {
             val barrier = readLegacyHistoryBarrierLocked() ?: return false
             return legacyHistoryCheckpointMatchesIndex(barrier)
@@ -580,11 +800,13 @@ class CaptureCandidateStore internal constructor(
     }
 
     private fun finishLegacyCandidateHistoryMigrationIfReadyLocked(nowMs: Long) {
-        if (!recoverLegacyCandidateHistoryJournalLocked()) return
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return
         val barrier = readLegacyHistoryBarrierLocked() ?: return
         if (!legacyHistoryCheckpointMatchesIndex(barrier)) return
-        if (candidateHistoryMetadataFile.exists()) {
-            if (candidateHistoryIsCompleteLocked()) legacyCandidateHistoryFile.delete()
+        if (candidateHistoryMetadataFile.exists() && candidateHistoryIsCompleteLocked()) {
+            legacyCandidateHistoryFile.delete()
             return
         }
         if (nowMs < barrier.expiresAtMs) return
@@ -947,6 +1169,10 @@ class CaptureCandidateStore internal constructor(
             recoverImageFingerprintsLocked(nowMs)
             return
         }
+        if (!indexFile.exists() && !candidateHistoryMetadataFile.exists() &&
+            !legacyCandidateHistoryFile.exists() && !imageFingerprintFile.exists() &&
+            !imageFingerprintMetadataFile.exists()
+        ) return
 
         val evidence = readLatestCandidatesStrict()
         val expected = evidence?.let { fingerprintEvidence(it, nowMs) }
@@ -1171,8 +1397,12 @@ class CaptureCandidateStore internal constructor(
     private fun pruneExpiredLocked(nowMs: Long = System.currentTimeMillis()) {
         if (!dir.isDirectory) return
         if (!recoverLegacyCandidateHistoryJournalLocked()) error("legacy candidate history recovery failed")
+        if (!recoverCandidateHistoryMetadataJournalLocked()) error("candidate history metadata recovery failed")
         if (indexFile.exists() && !indexFile.isFile) error("candidate index path is unusable")
         val candidates = readLatestCandidatesStrict() ?: error("candidate evidence is unreadable")
+        if (indexFile.isFile && !candidateHistoryIsCompleteLocked() &&
+            !ensureLegacyCandidateHistoryMigrationLocked(nowMs, candidates)
+        ) error("candidate history migration could not be checkpointed")
         val retained = candidates.filterNot {
             ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
         }
@@ -1202,6 +1432,8 @@ class CaptureCandidateStore internal constructor(
                 INDEX_TMP_NAME,
                 candidateHistoryMetadataFile.name,
                 CANDIDATE_HISTORY_METADATA_TMP_NAME,
+                candidateHistoryMetadataJournalFile.name,
+                CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME,
                 legacyCandidateHistoryFile.name,
                 LEGACY_CANDIDATE_HISTORY_TMP_NAME,
                 legacyCandidateHistoryJournalFile.name,
@@ -1234,6 +1466,7 @@ class CaptureCandidateStore internal constructor(
         const val MAX_CANDIDATE_INDEX_BUDGET_BYTES = 16L * 1024 * 1024
         const val MAX_CANDIDATE_COUNT = 10_000
         private const val MAX_CANDIDATE_METADATA_BYTES = 128
+        private const val MAX_CANDIDATE_HISTORY_JOURNAL_BYTES = 512
         const val SCREENSHOT_UNAVAILABLE_PREFIX = "image unavailable:"
         const val SCREENSHOT_UNAVAILABLE_QUOTA = CaptureCandidate.SCREENSHOT_UNAVAILABLE_QUOTA
         const val SCREENSHOT_UNAVAILABLE_IO = CaptureCandidate.SCREENSHOT_UNAVAILABLE_IO
@@ -1242,6 +1475,8 @@ class CaptureCandidateStore internal constructor(
         private const val INDEX_TMP_NAME = "candidates.jsonl.tmp"
         private const val CANDIDATE_HISTORY_METADATA_NAME = "candidates.meta"
         private const val CANDIDATE_HISTORY_METADATA_TMP_NAME = "candidates.meta.tmp"
+        private const val CANDIDATE_HISTORY_METADATA_JOURNAL_NAME = "candidates.meta-write-ahead"
+        private const val CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME = "candidates.meta-write-ahead.tmp"
         private const val LEGACY_CANDIDATE_HISTORY_NAME = "candidates.legacy-window"
         private const val LEGACY_CANDIDATE_HISTORY_TMP_NAME = "candidates.legacy-window.tmp"
         private const val LEGACY_CANDIDATE_HISTORY_JOURNAL_NAME = "candidates.legacy-write-ahead"
