@@ -251,6 +251,10 @@ class CaptureCandidateStoreSafetyTest {
             val saved = candidate("known-image")
                 .copy(imageFingerprint = knownFingerprint)
             assertNotNull(store.save(saved, null))
+            assertTrue(
+                "a fresh save must establish candidate-history completeness metadata",
+                Files.isRegularFile(root.resolve("page_capture/candidates.meta")),
+            )
             Files.write(root.resolve("page_capture/image-fingerprints.jsonl"), ByteArray(0))
 
             assertEquals(
@@ -832,7 +836,9 @@ class CaptureCandidateStoreSafetyTest {
         val root = Files.createTempDirectory("candidate-store-fingerprint-recovery")
         try {
             val store = CaptureCandidateStore(root.toFile())
-            val fingerprint = "g".repeat(64)
+            // A fingerprint must be SHA-256 hex; keep this fixture valid so the
+            // test exercises recovery rather than candidate validation.
+            val fingerprint = "a".repeat(64)
             assertNotNull(store.save(candidate("recovery-source").copy(imageFingerprint = fingerprint), null))
             val marker = root.resolve("page_capture/image-fingerprints.unavailable")
             Files.write(marker, "unavailable\n".toByteArray())
@@ -840,6 +846,40 @@ class CaptureCandidateStoreSafetyTest {
             assertEquals(ImageFingerprintLookup.CleanNoMatch, store.lookupImageFingerprint("e".repeat(64)))
             assertEquals(ImageFingerprintLookup.Match, store.lookupImageFingerprint(fingerprint))
             assertFalse("marker clears only after the rebuilt index verifies", Files.exists(marker))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `metadata replacement failure is reported and exact journal state recovers after restart`() {
+        val root = Files.createTempDirectory("candidate-store-meta-write-failure")
+        try {
+            val directory = root.resolve("page_capture")
+            val store = CaptureCandidateStore(root.toFile())
+            val first = candidate("metadata-first", capturedAtMs = System.currentTimeMillis())
+                .copy(imageFingerprint = "1".repeat(64))
+            val second = candidate("metadata-second", capturedAtMs = first.capturedAtMs + 1L)
+                .copy(imageFingerprint = "2".repeat(64))
+            assertTrue(store.saveWithResult(first, null) is CandidateSaveResult.Saved)
+
+            // Force replaceFile(candidates.meta.tmp, candidates.meta, ...) to
+            // fail after the new candidate index has been atomically replaced.
+            Files.createDirectory(directory.resolve("candidates.meta.tmp"))
+            assertEquals(
+                CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE),
+                store.saveWithResult(second, null),
+            )
+
+            Files.delete(directory.resolve("candidates.meta.tmp"))
+            val reopened = CaptureCandidateStore(root.toFile())
+            assertEquals(ImageFingerprintLookup.Match, reopened.lookupImageFingerprint("2".repeat(64)))
+            assertEquals(ImageFingerprintLookup.CleanNoMatch, reopened.lookupImageFingerprint("e".repeat(64)))
+            assertEquals(
+                listOf("metadata-first", "metadata-second"),
+                reopened.pending().map { it.candidateId },
+            )
+            assertFalse("a repaired journal is consumed", Files.exists(directory.resolve("candidates.meta-write-ahead")))
         } finally {
             root.toFile().deleteRecursively()
         }
@@ -958,6 +998,7 @@ class CaptureCandidateStoreSafetyTest {
                 assertNotNull(store.save(candidate("metadata-$index"), null))
                 val directory = root.resolve("page_capture")
                 val metadataFile = directory.resolve("candidates.meta")
+                assertTrue("the saved candidate must have established metadata before this corruption test", Files.isRegularFile(metadataFile))
                 if (metadata == null) {
                     Files.delete(metadataFile)
                 } else {
