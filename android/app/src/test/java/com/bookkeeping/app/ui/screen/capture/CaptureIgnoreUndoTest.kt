@@ -155,12 +155,8 @@ class CaptureIgnoreUndoTest {
 
         assertEquals(CaptureCandidate.STATUS_PENDING, store.pending().single().status)
         assertEquals(
-            "restore must only rewrite the candidate status",
-            listOf(
-                CaptureCandidate.STATUS_PENDING,
-                CaptureCandidate.STATUS_IGNORED,
-                CaptureCandidate.STATUS_PENDING,
-            ),
+            "restore leaves one current PENDING candidate state; the candidate store compacts prior snapshots",
+            listOf(CaptureCandidate.STATUS_PENDING),
             statuses(root, "card"),
         )
         assertFalse(
