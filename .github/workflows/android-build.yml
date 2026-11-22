@@ -64,6 +64,7 @@ jobs:
           ls -l "$APK"
           echo "APK_MB=$(( $(stat -c%s "$APK") / 1024 / 1024 ))"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: finance-collector-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
