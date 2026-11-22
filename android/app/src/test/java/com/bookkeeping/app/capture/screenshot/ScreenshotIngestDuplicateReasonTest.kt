@@ -65,11 +65,16 @@ class ScreenshotIngestDuplicateReasonTest {
 
     private fun withIngest(
         reason: DuplicateReason,
+        fingerprintUnavailable: Boolean = false,
         block: suspend (CaptureCandidateStore, ScreenshotIntakeCoordinator.Outcome, List<DiagnosticStep>) -> Unit,
     ) = runBlocking {
         val dir: File = Files.createTempDirectory("ingest-dup-${reason.name}").toFile()
         try {
             val store = CaptureCandidateStore(dir)
+            if (fingerprintUnavailable) {
+                val captureDir = File(dir, "page_capture").apply { mkdirs() }
+                File(captureDir, "image-fingerprints.jsonl").writeText("{synthetic broken index\n")
+            }
             val notes = mutableListOf<DiagnosticStep>()
             val writer = FakeWriter(
                 LedgerInsertResult.Duplicate(
@@ -85,7 +90,9 @@ class ScreenshotIngestDuplicateReasonTest {
             val outcome = coordinator.ingestBlocks(
                 request = request(),
                 blocks = completedTransferPage(),
-                bytes = null,
+                // A synthetic retained image is required before the coordinator
+                // is allowed to call the ledger writer.
+                bytes = ByteArray(256) { (it % 29).toByte() },
                 fingerprint = (reason.ordinal + 1).toString(16).repeat(64).take(64),
                 attemptId = "attempt-${reason.name}",
                 allowAuto = true,
@@ -100,7 +107,7 @@ class ScreenshotIngestDuplicateReasonTest {
 
     @Test
     fun `weak cross channel match keeps the candidate pending and writes a diagnostic`() =
-        withIngest(DuplicateReason.CROSS_SOURCE_WEAK) { store, outcome, notes ->
+        withIngest(DuplicateReason.CROSS_SOURCE_WEAK, fingerprintUnavailable = true) { store, outcome, notes ->
             val stored = store.latest().single()
             assertEquals(CaptureCandidate.STATUS_PENDING, stored.status)
             assertEquals(1, outcome.pending)
@@ -116,7 +123,7 @@ class ScreenshotIngestDuplicateReasonTest {
 
     @Test
     fun `strong cross channel match also keeps the candidate pending`() =
-        withIngest(DuplicateReason.CROSS_SOURCE) { store, outcome, notes ->
+        withIngest(DuplicateReason.CROSS_SOURCE, fingerprintUnavailable = true) { store, outcome, notes ->
             val stored = store.latest().single()
             assertEquals(CaptureCandidate.STATUS_PENDING, stored.status)
             assertEquals(1, outcome.pending)
@@ -129,7 +136,7 @@ class ScreenshotIngestDuplicateReasonTest {
 
     @Test
     fun `exact source order id duplicate is ignored`() =
-        withIngest(DuplicateReason.SOURCE_ORDER_ID) { store, outcome, notes ->
+        withIngest(DuplicateReason.SOURCE_ORDER_ID, fingerprintUnavailable = true) { store, outcome, notes ->
             val stored = store.latest().single()
             assertEquals(CaptureCandidate.STATUS_IGNORED, stored.status)
             assertEquals(0, outcome.pending)

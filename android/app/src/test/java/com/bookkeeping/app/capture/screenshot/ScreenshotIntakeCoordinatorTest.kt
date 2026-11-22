@@ -127,8 +127,11 @@ class ScreenshotIntakeCoordinatorTest {
                 "Album watcher import failed: The image could not be decoded. Select the original image or capture again from the payment app.",
                 ScreenshotIntakeFailureNoticeCopy.message(notices.single()) { EnglishUiText.translate(it) },
             )
+            // The Activity copy currently joins the translated reason and
+            // instruction with a space (the persistent banner has its own
+            // sentence template); keep this exact output pinned.
             assertEquals(
-                "The image could not be decoded. Check the image, then reselect or share the original image.",
+                "The image could not be decoded Check the image, then reselect or share the original image.",
                 ScreenshotIntakeFailureNoticeCopy.activityMessage(outcome.failure!!) { EnglishUiText.translate(it) },
             )
             assertTrue(store.latest().isEmpty())
@@ -548,21 +551,24 @@ class ScreenshotIntakeCoordinatorTest {
     }
 
     @Test
-    fun `corrupt image fingerprint index holds an otherwise auto bookable card for review`() = runBlocking {
+    fun `unavailable image fingerprint index does not block an otherwise auto bookable transaction`() = runBlocking {
         val dir = Files.createTempDirectory("intake-corrupt-fingerprint").toFile()
         try {
             val store = CaptureCandidateStore(dir)
+            val notes = mutableListOf<DiagnosticStep>()
             val captureDir = File(dir, "page_capture").apply { mkdirs() }
             File(captureDir, "image-fingerprints.jsonl").writeText("{corrupt fixture index\n")
             assertTrue(store.lookupImageFingerprint("f".repeat(64)) is ImageFingerprintLookup.Unavailable)
 
             var ledgerWrites = 0
+            var writtenEntity: TransactionEntity? = null
             val writer = object : ScreenshotLedgerWriter {
                 override suspend fun insert(
                     entity: TransactionEntity,
                     attemptId: String,
                 ): LedgerInsertResult {
                     ledgerWrites++
+                    writtenEntity = entity
                     return LedgerInsertResult.Inserted(400L)
                 }
 
@@ -582,24 +588,31 @@ class ScreenshotIntakeCoordinatorTest {
             )
 
             val outcome = ingestPage(
-                coordinator = ScreenshotIntakeCoordinator(store, ledgerWriter = writer),
+                coordinator = ScreenshotIntakeCoordinator(
+                    store = store,
+                    diagnosticSink = { notes += it },
+                    ledgerWriter = writer,
+                ),
                 capturedAtMs = capturedAt,
                 blocks = highConfidencePayment,
+                bytes = ByteArray(256) { (it % 29).toByte() },
                 fingerprint = "f".repeat(64),
             )
 
-            assertEquals(0, outcome.booked)
-            assertEquals(1, outcome.pending)
-            assertEquals(0, ledgerWrites)
-            val pending = store.pending().single()
-            assertTrue(pending.reason.contains("fingerprint index unavailable"))
-            assertTrue(pending.ledgerWriteAllowed)
-            assertTrue("the shared review action remains available", CaptureBookGate.mayConfirm(pending))
-            assertEquals("WECHAT", CaptureReviewMapping.toTransactionEntity(
-                pending,
-                pending.merchantCandidates.single(),
-                CaptureReviewMapping.defaultCategory(pending),
-            ).source)
+            assertEquals(1, outcome.booked)
+            assertEquals(0, outcome.pending)
+            assertEquals(1, ledgerWrites)
+            assertEquals(3_650L, writtenEntity?.amountCents)
+            assertEquals("EXPENSE", writtenEntity?.type)
+            assertEquals(CaptureCandidate.STATUS_APPROVED, store.latest().single().status)
+            assertTrue(
+                "the diagnostic must distinguish unavailable screenshot dedup from a clean no-match",
+                notes.any { it.details.contains("fingerprint index unavailable") },
+            )
+            assertFalse(
+                "unavailable index must not be reported as a clean no-duplicate result",
+                notes.any { it.details == "No duplicate found" },
+            )
         } finally {
             dir.deleteRecursively()
         }

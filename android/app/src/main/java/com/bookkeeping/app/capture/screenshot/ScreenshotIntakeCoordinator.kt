@@ -339,23 +339,11 @@ class ScreenshotIntakeCoordinator private constructor(
                 .filter { it.captureObservedAtMs == null }
                 .map { it.toFingerprint() },
         )
-        val plan = if (fingerprintLookup is ImageFingerprintLookup.Unavailable) {
-            initialPlan.copy(
-                decisions = initialPlan.decisions.map { decision ->
-                    if (decision.action == Action.AUTO_BOOK) {
-                        decision.copy(
-                            action = Action.ASK_USER,
-                            reason = "fingerprint index unavailable; confirm this transaction",
-                            ledgerWriteAllowed = true,
-                        )
-                    } else {
-                        decision
-                    }
-                },
-            )
-        } else {
-            initialPlan
-        }
+        // Fingerprint availability describes only the local screenshot replay
+        // index, not transaction certainty. Keep the page decision unchanged:
+        // the ledger writer below still performs its repository duplicate gate,
+        // and a writer-reported collision keeps the candidate reviewable.
+        val plan = initialPlan
         val ocrSummary = "OCR ${blocks.size} 个文本块"
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;
@@ -412,15 +400,25 @@ class ScreenshotIntakeCoordinator private constructor(
         recordStep(
             attemptId = attemptId,
             stage = TransactionDiagnostics.STAGE_DEDUP,
-            result = if (matched.isEmpty()) TransactionDiagnostics.RESULT_SUCCESS
-            else TransactionDiagnostics.RESULT_WARNING,
-            details = if (matched.isEmpty()) "No duplicate found" else "Exact duplicate candidate skipped",
+            result = when {
+                matched.isNotEmpty() -> TransactionDiagnostics.RESULT_WARNING
+                fingerprintLookup is ImageFingerprintLookup.Unavailable ->
+                    TransactionDiagnostics.RESULT_WARNING
+                else -> TransactionDiagnostics.RESULT_SUCCESS
+            },
+            details = when {
+                matched.isNotEmpty() -> "Exact duplicate candidate skipped"
+                fingerprintLookup is ImageFingerprintLookup.Unavailable ->
+                    "Image fingerprint lookup unavailable; ledger duplicate checks remain active"
+                else -> "No duplicate found"
+            },
             callSite = CALL_SITE_INGEST,
             inputSummary = candidateSummary ?: ocrSummary,
-            outputSummary = if (matched.isEmpty()) {
-                "未命中已有账单"
-            } else {
-                "命中已有 ${matched.joinToString("、") { "#$it" }}，跳过 ${matched.size} 笔"
+            outputSummary = when {
+                matched.isNotEmpty() -> "命中已有 ${matched.joinToString("、") { "#$it" }}，跳过 ${matched.size} 笔"
+                fingerprintLookup is ImageFingerprintLookup.Unavailable ->
+                    "截图指纹索引不可用；仍由账本写入层执行查重"
+                else -> "未命中已有账单"
             },
             rawText = rawText,
         )

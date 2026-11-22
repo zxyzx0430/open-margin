@@ -2,11 +2,13 @@ package com.bookkeeping.app.capture.screenshot
 
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
+import com.bookkeeping.app.ui.screen.capture.CaptureReviewMapping
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Calendar
 import java.util.TimeZone
 
 /**
@@ -30,18 +32,34 @@ class ScreenshotPageInterpreterSampleShapeTest {
     private fun blockAt(text: String, left: Int, top: Int, right: Int) =
         TextBlock(text = text, left = left, top = top, right = right, bottom = top + 20)
 
-    private fun plan(blocks: List<TextBlock>) = ScreenshotImportPipeline.plan(
+    private fun plan(blocks: List<TextBlock>, captureAtMs: Long = capturedAt) = ScreenshotImportPipeline.plan(
         request = ScreenshotIntakeRequest(
             source = IntakeSource.SHARE,
             uri = "content://media/external/images/media/7",
             mimeType = "image/png",
-            capturedAtMs = capturedAt,
+            capturedAtMs = captureAtMs,
             byteSize = 300_000L,
             imageFingerprint = FINGERPRINT,
         ),
         blocks = blocks,
         existing = emptyList(),
         timeZone = zone,
+    )
+
+    private fun localTime(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
+        Calendar.getInstance(zone).apply {
+            isLenient = false
+            clear()
+            set(year, month - 1, day, hour, minute, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+    private fun timedCompletedPayment(timeLabel: String) = listOf(
+        block("微信支付", 10),
+        block(timeLabel, 40),
+        block("收款方 Fixture shop", 70),
+        block("-¥18.00", 100),
+        block("交易成功", 130),
     )
 
     /**
@@ -127,6 +145,71 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertNull(ScreenshotPageInterpreter.amountOf("本月统计 509.61"))
         assertNull(ScreenshotPageInterpreter.amountOf("11月29日自动确认收货后扣款"))
         assertNull(ScreenshotPageInterpreter.amountOf("验证码 123456"))
+    }
+
+    @Test
+    fun `weekday labels resolve the transaction date across the week boundary`() {
+        val mondayCapture = localTime(2026, 11, 23, 0, 10)
+        val sundayEvent = localTime(2026, 11, 22, 23, 55)
+        val fromPreviousSunday = ScreenshotPageInterpreter.interpret(
+            timedCompletedPayment("周日 23:55"),
+            mondayCapture,
+            zone,
+        ).drafts.single()
+
+        assertEquals(sundayEvent, fromPreviousSunday.eventTimeMs)
+
+        val sundayCapture = localTime(2026, 11, 22, 23, 55)
+        val weekdays = "一二三四五六日"
+        weekdays.forEachIndexed { index, day ->
+            val expected = localTime(2026, 11, 16 + index, 22, 50)
+            val resolved = ScreenshotPageInterpreter.interpret(
+                timedCompletedPayment("周$day 22:50"),
+                sundayCapture,
+                zone,
+            ).drafts.single().eventTimeMs
+            assertEquals("weekday label 周$day", expected, resolved)
+        }
+
+        // The screenshot was taken on Sunday, while the page's "星期一" label
+        // belongs to the preceding Monday, not to the capture day or Saturday.
+        val priorMonday = localTime(2026, 11, 16, 23, 50)
+        val fromPriorMonday = ScreenshotPageInterpreter.interpret(
+            timedCompletedPayment("星期一 23:50"),
+            sundayCapture,
+            zone,
+        ).drafts.single()
+
+        assertEquals(priorMonday, fromPriorMonday.eventTimeMs)
+    }
+
+    @Test
+    fun `weekday conflicting with explicit date preserves screenshot time provenance`() {
+        val captureTime = localTime(2026, 11, 23, 9, 0)
+        val blocks = timedCompletedPayment("周二 2026-11-23 08:45")
+        val evidence = ScreenshotPageInterpreter.interpret(blocks, captureTime, zone)
+        assertNull(evidence.drafts.single().eventTimeMs)
+
+        val plan = plan(blocks, captureTime)
+        val decision = plan.decisions.single()
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        val candidate = ScreenshotCandidateFactory.create(
+            decision = decision,
+            source = IntakeSource.SHARE,
+            capturedAtMs = captureTime,
+            imageFingerprint = FINGERPRINT,
+        )
+        assertEquals(captureTime, candidate.eventTimeMs)
+        assertEquals(CaptureCandidate.TIME_SOURCE_CAPTURE, candidate.eventTimeSource)
+        assertTrue(candidate.eventTimeNeedsConfirmation)
+
+        val entity = CaptureReviewMapping.toTransactionEntity(
+            candidate = candidate,
+            merchant = candidate.merchantCandidates.single(),
+            category = CaptureReviewMapping.defaultCategory(candidate),
+        )
+        assertEquals(captureTime, entity.timestamp)
+        assertTrue(entity.eventTimeNeedsConfirmation)
     }
 
     @Test

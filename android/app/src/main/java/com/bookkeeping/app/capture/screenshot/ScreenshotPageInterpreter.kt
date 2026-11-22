@@ -186,6 +186,8 @@ object ScreenshotPageInterpreter {
     private val DATE_TOKEN_REGEX = Regex("(\\d{1,2})\\s*[月日]|\\d{1,4}\\s*[-/]\\s*\\d{1,2}")
     private val TIME_ONLY_REGEX = Regex("(\\d{1,2}):(\\d{2})(?::(\\d{2}))?")
     private val RELATIVE_DAY_REGEX = Regex("大前天|前天|昨天|昨日|今天|今日")
+    /** `周一` / `星期天`: a weekday label is date evidence, not merchant text. */
+    private val WEEKDAY_REGEX = Regex("(?:^|[\\s:：])(?:星期|周)([一二三四五六日天])")
 
     fun interpret(
         blocks: List<TextBlock>,
@@ -954,6 +956,7 @@ object ScreenshotPageInterpreter {
 
     /** `21:46`, `昨天 14:01`, `11月19日 20:10`, `2026-11-19 20:15`: never a shop. */
     private fun isTimeOrDateLine(line: String): Boolean {
+        if (WEEKDAY_REGEX.containsMatchIn(line)) return true
         val stripped = RELATIVE_DAY_REGEX.replace(line, " ").trim()
         if (TIME_ONLY_REGEX.matchEntire(stripped) != null) return true
         if (DATE_TIME_REGEX.containsMatchIn(line)) return true
@@ -980,9 +983,17 @@ object ScreenshotPageInterpreter {
     }
 
     private fun eventTimeOf(text: String, capturedAtMs: Long, timeZone: TimeZone): Long? {
+        val weekdayValues = WEEKDAY_REGEX.findAll(text)
+            .map { calendarWeekday(it.groupValues[1]) }
+            .distinct()
+            .toList()
+        // Conflicting weekday labels cannot support an exact transaction time.
+        if (weekdayValues.size > 1) return null
+        val weekday = weekdayValues.singleOrNull()
+
         DATE_TIME_REGEX.find(text)?.let { match ->
             val values = match.groupValues
-            return runCatching {
+            val parsed = runCatching {
                 Calendar.getInstance(timeZone).apply {
                     isLenient = false
                     clear()
@@ -996,6 +1007,7 @@ object ScreenshotPageInterpreter {
                     )
                 }.timeInMillis.takeIf { it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS) }
             }.getOrNull()
+            return parsed?.takeIf { weekday == null || calendarWeekdayAt(it, timeZone) == weekday }
         }
 
         // `11月19日 20:10` is a real date with the year omitted. Resolving it
@@ -1009,7 +1021,7 @@ object ScreenshotPageInterpreter {
             val values = match.groupValues
             val captureYear = Calendar.getInstance(timeZone).apply { timeInMillis = capturedAtMs }
                 .get(Calendar.YEAR)
-            return ((captureYear - 1)..(captureYear + 1))
+            val parsed = ((captureYear - 1)..(captureYear + 1))
                 .mapNotNull { year ->
                     runCatching {
                         Calendar.getInstance(timeZone).apply {
@@ -1028,6 +1040,7 @@ object ScreenshotPageInterpreter {
                 }
                 .filter { it in (capturedAtMs - MONTH_DAY_MAX_AGE_MS)..(capturedAtMs + MONTH_DAY_FUTURE_TOLERANCE_MS) }
                 .minByOrNull { abs(it - capturedAtMs) }
+            return parsed?.takeIf { weekday == null || calendarWeekdayAt(it, timeZone) == weekday }
         }
 
         val relativeDay = RELATIVE_DAY_REGEX.find(text)?.value
@@ -1042,7 +1055,7 @@ object ScreenshotPageInterpreter {
                 "昨天", "昨日" -> -1
                 else -> 0
             }
-            return runCatching {
+            val parsed = runCatching {
                 Calendar.getInstance(timeZone).apply {
                     timeInMillis = capturedAtMs
                     isLenient = false
@@ -1055,6 +1068,35 @@ object ScreenshotPageInterpreter {
                     it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS)
                 }
             }.getOrNull()
+            return parsed?.takeIf { weekday == null || calendarWeekdayAt(it, timeZone) == weekday }
+        }
+        if (weekday != null) {
+            // A weekday plus one clock resolves to the most recent occurrence
+            // of that weekday on or before the screenshot date. If the OCR also
+            // carried a numeric date we did not successfully bind above, do not
+            // discard that evidence and invent a weekday-only transaction date.
+            val match = times.singleOrNull() ?: return null
+            if (text.contains("年") || DATE_TOKEN_REGEX.containsMatchIn(text)) return null
+            val captureDay = Calendar.getInstance(timeZone).apply {
+                timeInMillis = capturedAtMs
+                isLenient = false
+            }
+            val daysSinceWeekday = (captureDay.get(Calendar.DAY_OF_WEEK) - weekday + 7) % 7
+            val parsed = runCatching {
+                captureDay.apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                    add(Calendar.DAY_OF_YEAR, -daysSinceWeekday)
+                    set(Calendar.HOUR_OF_DAY, match.groupValues[1].toInt())
+                    set(Calendar.MINUTE, match.groupValues[2].toInt())
+                    set(Calendar.SECOND, match.groupValues[3].ifBlank { "0" }.toInt())
+                }.timeInMillis.takeIf {
+                    it in MIN_EVENT_TIME..(capturedAtMs + FUTURE_TOLERANCE_MS)
+                }
+            }.getOrNull()
+            return parsed?.takeIf { calendarWeekdayAt(it, timeZone) == weekday }
         }
         // Date-shaped tokens without a time-only match are not a clock: falling
         // through here would assert "capture day at HH:mm" for a date we failed
@@ -1121,6 +1163,20 @@ object ScreenshotPageInterpreter {
 
     private fun countDistinctAmounts(blocks: List<TextBlock>): Int =
         blocks.mapNotNull { amountOf(it.text) }.distinct().size
+
+    private fun calendarWeekday(label: String): Int = when (label) {
+        "一" -> Calendar.MONDAY
+        "二" -> Calendar.TUESDAY
+        "三" -> Calendar.WEDNESDAY
+        "四" -> Calendar.THURSDAY
+        "五" -> Calendar.FRIDAY
+        "六" -> Calendar.SATURDAY
+        "日", "天" -> Calendar.SUNDAY
+        else -> error("Unsupported weekday label")
+    }
+
+    private fun calendarWeekdayAt(timestamp: Long, timeZone: TimeZone): Int =
+        Calendar.getInstance(timeZone).apply { timeInMillis = timestamp }.get(Calendar.DAY_OF_WEEK)
 
     private fun noiseKey(value: String?): String =
         value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "").take(24)
