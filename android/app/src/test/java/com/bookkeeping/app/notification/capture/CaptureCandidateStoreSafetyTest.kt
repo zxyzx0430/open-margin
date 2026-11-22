@@ -303,6 +303,42 @@ class CaptureCandidateStoreSafetyTest {
     }
 
     @Test
+    fun `null or invalid retained candidate evidence prevents index replacement`() {
+        listOf(
+            "null parser result" to "{}",
+            "parsed invalid candidate" to candidate("invalid-evidence").copy(pageIdentity = "")
+                .toJson().toString(),
+        ).forEachIndexed { index, (description, invalidEvidence) ->
+            val root = Files.createTempDirectory("candidate-store-invalid-evidence").toFile()
+            try {
+                val store = CaptureCandidateStore(root)
+                val retained = candidate("retained-$index")
+                assertNotNull(store.save(retained, null))
+                val indexFile = root.toPath().resolve("page_capture/candidates.jsonl")
+                Files.write(
+                    indexFile,
+                    (String(Files.readAllBytes(indexFile), Charsets.UTF_8) + invalidEvidence + "\n")
+                        .toByteArray(Charsets.UTF_8),
+                )
+                val evidenceBeforeWrite = Files.readAllBytes(indexFile)
+
+                assertEquals(
+                    "$description must fail closed",
+                    CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE),
+                    store.saveWithResult(candidate("must-not-replace-$index"), null),
+                )
+                assertTrue(
+                    "$description must leave retained evidence unchanged",
+                    evidenceBeforeWrite.contentEquals(Files.readAllBytes(indexFile)),
+                )
+                assertEquals(listOf(retained.candidateId), store.latest().map { it.candidateId })
+            } finally {
+                root.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
     fun `candidate index capacity rejects only new rows and retry succeeds after expiry`() {
         val root = Files.createTempDirectory("candidate-store-index-budget")
         try {

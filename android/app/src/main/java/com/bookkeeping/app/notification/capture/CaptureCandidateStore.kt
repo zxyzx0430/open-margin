@@ -452,6 +452,7 @@ class CaptureCandidateStore internal constructor(
             indexFile.readLines().forEach { line ->
                 if (line.isBlank()) error("blank candidate evidence line")
                 val candidate = CaptureCandidate.fromJson(org.json.JSONObject(line))
+                    ?: error("invalid candidate evidence")
                 if (!candidate.isValid()) error("invalid candidate evidence")
                 latest[candidate.candidateId] = candidate
             }

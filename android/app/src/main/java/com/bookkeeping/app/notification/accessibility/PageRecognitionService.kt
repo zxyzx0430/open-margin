@@ -151,15 +151,17 @@ open class PageRecognitionService : AccessibilityService() {
                     if (pageRoute.saved.saved.isNotEmpty()) {
                         ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
                     }
-                    repository.recordDiagnostic(
-                        attemptId = TransactionDiagnostics.newAttemptId(),
-                        stage = TransactionDiagnostics.STAGE_DEDUP,
-                        result = if (pageRoute.saved.failed == 0) TransactionDiagnostics.RESULT_WARNING
-                        else TransactionDiagnostics.RESULT_FAILURE,
-                        details = "Multi-card page held for individual confirmation",
-                        outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +
-                            if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "",
-                    )
+                    scope.launch {
+                        repository.recordDiagnostic(
+                            attemptId = TransactionDiagnostics.newAttemptId(),
+                            stage = TransactionDiagnostics.STAGE_DEDUP,
+                            result = if (pageRoute.saved.failed == 0) TransactionDiagnostics.RESULT_WARNING
+                            else TransactionDiagnostics.RESULT_FAILURE,
+                            details = "Multi-card page held for individual confirmation",
+                            outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +
+                                if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "",
+                        )
+                    }
                     return
                 }
 

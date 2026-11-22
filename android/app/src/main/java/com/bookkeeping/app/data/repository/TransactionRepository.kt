@@ -611,7 +611,7 @@ class TransactionRepository @Inject constructor(
             diagnosticInput = diagnosticInput,
             deferPostCommitEffects = deferPostCommitEffects,
         )
-        if (id > 0L) {
+        return if (id > 0L) {
             if (!deferPostCommitEffects) {
                 CaptureHealth.onTransactionSaved(context)
                 KeepAliveService.refreshStatus(context)
