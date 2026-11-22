@@ -278,6 +278,37 @@ class CaptureMergePolicyTest {
     }
 
     @Test
+    fun oneSidedMerchantAndCloseAmountTimeRequireExactPlatformOrderIds() {
+        val placeholder = entity(id = 21, merchant = "微信支付").copy(captureObservedAtMs = null)
+        val richWithoutId = entity(
+            id = 0,
+            merchant = "Fixture shop",
+            account = null,
+            orderId = null,
+            timestamp = t0 + 1_000L,
+        ).copy(captureObservedAtMs = t0 + 1_000L)
+
+        assertFalse(CaptureMergePolicy.isSamePaymentWithOneSidedMerchant(placeholder, richWithoutId))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(placeholder), richWithoutId))
+        assertNull(CaptureMergePolicy.planConfirmedMerge(placeholder, richWithoutId))
+
+        val onlyOneId = richWithoutId.copy(sourceTransactionId = "FIXTURE-ORDER-A")
+        assertFalse(CaptureMergePolicy.isSamePaymentWithOneSidedMerchant(placeholder, onlyOneId))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(placeholder), onlyOneId))
+
+        val exactIdOnBothSides = placeholder.copy(sourceTransactionId = "FIXTURE-ORDER-A")
+        assertTrue(CaptureMergePolicy.isSamePaymentWithOneSidedMerchant(exactIdOnBothSides, onlyOneId))
+        assertEquals(
+            exactIdOnBothSides.id,
+            CaptureMergePolicy.findMergeTarget(listOf(exactIdOnBothSides), onlyOneId)?.id,
+        )
+
+        val distinctId = onlyOneId.copy(sourceTransactionId = "FIXTURE-ORDER-B")
+        assertFalse(CaptureMergePolicy.isSamePaymentWithOneSidedMerchant(exactIdOnBothSides, distinctId))
+        assertNull(CaptureMergePolicy.findMergeTarget(listOf(exactIdOnBothSides), distinctId))
+    }
+
+    @Test
     fun notificationThenPaymentPageKeepsOneEnrichedRow() {
         // 两个入口抓到同一笔，且都带同一个订单号（强标识相等），才能自动合成一条。
         val orderId = "420000123420260101"

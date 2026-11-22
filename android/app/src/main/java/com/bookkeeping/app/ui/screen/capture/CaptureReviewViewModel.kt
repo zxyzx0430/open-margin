@@ -4,6 +4,10 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bookkeeping.app.capture.screenshot.CandidateStorageIntakeKind
+import com.bookkeeping.app.capture.screenshot.CandidateStorageWarningQueue
+import com.bookkeeping.app.capture.screenshot.ScreenshotIntakeFailureNotice
+import com.bookkeeping.app.capture.screenshot.ScreenshotIntakeFailureNoticeQueue
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
@@ -49,6 +53,15 @@ class CaptureReviewViewModel @Inject constructor(
         /** The card just ignored, while its undo window is still open. */
         val undo: CaptureIgnoreUndo.Offer? = null,
         val message: String? = null,
+        val storageWarningKinds: Set<CandidateStorageIntakeKind> = emptySet(),
+        val intakeFailureNotice: ScreenshotIntakeFailureNotice? = null,
+    )
+
+    private data class ReviewSnapshot(
+        val pending: List<CaptureCandidate>,
+        val ignored: List<CaptureCandidate>,
+        val storageWarningKinds: Set<CandidateStorageIntakeKind>,
+        val intakeFailureNotice: ScreenshotIntakeFailureNotice?,
     )
 
     private val store = CaptureCandidateStore(context)
@@ -63,10 +76,39 @@ class CaptureReviewViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(busy = true) }
-            val snapshot = withContext(Dispatchers.IO) { store.pending() to store.ignored() }
-            queue.replacePending(snapshot.first)
-            _state.update { it.copy(ignored = snapshot.second) }
+            val snapshot = withContext(Dispatchers.IO) {
+                ReviewSnapshot(
+                    pending = store.pending(),
+                    ignored = store.ignored(),
+                    storageWarningKinds = CandidateStorageWarningQueue.pendingKinds(context),
+                    intakeFailureNotice = ScreenshotIntakeFailureNoticeQueue.pending(context),
+                )
+            }
+            queue.replacePending(snapshot.pending)
+            _state.update {
+                it.copy(
+                    ignored = snapshot.ignored,
+                    storageWarningKinds = snapshot.storageWarningKinds,
+                    intakeFailureNotice = snapshot.intakeFailureNotice,
+                )
+            }
             publish()
+        }
+    }
+
+    fun acknowledgeStorageWarning() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (CandidateStorageWarningQueue.acknowledge(context)) {
+                _state.update { it.copy(storageWarningKinds = emptySet()) }
+            }
+        }
+    }
+
+    fun acknowledgeIntakeFailureNotice() {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (ScreenshotIntakeFailureNoticeQueue.acknowledge(context)) {
+                _state.update { it.copy(intakeFailureNotice = null) }
+            }
         }
     }
 

@@ -4,54 +4,304 @@ import android.content.Context
 import com.bookkeeping.app.capture.screenshot.ScreenshotRetention
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
+
+internal enum class CandidateHistoryWriteFaultPoint {
+    AFTER_JOURNAL_REPLACEMENT,
+    AFTER_INDEX_REPLACEMENT,
+    BEFORE_CHECKPOINT_REPLACEMENT,
+}
 
 /** Local candidate inbox; it never writes the ledger. */
-class CaptureCandidateStore internal constructor(private val filesRoot: File) {
+class CaptureCandidateStore internal constructor(
+    private val filesRoot: File,
+    private val screenshotStorageQuotaBytes: Long = MAX_SCREENSHOT_STORAGE_QUOTA_BYTES,
+    private val candidateIndexBudgetBytes: Long = MAX_CANDIDATE_INDEX_BUDGET_BYTES,
+    private val candidateCountBudget: Int = MAX_CANDIDATE_COUNT,
+    private val writeFaultInjector: ((CandidateHistoryWriteFaultPoint) -> Unit)? = null,
+) {
     constructor(context: Context) : this(context.applicationContext.filesDir)
 
     private val dir = File(filesRoot, "page_capture")
     private val indexFile = File(dir, "candidates.jsonl")
+    private val candidateHistoryMetadataFile = File(dir, CANDIDATE_HISTORY_METADATA_NAME)
+    private val legacyCandidateHistoryFile = File(dir, LEGACY_CANDIDATE_HISTORY_NAME)
+    private val legacyCandidateHistoryJournalFile = File(dir, LEGACY_CANDIDATE_HISTORY_JOURNAL_NAME)
+    private val imageFingerprintFile = File(dir, "image-fingerprints.jsonl")
+    private val imageFingerprintMetadataFile = File(dir, "image-fingerprints.meta")
 
-    fun save(candidate: CaptureCandidate, screenshot: ByteArray?): CaptureCandidate? {
-        if (!candidate.isValid()) return null
-        synchronized(lock) {
-            if (!dir.exists() && !dir.mkdirs()) return null
-            runCatching { pruneExpiredLocked() }
-            val screenshotPath = screenshot
-                ?.takeIf { it.isNotEmpty() && it.size <= MAX_SCREENSHOT_BYTES }
-                ?.let { bytes ->
-                    val file = File(dir, "shot_${candidate.candidateId}.jpg")
-                    if (runCatching { file.writeBytes(bytes) }.isSuccess) file.absolutePath else null
-                } ?: candidate.screenshotPath?.takeIf(::isAppPrivateFile)
+    fun save(candidate: CaptureCandidate, screenshot: ByteArray?): CaptureCandidate? =
+        (saveWithResult(candidate, screenshot) as? CandidateSaveResult.Saved)?.candidate
+
+    /**
+     * Store an item and preserve the reason when the bounded review index is full.
+     * The screenshot quota remains independent from the candidate index budget.
+     */
+    fun saveWithResult(
+        candidate: CaptureCandidate,
+        screenshot: ByteArray?,
+        nowMs: Long = System.currentTimeMillis(),
+    ): CandidateSaveResult {
+        if (!candidate.isValid()) return CandidateSaveResult.Failed(CandidateSaveFailure.INVALID_CANDIDATE)
+        return synchronized(lock) {
+            val createdDirectory = !dir.exists()
+            if (!dir.exists() && !dir.mkdirs()) {
+                return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
+            }
+            runCatching { pruneExpiredLocked(nowMs) }
+            val existing = readLatestCandidatesStrict()
+                ?: return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
+            if (!ensureLegacyCandidateHistoryMigrationLocked(nowMs, existing)) {
+                return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
+            }
+            var newlyWrittenScreenshot: String? = null
+            var screenshotUnavailableReason: String? = null
+            val screenshotPath = when {
+                screenshot != null -> {
+                    val bytes = screenshot
+                    if (bytes.isEmpty() || bytes.size > MAX_SCREENSHOT_BYTES) {
+                        screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_INVALID
+                        null
+                    } else {
+                        val file = File(dir, "shot_${sha256(bytes)}.jpg")
+                        when {
+                            file.isFile && file.length() == bytes.size.toLong() &&
+                                runCatching { file.readBytes().contentEquals(bytes) }.getOrDefault(false) ->
+                                canonicalStoredScreenshotPath(file.absolutePath)
+                                    ?: run {
+                                        screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_IO
+                                        null
+                                    }
+
+                            file.exists() -> {
+                                screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_IO
+                                null
+                            }
+
+                            screenshotBytesInUse(existing, nowMs) + bytes.size >
+                                screenshotStorageQuotaBytes.coerceAtLeast(0L) -> {
+                                screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_QUOTA
+                                null
+                            }
+
+                            else -> {
+                                newlyWrittenScreenshot = file.absolutePath
+                                val written = runCatching { file.writeBytes(bytes) }.isSuccess &&
+                                    file.isFile && file.length() == bytes.size.toLong() &&
+                                    runCatching { file.readBytes().contentEquals(bytes) }.getOrDefault(false)
+                                if (written) canonicalStoredScreenshotPath(file.absolutePath) ?: run {
+                                    screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_IO
+                                    null
+                                } else {
+                                    screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_IO
+                                    null
+                                }
+                            }
+                        }
+                    }
+                }
+
+                candidate.screenshotPath != null -> {
+                    val path = candidate.screenshotPath
+                    when {
+                        !isStoredScreenshotFile(path) -> {
+                            screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_IO
+                            null
+                        }
+
+                        !isWithinScreenshotQuota(path, existing, nowMs) -> {
+                            screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_QUOTA
+                            null
+                        }
+
+                        else -> canonicalStoredScreenshotPath(path).also { canonical ->
+                            if (canonical == null) screenshotUnavailableReason = SCREENSHOT_UNAVAILABLE_IO
+                        }
+                    }
+                }
+
+                else -> null
+            }
             val stored = candidate.copy(
                 screenshotPath = screenshotPath,
+                reason = candidate.reason,
+                screenshotUnavailableReason = screenshotUnavailableReason ?: candidate.screenshotUnavailableReason,
+                imageFingerprint = candidate.imageFingerprint ?: screenshot
+                    ?.takeIf { it.isNotEmpty() && it.size <= MAX_SCREENSHOT_BYTES }
+                    ?.let(::sha256),
                 diagnosticAttemptId = candidate.diagnosticAttemptId
                     ?: TransactionDiagnostics.newAttemptId(),
             )
-            val saved = runCatching {
-                indexFile.appendText(stored.toJson().toString() + "\n")
-                trimIndex()
-                runCatching { pruneExpiredLocked() }
-                true
-            }.getOrDefault(false)
-            if (!saved && screenshotPath != null) deleteOwnedFile(screenshotPath)
-            return stored.takeIf { saved }
+            val retained = existing.filterNot {
+                ScreenshotRetention.isExpired(it.capturedAtMs, nowMs) &&
+                    it.candidateId != stored.candidateId
+            }.toMutableList()
+            retained.removeAll { it.candidateId == stored.candidateId }
+            retained += stored
+            val isNewCandidate = existing.none { it.candidateId == stored.candidateId }
+            if (isNewCandidate && !candidateIndexWithinBudget(retained)) {
+                newlyWrittenScreenshot?.let { deleteScreenshotIfUnreferenced(it, existing, nowMs) }
+                return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.INDEX_FULL)
+            }
+            if (!writeCandidateIndexLocked(retained, allowInitialHistory = createdDirectory)) {
+                newlyWrittenScreenshot?.let { deleteScreenshotIfUnreferenced(it, existing, nowMs) }
+                return@synchronized CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE)
+            }
+            stored.imageFingerprint?.takeIf(String::isNotBlank)?.let {
+                recordImageFingerprintLocked(it, stored.capturedAtMs, nowMs)
+            }
+            runCatching { pruneExpiredLocked(nowMs) }
+            CandidateSaveResult.Saved(stored)
         }
     }
 
-    fun latest(limit: Int = 50): List<CaptureCandidate> = synchronized(lock) {
+    fun latest(limit: Int = Int.MAX_VALUE): List<CaptureCandidate> = synchronized(lock) {
         runCatching { pruneExpiredLocked() }
-        val collapsed = linkedMapOf<String, CaptureCandidate>()
-        readAll().forEach { candidate -> collapsed[candidate.candidateId] = candidate }
-        collapsed.values
+        readLatestCandidates()
             .sortedBy { it.capturedAtMs }
-            .takeLast(limit.coerceIn(1, MAX_ENTRIES))
+            .takeLast(limit.coerceAtLeast(0))
     }
 
     fun findByImageFingerprint(fingerprint: String): CaptureCandidate? = synchronized(lock) {
         runCatching { pruneExpiredLocked() }
         readAll().lastOrNull { it.imageFingerprint == fingerprint }
     }
+
+    /** Confirm that the exact source bytes remain readable from app-private storage. */
+    fun hasReadableScreenshot(candidate: CaptureCandidate, expectedBytes: ByteArray?): Boolean = synchronized(lock) {
+        if (expectedBytes == null || expectedBytes.isEmpty()) return@synchronized false
+        val path = candidate.screenshotPath?.let(::canonicalStoredScreenshotPath)
+            ?: return@synchronized false
+        val file = File(path)
+        file.canRead() && file.length() == expectedBytes.size.toLong() &&
+            runCatching { file.readBytes().contentEquals(expectedBytes) }.getOrDefault(false)
+    }
+
+    /**
+     * Check screenshot idempotency independently of the review inbox. The
+     * compact index contains only hashes and capture times and follows the same
+     * seven-day expiry boundary as screenshot evidence.
+     */
+    fun lookupImageFingerprint(
+        fingerprint: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): ImageFingerprintLookup = synchronized(lock) {
+        if (!fingerprint.matches(Regex("[a-f0-9]{64}"))) {
+            return@synchronized ImageFingerprintLookup.Unavailable("invalid fingerprint")
+        }
+        if (!recoverLegacyCandidateHistoryJournalLocked()) {
+            return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                ?: ImageFingerprintLookup.Unavailable("legacy candidate history recovery pending")
+        }
+        if (indexFile.isFile && !candidateHistoryMetadataFile.exists()) {
+            val history = readLatestCandidatesStrict()
+            if (history != null && !ensureLegacyCandidateHistoryMigrationLocked(nowMs, history)) {
+                return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                    ?: ImageFingerprintLookup.Unavailable("legacy candidate history checkpoint unavailable")
+            }
+        }
+        finishLegacyCandidateHistoryMigrationIfReadyLocked(nowMs)
+        if (File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists()) {
+            if (!recoverImageFingerprintsLocked(nowMs)) {
+                return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                    ?: ImageFingerprintLookup.Unavailable("fingerprint index unavailable")
+            }
+        }
+        if ((imageFingerprintFile.exists() && !imageFingerprintFile.isFile) ||
+            (indexFile.exists() && !indexFile.isFile) ||
+            (candidateHistoryMetadataFile.exists() && !candidateHistoryMetadataFile.isFile) ||
+            (legacyCandidateHistoryFile.exists() && !legacyCandidateHistoryFile.isFile)
+        ) {
+            markImageFingerprintIndexUnavailableLocked()
+            return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                ?: ImageFingerprintLookup.Unavailable("fingerprint index path is unusable")
+        }
+        if (imageFingerprintFile.isFile) {
+            var records = readImageFingerprints() ?: run {
+                markImageFingerprintIndexUnavailableLocked()
+                if (!recoverImageFingerprintsLocked(nowMs)) {
+                    return@synchronized ImageFingerprintLookup.Unavailable("fingerprint index unreadable")
+                }
+                readImageFingerprints()
+                    ?: return@synchronized ImageFingerprintLookup.Unavailable("fingerprint index unreadable")
+            }
+            val evidence = readLatestCandidatesStrict()
+            if (evidence == null) {
+                markImageFingerprintIndexUnavailableLocked()
+                return@synchronized if (records.any {
+                        it.fingerprint == fingerprint &&
+                            !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+                    }
+                ) {
+                    ImageFingerprintLookup.Match
+                } else {
+                    ImageFingerprintLookup.Unavailable("candidate evidence is unreadable")
+                }
+            }
+            if (!candidateHistoryIsCompleteLocked()) {
+                markImageFingerprintIndexUnavailableLocked()
+                return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                    ?: ImageFingerprintLookup.Unavailable("candidate history completeness is unverified")
+            }
+            val completeEvidence = fingerprintEvidence(evidence, nowMs)
+            if (completeEvidence == null) {
+                markImageFingerprintIndexUnavailableLocked()
+                return@synchronized if (records.any {
+                        it.fingerprint == fingerprint &&
+                            !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+                    }
+                ) ImageFingerprintLookup.Match else
+                    ImageFingerprintLookup.Unavailable("candidate fingerprint evidence is incomplete")
+            }
+            val indexed = records.filterNot {
+                ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+            }.associateBy { it.fingerprint }
+            val expected = completeEvidence.associateBy { it.fingerprint }
+            if (indexed != expected) {
+                markImageFingerprintIndexUnavailableLocked()
+                if (!recoverImageFingerprintsLocked(nowMs)) {
+                    return@synchronized if (records.any {
+                            it.fingerprint == fingerprint &&
+                                !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+                        } || evidence.any {
+                            it.imageFingerprint == fingerprint &&
+                                !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+                        }
+                    ) ImageFingerprintLookup.Match else
+                        ImageFingerprintLookup.Unavailable("fingerprint index is incomplete")
+                }
+                records = readImageFingerprints()
+                    ?: return@synchronized ImageFingerprintLookup.Unavailable("fingerprint index unreadable")
+            }
+            return@synchronized fingerprintResult(records, fingerprint, nowMs)
+        }
+
+        // A missing or interrupted index is rebuilt only from a strictly parsed
+        // candidate index. A positive candidate match is safe even if rebuilding
+        // fails; every other result stays unavailable.
+        if (indexFile.exists() || candidateHistoryMetadataFile.exists() ||
+            imageFingerprintMetadataFile.exists() ||
+            File(dir, FINGERPRINT_TMP_NAME).exists()
+        ) {
+            markImageFingerprintIndexUnavailableLocked()
+            if (recoverImageFingerprintsLocked(nowMs)) {
+                val records = readImageFingerprints()
+                    ?: return@synchronized ImageFingerprintLookup.Unavailable("fingerprint index unreadable")
+                return@synchronized fingerprintResult(records, fingerprint, nowMs)
+            }
+            return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
+                ?: ImageFingerprintLookup.Unavailable("fingerprint index missing or incomplete")
+        }
+        if (dir.exists()) ImageFingerprintLookup.Unavailable("capture history is missing")
+        else ImageFingerprintLookup.CleanNoMatch
+    }
+
+    /** Compatibility query. Callers making booking decisions must use the typed lookup above. */
+    fun containsImageFingerprint(
+        fingerprint: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Boolean = lookupImageFingerprint(fingerprint, nowMs) == ImageFingerprintLookup.Match
 
     /**
      * Every waiting card, oldest first.
@@ -62,12 +312,12 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
      * coming back. Repeated imports of the same image are stopped upstream by
      * the importer's repeatImage rule, so candidateId is the only key needed.
      */
-    fun pending(limit: Int = 50): List<CaptureCandidate> =
-        latest(MAX_ENTRIES)
+    fun pending(limit: Int = Int.MAX_VALUE): List<CaptureCandidate> =
+        latest()
             .filter { it.status == CaptureCandidate.STATUS_PENDING }
             .distinctBy { it.candidateId }
             .sortedBy { it.capturedAtMs }
-            .take(limit.coerceIn(1, MAX_ENTRIES))
+            .take(limit.coerceAtLeast(0))
 
     /**
      * Cards that were ignored, newest first, for the recovery list.
@@ -78,17 +328,17 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
      * skips, so both kinds show up here; the user decides which ones to bring
      * back.
      */
-    fun ignored(limit: Int = 50): List<CaptureCandidate> =
-        latest(MAX_ENTRIES)
+    fun ignored(limit: Int = Int.MAX_VALUE): List<CaptureCandidate> =
+        latest()
             .filter { it.status == CaptureCandidate.STATUS_IGNORED }
             .distinctBy { it.candidateId }
             .sortedByDescending { it.capturedAtMs }
-            .take(limit.coerceIn(1, MAX_ENTRIES))
+            .take(limit.coerceAtLeast(0))
 
     /**
      * Put one ignored card back into review.
      *
-     * Only a PENDING status record is appended: nothing here touches the ledger,
+     * Only a PENDING status record is written: nothing here touches the ledger,
      * so the user still has to confirm the card. [nowMs] is a parameter so the
      * retention boundary is testable without waiting seven days, and the lookup
      * deliberately runs before [pruneExpiredLocked] so a record that is expired
@@ -98,7 +348,8 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
     fun restore(candidateId: String, nowMs: Long = System.currentTimeMillis()): RestoreOutcome =
         synchronized(lock) {
             if (candidateId.isBlank()) return@synchronized RestoreOutcome.NOT_FOUND
-            val record = readAll().lastOrNull { it.candidateId == candidateId }
+            val latest = readLatestCandidatesStrict() ?: return@synchronized RestoreOutcome.WRITE_FAILED
+            val record = latest.lastOrNull { it.candidateId == candidateId }
             when {
                 record == null -> RestoreOutcome.NOT_FOUND
                 ScreenshotRetention.isExpired(record.capturedAtMs, nowMs) ->
@@ -106,14 +357,10 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
                 record.status != CaptureCandidate.STATUS_IGNORED -> RestoreOutcome.NOT_IGNORED
                 !dir.exists() && !dir.mkdirs() -> RestoreOutcome.WRITE_FAILED
                 else -> {
-                    val written = runCatching {
-                        indexFile.appendText(
-                            record.copy(status = CaptureCandidate.STATUS_PENDING)
-                                .toJson().toString() + "\n",
-                        )
-                        trimIndex()
-                        true
-                    }.getOrDefault(false)
+                    val updated = record.copy(status = CaptureCandidate.STATUS_PENDING)
+                    val written = writeCandidateIndexLocked(
+                        latest.filterNot { it.candidateId == candidateId } + updated,
+                    )
                     if (written) {
                         runCatching { pruneExpiredLocked(nowMs) }
                         RestoreOutcome.RESTORED
@@ -132,17 +379,40 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
      */
     fun relatedWaiting(incoming: CaptureCandidate, nowMs: Long): CaptureCandidate? = synchronized(lock) {
         runCatching { pruneExpiredLocked() }
-        ScreenshotWaitingCorrelation.settleTarget(incoming, latest(MAX_ENTRIES), nowMs)
+        ScreenshotWaitingCorrelation.settleTarget(incoming, latest(), nowMs)
     }
 
-    /** Appends a status record; readers keep the last record for each candidateId. */
+    /**
+     * Apply a monotonic status update. Terminal states cannot be reopened by a
+     * delayed callback; an ignored card can only return through [restore].
+     */
     fun mark(candidate: CaptureCandidate, status: String): Boolean {
         if (status !in CaptureCandidate.STATUSES) return false
         synchronized(lock) {
             if (!dir.exists() && !dir.mkdirs()) return false
+            val latest = readLatestCandidatesStrict() ?: return false
+            val current = latest.lastOrNull { it.candidateId == candidate.candidateId }
+                ?: return false
+            if (ScreenshotRetention.isExpired(current.capturedAtMs, System.currentTimeMillis())) return false
+            if (!canTransition(current.status, status)) return false
+            val updated = if (status == CaptureCandidate.STATUS_PENDING) {
+                current.copy(
+                    status = status,
+                    reason = candidate.reason,
+                    matchedTransactionId = candidate.matchedTransactionId,
+                    screenshotUnavailableReason = candidate.screenshotUnavailableReason
+                        ?: current.screenshotUnavailableReason,
+                )
+            } else {
+                current.copy(status = status)
+            }
+            if (current.status == status &&
+                (status != CaptureCandidate.STATUS_PENDING || updated == current)
+            ) return true
             return runCatching {
-                indexFile.appendText(candidate.copy(status = status).toJson().toString() + "\n")
-                trimIndex()
+                check(writeCandidateIndexLocked(
+                    latest.filterNot { it.candidateId == current.candidateId } + updated,
+                ))
                 runCatching { pruneExpiredLocked() }
                 true
             }.getOrDefault(false)
@@ -167,68 +437,836 @@ class CaptureCandidateStore internal constructor(private val filesRoot: File) {
         }.getOrElse { emptyList() }
     }
 
-    private fun trimIndex() {
+    private fun readLatestCandidates(): List<CaptureCandidate> {
+        val latest = linkedMapOf<String, CaptureCandidate>()
+        readAll().forEach { latest[it.candidateId] = it }
+        return latest.values.toList()
+    }
+
+    /** Null means some retained evidence is unreadable; writers must not replace it. */
+    private fun readLatestCandidatesStrict(): List<CaptureCandidate>? {
+        if (!indexFile.exists()) return emptyList()
+        if (!indexFile.isFile) return null
+        return runCatching {
+            val latest = linkedMapOf<String, CaptureCandidate>()
+            indexFile.readLines().forEach { line ->
+                if (line.isBlank()) error("blank candidate evidence line")
+                val candidate = CaptureCandidate.fromJson(org.json.JSONObject(line))
+                if (!candidate.isValid()) error("invalid candidate evidence")
+                latest[candidate.candidateId] = candidate
+            }
+            latest.values.sortedBy { it.capturedAtMs }
+        }.getOrNull()
+    }
+
+    private fun writeCandidateIndexLocked(
+        candidates: List<CaptureCandidate>,
+        allowInitialHistory: Boolean = false,
+        allowLegacyMigration: Boolean = false,
+    ): Boolean {
+        if (!recoverLegacyCandidateHistoryJournalLocked()) return false
+        val legacyBarrier = if (legacyCandidateHistoryFile.exists()) {
+            readLegacyHistoryBarrierLocked()?.takeIf(::legacyHistoryCheckpointMatchesIndex) ?: return false
+        } else {
+            null
+        }
+        val ordered = candidates
+            .distinctBy { it.candidateId }
+            .sortedBy { it.capturedAtMs }
+        val content = encodeCandidates(ordered)
+        val current = readLatestCandidatesStrict()
+        if (!candidateIndexWithinBudget(ordered)) {
+            // Existing oversized stores may be compacted, pruned, or updated
+            // without growing. They must not lose retained rows just to satisfy
+            // the new limit, and no newly added row may enlarge such a store.
+            val currentIds = current?.mapTo(mutableSetOf()) { it.candidateId } ?: return false
+            if (ordered.any { it.candidateId !in currentIds } ||
+                content.size > (if (indexFile.isFile) indexFile.length() else 0L)
+            ) return false
+        }
+        val canAdvanceHistoryMetadata = candidateHistoryIsCompleteLocked() ||
+            (allowInitialHistory && isNewCandidateHistoryLocked()) || allowLegacyMigration
+        if (legacyBarrier != null) {
+            val oldBytes = runCatching { indexFile.readBytes() }.getOrNull() ?: return false
+            val oldRows = readLatestCandidatesStrict() ?: return false
+            val oldState = CandidateIndexState(oldRows.size, oldBytes.size.toLong(), sha256(oldBytes))
+            val newState = CandidateIndexState(ordered.size, content.size.toLong(), sha256(content))
+            if (!writeLegacyCandidateHistoryJournalLocked(legacyBarrier.expiresAtMs, oldState, newState)) {
+                return false
+            }
+            writeFaultInjector?.invoke(CandidateHistoryWriteFaultPoint.AFTER_JOURNAL_REPLACEMENT)
+        }
+        if (!replaceFileAtomically(File(dir, INDEX_TMP_NAME), indexFile, content)) return false
+        if (legacyBarrier != null) {
+            writeFaultInjector?.invoke(CandidateHistoryWriteFaultPoint.AFTER_INDEX_REPLACEMENT)
+        }
+        val verified = readLatestCandidatesStrict() ?: return false
+        if (verified != ordered) return false
+        if (legacyBarrier != null && !writeLegacyHistoryCheckpointLocked(legacyBarrier.expiresAtMs, ordered.size, content)) {
+            return false
+        }
+        if (legacyBarrier != null) {
+            val updatedBarrier = readLegacyHistoryBarrierLocked() ?: return false
+            val expected = CandidateIndexState(ordered.size, content.size.toLong(), sha256(content))
+            if (!legacyHistoryCheckpointMatchesState(updatedBarrier, expected)) return false
+            if (!deleteLegacyCandidateHistoryJournalLocked()) return false
+        }
+        if (canAdvanceHistoryMetadata) {
+            val metadata = (fingerprintMetadata(ordered.size, content) + "\n")
+                .toByteArray(Charsets.UTF_8)
+            if (metadata.size > MAX_CANDIDATE_METADATA_BYTES) return false
+            // A metadata write failure leaves the candidate itself stored, but
+            // the stale or absent metadata keeps future negative lookups unsafe.
+            replaceFile(File(dir, CANDIDATE_HISTORY_METADATA_TMP_NAME), candidateHistoryMetadataFile, metadata)
+        }
+        return true
+    }
+
+    private fun candidateHistoryIsCompleteLocked(): Boolean {
+        if (!indexFile.isFile || !candidateHistoryMetadataFile.isFile) return false
+        return runCatching {
+            val bytes = indexFile.readBytes()
+            val lines = indexFile.readLines()
+            readLatestCandidatesStrict() != null &&
+                candidateHistoryMetadataFile.readText().trim() == fingerprintMetadata(lines.size, bytes)
+        }.getOrDefault(false)
+    }
+
+    private fun isNewCandidateHistoryLocked(): Boolean =
+        !indexFile.exists() &&
+            !File(dir, INDEX_TMP_NAME).exists() &&
+            !candidateHistoryMetadataFile.exists() &&
+            !File(dir, CANDIDATE_HISTORY_METADATA_TMP_NAME).exists() &&
+            !legacyCandidateHistoryFile.exists() &&
+            !File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists() &&
+            !imageFingerprintFile.exists() &&
+            !imageFingerprintMetadataFile.exists() &&
+            !File(dir, FINGERPRINT_TMP_NAME).exists() &&
+            !File(dir, FINGERPRINT_METADATA_TMP_NAME).exists()
+
+    private fun candidateIndexWithinBudget(candidates: List<CaptureCandidate>): Boolean {
+        val ordered = canonicalCandidates(candidates)
+        return ordered.size <= candidateCountBudget.coerceAtLeast(0) &&
+            encodeCandidates(ordered).size.toLong() <= candidateIndexBudgetBytes.coerceAtLeast(0L)
+    }
+
+    /**
+     * A legacy index without candidates.meta is not complete evidence yet.
+     * Record a conservative expiry barrier and keep misses unavailable until
+     * every pre-upgrade row could have aged out under the seven-day policy.
+     */
+    private fun ensureLegacyCandidateHistoryMigrationLocked(
+        nowMs: Long,
+        candidates: List<CaptureCandidate>,
+    ): Boolean {
+        if (!recoverLegacyCandidateHistoryJournalLocked()) return false
+        if (candidateHistoryMetadataFile.exists() || !indexFile.isFile) return true
+        if (legacyCandidateHistoryFile.exists()) {
+            val barrier = readLegacyHistoryBarrierLocked() ?: return false
+            return legacyHistoryCheckpointMatchesIndex(barrier)
+        }
+        val legacyFingerprintRecords = readLegacyImageFingerprintsLocked() ?: return false
+        val latestLegacyEvidenceMs = maxOf(
+            nowMs,
+            candidates.maxOfOrNull { it.capturedAtMs } ?: nowMs,
+            legacyFingerprintRecords.maxOfOrNull { it.capturedAtMs } ?: nowMs,
+        )
+        val barrierMs = retentionDeadline(latestLegacyEvidenceMs)
+        val indexBytes = runCatching { indexFile.readBytes() }.getOrNull() ?: return false
+        if (!writeLegacyHistoryCheckpointLocked(barrierMs, candidates.size, indexBytes)) return false
+        val barrier = readLegacyHistoryBarrierLocked() ?: return false
+        return legacyHistoryCheckpointMatchesIndex(barrier)
+    }
+
+    private fun finishLegacyCandidateHistoryMigrationIfReadyLocked(nowMs: Long) {
+        if (!recoverLegacyCandidateHistoryJournalLocked()) return
+        val barrier = readLegacyHistoryBarrierLocked() ?: return
+        if (!legacyHistoryCheckpointMatchesIndex(barrier)) return
+        if (candidateHistoryMetadataFile.exists()) {
+            if (candidateHistoryIsCompleteLocked()) legacyCandidateHistoryFile.delete()
+            return
+        }
+        if (nowMs < barrier.expiresAtMs) return
+        if (!runCatching { pruneExpiredLocked(nowMs) }.isSuccess) return
+        val retained = readLatestCandidatesStrict() ?: return
+        if (!writeCandidateIndexLocked(retained, allowLegacyMigration = true)) return
+        if (candidateHistoryIsCompleteLocked()) {
+            legacyCandidateHistoryFile.delete()
+            File(dir, LEGACY_CANDIDATE_HISTORY_TMP_NAME).delete()
+        }
+    }
+
+    private data class LegacyHistoryBarrier(
+        val expiresAtMs: Long,
+        val candidateCount: Int,
+        val indexBytes: Long,
+        val indexSha256: String,
+    )
+
+    private data class CandidateIndexState(
+        val candidateCount: Int,
+        val indexBytes: Long,
+        val indexSha256: String,
+    )
+
+    private data class LegacyHistoryJournal(
+        val expiresAtMs: Long,
+        val oldIndex: CandidateIndexState,
+        val newIndex: CandidateIndexState,
+    )
+
+    /**
+     * Recover only the exact old or intended new index state recorded by the
+     * journal. Parseability alone never upgrades candidate history completeness.
+     */
+    private fun recoverLegacyCandidateHistoryJournalLocked(): Boolean {
+        if (!legacyCandidateHistoryJournalFile.exists()) return true
+        if (!legacyCandidateHistoryJournalFile.isFile) return false
+        val journal = readLegacyHistoryJournalLocked() ?: return false
+        val current = readCandidateIndexStateLocked() ?: return false
+        val currentIsOld = candidateIndexStateMatches(current, journal.oldIndex)
+        val currentIsNew = candidateIndexStateMatches(current, journal.newIndex)
+        if (!currentIsOld && !currentIsNew) return false
+
+        val checkpoint = readLegacyHistoryBarrierLocked()
+        if (checkpoint == null) {
+            // The journal is the durable source for the seven-day expiry. Rebuild
+            // the checkpoint only for the exact old or intended-new index state.
+            val state = if (currentIsNew) journal.newIndex else journal.oldIndex
+            val content = runCatching { indexFile.readBytes() }.getOrNull() ?: return false
+            if (!runCatching {
+                    writeLegacyHistoryCheckpointLocked(
+                        journal.expiresAtMs,
+                        state.candidateCount,
+                        content,
+                    )
+                }.getOrDefault(false)
+            ) return false
+            val repaired = readLegacyHistoryBarrierLocked() ?: return false
+            if (repaired.expiresAtMs != journal.expiresAtMs ||
+                !legacyHistoryCheckpointMatchesState(repaired, state)
+            ) return false
+            return deleteLegacyCandidateHistoryJournalLocked()
+        }
+        if (checkpoint.expiresAtMs != journal.expiresAtMs) return false
+        val checkpointIsOld = legacyHistoryCheckpointMatchesState(checkpoint, journal.oldIndex)
+        val checkpointIsNew = legacyHistoryCheckpointMatchesState(checkpoint, journal.newIndex)
+        if (!checkpointIsOld && !checkpointIsNew) return false
+
+        if (currentIsOld) {
+            if (!checkpointIsOld) return false
+            return deleteLegacyCandidateHistoryJournalLocked()
+        }
+
+        if (!checkpointIsNew) {
+            val content = runCatching { indexFile.readBytes() }.getOrNull() ?: return false
+            val repaired = runCatching {
+                writeLegacyHistoryCheckpointLocked(
+                    journal.expiresAtMs,
+                    journal.newIndex.candidateCount,
+                    content,
+                )
+            }.getOrDefault(false)
+            if (!repaired) return false
+            val repairedCheckpoint = readLegacyHistoryBarrierLocked() ?: return false
+            if (!legacyHistoryCheckpointMatchesState(repairedCheckpoint, journal.newIndex)) return false
+        }
+        return deleteLegacyCandidateHistoryJournalLocked()
+    }
+
+    private fun readCandidateIndexStateLocked(): CandidateIndexState? = runCatching {
+        if (!indexFile.isFile) return@runCatching null
+        val rows = readLatestCandidatesStrict() ?: return@runCatching null
+        val bytes = indexFile.readBytes()
+        CandidateIndexState(rows.size, bytes.size.toLong(), sha256(bytes))
+    }.getOrNull()
+
+    private fun candidateIndexStateMatches(actual: CandidateIndexState, expected: CandidateIndexState): Boolean =
+        actual == expected
+
+    private fun legacyHistoryCheckpointMatchesState(
+        barrier: LegacyHistoryBarrier,
+        state: CandidateIndexState,
+    ): Boolean = barrier.candidateCount == state.candidateCount &&
+        barrier.indexBytes == state.indexBytes && barrier.indexSha256 == state.indexSha256
+
+    private fun writeLegacyCandidateHistoryJournalLocked(
+        expiresAtMs: Long,
+        oldIndex: CandidateIndexState,
+        newIndex: CandidateIndexState,
+    ): Boolean {
+        val content = legacyHistoryJournal(expiresAtMs, oldIndex, newIndex)
+        val temporary = File(dir, LEGACY_CANDIDATE_HISTORY_JOURNAL_TMP_NAME)
+        return runCatching {
+            if (!dir.isDirectory && !dir.mkdirs()) return@runCatching false
+            FileOutputStream(temporary).use { output ->
+                output.write(content)
+                output.fd.sync()
+            }
+            // This rename must finish before the candidate index can move.
+            if (!temporary.renameTo(legacyCandidateHistoryJournalFile)) return@runCatching false
+            legacyCandidateHistoryJournalFile.isFile &&
+                legacyCandidateHistoryJournalFile.readBytes().contentEquals(content)
+        }.getOrDefault(false)
+    }
+
+    private fun readLegacyHistoryJournalLocked(): LegacyHistoryJournal? {
+        if (!legacyCandidateHistoryJournalFile.isFile) return null
+        return runCatching {
+            val fields = legacyCandidateHistoryJournalFile.readText().trim().split(':')
+            if (fields.size != 8 || fields[0] != "v1") return@runCatching null
+            val expiry = fields[1].toLong().takeIf { it > 0L } ?: return@runCatching null
+            fun state(offset: Int): CandidateIndexState? {
+                val count = fields[offset].toInt().takeIf { it >= 0 } ?: return null
+                val bytes = fields[offset + 1].toLong().takeIf { it >= 0L } ?: return null
+                val digest = fields[offset + 2].takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+                    ?: return null
+                return CandidateIndexState(count, bytes, digest)
+            }
+            val old = state(2) ?: return@runCatching null
+            val next = state(5) ?: return@runCatching null
+            LegacyHistoryJournal(expiry, old, next)
+        }.getOrNull()
+    }
+
+    private fun legacyHistoryJournal(
+        expiresAtMs: Long,
+        oldIndex: CandidateIndexState,
+        newIndex: CandidateIndexState,
+    ): ByteArray = listOf(
+        "v1",
+        expiresAtMs,
+        oldIndex.candidateCount,
+        oldIndex.indexBytes,
+        oldIndex.indexSha256,
+        newIndex.candidateCount,
+        newIndex.indexBytes,
+        newIndex.indexSha256,
+    ).joinToString(":", postfix = "\n").toByteArray(Charsets.UTF_8)
+
+    private fun deleteLegacyCandidateHistoryJournalLocked(): Boolean {
+        if (legacyCandidateHistoryJournalFile.exists() &&
+            !legacyCandidateHistoryJournalFile.delete() && legacyCandidateHistoryJournalFile.exists()
+        ) return false
+        return !legacyCandidateHistoryJournalFile.exists()
+    }
+
+    private fun readLegacyHistoryBarrierLocked(): LegacyHistoryBarrier? {
+        if (!legacyCandidateHistoryFile.isFile) return null
+        return runCatching {
+            val fields = legacyCandidateHistoryFile.readText().trim().split(':')
+            if (fields.size != 5 || fields[0] != "v1") return@runCatching null
+            val expiry = fields[1].toLong().takeIf { it > 0L } ?: return@runCatching null
+            val count = fields[2].toInt().takeIf { it >= 0 } ?: return@runCatching null
+            val bytes = fields[3].toLong().takeIf { it >= 0L } ?: return@runCatching null
+            val digest = fields[4].takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+                ?: return@runCatching null
+            LegacyHistoryBarrier(expiry, count, bytes, digest)
+        }.getOrNull()
+    }
+
+    private fun legacyHistoryCheckpointMatchesIndex(barrier: LegacyHistoryBarrier): Boolean = runCatching {
+        if (!indexFile.isFile) return@runCatching false
+        val bytes = indexFile.readBytes()
+        val rows = readLatestCandidatesStrict() ?: return@runCatching false
+        bytes.size.toLong() == barrier.indexBytes &&
+            rows.size == barrier.candidateCount &&
+            sha256(bytes) == barrier.indexSha256
+    }.getOrDefault(false)
+
+    private fun legacyHistoryCheckpoint(
+        expiresAtMs: Long,
+        candidateCount: Int,
+        content: ByteArray,
+    ): ByteArray = "v1:$expiresAtMs:$candidateCount:${content.size}:${sha256(content)}\n"
+        .toByteArray(Charsets.UTF_8)
+
+    private fun writeLegacyHistoryCheckpointLocked(
+        expiresAtMs: Long,
+        candidateCount: Int,
+        content: ByteArray,
+    ): Boolean {
+        writeFaultInjector?.invoke(CandidateHistoryWriteFaultPoint.BEFORE_CHECKPOINT_REPLACEMENT)
+        return replaceFileAtomically(
+            File(dir, LEGACY_CANDIDATE_HISTORY_TMP_NAME),
+            legacyCandidateHistoryFile,
+            legacyHistoryCheckpoint(expiresAtMs, candidateCount, content),
+        )
+    }
+
+    /** Parse timestamps conservatively even when no checksum sidecar exists. */
+    private fun readLegacyImageFingerprintsLocked(): List<ImageFingerprintRecord>? {
+        if (!imageFingerprintFile.exists()) return emptyList()
+        if (!imageFingerprintFile.isFile) return null
+        return runCatching {
+            imageFingerprintFile.readLines().map { line ->
+                if (line.isBlank()) error("blank legacy fingerprint evidence line")
+                val json = org.json.JSONObject(line)
+                val fingerprint = json.optString("fingerprint")
+                    .takeIf { it.matches(Regex("[a-f0-9]{64}")) }
+                    ?: error("invalid legacy fingerprint")
+                val capturedAtMs = json.optLong("capturedAtMs", Long.MIN_VALUE)
+                if (capturedAtMs <= 0L) error("invalid legacy fingerprint time")
+                ImageFingerprintRecord(fingerprint, capturedAtMs)
+            }
+        }.getOrNull()
+    }
+
+    private fun retentionDeadline(capturedAtMs: Long): Long =
+        if (capturedAtMs > Long.MAX_VALUE - ScreenshotRetention.RETENTION_MS) {
+            Long.MAX_VALUE
+        } else {
+            capturedAtMs + ScreenshotRetention.RETENTION_MS
+        }
+
+    private fun isStoredScreenshotFile(path: String): Boolean = runCatching {
+        canonicalStoredScreenshotPath(path) != null
+    }.getOrDefault(false)
+
+    private fun canonicalStoredScreenshotPath(path: String): String? = runCatching {
+        val target = File(path).canonicalFile
+        target.path.takeIf {
+            target.parentFile == dir.canonicalFile &&
+                target.isFile && target.name.startsWith("shot_") &&
+                target.extension.equals("jpg", ignoreCase = true)
+        }
+    }.getOrNull()
+
+    private fun isWithinScreenshotQuota(
+        path: String,
+        candidates: List<CaptureCandidate>,
+        nowMs: Long,
+    ): Boolean {
+        val target = runCatching { File(path).canonicalFile }.getOrNull() ?: return false
+        val alreadyReferenced = candidates.any { candidate ->
+            !ScreenshotRetention.isExpired(candidate.capturedAtMs, nowMs) &&
+                candidate.screenshotPath?.let { existing ->
+                    canonicalStoredScreenshotPath(existing) == target.path
+                } == true
+        }
+        return alreadyReferenced ||
+            screenshotBytesInUse(candidates, nowMs) + target.length() <=
+            screenshotStorageQuotaBytes.coerceAtLeast(0L)
+    }
+
+    private fun screenshotBytesInUse(candidates: List<CaptureCandidate>, nowMs: Long): Long {
+        val filesByPath = linkedMapOf<String, File>()
+        candidates.asSequence()
+            .filterNot { ScreenshotRetention.isExpired(it.capturedAtMs, nowMs) }
+            .mapNotNull { it.screenshotPath }
+            .mapNotNull { path -> runCatching { File(path).canonicalFile }.getOrNull() }
+            .filter { it.parentFile == runCatching { dir.canonicalFile }.getOrNull() && it.isFile }
+            .forEach { filesByPath[it.absolutePath] = it }
+        dir.listFiles().orEmpty()
+            .filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }
+            .forEach fileLoop@ { file ->
+                val canonical = runCatching { file.canonicalFile }.getOrNull() ?: return@fileLoop
+                filesByPath[canonical.absolutePath] = canonical
+            }
+        return filesByPath.values.sumOf { it.length() }
+    }
+
+    private fun deleteScreenshotIfUnreferenced(
+        path: String,
+        candidates: List<CaptureCandidate>,
+        nowMs: Long,
+    ) {
+        val canonicalPath = canonicalStoredScreenshotPath(path)
+        val stillReferenced = candidates.any { candidate ->
+            !ScreenshotRetention.isExpired(candidate.capturedAtMs, nowMs) &&
+                canonicalPath != null &&
+                candidate.screenshotPath?.let(::canonicalStoredScreenshotPath) == canonicalPath
+        }
+        if (!stillReferenced) deleteOwnedFile(path)
+    }
+
+    private data class ImageFingerprintRecord(
+        val fingerprint: String,
+        val capturedAtMs: Long,
+    ) {
+        fun toJson(): org.json.JSONObject = org.json.JSONObject().apply {
+            put("fingerprint", fingerprint)
+            put("capturedAtMs", capturedAtMs)
+        }
+    }
+
+    private fun readImageFingerprints(): List<ImageFingerprintRecord>? {
+        if (!imageFingerprintFile.isFile || !imageFingerprintMetadataFile.isFile) return null
+        return runCatching {
+            val content = imageFingerprintFile.readBytes()
+            val records = imageFingerprintFile.readLines().map { line ->
+                if (line.isBlank()) error("blank fingerprint evidence line")
+                val json = org.json.JSONObject(line)
+                val fingerprint = json.optString("fingerprint")
+                    .takeIf { it.matches(Regex("[a-f0-9]{64}")) } ?: error("invalid fingerprint")
+                val capturedAtMs = json.optLong("capturedAtMs", Long.MIN_VALUE)
+                if (capturedAtMs <= 0L) error("invalid capture time")
+                ImageFingerprintRecord(fingerprint, capturedAtMs)
+            }.toList()
+            if (imageFingerprintMetadataFile.readText().trim() !=
+                fingerprintMetadata(records.size, content)
+            ) error("fingerprint index metadata mismatch")
+            records
+        }.getOrNull()
+    }
+
+    private fun recordImageFingerprintLocked(fingerprint: String, capturedAtMs: Long, nowMs: Long) {
+        if (File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists()) {
+            if (!recoverImageFingerprintsLocked(nowMs)) return
+        }
+        if (!imageFingerprintFile.isFile && indexFile.isFile) {
+            if (!recoverImageFingerprintsLocked(nowMs)) {
+                markImageFingerprintIndexUnavailableLocked()
+                return
+            }
+        }
+        val current = when {
+            imageFingerprintFile.isFile -> readImageFingerprints()
+            imageFingerprintFile.exists() || imageFingerprintMetadataFile.exists() -> null
+            else -> emptyList()
+        } ?: run {
+            markImageFingerprintIndexUnavailableLocked()
+            return
+        }
+        val updated = current.filterNot {
+            ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+        }.toMutableList()
+        val existing = updated.lastOrNull { it.fingerprint == fingerprint }
+        if (existing == null || capturedAtMs > existing.capturedAtMs) {
+            updated.removeAll { it.fingerprint == fingerprint }
+            updated += ImageFingerprintRecord(fingerprint, capturedAtMs)
+        }
+        if (!writeImageFingerprintsLocked(normalizeFingerprintRecords(updated))) {
+            markImageFingerprintIndexUnavailableLocked()
+        }
+    }
+
+    private fun reconcileImageFingerprintsLocked(nowMs: Long) {
+        if (File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists()) {
+            recoverImageFingerprintsLocked(nowMs)
+            return
+        }
+
+        val evidence = readLatestCandidatesStrict()
+        val expected = evidence?.let { fingerprintEvidence(it, nowMs) }
+        if (expected == null) {
+            if (imageFingerprintFile.exists() || imageFingerprintMetadataFile.exists()) {
+                markImageFingerprintIndexUnavailableLocked()
+            }
+            return
+        }
+        val current = when {
+            imageFingerprintFile.isFile -> readImageFingerprints()
+            imageFingerprintFile.exists() || imageFingerprintMetadataFile.exists() -> null
+            else -> emptyList()
+        }
+        if (current == null) {
+            markImageFingerprintIndexUnavailableLocked()
+            recoverImageFingerprintsLocked(nowMs)
+            return
+        }
+        val expectedByFingerprint = expected.associateBy { it.fingerprint }
+        val activeCurrent = current.filterNot {
+            ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+        }
+        if (activeCurrent.any { it.fingerprint !in expectedByFingerprint }) {
+            // An index-only retained fingerprint has no candidate evidence to
+            // rebuild from, so it must remain unavailable instead of being lost.
+            markImageFingerprintIndexUnavailableLocked()
+            return
+        }
+        val currentByFingerprint = activeCurrent.associateBy { it.fingerprint }
+        val missing = expected.any { it.fingerprint !in currentByFingerprint }
+        val expired = current.size != activeCurrent.size
+        if (missing || expired || !imageFingerprintFile.isFile) {
+            if (!writeImageFingerprintsLocked(expected)) {
+                markImageFingerprintIndexUnavailableLocked()
+            }
+        }
+    }
+
+    private fun recoverImageFingerprintsLocked(nowMs: Long): Boolean {
+        if (!indexFile.isFile || !candidateHistoryIsCompleteLocked()) return false
+        val candidates = readLatestCandidatesStrict() ?: return false
+        val expected = fingerprintEvidence(candidates, nowMs) ?: return false
+
+        // If a readable index knows about a still-retained fingerprint that the
+        // candidate log cannot explain, rebuilding would turn missing evidence
+        // into a false clean result. Preserve Unavailable in that case.
+        val previous = readImageFingerprints()
+        if (previous != null) {
+            val expectedFingerprints = expected.mapTo(mutableSetOf()) { it.fingerprint }
+            if (previous.any {
+                    !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs) &&
+                        it.fingerprint !in expectedFingerprints
+                }
+            ) return false
+        }
+
+        if (!writeImageFingerprintsLocked(expected)) {
+            markImageFingerprintIndexUnavailableLocked()
+            return false
+        }
+        if (readImageFingerprints() != expected) {
+            markImageFingerprintIndexUnavailableLocked()
+            return false
+        }
+        val marker = File(dir, FINGERPRINT_UNAVAILABLE_NAME)
+        if (marker.exists() && !marker.delete() && marker.exists()) return false
+        return true
+    }
+
+    private fun knownFingerprintResultLocked(
+        fingerprint: String,
+        nowMs: Long,
+    ): ImageFingerprintLookup? {
+        val knownInCandidates = runCatching { readAll() }.getOrDefault(emptyList()).any {
+            it.imageFingerprint == fingerprint &&
+                !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+        }
+        val knownInIndex = readImageFingerprints()?.any {
+            it.fingerprint == fingerprint &&
+                !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+        } == true
+        return if (knownInCandidates || knownInIndex) ImageFingerprintLookup.Match else null
+    }
+
+    private fun fingerprintEvidence(
+        candidates: List<CaptureCandidate>,
+        nowMs: Long,
+    ): List<ImageFingerprintRecord>? {
+        val latestByFingerprint = linkedMapOf<String, ImageFingerprintRecord>()
+        candidates.forEach { candidate ->
+            if (ScreenshotRetention.isExpired(candidate.capturedAtMs, nowMs)) return@forEach
+            val screenshotUnavailable = candidate.screenshotUnavailableReason != null ||
+                candidate.reason.startsWith(SCREENSHOT_UNAVAILABLE_PREFIX) ||
+                candidate.reason == "screenshot decode failed" ||
+                candidate.reason == "screenshot start failed" ||
+                candidate.reason.startsWith("screenshot error ")
+            val requiresFingerprint = candidate.screenshotPath != null || screenshotUnavailable ||
+                candidate.intakeMethod in setOf(
+                    CaptureCandidate.INTAKE_MEDIASTORE,
+                    CaptureCandidate.INTAKE_SHARE,
+                    CaptureCandidate.INTAKE_PHOTO_PICKER,
+                )
+            val fingerprint = candidate.imageFingerprint
+            if (requiresFingerprint && fingerprint == null) return null
+            if (fingerprint != null) {
+                val existing = latestByFingerprint[fingerprint]
+                if (existing == null || candidate.capturedAtMs > existing.capturedAtMs) {
+                    latestByFingerprint[fingerprint] = ImageFingerprintRecord(
+                        fingerprint,
+                        candidate.capturedAtMs,
+                    )
+                }
+            }
+        }
+        return normalizeFingerprintRecords(latestByFingerprint.values.toList())
+    }
+
+    private fun normalizeFingerprintRecords(
+        records: List<ImageFingerprintRecord>,
+    ): List<ImageFingerprintRecord> {
+        val latest = linkedMapOf<String, ImageFingerprintRecord>()
+        records.forEach { record ->
+            val existing = latest[record.fingerprint]
+            if (existing == null || record.capturedAtMs > existing.capturedAtMs) {
+                latest[record.fingerprint] = record
+            }
+        }
+        return latest.values.sortedWith(compareBy<ImageFingerprintRecord> { it.capturedAtMs }.thenBy { it.fingerprint })
+    }
+
+    private fun writeImageFingerprintsLocked(records: List<ImageFingerprintRecord>): Boolean {
+        val normalized = normalizeFingerprintRecords(records)
+        val content = normalized.joinToString("\n", postfix = if (normalized.isEmpty()) "" else "\n") {
+            it.toJson().toString()
+        }.toByteArray(Charsets.UTF_8)
+        if (!replaceFile(File(dir, FINGERPRINT_TMP_NAME), imageFingerprintFile, content)) return false
+        val metadata = (fingerprintMetadata(normalized.size, content) + "\n")
+            .toByteArray(Charsets.UTF_8)
+        if (!replaceFile(File(dir, FINGERPRINT_METADATA_TMP_NAME), imageFingerprintMetadataFile, metadata)) {
+            return false
+        }
+        return readImageFingerprints() == normalized
+    }
+
+    private fun fingerprintMetadata(recordCount: Int, content: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(content)
+            .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
+        return "$recordCount:$digest"
+    }
+
+    private fun markImageFingerprintIndexUnavailableLocked() {
+        runCatching {
+            if (!dir.exists()) dir.mkdirs()
+            File(dir, FINGERPRINT_UNAVAILABLE_NAME).writeText("unavailable\n")
+        }
+    }
+
+    private fun replaceFile(temp: File, target: File, content: ByteArray): Boolean = runCatching {
+        temp.writeBytes(content)
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+        target.isFile && target.readBytes().contentEquals(content)
+    }.getOrDefault(false)
+
+    private fun replaceFileAtomically(temp: File, target: File, content: ByteArray): Boolean = runCatching {
+        FileOutputStream(temp).use { output ->
+            output.write(content)
+            output.fd.sync()
+        }
+        if (!temp.renameTo(target)) return@runCatching false
+        target.isFile && target.readBytes().contentEquals(content)
+    }.getOrDefault(false)
+
+    private fun fingerprintResult(
+        records: List<ImageFingerprintRecord>,
+        fingerprint: String,
+        nowMs: Long,
+    ): ImageFingerprintLookup = if (records.any {
+            it.fingerprint == fingerprint && !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
+        }
+    ) ImageFingerprintLookup.Match else ImageFingerprintLookup.CleanNoMatch
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes)
+        .joinToString("") { byte -> (byte.toInt() and 0xff).toString(16).padStart(2, '0') }
+
+    private fun encodeCandidates(candidates: List<CaptureCandidate>): ByteArray =
+        candidates.joinToString("\n", postfix = if (candidates.isEmpty()) "" else "\n") {
+            it.toJson().toString()
+        }.toByteArray(Charsets.UTF_8)
+
+    private fun canonicalCandidates(candidates: List<CaptureCandidate>): List<CaptureCandidate> =
+        candidates.distinctBy { it.candidateId }.sortedBy { it.capturedAtMs }
+
+    private fun replaceCandidateIndexIfNeeded(
+        candidates: List<CaptureCandidate>,
+        allowLegacyMigration: Boolean = false,
+    ) {
         if (!indexFile.isFile) return
-        if (indexFile.length() <= MAX_INDEX_BYTES && indexFile.readLines().size <= MAX_ENTRIES) return
-        val kept = indexFile.readLines().takeLast(MAX_ENTRIES)
-        indexFile.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
+        val ordered = canonicalCandidates(candidates)
+        if (runCatching { indexFile.readBytes().contentEquals(encodeCandidates(ordered)) }.getOrDefault(false)) {
+            return
+        }
+        check(writeCandidateIndexLocked(ordered, allowLegacyMigration = allowLegacyMigration)) {
+            "candidate index compaction failed"
+        }
+    }
+
+    private fun canTransition(current: String, next: String): Boolean = when (current) {
+        CaptureCandidate.STATUS_PENDING -> true
+        CaptureCandidate.STATUS_WAITING -> next == CaptureCandidate.STATUS_WAITING ||
+            next == CaptureCandidate.STATUS_LINKED
+        CaptureCandidate.STATUS_APPROVED,
+        CaptureCandidate.STATUS_IGNORED,
+        CaptureCandidate.STATUS_LINKED -> next == current
+        else -> false
     }
 
     private fun pruneExpiredLocked(nowMs: Long = System.currentTimeMillis()) {
         if (!dir.isDirectory) return
-        val referenced = mutableSetOf<String>()
-        val expiredPaths = mutableSetOf<String>()
-        if (indexFile.isFile) {
-            val keptLines = mutableListOf<String>()
-            indexFile.readLines().forEach { line ->
-                val candidate = runCatching {
-                    CaptureCandidate.fromJson(org.json.JSONObject(line))
-                }.getOrNull() ?: return@forEach
-                if (ScreenshotRetention.isExpired(candidate.capturedAtMs, nowMs)) {
-                    candidate.screenshotPath?.let(expiredPaths::add)
-                } else {
-                    keptLines += line
-                    candidate.screenshotPath?.let(referenced::add)
-                }
-            }
-            val replacement = File(dir, INDEX_TMP_NAME)
-            replacement.writeText(keptLines.joinToString("\n", postfix = if (keptLines.isEmpty()) "" else "\n"))
-            if (!replacement.renameTo(indexFile)) {
-                replacement.copyTo(indexFile, overwrite = true)
-                replacement.delete()
-            }
+        if (!recoverLegacyCandidateHistoryJournalLocked()) error("legacy candidate history recovery failed")
+        if (indexFile.exists() && !indexFile.isFile) error("candidate index path is unusable")
+        val candidates = readLatestCandidatesStrict() ?: error("candidate evidence is unreadable")
+        val retained = candidates.filterNot {
+            ScreenshotRetention.isExpired(it.capturedAtMs, nowMs)
         }
+        val referenced = mutableSetOf<String>()
+        val expiredPaths = candidates.asSequence()
+            .filter { ScreenshotRetention.isExpired(it.capturedAtMs, nowMs) }
+            .mapNotNull { it.screenshotPath }
+            .mapNotNull(::canonicalStoredScreenshotPath)
+            .toSet()
+        retained.mapNotNullTo(referenced) { it.screenshotPath?.let(::canonicalStoredScreenshotPath) }
+        if (indexFile.isFile) {
+            replaceCandidateIndexIfNeeded(retained)
+        }
+        // The independent index can be rebuilt only when every retained
+        // candidate line is readable and carries any required image evidence.
+        reconcileImageFingerprintsLocked(nowMs)
         expiredPaths.filterNot(referenced::contains).forEach(::deleteOwnedFile)
         val files = dir.listFiles().orEmpty()
-        val referencedNames = files.filter { it.absolutePath in referenced }.map { it.name }.toSet()
+        val referencedNames = files.filter {
+            runCatching { it.canonicalPath }.getOrNull() in referenced
+        }.map { it.name }.toSet()
         ScreenshotRetention.orphans(
             files = files.map { it.name },
             referencedNames = referencedNames,
-            keepNames = setOf(indexFile.name, INDEX_TMP_NAME),
+            keepNames = setOf(
+                indexFile.name,
+                INDEX_TMP_NAME,
+                candidateHistoryMetadataFile.name,
+                CANDIDATE_HISTORY_METADATA_TMP_NAME,
+                legacyCandidateHistoryFile.name,
+                LEGACY_CANDIDATE_HISTORY_TMP_NAME,
+                legacyCandidateHistoryJournalFile.name,
+                LEGACY_CANDIDATE_HISTORY_JOURNAL_TMP_NAME,
+                imageFingerprintFile.name,
+                FINGERPRINT_TMP_NAME,
+                FINGERPRINT_METADATA_TMP_NAME,
+                FINGERPRINT_UNAVAILABLE_NAME,
+                imageFingerprintMetadataFile.name,
+            ),
         ).forEach { name -> File(dir, name).deleteRecursively() }
     }
-
-    private fun isAppPrivateFile(path: String): Boolean = runCatching {
-        val target = File(path).canonicalFile
-        val root = filesRoot.canonicalFile
-        target.path.startsWith(root.path + File.separator) && target.isFile
-    }.getOrDefault(false)
 
     private fun deleteOwnedFile(path: String) {
         runCatching {
             val target = File(path).canonicalFile
-            if (target.parentFile == dir.canonicalFile) target.delete()
+            if (target.parentFile == dir.canonicalFile &&
+                target.name.startsWith("shot_") &&
+                target.extension.equals("jpg", ignoreCase = true)
+            ) target.delete()
         }
     }
 
     companion object {
         // Store instances share the same on-disk index, including background cleanup.
         private val lock = Any()
-        private const val MAX_ENTRIES = 200
-        private const val MAX_INDEX_BYTES = 512 * 1024L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
+        const val MAX_SCREENSHOT_STORAGE_QUOTA_BYTES = 64L * 1024 * 1024
+        /** Candidate metadata budget: 16 MiB of JSONL plus at most 10,000 retained rows. */
+        const val MAX_CANDIDATE_INDEX_BUDGET_BYTES = 16L * 1024 * 1024
+        const val MAX_CANDIDATE_COUNT = 10_000
+        private const val MAX_CANDIDATE_METADATA_BYTES = 128
+        const val SCREENSHOT_UNAVAILABLE_PREFIX = "image unavailable:"
+        const val SCREENSHOT_UNAVAILABLE_QUOTA = CaptureCandidate.SCREENSHOT_UNAVAILABLE_QUOTA
+        const val SCREENSHOT_UNAVAILABLE_IO = CaptureCandidate.SCREENSHOT_UNAVAILABLE_IO
+        const val SCREENSHOT_UNAVAILABLE_INVALID = CaptureCandidate.SCREENSHOT_UNAVAILABLE_INVALID
+        const val SCREENSHOT_UNAVAILABLE_MISSING = CaptureCandidate.SCREENSHOT_UNAVAILABLE_MISSING
         private const val INDEX_TMP_NAME = "candidates.jsonl.tmp"
+        private const val CANDIDATE_HISTORY_METADATA_NAME = "candidates.meta"
+        private const val CANDIDATE_HISTORY_METADATA_TMP_NAME = "candidates.meta.tmp"
+        private const val LEGACY_CANDIDATE_HISTORY_NAME = "candidates.legacy-window"
+        private const val LEGACY_CANDIDATE_HISTORY_TMP_NAME = "candidates.legacy-window.tmp"
+        private const val LEGACY_CANDIDATE_HISTORY_JOURNAL_NAME = "candidates.legacy-write-ahead"
+        private const val LEGACY_CANDIDATE_HISTORY_JOURNAL_TMP_NAME = "candidates.legacy-write-ahead.tmp"
+        private const val FINGERPRINT_TMP_NAME = "image-fingerprints.jsonl.tmp"
+        private const val FINGERPRINT_METADATA_TMP_NAME = "image-fingerprints.meta.tmp"
+        private const val FINGERPRINT_UNAVAILABLE_NAME = "image-fingerprints.unavailable"
     }
+}
+
+sealed interface CandidateSaveResult {
+    data class Saved(val candidate: CaptureCandidate) : CandidateSaveResult
+    data class Failed(val reason: CandidateSaveFailure) : CandidateSaveResult
+}
+
+enum class CandidateSaveFailure {
+    INVALID_CANDIDATE,
+    STORAGE_UNAVAILABLE,
+    INDEX_FULL,
+}
+
+/** A missing/corrupt index is not evidence that an image has never been seen. */
+sealed interface ImageFingerprintLookup {
+    data object Match : ImageFingerprintLookup
+    data object CleanNoMatch : ImageFingerprintLookup
+    data class Unavailable(val reason: String) : ImageFingerprintLookup
 }
 
 /**

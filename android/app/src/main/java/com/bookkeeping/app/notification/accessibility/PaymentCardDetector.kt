@@ -3,6 +3,7 @@ package com.bookkeeping.app.notification.accessibility
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlin.math.abs
 
 /** One visible text line with its screen-space bounds. Android-free for JVM tests. */
 data class BillTextLine(
@@ -67,6 +68,8 @@ data class PaymentCardDetection(
     val cardKey: String,
     val completionExplicit: Boolean = false,
     val directionExplicit: Boolean = direction != PaymentDirection.UNKNOWN,
+    /** The text contains a plausible amount, but missing geometry prevents safe grouping. */
+    val reviewRequired: Boolean = false,
 ) {
     /** False for created/cancelled/pending/failed/unknown cards; never book those. */
     val isFinal: Boolean get() = status == PaymentCardStatus.COMPLETED
@@ -302,9 +305,17 @@ object PaymentCardDetector {
             if (node.password || node.editable) return@mapNotNull null
             val text = node.text.trim().ifEmpty { node.contentDesc.trim() }
             if (text.isEmpty()) return@mapNotNull null
-            val bounds = node.bounds ?: return@mapNotNull null
-            if (bounds.isEmpty) return@mapNotNull null
-            BillTextLine(text, bounds.top, bounds.bottom, bounds.left, bounds.right)
+            // Keep text whose geometry is absent or invalid. fromLines will use
+            // reading order for grouping and require review before this card can
+            // enter the normal single-candidate capture path.
+            val bounds = node.bounds
+            BillTextLine(
+                text = text,
+                top = bounds?.top ?: 0,
+                bottom = bounds?.bottom ?: 0,
+                left = bounds?.left ?: 0,
+                right = bounds?.right ?: 0,
+            )
         }.distinctBy { "${it.text}|${it.top}|${it.left}" }
         if (lines.isEmpty()) return emptyList()
         val screenHeight = lines.maxOf { it.bottom }.coerceAtLeast(1)
@@ -352,9 +363,29 @@ object PaymentCardDetector {
         val visible = lines.filter { it.text.isNotBlank() }
         if (visible.isEmpty()) return emptyList()
         val pageText = visible.joinToString(" ") { it.text }
-        return groupCards(visible, screenHeightPx)
-            .mapNotNull { group -> parseCard(source, group, pageText, capturedAtMs, pageIdentity) }
-            .distinctBy { it.cardKey }
+        val geometriesUsable = visible.all { it.hasUsableGeometry(screenHeightPx) }
+        val groups = if (geometriesUsable) {
+            groupCards(visible, screenHeightPx)
+        } else {
+            groupCardsByText(visible)
+        }
+        return groups.flatMap { group ->
+            val plausibleAmounts = group.filterNot { isNoisyAmountLine(it.text, PaymentCardKind.PAYMENT) }
+                .mapNotNull { parseAmount(it.text)?.takeIf { amount -> amount > 0L } }
+            if (!geometriesUsable && plausibleAmounts.size > 1) {
+                ambiguousAmountCandidates(
+                    source = source,
+                    amounts = plausibleAmounts,
+                    capturedAtMs = capturedAtMs,
+                    pageIdentity = pageIdentity,
+                )
+            } else {
+                val parsed = parseCard(source, group, pageText, capturedAtMs, pageIdentity)
+                listOfNotNull(
+                    if (!geometriesUsable) parsed?.copy(reviewRequired = true) else parsed,
+                )
+            }
+        }
     }
 
     // --- grouping ----------------------------------------------------------
@@ -382,14 +413,83 @@ object PaymentCardDetector {
         return groups
     }
 
+    /** Text order is the only usable signal when OCR rectangles are absent or invalid. */
+    private fun groupCardsByText(lines: List<BillTextLine>): List<List<BillTextLine>> {
+        val groups = mutableListOf<MutableList<BillTextLine>>()
+        var current = mutableListOf<BillTextLine>()
+        for (line in lines) {
+            if (current.isNotEmpty() && startsNewCard(line, current)) {
+                groups += current
+                current = mutableListOf()
+            }
+            current += line
+        }
+        if (current.isNotEmpty()) groups += current
+        return groups
+    }
+
+    private fun BillTextLine.hasUsableGeometry(screenHeightPx: Int): Boolean =
+        left >= 0 && top >= 0 && right > left && bottom > top &&
+            screenHeightPx > 0 && bottom <= screenHeightPx
+
     private fun startsNewCard(line: BillTextLine, current: List<BillTextLine>): Boolean {
         val text = line.text.trim()
-        if (!STANDALONE_TIME.matches(text)) return false
-        // A time line can sit between the merchant and amount of the same card.
-        // Only a group that already has an amount can be a completed previous card.
-        if (current.none { parseAmount(it.text) != null }) return false
-        val previous = current.lastOrNull()?.text.orEmpty()
-        return TIME_LABELS.none { previous.contains(it) }
+        val hasAmount = current.any { parseAmount(it.text) != null }
+        if (!hasAmount) return false
+        if (STANDALONE_TIME.matches(text)) {
+            // A time line can sit between the merchant and amount of the same card.
+            // Only split if the current card already has its own event time.
+            val previous = current.lastOrNull()?.text.orEmpty()
+            return TIME_LABELS.none { previous.contains(it) } &&
+                current.any { STANDALONE_TIME.matches(it.text.trim()) }
+        }
+
+        // Adjacent rows can have no useful vertical gap (or no OCR geometry at
+        // all). Once one card has both an amount and a terminal status, a
+        // contradictory status marker starts a new card. Status is then
+        // classified only from that card's own lines.
+        val previousHasTerminalStatus = current.any {
+            isCancelledStatus(it.text) || isSuccessfulStatus(it.text)
+        }
+        val nextHasTerminalStatus = isCancelledStatus(text) || isSuccessfulStatus(text)
+        return previousHasTerminalStatus && nextHasTerminalStatus
+    }
+
+    private fun isCancelledStatus(text: String): Boolean = containsAny(
+        text, "已取消", "订单已取消", "交易关闭", "支付关闭", "订单已关闭", "已关闭", "已失效", "已退回",
+    )
+
+    private fun isSuccessfulStatus(text: String): Boolean =
+        STRONG_COMPLETED_PAYMENT.any(text::contains) || TRANSFER_SETTLED.any(text::contains) ||
+            containsAny(text, "已到账", "到账成功", "提现成功", "退款成功", "已领取", "已存入零钱")
+
+    private fun ambiguousAmountCandidates(
+        source: PaymentCardSource,
+        amounts: List<Long>,
+        capturedAtMs: Long,
+        pageIdentity: String,
+    ): List<PaymentCardDetection> {
+        return amounts.mapIndexed { index, amount ->
+            val cardKey = listOf(pageIdentity, "AMBIGUOUS", index, amount).joinToString("|")
+            PaymentCardDetection(
+                source = source,
+                kind = PaymentCardKind.PAYMENT,
+                status = PaymentCardStatus.UNKNOWN,
+                direction = PaymentDirection.UNKNOWN,
+                amountCents = amount,
+                merchantCandidates = emptyList(),
+                orderId = null,
+                eventTimeMs = null,
+                confidence = 0.2f,
+                reason = "invalid OCR bounds; transaction grouping needs review",
+                nonFinalReason = "交易分组不明确，请核对候选金额",
+                pageIdentity = pageIdentity,
+                cardKey = cardKey,
+                completionExplicit = false,
+                directionExplicit = false,
+                reviewRequired = true,
+            )
+        }
     }
 
     private fun hasCardContent(text: String): Boolean =
@@ -490,13 +590,17 @@ object PaymentCardDetector {
         pageText: String,
     ): Classification? {
         // A failed payment/refund never becomes a bookable card.
-        if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) }) return null
+        if (FAILURE_MARKERS.any { joined.contains(it, ignoreCase = true) } &&
+            !isCancelledStatus(joined)
+        ) return null
         if (REFUND_MARKERS.any { joined.contains(it) }) return classifyRefund(joined)
         if (isPayAfterUse(joined)) return classifyPayAfterUse(joined)
         if (joined.contains("红包")) return classifyRedPacket(joined)
         if (WITHDRAWAL_MARKERS.any { joined.contains(it) }) return classifyWithdrawal(joined)
         if (TRANSFER_MARKERS.any { joined.contains(it) }) return classifyTransfer(joined)
-        if (PAYMENT_MARKERS.any { joined.contains(it) }) return classifyPayment(lines, joined)
+        if (PAYMENT_MARKERS.any { joined.contains(it) } || isCancelledStatus(joined)) {
+            return classifyPayment(lines, joined)
+        }
         return classifyBill(lines, joined, pageText)
     }
 
@@ -727,7 +831,9 @@ object PaymentCardDetector {
         // not proof that the user paid this amount on this page.
         if (weakPaid && !strongPaid && !hasContext) return null
         val status = when {
-            containsAny(joined, "已取消", "订单已取消", "交易关闭", "订单已关闭") ->
+            containsAny(
+                joined, "已取消", "订单已取消", "交易关闭", "支付关闭", "订单已关闭", "已关闭", "已失效",
+            ) ->
                 PaymentCardStatus.CANCELLED
             containsAny(
                 joined, "待支付", "等待付款", "未支付", "未付款",
@@ -1120,7 +1226,27 @@ object PaymentCardDetector {
                             set(Calendar.MONTH, fallback.get(Calendar.MONTH))
                             set(Calendar.DAY_OF_MONTH, fallback.get(Calendar.DAY_OF_MONTH))
                         } else {
-                            set(Calendar.YEAR, fallback.get(Calendar.YEAR))
+                            val month = get(Calendar.MONTH)
+                            val day = get(Calendar.DAY_OF_MONTH)
+                            val hour = get(Calendar.HOUR_OF_DAY)
+                            val minute = get(Calendar.MINUTE)
+                            val second = get(Calendar.SECOND)
+                            val millisecond = get(Calendar.MILLISECOND)
+                            return (-1..1).mapNotNull { yearOffset ->
+                                runCatching {
+                                    Calendar.getInstance().apply {
+                                        isLenient = false
+                                        clear()
+                                        set(Calendar.YEAR, fallback.get(Calendar.YEAR) + yearOffset)
+                                        set(Calendar.MONTH, month)
+                                        set(Calendar.DAY_OF_MONTH, day)
+                                        set(Calendar.HOUR_OF_DAY, hour)
+                                        set(Calendar.MINUTE, minute)
+                                        set(Calendar.SECOND, second)
+                                        set(Calendar.MILLISECOND, millisecond)
+                                    }.timeInMillis
+                                }.getOrNull()
+                            }.minByOrNull { abs(it - fallbackMs) }
                         }
                     }
                 }

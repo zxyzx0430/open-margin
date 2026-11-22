@@ -4,7 +4,9 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -171,5 +173,52 @@ class CaptureReviewMappingTest {
                 candidate(kind = CaptureCandidate.KIND_TRANSFER),
             ),
         )
+    }
+
+    @Test
+    fun screenshotStorageWarningsSurfaceTypedReasonsWithoutRawFailureDetails() {
+        val expectedByReason = mapOf(
+            CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_QUOTA to "截图未保留（空间不足）；释放空间后重新导入。",
+            CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_IO to "截图保存失败；请重新选择图片后核对。",
+            CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_INVALID to "图片无效，截图未保留；请换图重新导入。",
+            CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_MISSING to "截图未提供或未保留；请重新导入原图。",
+            "screenshot decode failed" to "截图无法读取；请重新选择图片。",
+            "screenshot start failed" to "截图无法读取；请重新选择图片。",
+            "screenshot error FixtureIOException: /private/fixture/path" to "截图无法读取；请重新选择图片。",
+            "screenshot unsupported" to "图片格式不支持；请换一张截图。",
+            "${CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_PREFIX} fixture failure" to "截图未能保留；请重新导入原图。",
+        )
+
+        expectedByReason.forEach { (reason, expected) ->
+            val notice = CaptureReviewMapping.screenshotUnavailableNotice(candidate().copy(reason = reason))
+            assertEquals(reason, expected, notice)
+            assertFalse(notice.orEmpty().contains("/private"))
+            assertFalse(notice.orEmpty().contains("FixtureIOException"))
+        }
+        assertEquals(null, CaptureReviewMapping.screenshotUnavailableNotice(candidate()))
+    }
+
+    @Test
+    fun duplicateAndScreenshotQuotaOrIoWarningsCanBeShownTogether() {
+        mapOf(
+            CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_QUOTA to "截图未保留（空间不足）；释放空间后重新导入。",
+            CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_IO to "截图保存失败；请重新选择图片后核对。",
+        ).forEach { (imageReason, expectedImageWarning) ->
+            val duplicate = candidate().copy(
+                reason = CaptureCandidate.REASON_LIKELY_DUPLICATE,
+                matchedTransactionId = 42L,
+                screenshotUnavailableReason = imageReason,
+            )
+
+            assertEquals(CaptureCandidate.REASON_LIKELY_DUPLICATE, duplicate.reason)
+            assertEquals(
+                "疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #42）",
+                likelyDuplicateNoticeText(duplicate),
+            )
+            val imageWarning = CaptureReviewMapping.screenshotUnavailableNotice(duplicate)
+            assertEquals(expectedImageWarning, imageWarning)
+            assertFalse(imageWarning.orEmpty().contains("IOException"))
+            assertFalse(imageWarning.orEmpty().contains("/private"))
+        }
     }
 }

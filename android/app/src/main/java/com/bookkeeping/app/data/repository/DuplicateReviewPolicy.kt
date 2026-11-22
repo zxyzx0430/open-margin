@@ -4,9 +4,9 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import kotlin.math.abs
 
 /**
- * Local-only rule for "same money, but not enough evidence to auto-merge".
- * High-confidence same-source/same-merchant duplicates are still handled by
- * the existing 8s check before this rule is consulted.
+ * Local-only rule for "similar money, but not enough evidence to auto-merge".
+ * Similar amount, merchant and time never suppress a same-source ledger row;
+ * when this rule matches, the new row is retained and marked for review.
  */
 object DuplicateReviewPolicy {
     const val WINDOW_MS: Long = 3 * 60_000L

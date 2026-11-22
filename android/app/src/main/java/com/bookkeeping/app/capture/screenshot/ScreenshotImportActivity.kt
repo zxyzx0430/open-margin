@@ -284,16 +284,10 @@ class ScreenshotImportActivity : ComponentActivity() {
     }
 
     private fun describe(outcome: ScreenshotIntakeCoordinator.Outcome): String {
-        val base = when {
-            outcome.failure == FailureReason.PERMISSION_DENIED -> tr("没有读取这张图片的权限")
-            outcome.failure == FailureReason.URI_INVALID -> tr("图片地址已失效")
-            outcome.failure == FailureReason.UNSUPPORTED_MIME -> tr("不是支持的图片格式")
-            outcome.failure == FailureReason.UNREADABLE -> tr("图片读不出来")
-            outcome.failure == FailureReason.OVERSIZED -> tr("图片太大，请先裁剪")
-            outcome.failure == FailureReason.DECODE_FAILED -> tr("图片解码失败")
-            outcome.failure == FailureReason.OCR_EMPTY -> tr("没有识别到文字")
-            outcome.failure == FailureReason.NOT_TRANSACTION -> tr("这张图片里没有交易")
-            outcome.failure == FailureReason.UNKNOWN_PAGE -> tr("没认出是微信或支付宝的交易页")
+        val failureMessage = outcome.failure?.let { failure ->
+            ScreenshotIntakeFailureNoticeCopy.activityMessage(failure) { tr(it) }
+        }
+        val base = failureMessage ?: when {
             outcome.repeatImage -> tr("这张截图已经处理过")
             outcome.booked > 0 && outcome.pending == 0 -> tr("已记录 %d 笔").format(outcome.booked)
             outcome.pending > 0 -> tr("有 %d 笔等你确认").format(outcome.pending)
@@ -409,8 +403,8 @@ class ScreenshotImportActivity : ComponentActivity() {
                 // 用户已经确认要记，就把截图的商户/订单号并进那一行，而不是再插一行、
                 // 也不是把卡片当成「已存在」丢掉。
                 crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
-                // 用户确认时同样把「检测到但合不了」的跨通道疑似重复留在待确认，
-                // 不悄悄写成第二行。
+                // 用户确认时精确 ID 可补全已有行；弱相似度不足以证明重复，
+                // 所以不合并，按独立新行写入。
                 holdWeakCrossSourceMatch = true,
                 mergeConfirmedCrossSource = true,
             )
@@ -441,7 +435,6 @@ class ScreenshotImportActivity : ComponentActivity() {
                 -> WriteOutcome.SuspectedDuplicate(inserted.existingTransactionId)
                 // 同一通道的精确重发：账本已经有这一行，卡片可以收起。
                 DuplicateReason.SOURCE_ORDER_ID,
-                DuplicateReason.SAME_SOURCE_WINDOW,
                 -> {
                     store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
                     WriteOutcome.ALREADY_EXISTS
@@ -999,6 +992,14 @@ private fun ImportCandidateCard(
 
             // 与待确认弹窗共用同一句提示和同一套文案，避免两个入口解释不一致。
             LikelyDuplicateNotice(candidate)
+            CaptureReviewMapping.screenshotUnavailableNotice(candidate)?.let { warning ->
+                Text(
+                    text = warning,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.error,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
 
             if (needsDirection) {
                 if (directionChoice == null) {

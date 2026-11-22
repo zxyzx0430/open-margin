@@ -195,7 +195,11 @@ class AccessibilityCaptureService : AccessibilityService() {
     }
 
     private fun shouldEmit(tx: TransactionEntity): Boolean {
-        val fp = "${tx.source}|${tx.amountCents}|${tx.type}"
+        // Amount/merchant/time similarity is not a stable event ID. Suppress
+        // repeated accessibility emissions only when the platform supplied an
+        // exact non-empty order ID; the repository applies the same rule durably.
+        val orderId = tx.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty) ?: return true
+        val fp = "${tx.source}|$orderId"
         val now = System.currentTimeMillis()
         if (fp == lastFingerprint && now - lastEmitAtMs < FINGERPRINT_TTL_MS) return false
         lastFingerprint = fp

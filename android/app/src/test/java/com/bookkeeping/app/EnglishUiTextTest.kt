@@ -7,6 +7,22 @@ import org.junit.Test
 
 class EnglishUiTextTest {
     @Test
+    fun notificationReplayDiagnosticNamesThePlatformOrderIdIdentity() {
+        val summary = "该支付平台的相同订单号已记录，重复通知已跳过"
+        val detail = "Exact order ID already recorded for the same payment platform; notification replay skipped"
+
+        assertEquals(
+            "The exact order ID is already recorded for this payment platform; notification replay skipped",
+            EnglishUiText.translate(summary),
+        )
+        assertEquals(summary, EnglishUiText.diagnosticDetailTranslationKey(detail))
+        assertEquals(
+            "The exact order ID is already recorded for this payment platform; notification replay skipped",
+            EnglishUiText.translate(EnglishUiText.diagnosticDetailTranslationKey(detail)),
+        )
+    }
+
+    @Test
     fun screenshotImportConfirmationLabelsTranslate() {
         val expected = mapOf(
             "时间待确认" to "Time to be confirmed",
@@ -38,6 +54,53 @@ class EnglishUiTextTest {
             "暂时无法记录，请稍后重试" to "Unable to record it right now; try again later",
             "还有 %d 笔待确认" to "%d more waiting for confirmation",
             "仅预览，不能记入账本" to "Preview only; cannot be added to the ledger",
+            "待确认存储已满" to "Pending review storage is full",
+            "这些识别结果未保存。" to "These results were not saved.",
+            "截图或支付页面：现有候选最多保留 7 天，过期后释放名额；之后重新选择截图或重新打开支付页面核对。" to
+                "Screenshot or payment page: Existing candidates are kept for up to 7 days. After they expire and free a slot, reselect the screenshot or reopen the payment page to review it.",
+            "支付通知：现有候选最多保留 7 天，过期后释放名额；之后打开支付应用的通知或账单，核对后重新采集。" to
+                "Payment notification: Existing candidates are kept for up to 7 days. After they expire and free a slot, open the payment app's notifications or bill history, review the transaction, then capture it again.",
+            "银行短信：现有候选最多保留 7 天，过期后释放名额；之后在短信应用中查找原消息，核对后重新采集。" to
+                "Bank SMS: Existing candidates are kept for up to 7 days. After they expire and free a slot, find the original message in the SMS app, review the transaction, then capture it again.",
+            "知道了（仅关闭提示，未保存项目仍需重新采集）" to
+                "Got it (closes this warning only; it does not recover the unsaved items)",
+            "截图导入未完成" to "Screenshot import incomplete",
+            "相册监听" to "Album watcher",
+            "分享图片" to "Shared image",
+            "选图" to "Photo picker",
+            "%s导入未完成：%s。请重新选择原图或从支付应用页面重新采集。" to
+                "%s import failed: %s. Select the original image or capture again from the payment app.",
+            "请检查图片后重新选择或分享原图。" to
+                "Check the image, then reselect or share the original image.",
+            "打开待确认列表" to "Open pending reviews",
+            "新识别结果未保存" to "Newly recognised result was not saved",
+            "新识别结果未保存。请查看现有待确认项；候选保留 7 天，过期释放空间后再从原始来源重新采集。" to
+                "Newly recognised information was not saved. Review existing pending items; candidates are kept for 7 days. After they expire and free space, capture the original transaction again.",
+            "知道了" to "Got it",
+            "待确认候选存储已满；这笔新识别结果未保存。请查看现有候选，候选保留 7 天并在过期后自动清理，再重新识别。" to
+                "Pending review storage is full; this new result was not saved. Review the existing candidates; they expire after 7 days, then scan again.",
+            "截图暂不可用；记入前请仔细核对提取的金额、商户、收支方向和时间。" to
+                "Screenshot unavailable. Check the extracted amount, merchant, direction, and time before recording.",
+            "截图未保留（空间不足）；释放空间后重新导入。" to
+                "Screenshot was not retained because storage is full. Free space, then import it again.",
+            "截图保存失败；请重新选择图片后核对。" to
+                "Screenshot save failed. Select the image again and review it.",
+            "图片无效，截图未保留；请换图重新导入。" to
+                "The image is invalid and was not retained. Choose another image and import it again.",
+            "截图未提供或未保留；请重新导入原图。" to
+                "The screenshot was missing or not retained. Import the original image again.",
+            "截图无法读取；请重新选择图片。" to
+                "The screenshot could not be read. Select the image again.",
+            "图片格式不支持；请换一张截图。" to
+                "This image format is unsupported. Choose another screenshot.",
+            "截图未能保留；请重新导入原图。" to
+                "The screenshot was not retained. Import the original image again.",
+            "疑似与已有记录重复，请核对后再决定是否记入。" to
+                "This may duplicate an existing record. Check it before deciding whether to record.",
+            "通知记录标识存在歧义，可能是重复提醒，也可能是另一笔交易；请核对后再决定是否记入。" to
+                "The notification identity is ambiguous: it may be a replay or another transaction. Review it before recording.",
+            "同一张截图里有相似记录，请核对是否重复后再决定是否记入。" to
+                "This screenshot contains a similar record. Check whether it is a duplicate before recording.",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English screenshot label: $source", EnglishUiText.hasTranslation(source))

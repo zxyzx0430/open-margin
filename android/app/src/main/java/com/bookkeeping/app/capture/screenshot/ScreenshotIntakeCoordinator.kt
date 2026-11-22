@@ -20,7 +20,10 @@ import com.bookkeeping.app.data.repository.LedgerInsertResult
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CandidateSaveFailure
+import com.bookkeeping.app.notification.capture.CandidateSaveResult
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.notification.capture.ImageFingerprintLookup
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy.Action
 import com.bookkeeping.app.notification.capture.ScreenshotWaitingCorrelation
 import com.bookkeeping.app.ocr.MlKitOcrEngine
@@ -68,6 +71,8 @@ class ScreenshotIntakeCoordinator private constructor(
     private val diagnosticSink: suspend (DiagnosticStep) -> Unit,
     /** Null means "build one from [repositoryProvider]"; tests inject a fake. */
     private val ledgerWriter: ScreenshotLedgerWriter?,
+    private val decodeOverride: ((ByteArray) -> Bitmap?)?,
+    private val failureNoticeSink: (IntakeSource, FailureReason) -> Unit,
 ) {
     /**
      * Android entry point: URI access, decoding and OCR all come from [context].
@@ -80,6 +85,12 @@ class ScreenshotIntakeCoordinator private constructor(
         repositoryProvider = { androidRepositoryOrNull(ctx) },
         diagnosticSink = { step -> androidDiagnostics(ctx)?.record(step.copy(callSite = step.callSite ?: CALL_SITE_INGEST)) },
         ledgerWriter = null,
+        decodeOverride = null,
+        failureNoticeSink = { source, reason ->
+            if (source == IntakeSource.MEDIASTORE) {
+                ScreenshotIntakeFailureNoticeQueue.markPending(ctx, source, reason)
+            }
+        },
     )
 
     internal constructor(
@@ -87,7 +98,9 @@ class ScreenshotIntakeCoordinator private constructor(
         repositoryProvider: () -> TransactionRepository? = { null },
         diagnosticSink: suspend (DiagnosticStep) -> Unit = {},
         ledgerWriter: ScreenshotLedgerWriter? = null,
-    ) : this(null, store, repositoryProvider, diagnosticSink, ledgerWriter)
+        decodeOverride: ((ByteArray) -> Bitmap?)? = null,
+        failureNoticeSink: (IntakeSource, FailureReason) -> Unit = { _, _ -> },
+    ) : this(null, store, repositoryProvider, diagnosticSink, ledgerWriter, decodeOverride, failureNoticeSink)
 
     data class Outcome(
         val booked: Int = 0,
@@ -164,7 +177,7 @@ class ScreenshotIntakeCoordinator private constructor(
         val inputSummary = intakeSummary(request)
         val validation = ScreenshotImportPipeline.validate(request)
         if (validation is IntakeValidation.Rejected) {
-            recordFailure(attemptId, validation.reason, inputSummary)
+            recordIntakeFailure(attemptId, request.source, validation.reason, inputSummary)
             return Outcome(failure = validation.reason, autoBookAllowed = autoBookAllowed)
         }
 
@@ -172,29 +185,31 @@ class ScreenshotIntakeCoordinator private constructor(
             ScreenshotBoundedReader.read(openStream(), ScreenshotImportPipeline.MAX_IMAGE_BYTES)
         }.getOrNull()
         if (boundedRead == null) {
-            recordFailure(attemptId, FailureReason.UNREADABLE, inputSummary)
+            recordIntakeFailure(attemptId, request.source, FailureReason.UNREADABLE, inputSummary)
             return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
         val bytes = when (boundedRead) {
             is ScreenshotBoundedReader.Result.Complete -> boundedRead.bytes
             ScreenshotBoundedReader.Result.Oversized -> {
-                recordFailure(attemptId, FailureReason.OVERSIZED, inputSummary)
+                recordIntakeFailure(attemptId, request.source, FailureReason.OVERSIZED, inputSummary)
                 return Outcome(failure = FailureReason.OVERSIZED, autoBookAllowed = autoBookAllowed)
             }
         }
         if (bytes.isEmpty()) {
-            recordFailure(attemptId, FailureReason.UNREADABLE, inputSummary)
+            recordIntakeFailure(attemptId, request.source, FailureReason.UNREADABLE, inputSummary)
             return Outcome(failure = FailureReason.UNREADABLE, autoBookAllowed = autoBookAllowed)
         }
-        val decoded = runCatching { decode(bytes) }.getOrNull()
+        val decoded = runCatching {
+            if (decodeOverride == null) decode(bytes) else decodeOverride.invoke(bytes)
+        }.getOrNull()
         if (decoded == null) {
-            recordFailure(attemptId, FailureReason.DECODE_FAILED, inputSummary)
+            recordIntakeFailure(attemptId, request.source, FailureReason.DECODE_FAILED, inputSummary)
             return Outcome(failure = FailureReason.DECODE_FAILED, autoBookAllowed = autoBookAllowed)
         }
         val ocr = runCatching { recognize(decoded) }.getOrNull()
         decoded.recycle()
         if (ocr == null || ocr.isEmpty) {
-            recordFailure(attemptId, FailureReason.OCR_EMPTY, inputSummary)
+            recordIntakeFailure(attemptId, request.source, FailureReason.OCR_EMPTY, inputSummary)
             return Outcome(failure = FailureReason.OCR_EMPTY, autoBookAllowed = autoBookAllowed)
         }
         val blocks = ocr.lines.mapNotNull { line ->
@@ -296,11 +311,22 @@ class ScreenshotIntakeCoordinator private constructor(
             }
         val ledgerRows = runCatching { repository?.screenshotDedupRows() }.getOrNull().orEmpty()
         val existing = ledgerRows
-        val previousFingerprints = runCatching {
-            store.latest(MAX_REMEMBERED).mapNotNull { it.imageFingerprint }.toSet()
-        }.getOrDefault(emptySet())
+        // The review inbox is intentionally capped at 80 visible candidates,
+        // but image idempotency follows the store's retention window. Looking
+        // up this exact fingerprint also keeps ignored/restored cards reserved
+        // until their evidence expires.
+        val fingerprintLookup = runCatching {
+            store.lookupImageFingerprint(fingerprint)
+        }.getOrElse {
+            ImageFingerprintLookup.Unavailable("fingerprint index lookup failed")
+        }
+        val previousFingerprints = if (fingerprintLookup == ImageFingerprintLookup.Match) {
+            setOf(fingerprint)
+        } else {
+            emptySet()
+        }
 
-        val plan = ScreenshotImportPipeline.plan(
+        val initialPlan = ScreenshotImportPipeline.plan(
             request = request.copy(imageFingerprint = fingerprint),
             blocks = blocks,
             existing = existing.map { it.toFingerprint() },
@@ -313,13 +339,30 @@ class ScreenshotIntakeCoordinator private constructor(
                 .filter { it.captureObservedAtMs == null }
                 .map { it.toFingerprint() },
         )
+        val plan = if (fingerprintLookup is ImageFingerprintLookup.Unavailable) {
+            initialPlan.copy(
+                decisions = initialPlan.decisions.map { decision ->
+                    if (decision.action == Action.AUTO_BOOK) {
+                        decision.copy(
+                            action = Action.ASK_USER,
+                            reason = "fingerprint index unavailable; confirm this transaction",
+                            ledgerWriteAllowed = true,
+                        )
+                    } else {
+                        decision
+                    }
+                },
+            )
+        } else {
+            initialPlan
+        }
         val ocrSummary = "OCR ${blocks.size} 个文本块"
         plan.failure?.let { failure ->
             // A recognised but empty page still records a local diagnostic row;
             // no ledger write and no user-visible noise. The OCR text rides along
             // because a page that parsed to nothing is exactly the case a user
             // reports as "it did not record".
-            recordFailure(attemptId, failure, ocrSummary, rawText)
+            recordIntakeFailure(attemptId, source, failure, ocrSummary, rawText)
             return Outcome(
                 failure = failure,
                 repeatImage = plan.repeatImage,
@@ -400,35 +443,85 @@ class ScreenshotIntakeCoordinator private constructor(
         val createdHere = mutableSetOf<String>()
         val waitingToSettle = linkedMapOf<String, CaptureCandidate>()
         plan.decisions.forEach { decision ->
-            val candidate = ScreenshotCandidateFactory.create(
+            val candidateDraft = ScreenshotCandidateFactory.create(
                 decision = decision,
                 source = source,
                 capturedAtMs = capturedAtMs,
                 imageFingerprint = fingerprint,
                 diagnosticAttemptId = attemptId,
             )
-            val stored = store.save(candidate, bytes)
-            if (stored == null) {
-                // save() returns null when the candidate is invalid or when its
-                // index write fails. Neither is "the ledger already has it";
-                // counting it as skipped is how money disappeared silently.
-                failed++
-                recordWriteFailure(
-                    attemptId = attemptId,
-                    code = "CANDIDATE_STORE_WRITE_FAILED",
-                    cause = null,
-                    inputSummary = candidateSummary ?: ocrSummary,
-                    rawText = rawText,
-                    outputSummary = "候选卡片未保存",
+            val candidate = if (bytes == null) {
+                candidateDraft.copy(
+                    screenshotUnavailableReason = CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_MISSING,
                 )
-                return@forEach
+            } else {
+                candidateDraft
+            }
+            val stored = when (val save = store.saveWithResult(candidate, bytes)) {
+                is CandidateSaveResult.Saved -> save.candidate
+                is CandidateSaveResult.Failed -> {
+                    // A full review index is a storage failure, never a duplicate
+                    // or ignored transaction. Preserve the explicit reason for
+                    // diagnostics and tell the user how to retry after expiry.
+                    failed++
+                    val indexFull = save.reason == CandidateSaveFailure.INDEX_FULL
+                    recordWriteFailure(
+                        attemptId = attemptId,
+                        code = if (indexFull) "CANDIDATE_INDEX_FULL" else "CANDIDATE_STORE_WRITE_FAILED",
+                        cause = null,
+                        inputSummary = candidateSummary ?: ocrSummary,
+                        rawText = rawText,
+                        outputSummary = if (indexFull) "候选存储已满，本笔候选未保存" else "候选卡片未保存",
+                    )
+                    if (indexFull) context?.let {
+                        ScreenshotReviewNotifier.notifyCandidateStorageFull(it, CandidateStorageIntakeKind.SCREENSHOT_PAGE)
+                    }
+                    return@forEach
+                }
             }
             createdHere += stored.candidateId
+            val screenshotReadable = store.hasReadableScreenshot(stored, bytes)
+            val reviewCandidate = if (!screenshotReadable) {
+                stored.copy(
+                    screenshotUnavailableReason = stored.screenshotUnavailableReason ?:
+                        if (bytes == null) CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_MISSING
+                        else CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_IO,
+                )
+            } else {
+                stored
+            }
+            if (!screenshotReadable) {
+                val persisted = store.mark(reviewCandidate, CaptureCandidate.STATUS_PENDING)
+                pending++
+                if (!persisted) {
+                    failed++
+                    recordWriteFailure(
+                        attemptId = attemptId,
+                        code = "SCREENSHOT_EVIDENCE_WARNING_WRITE_FAILED",
+                        cause = null,
+                        inputSummary = candidateSummary ?: ocrSummary,
+                        rawText = rawText,
+                        outputSummary = "截图不可用，本笔保持待确认；账本未写入",
+                    )
+                }
+                recordStep(
+                    attemptId = attemptId,
+                    stage = TransactionDiagnostics.STAGE_SAVE,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Screenshot evidence unavailable; candidate kept pending",
+                    callSite = CALL_SITE_INGEST,
+                    outputSummary = "截图未能验证，本笔已保留待确认；请重新导入截图并核对后再记录",
+                )
+                val pendingCandidate = store.pending().lastOrNull { it.candidateId == reviewCandidate.candidateId }
+                    ?: reviewCandidate.copy(status = CaptureCandidate.STATUS_PENDING)
+                if (source != IntakeSource.MEDIASTORE) confirmationCandidates += pendingCandidate
+                return@forEach
+            }
             var applied = false
             when (decision.action) {
                 Action.AUTO_BOOK -> {
                     if (!CaptureBookGate.mayWriteLedger(allowAuto, previewOnly)) {
-                        store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                        store.mark(reviewCandidate, CaptureCandidate.STATUS_PENDING)
                         pending++
                         return@forEach
                     }
@@ -491,10 +584,8 @@ class ScreenshotIntakeCoordinator private constructor(
                                             outputSummary = "疑似 #${result.existingTransactionId}（另一通道），保留待确认",
                                         )
                                     }
-                                    // Same channel + same order id, or same merchant
-                                    // and amount inside the 8s window: a definite
-                                    // re-report, safe to close without asking.
-                                    DuplicateReason.SAME_SOURCE_WINDOW,
+                                    // A non-empty platform order ID is the only
+                                    // ledger evidence strong enough to close this card.
                                     DuplicateReason.SOURCE_ORDER_ID -> {
                                         store.mark(stored, CaptureCandidate.STATUS_IGNORED)
                                         ignored++
@@ -535,7 +626,7 @@ class ScreenshotIntakeCoordinator private constructor(
                     }
                 }
                 Action.ASK_USER -> {
-                    store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                    store.mark(reviewCandidate, CaptureCandidate.STATUS_PENDING)
                     pending++
                     applied = true
                     if (source != IntakeSource.MEDIASTORE) confirmationCandidates += stored
@@ -640,8 +731,8 @@ class ScreenshotIntakeCoordinator private constructor(
                     ),
                     crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
                     // 用户已经确认「这笔要记」：跨通道命中的同一笔直接补全字段，
-                    // 不新增行，也不再只回一句「已在账本中」。窗口外检测到的疑似
-                    // 重复仍然返回 CROSS_SOURCE_WEAK，卡片留在待确认。
+                    // 不新增行，也不再只回一句「已在账本中」。弱相似度不足以证明重复，
+                    // 用户确认后按独立新行写入。
                     holdWeakCrossSourceMatch = true,
                     mergeConfirmedCrossSource = true,
                 )
@@ -663,8 +754,8 @@ class ScreenshotIntakeCoordinator private constructor(
                 ) {
                     // 仓库已经先试过合并；走到这里说明两条记录不可能合成一条
                     // （商户矛盾、订单号矛盾、超出 120 秒窗口、对侧不可合并）。
-                    // 跨通道只是启发式，显式确认也不能替用户吞掉一笔，所以保留
-                    // 候选 PENDING 并写明疑似匹配的那条。
+                    // 跨通道只是启发式；如果仓库仍返回该结果，保留候选 PENDING
+                    // 并写明疑似匹配的那条。
                     recordStep(
                         attemptId = attemptId,
                         stage = TransactionDiagnostics.STAGE_DEDUP,
@@ -730,6 +821,17 @@ class ScreenshotIntakeCoordinator private constructor(
             inputSummary = inputSummary,
             rawText = rawText,
         )
+    }
+
+    private suspend fun recordIntakeFailure(
+        attemptId: String,
+        source: IntakeSource,
+        failure: FailureReason,
+        inputSummary: String? = null,
+        rawText: String? = null,
+    ) {
+        recordFailure(attemptId, failure, inputSummary, rawText)
+        runCatching { failureNoticeSink(source, failure) }
     }
 
     /**
@@ -882,7 +984,6 @@ class ScreenshotIntakeCoordinator private constructor(
         /** Dotted entry point shown under each step; also the chain's entry kind. */
         const val CALL_SITE_INGEST = "ScreenshotIntakeCoordinator.ingest"
         private const val MAX_EDGE = 1600
-        private const val MAX_REMEMBERED = 80
     }
 }
 

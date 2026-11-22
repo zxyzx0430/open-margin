@@ -32,7 +32,7 @@ class ScreenshotReviewReceiver : BroadcastReceiver() {
                 val candidate = intent.getStringExtra(EXTRA_CANDIDATE_ID)?.let { id ->
                     pending.firstOrNull { it.candidateId == id }
                 }
-                if (candidate != null) {
+                if (candidate != null && !ScreenshotReviewNotificationPolicy.requiresImageReview(candidate)) {
                     if (action == ACTION_BOOK) book(appContext, store, candidate)
                     else store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
                 }

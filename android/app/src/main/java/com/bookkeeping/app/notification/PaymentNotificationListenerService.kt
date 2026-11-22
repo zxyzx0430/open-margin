@@ -13,6 +13,8 @@ import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.repository.LedgerInsertResult
+import com.bookkeeping.app.data.repository.NotificationInsertResult
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.CancellationException
@@ -210,14 +212,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         }
 
         // 在后台协程里入库（IO 不能在主线程）。
-        // 同一条通知会被系统重复投递：通知更新、MessagingStyle 重组、监听器重连重放、
-        // 用户点开通知都可能再次回调 onNotificationPosted。指纹包含包名/标题/正文/
-        // 原始时间，同一指纹 + 时间相近 = 同一条通知，不是新的一笔。
-        //
-        // 判定顺序很关键：先看指纹，再看「这条通知以前是否真的入过账」。指纹只在入库
-        // 成功之后写入（见 TransactionRepository.recordNoticeFingerprint），所以写入
-        // 失败的记录不会被重放检测当成已入账——宁可多记一行，不能吞掉真钱。
-        val fingerprint = NoticeFingerprint.of(packageName, title, body, originalTime)
+        // This identifies the Android notification record only. Android apps can
+        // reuse a record ID for another payment, so it is never transaction identity.
+        val fingerprint = NoticeFingerprint.forSourceEvent(packageName, sbn.key)
+        val legacyFingerprint = NoticeFingerprint.of(packageName, title, body, originalTime)
         val seenMs = System.currentTimeMillis()
         scope.launch {
             try {
@@ -247,40 +245,54 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     ),
                     rawText = rawText,
                 )
-                val previous = repository.findProcessedNotice(fingerprint)
-                if (NoticeReplayPolicy.isSameNoticeRepost(
-                        previousFingerprint = previous?.fingerprint,
-                        previousSeenMs = previous?.lastSeenMs,
-                        fingerprint = fingerprint,
-                        seenMs = seenMs,
-                    )
-                ) {
-                    // 续期：连续重投递不应该在窗口边界上漏过去。
-                    repository.recordNoticeFingerprint(fingerprint, packageName, seenMs)
-                    repository.recordDiagnostic(
-                        attemptId = diagnosticInput.attemptId,
-                        stage = TransactionDiagnostics.STAGE_DEDUP,
-                        result = TransactionDiagnostics.RESULT_WARNING,
-                        details = "Duplicate notification repost skipped",
-                        callSite = diagnosticInput.callSite,
-                        inputSummary = inputSummary,
-                        outputSummary = "同一条通知重复投递，已跳过（这笔钱已在账本里）",
-                        rawText = rawText,
-                    )
-                    if (BuildConfig.DEBUG) Log.d(TAG, "Notice repost skipped (already booked)")
-                    return@launch
-                }
-                // insertIfNotDuplicate：实际窗口 8s，同来源+同商户+同金额视为重复；
-                // 跨通道只在「一侧缺商户、另一侧有真实商户」时由 CaptureMergePolicy
-                // 合成一行，绝不把两笔都有商户的同额支付并掉。
-                val id = repository.insertIfNotDuplicate(parsed, diagnosticInput = diagnosticInput)
-                // 入库成功（新行 / 8 秒内已存在）之后才记指纹：写入失败时下一次
-                // 重投递还能重新入账。
-                repository.recordNoticeFingerprint(fingerprint, packageName, seenMs)
-                if (id == null) {
-                    if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate notification")
-                } else {
-                    Log.i(TAG, "Auto-captured transaction id=$id")
+                when (val insertion = repository.insertNotificationIfNotReplayed(
+                    fingerprint = fingerprint,
+                    source = packageName,
+                    seenMs = seenMs,
+                    transaction = parsed,
+                    notifySuccess = false,
+                    diagnosticInput = diagnosticInput,
+                    legacyFingerprints = setOf(legacyFingerprint),
+                )) {
+                    is NotificationInsertResult.Replayed -> {
+                        repository.recordDiagnostic(
+                            attemptId = diagnosticInput.attemptId,
+                            stage = TransactionDiagnostics.STAGE_DEDUP,
+                            result = TransactionDiagnostics.RESULT_WARNING,
+                            details = "Exact order ID already recorded for the same payment platform; notification replay skipped",
+                            callSite = diagnosticInput.callSite,
+                            inputSummary = inputSummary,
+                            outputSummary = "该支付平台的相同订单号已记录，重复通知已跳过",
+                            rawText = rawText,
+                        )
+                        if (BuildConfig.DEBUG) Log.d(TAG, "Exact platform transaction already booked")
+                    }
+                    is NotificationInsertResult.NeedsReview -> {
+                        repository.recordDiagnostic(
+                            attemptId = diagnosticInput.attemptId,
+                            stage = TransactionDiagnostics.STAGE_DEDUP,
+                            result = TransactionDiagnostics.RESULT_WARNING,
+                            details = insertion.reason,
+                            transactionId = insertion.candidateTransactionId,
+                            callSite = diagnosticInput.callSite,
+                            inputSummary = inputSummary,
+                            outputSummary = "通知重放身份存在歧义，已保留待复核",
+                            rawText = rawText,
+                        )
+                    }
+                    is NotificationInsertResult.Failed -> throw (insertion.cause as? Exception
+                        ?: IllegalStateException("notification ledger write failed", insertion.cause))
+                    is NotificationInsertResult.Processed -> when (val result = insertion.ledgerResult) {
+                        is LedgerInsertResult.Failed -> throw (result.cause as? Exception
+                            ?: IllegalStateException("notification ledger write failed", result.cause))
+                        is LedgerInsertResult.Duplicate -> {
+                            if (BuildConfig.DEBUG) Log.d(TAG, "Skipped exact duplicate notification")
+                        }
+                        is LedgerInsertResult.Inserted ->
+                            Log.i(TAG, "Auto-captured transaction id=${result.transactionId}")
+                        is LedgerInsertResult.Merged ->
+                            Log.i(TAG, "Auto-captured transaction id=${result.transactionId}")
+                    }
                 }
             } catch (failure: CancellationException) {
                 throw failure
@@ -304,44 +316,5 @@ class PaymentNotificationListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "BkNotifListener"
         private const val REBIND_DELAY_MS = 3_000L
-    }
-}
-
-/**
- * 通知重复投递判定（纯逻辑，无 Android 依赖，可直接跑 JVM 单测）。
- *
- * 依据：[NoticeFingerprint] 把包名 / 标题 / 正文 / 原始通知时间压成一个 SHA-256。
- * 同一指纹 ⇒ 同一条通知证据；两笔真实交易的成交时间不同 ⇒ `originalTime` 不同
- * ⇒ 指纹不同，永远不会被这条规则拦下。
- *
- * 为什么是 10 分钟：通知被更新、MessagingStyle 重组、监听器重连重放、用户点开通知
- * 触发的再次投递，间隔通常是秒级到分钟级；10 分钟足够覆盖「付完款 → 点开详情页 →
- * 返回」这一整段操作，又不会无限期拒绝补记。超过窗口的重复投递仍然会插入：多出来的
- * 一行用户删得掉，被吞掉的那笔钱用户看不见。
- *
- * 这条规则只回答「是不是同一条通知的再次投递」，不回答「账本里有没有这笔钱」——
- * 后者由调用方用持久化指纹（只记录成功入账的通知）来确认。
- */
-object NoticeReplayPolicy {
-
-    /** 重投递窗口：同一条通知在这个时间内再次回调，视为重放。 */
-    const val REPOST_WINDOW_MS: Long = 10 * 60_000L
-
-    /**
-     * @param previousFingerprint 上一次已入账通知的指纹；null 表示没有记录。
-     * @param previousSeenMs 上一次成功入账的时间；null 表示从没成功入账过，不能拦。
-     */
-    fun isSameNoticeRepost(
-        previousFingerprint: String?,
-        previousSeenMs: Long?,
-        fingerprint: String,
-        seenMs: Long,
-        windowMs: Long = REPOST_WINDOW_MS,
-    ): Boolean {
-        if (previousFingerprint != fingerprint) return false
-        if (previousSeenMs == null) return false
-        val elapsed = seenMs - previousSeenMs
-        // 系统时间往回走（用户手动改时间）时不判重放：宁可多记一行。
-        return elapsed in 0..windowMs
     }
 }

@@ -21,7 +21,7 @@ import org.junit.Test
  *
  * 这里钉死确认路径：
  * - 仓库合并成功（[LedgerInsertResult.Merged]）→ SAVED，卡片 APPROVED；
- * - 无法安全合并（CROSS_SOURCE / CROSS_SOURCE_WEAK）→ ALREADY_EXISTS，卡片仍 PENDING；
+ * - 仓库若仍返回未解决的跨通道命中 → ALREADY_EXISTS，卡片仍 PENDING；
  * - 同一通道的精确重发 → ALREADY_EXISTS，卡片 IGNORED（原有行为）。
  *
  * 真正的 Room 写入需要设备；这里用 coordinator 自带的 writer seam 驱动三种结果。
@@ -114,7 +114,7 @@ class ScreenshotConfirmCandidateTest {
     }
 
     @Test
-    fun `weak cross channel match keeps the card pending too`() = withStore { store, _ ->
+    fun `unresolved weak duplicate response keeps the card pending`() = withStore { store, _ ->
         val stored = candidate()
         assertNotNull(store.save(stored, null))
         val writer = FakeWriter(

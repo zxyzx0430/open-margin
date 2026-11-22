@@ -8,6 +8,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
+import java.util.TimeZone
 
 class PaymentCardDetectorTest {
 
@@ -479,6 +480,131 @@ class PaymentCardDetectorTest {
         assertEquals(2, cards.size)
         assertEquals(listOf("早餐店"), cards.single { it.amountCents == 1000L }.merchantCandidates)
         assertEquals(listOf("咖啡店"), cards.single { it.amountCents == 2500L }.merchantCandidates)
+    }
+
+    @Test
+    fun adjacentSuccessfulAndCancelledCardsKeepTheirOwnStatusWithZeroBounds() {
+        val rawLines = listOf(
+            BillTextLine("支付成功"),
+            BillTextLine("Fixture breakfast shop"),
+            BillTextLine("¥10.00"),
+            BillTextLine("交易关闭"),
+            BillTextLine("Fixture coffee shop"),
+            BillTextLine("¥25.00"),
+        )
+
+        val cards = PaymentCardDetector.fromLines(
+            packageName = PaymentCardDetector.WECHAT,
+            lines = rawLines,
+            capturedAtMs = capturedAt,
+            screenHeightPx = 2400,
+            pageIdentity = "fixture-zero-bounds",
+        )
+
+        assertEquals(2, cards.size)
+        assertEquals(PaymentCardStatus.COMPLETED, cards.single { it.amountCents == 1000L }.status)
+        assertEquals(PaymentCardStatus.CANCELLED, cards.single { it.amountCents == 2500L }.status)
+    }
+
+    @Test
+    fun adjacentSuccessfulCardsWithZeroGapRemainSeparateCandidates() {
+        val cards = PaymentCardDetector.fromLines(
+            packageName = PaymentCardDetector.ALIPAY,
+            lines = listOf(
+                line("支付成功", 10),
+                line("Fixture breakfast shop", 40),
+                line("¥10.00", 70),
+                line("交易成功", 100),
+                line("Fixture coffee shop", 130),
+                line("¥20.00", 160),
+            ),
+            capturedAtMs = capturedAt,
+            screenHeightPx = 600,
+            pageIdentity = "fixture-adjacent-success-cards",
+        )
+
+        assertEquals(2, cards.size)
+        assertEquals(setOf(1_000L, 2_000L), cards.map { it.amountCents }.toSet())
+        assertTrue(cards.all { it.status == PaymentCardStatus.COMPLETED })
+    }
+
+    @Test
+    fun zeroBoundsWithMultipleAmountsReturnSeparateReviewCandidatesInsteadOfOneCombinedCard() {
+        val cards = PaymentCardDetector.fromLines(
+            packageName = PaymentCardDetector.WECHAT,
+            lines = listOf(
+                BillTextLine("支付成功"),
+                BillTextLine("¥10.00"),
+                BillTextLine("¥20.00"),
+            ),
+            capturedAtMs = capturedAt,
+            screenHeightPx = 2400,
+            pageIdentity = "fixture-ambiguous-bounds",
+        )
+
+        assertEquals(listOf(1000L, 2000L), cards.map { it.amountCents })
+        assertTrue(cards.all { it.reviewRequired })
+        assertTrue(cards.all { it.status == PaymentCardStatus.UNKNOWN })
+    }
+
+    @Test
+    fun yearlessJanuaryTransactionOnDecemberCaptureUsesFollowingYear() {
+        withShanghaiTimeZone {
+            val capture = fixedInstant(2025, Calendar.DECEMBER, 31, 23, 55)
+            val card = datedPayment("交易时间 1月1日 00:05", capture)
+            val time = Calendar.getInstance().apply { timeInMillis = card.eventTimeMs!! }
+
+            assertEquals(2026, time.get(Calendar.YEAR))
+            assertEquals(Calendar.JANUARY, time.get(Calendar.MONTH))
+            assertEquals(1, time.get(Calendar.DAY_OF_MONTH))
+            assertEquals(5, time.get(Calendar.MINUTE))
+        }
+    }
+
+    @Test
+    fun yearlessDecemberTransactionOnJanuaryCaptureUsesPreviousYear() {
+        withShanghaiTimeZone {
+            val capture = fixedInstant(2026, Calendar.JANUARY, 1, 0, 5)
+            val card = datedPayment("交易时间 12月31日 23:55", capture)
+            val time = Calendar.getInstance().apply { timeInMillis = card.eventTimeMs!! }
+
+            assertEquals(2025, time.get(Calendar.YEAR))
+            assertEquals(Calendar.DECEMBER, time.get(Calendar.MONTH))
+            assertEquals(31, time.get(Calendar.DAY_OF_MONTH))
+            assertEquals(55, time.get(Calendar.MINUTE))
+        }
+    }
+
+    private fun datedPayment(timeLine: String, capturedAtMs: Long): PaymentCardDetection {
+        val lines = listOf(
+            line("支付成功", 100),
+            line("Fixture merchant", 160),
+            line("¥10.00", 220),
+            line(timeLine, 280),
+        )
+        return PaymentCardDetector.fromLines(
+            packageName = PaymentCardDetector.WECHAT,
+            lines = lines,
+            capturedAtMs = capturedAtMs,
+            screenHeightPx = 2400,
+            pageIdentity = "fixture-year-rollover",
+        ).single()
+    }
+
+    private fun fixedInstant(year: Int, month: Int, day: Int, hour: Int, minute: Int): Long =
+        Calendar.getInstance().apply {
+            clear()
+            set(year, month, day, hour, minute)
+        }.timeInMillis
+
+    private inline fun <T> withShanghaiTimeZone(block: () -> T): T {
+        val original = TimeZone.getDefault()
+        return try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+            block()
+        } finally {
+            TimeZone.setDefault(original)
+        }
     }
 
     @Test

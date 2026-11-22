@@ -22,7 +22,7 @@ import org.junit.Test
  * a definite same-channel re-report and became IGNORED: the card disappeared with
  * no prompt. This pins the reason split:
  * - CROSS_SOURCE / CROSS_SOURCE_WEAK -> PENDING, diagnostic written;
- * - SAME_SOURCE_WINDOW -> IGNORED, because it is a real re-report.
+ * - SOURCE_ORDER_ID -> IGNORED, because an exact platform order ID proves the re-report.
  */
 class ScreenshotIngestDuplicateReasonTest {
 
@@ -128,8 +128,8 @@ class ScreenshotIngestDuplicateReasonTest {
         }
 
     @Test
-    fun `same source window duplicate is still ignored`() =
-        withIngest(DuplicateReason.SAME_SOURCE_WINDOW) { store, outcome, notes ->
+    fun `exact source order id duplicate is ignored`() =
+        withIngest(DuplicateReason.SOURCE_ORDER_ID) { store, outcome, notes ->
             val stored = store.latest().single()
             assertEquals(CaptureCandidate.STATUS_IGNORED, stored.status)
             assertEquals(0, outcome.pending)
@@ -137,6 +137,6 @@ class ScreenshotIngestDuplicateReasonTest {
             assertEquals(1, outcome.duplicates)
 
             val note = notes.single { it.details.startsWith("Duplicate confirmed by ledger") }
-            assertTrue(note.details.contains("SAME_SOURCE_WINDOW"))
+            assertTrue(note.details.contains("SOURCE_ORDER_ID"))
         }
 }

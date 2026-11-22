@@ -43,6 +43,16 @@ data class CaptureCandidate(
     val matchedTransactionId: Long? = null,
     /** A preview candidate can be reviewed/ignored but never written through any path. */
     val ledgerWriteAllowed: Boolean = true,
+    /** Original ledger source for notification/SMS review cards. */
+    val transactionSource: String? = null,
+    /** Parsed category retained for actionable notification/SMS review. */
+    val transactionCategory: String? = null,
+    /** Account label (for example, a synthetic bank/card account fixture). */
+    val transactionAccount: String? = null,
+    /** Preserve the ledger currency for notification/SMS review and confirmation. */
+    val transactionCurrency: String? = null,
+    /** Screenshot storage/read failure, kept separate from duplicate/review reason. */
+    val screenshotUnavailableReason: String? = null,
 ) {
 
     fun isValid(): Boolean {
@@ -62,6 +72,11 @@ data class CaptureCandidate(
         if (candidateId.isBlank() || candidateId.length > 80) return false
         if (matchedTransactionId != null && matchedTransactionId <= 0L) return false
         if (imageFingerprint != null && !imageFingerprint.matches(Regex("[a-f0-9]{64}"))) return false
+        if (transactionSource != null && transactionSource !in TRANSACTION_SOURCES) return false
+        if (transactionCategory != null && transactionCategory !in TRANSACTION_CATEGORIES) return false
+        if (transactionAccount != null && transactionAccount.length > 80) return false
+        if (transactionCurrency != null && !transactionCurrency.matches(Regex("[A-Z]{3}"))) return false
+        if (screenshotUnavailableReason != null && screenshotUnavailableReason !in SCREENSHOT_UNAVAILABLE_REASONS) return false
         return true
     }
 
@@ -125,6 +140,11 @@ data class CaptureCandidate(
         put("directionExplicit", directionExplicit)
         put("matchedTransactionId", matchedTransactionId ?: JSONObject.NULL)
         put("ledgerWriteAllowed", ledgerWriteAllowed)
+        put("transactionSource", transactionSource ?: JSONObject.NULL)
+        put("transactionCategory", transactionCategory ?: JSONObject.NULL)
+        put("transactionAccount", transactionAccount ?: JSONObject.NULL)
+        put("transactionCurrency", transactionCurrency ?: JSONObject.NULL)
+        put("screenshotUnavailableReason", screenshotUnavailableReason ?: JSONObject.NULL)
     }
 
     companion object {
@@ -153,10 +173,22 @@ data class CaptureCandidate(
          * 否则会给用户一个不存在的账本记录号。
          */
         const val REASON_SAME_IMAGE_REPEAT = "同一张截图里出现了重复记录"
+        const val SCREENSHOT_UNAVAILABLE_QUOTA = "image unavailable: storage quota"
+        const val SCREENSHOT_UNAVAILABLE_IO = "image unavailable: write failed"
+        const val SCREENSHOT_UNAVAILABLE_INVALID = "image unavailable: invalid image"
+        const val SCREENSHOT_UNAVAILABLE_MISSING = "image unavailable: missing evidence"
+        val SCREENSHOT_UNAVAILABLE_REASONS = setOf(
+            SCREENSHOT_UNAVAILABLE_QUOTA,
+            SCREENSHOT_UNAVAILABLE_IO,
+            SCREENSHOT_UNAVAILABLE_INVALID,
+            SCREENSHOT_UNAVAILABLE_MISSING,
+        )
         const val INTAKE_MEDIASTORE = "MEDIASTORE"
         const val INTAKE_SHARE = "SHARE"
         const val INTAKE_PHOTO_PICKER = "PHOTO_PICKER"
         const val INTAKE_ACCESSIBILITY = "ACCESSIBILITY"
+        const val INTAKE_NOTIFICATION = "NOTIFICATION"
+        const val INTAKE_SMS = "SMS"
         const val PLATFORM_WECHAT = "WECHAT"
         const val PLATFORM_ALIPAY = "ALIPAY"
         const val PLATFORM_UNKNOWN = "UNKNOWN"
@@ -197,6 +229,7 @@ data class CaptureCandidate(
         val DIRECTIONS = setOf(DIRECTION_EXPENSE, DIRECTION_INCOME, DIRECTION_UNKNOWN)
         val INTAKE_METHODS = setOf(
             INTAKE_MEDIASTORE, INTAKE_SHARE, INTAKE_PHOTO_PICKER, INTAKE_ACCESSIBILITY,
+            INTAKE_NOTIFICATION, INTAKE_SMS,
         )
         val PAYMENT_PLATFORMS = setOf(PLATFORM_WECHAT, PLATFORM_ALIPAY, PLATFORM_UNKNOWN)
         val CONFIDENCE_TIERS = setOf(TIER_HIGH, TIER_MEDIUM, TIER_LOW)
@@ -206,6 +239,12 @@ data class CaptureCandidate(
         )
         val EVENT_TIME_SOURCES = setOf(
             TIME_SOURCE_ACTUAL, TIME_SOURCE_CAPTURE, TIME_SOURCE_USER_CORRECTED,
+        )
+        val TRANSACTION_SOURCES = setOf("MANUAL", "ALIPAY", "WECHAT", "BANK_SMS", "OTHER")
+        val TRANSACTION_CATEGORIES = setOf(
+            "FOOD", "TRANSPORT", "SHOPPING", "ENTERTAINMENT", "HOUSING", "UTILITIES",
+            "HEALTH", "EDUCATION", "SALARY", "BONUS", "INVESTMENT", "INSURANCE",
+            "GIFT", "TRANSFER", "OTHER",
         )
 
         fun platformFromPackage(packageName: String?): String = when (packageName) {
@@ -291,6 +330,21 @@ data class CaptureCandidate(
                 matchedTransactionId = if (json.isNull("matchedTransactionId")) null else
                     json.optLong("matchedTransactionId").takeIf { it > 0L },
                 ledgerWriteAllowed = json.optBoolean("ledgerWriteAllowed", true),
+                transactionSource = json.optString("transactionSource").takeIf {
+                    it in TRANSACTION_SOURCES
+                },
+                transactionCategory = json.optString("transactionCategory").takeIf {
+                    it in TRANSACTION_CATEGORIES
+                },
+                transactionAccount = json.optString("transactionAccount").takeIf {
+                    it.isNotBlank() && it != "null"
+                },
+                transactionCurrency = json.optString("transactionCurrency").takeIf {
+                    it.matches(Regex("[A-Z]{3}"))
+                },
+                screenshotUnavailableReason = json.optString("screenshotUnavailableReason").takeIf {
+                    it in SCREENSHOT_UNAVAILABLE_REASONS
+                },
             )
             candidate.takeIf { it.isValid() }
         }.getOrNull()

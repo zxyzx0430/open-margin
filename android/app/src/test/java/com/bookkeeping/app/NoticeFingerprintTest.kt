@@ -53,4 +53,47 @@ class NoticeFingerprintTest {
         val y = NoticeFingerprint.of("pkg", "a", "bc", 1L)
         assertNotEquals(x, y)
     }
+
+    @Test fun distinctNotificationRecordKeysHaveDistinctRecordFingerprints() {
+        val first = NoticeFingerprint.forSourceEvent("com.tencent.mm", "notice-key-1")
+        val second = NoticeFingerprint.forSourceEvent("com.tencent.mm", "notice-key-2")
+        assertNotEquals(first, second)
+    }
+
+    @Test fun sameNotificationRecordKeyKeepsItsRecordFingerprint() {
+        val original = NoticeFingerprint.forSourceEvent("com.tencent.mm", "notice-key-1")
+        val refreshed = NoticeFingerprint.forSourceEvent("com.tencent.mm", "notice-key-1")
+        assertEquals(original, refreshed)
+    }
+
+    @Test fun exactPlatformOrderIdentityDoesNotDependOnNotificationBodyOrRecordKey() {
+        val original = NoticeFingerprint.forPlatformTransaction("WECHAT", "ORDER-1042")
+        val refreshed = NoticeFingerprint.forPlatformTransaction("wechat", " ORDER-1042 ")
+        assertEquals(original, refreshed)
+        assertEquals(
+            original,
+            NoticeFingerprint.forPlatformTransaction("WECHAT", "ORDER-1042"),
+        )
+    }
+
+    @Test fun transactionIdentityIsScopedToPlatformAndExactOrderId() {
+        val wechat = NoticeFingerprint.forPlatformTransaction("WECHAT", "ORDER-1042")
+        val alipay = NoticeFingerprint.forPlatformTransaction("ALIPAY", "ORDER-1042")
+        val nextOrder = NoticeFingerprint.forPlatformTransaction("WECHAT", "ORDER-1043")
+        assertNotEquals(wechat, alipay)
+        assertNotEquals(wechat, nextOrder)
+    }
+
+    @Test fun reusedRecordKeyCanReferToDistinctPlatformTransactions() {
+        val record = NoticeFingerprint.forSourceEvent("com.tencent.mm", "reused-id-8")
+        val first = NoticeFingerprint.forPlatformTransaction("WECHAT", "ORDER-A")
+        val second = NoticeFingerprint.forPlatformTransaction("WECHAT", "ORDER-B")
+        assertEquals(record, NoticeFingerprint.forSourceEvent("com.tencent.mm", "reused-id-8"))
+        assertNotEquals(first, second)
+    }
+
+    @Test fun missingOrBlankSourceIdentityCannotCreateAReplayFingerprint() {
+        assertEquals(null, NoticeFingerprint.forSourceEvent("com.tencent.mm", null))
+        assertEquals(null, NoticeFingerprint.forSourceEvent("com.tencent.mm", "  "))
+    }
 }

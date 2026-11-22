@@ -188,17 +188,17 @@ class NotificationPageDuplicateTest {
         )
         assertEquals(PageCaptureOutcome.HOLD_FOR_REVIEW, PageCaptureResultPolicy.of(duplicate))
 
-        // 强证据/同通道重复才可以标记为已入账。
+        // Only an exact platform order ID can close the card as an existing row.
         assertEquals(
             PageCaptureOutcome.IGNORED,
             PageCaptureResultPolicy.of(
-                LedgerInsertResult.Duplicate(10L, DuplicateReason.CROSS_SOURCE),
+                LedgerInsertResult.Duplicate(10L, DuplicateReason.SOURCE_ORDER_ID),
             ),
         )
         assertEquals(
             PageCaptureOutcome.IGNORED,
             PageCaptureResultPolicy.of(
-                LedgerInsertResult.Duplicate(10L, DuplicateReason.SAME_SOURCE_WINDOW),
+                LedgerInsertResult.Duplicate(10L, DuplicateReason.CROSS_SOURCE),
             ),
         )
         assertEquals(
@@ -215,28 +215,19 @@ class NotificationPageDuplicateTest {
         )
     }
 
-    // ---------- 层 3：自动合并（通知缺商户 + 页面有商户） ----------
+    // ---------- 层 3：跨通道相似记录只保留复核候选 ----------
 
-    // 11. 核心修复：一侧缺商户、另一侧有商户、同额同向同平台且时间邻近 →
-    //     合并为 1 行，保留先入库的 id，补全商户和订单号。
+    // 11. 缺少两侧完全相同的非空订单号时，商户不对称与时间邻近不能证明是同一笔。
     @Test
-    fun `one sided merchant merges into the existing row and fills it`() {
+    fun `one sided merchant without an exact order id never auto merges`() {
         val notification = row(id = 10, merchant = "微信支付", timestamp = t0)
         val page = row(
             id = 0, merchant = "麦当劳", timestamp = t0 + 20_000L,
             orderId = "4200001234", fromPage = true,
         )
         val target = CaptureMergePolicy.findMergeTarget(listOf(notification), page)
-        assertNotNull("通知缺商户 + 页面有商户是同一笔，必须能合并", target)
-        assertEquals(10L, target!!.id)
-
-        val merged = CaptureMergePolicy.mergeInto(target, page)
-        assertEquals(10L, merged.id)
-        assertEquals(1_230L, merged.amountCents)
-        assertEquals(t0, merged.timestamp)
-        assertEquals("麦当劳", merged.merchant)
-        assertEquals("4200001234", merged.sourceTransactionId)
-        assertEquals(t0 + 20_000L, merged.captureObservedAtMs)
+        assertNull("one-sided order IDs are not proof of identity", target)
+        assertFalse(CaptureMergePolicy.isSamePaymentWithOneSidedMerchant(notification, page))
     }
 
     // 12. 两笔同额同平台但不同商户的真实交易：不合并。

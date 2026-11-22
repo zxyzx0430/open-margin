@@ -115,25 +115,6 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun recentForScreenshotDedup(limit: Int): List<TransactionEntity>
 
-    // 用于自动抓取路径去重：在时间窗口内找同来源 + 同金额的记录。
-    // 命中即认为是重复（同一笔交易被通知/无障碍/SMS 多个通道抓到了）。
-    @Query("""
-        SELECT * FROM transactions
-        WHERE syncDeleted = 0 AND source = :source AND merchant = :merchant AND amountCents = :amountCents
-          AND type = :type AND currency = :currency
-          AND timestamp >= :windowStartMs AND timestamp <= :windowEndMs
-        LIMIT 1
-    """)
-    suspend fun findRecentSameAmount(
-        source: String,
-        merchant: String,
-        amountCents: Long,
-        type: String,
-        currency: String,
-        windowStartMs: Long,
-        windowEndMs: Long,
-    ): TransactionEntity?
-
     /**
      * 手工记账保存前的疑似重复候选：同金额、同方向、同币种，时间在粗筛窗口内
      * （最宽 12 小时，按时间精度分档的收窄交给纯逻辑）。

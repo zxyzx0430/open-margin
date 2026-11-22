@@ -12,6 +12,8 @@ import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.capture.success.PaymentPage
 import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
+import com.bookkeeping.app.capture.screenshot.ScreenshotReviewNotifier
+import com.bookkeeping.app.capture.screenshot.CandidateStorageIntakeKind
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -22,6 +24,8 @@ import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.notification.capture.CaptureBookGate
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.notification.capture.CandidateSaveFailure
+import com.bookkeeping.app.notification.capture.CandidateSaveResult
 import com.bookkeeping.app.ocr.MlKitOcrEngine
 import com.bookkeeping.app.ocr.OcrEngine
 import com.bookkeeping.app.ocr.PaddleOcrEngine
@@ -60,6 +64,7 @@ open class PageRecognitionService : AccessibilityService() {
     private var ocrEngine: OcrEngine? = null
 
     private var lastPageIdentity: String? = null
+    private var lastPageEventId: String? = null
     private var lastCaptureAtMs: Long = 0L
     private var lastWindowActivity: String? = null
     private var lastWindowPackage: String? = null
@@ -112,6 +117,7 @@ open class PageRecognitionService : AccessibilityService() {
             lastWindowPackage = packageName
             lastWindowActivity = null
             lastPageIdentity = null
+            lastPageEventId = null
             lastCaptureAtMs = 0L
         }
 
@@ -140,49 +146,70 @@ open class PageRecognitionService : AccessibilityService() {
         // refund, and pay-after-use. Only explicitly completed cards may be booked.
         val cards = PaymentCardDetector.fromSnapshot(packageName, snapshot, now)
         if (cards.isNotEmpty()) {
-            val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
-            if (candidates.isNotEmpty()) {
-                // A page with several completed cards is a bill/history list,
-                // not one payment result. Booking it in bulk duplicates history;
-                // that belongs to the explicit bill-import flow.
-                if (candidates.size > 1) {
-                    if (BuildConfig.DEBUG) {
-                        Log.v(TAG, "skip multi-card page cards=${candidates.size}")
+            when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store)) {
+                is PaymentCardReviewQueue.Route.HeldForReview -> {
+                    if (pageRoute.saved.saved.isNotEmpty()) {
+                        ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
+                    }
+                    repository.recordDiagnostic(
+                        attemptId = TransactionDiagnostics.newAttemptId(),
+                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                        result = if (pageRoute.saved.failed == 0) TransactionDiagnostics.RESULT_WARNING
+                        else TransactionDiagnostics.RESULT_FAILURE,
+                        details = "Multi-card page held for individual confirmation",
+                        outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +
+                            if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "",
+                    )
+                    return
+                }
+
+                is PaymentCardReviewQueue.Route.SingleCandidate -> {
+                    val candidates = listOf(pageRoute.candidate)
+                    val pageIdentity = candidates.first().pageIdentity
+                    if (PageIdentityThrottlePolicy.shouldSuppress(
+                            previousIdentity = lastPageIdentity,
+                            previousEventId = lastPageEventId,
+                            previousCapturedAtMs = lastCaptureAtMs,
+                            identity = pageIdentity,
+                            eventId = candidates.first().orderId,
+                            nowMs = now,
+                            windowMs = PAGE_CAPTURE_DEDUP_MS,
+                        )
+                    ) return
+                    if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
+                    capturing.set(true)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        captureScreenshotForCandidates(
+                            candidates,
+                            allowStrictAuto,
+                            snapshot.root.windowId,
+                            contextText = snapshot.flattenText(),
+                        )
+                    } else {
+                        processCandidates(
+                            candidates.map { it.copy(reason = "screenshot unsupported") },
+                            null,
+                            allowStrictAuto,
+                            contextText = snapshot.flattenText(),
+                        )
                     }
                     return
                 }
-                val pageIdentity = candidates.first().pageIdentity
-                if (pageIdentity == lastPageIdentity && now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS) return
-                if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
-                capturing.set(true)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    captureScreenshotForCandidates(
-                        candidates,
-                        allowStrictAuto,
-                        snapshot.root.windowId,
-                        contextText = snapshot.flattenText(),
-                    )
-                } else {
-                    processCandidates(
-                        candidates.map { it.copy(reason = "screenshot unsupported") },
-                        null,
-                        allowStrictAuto,
-                        contextText = snapshot.flattenText(),
-                    )
-                }
-                return
-            }
-            if (BuildConfig.DEBUG) {
-                cards.forEach {
-                    Log.v(
-                        TAG,
-                        "skip card kind=${it.kind} status=${it.status} " +
-                            "reason=${it.nonFinalReason ?: it.reason}",
-                    )
+
+                PaymentCardReviewQueue.Route.NoBookableCandidate -> {
+                    if (BuildConfig.DEBUG) {
+                        cards.forEach {
+                            Log.v(
+                                TAG,
+                                "skip card kind=${it.kind} status=${it.status} " +
+                                    "reason=${it.nonFinalReason ?: it.reason}",
+                            )
+                        }
+                    }
+                    // No completed card in the node tree; OCR may still see a completed
+                    // card that accessibility exposed only as a non-final placeholder.
                 }
             }
-            // No completed card in the node tree; OCR may still see a completed
-            // card that accessibility exposed only as a non-final placeholder.
         }
 
         // If accessibility nodes are incomplete, OCR the visible payment page
@@ -190,11 +217,9 @@ open class PageRecognitionService : AccessibilityService() {
         // for notification-less red packets, refunds, transfers, and withdrawals.
         if (PaymentCardDetector.looksLikePaymentPage(packageName, pageText)) {
             val pageIdentity = PaymentCardDetector.pageIdentity(packageName, pageText)
-            if (pageIdentity == lastPageIdentity &&
-                now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS
-            ) {
-                return
-            }
+            // This text identity may represent two real same-amount payments in
+            // the same displayed minute. OCR has not established an order ID yet,
+            // so persist a reviewable candidate instead of throttling by text.
             if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
             capturing.set(true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -221,11 +246,16 @@ open class PageRecognitionService : AccessibilityService() {
             }
             return
         }
-        if (detection.pageIdentity == lastPageIdentity &&
-            now - lastCaptureAtMs < PAGE_CAPTURE_DEDUP_MS
-        ) {
-            return
-        }
+        if (PageIdentityThrottlePolicy.shouldSuppress(
+                previousIdentity = lastPageIdentity,
+                previousEventId = lastPageEventId,
+                previousCapturedAtMs = lastCaptureAtMs,
+                identity = detection.pageIdentity,
+                eventId = detection.orderId,
+                nowMs = now,
+                windowMs = PAGE_CAPTURE_DEDUP_MS,
+            )
+        ) return
         if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
         val amount = detection.amountCents ?: return
         val candidate = CaptureCandidate(
@@ -309,14 +339,16 @@ open class PageRecognitionService : AccessibilityService() {
                                         result.lines.joinToString("\n") { it.text }
                                     }
                                     val lines = result.lines.mapNotNull { line ->
-                                        line.bounds?.let {
-                                            BillTextLine(
-                                                text = line.text,
-                                                top = it.top,
-                                                bottom = it.bottom,
-                                                left = it.left,
-                                                right = it.right,
-                                            )
+                                        line.text.takeIf(String::isNotBlank)?.let { text ->
+                                            line.bounds?.let {
+                                                BillTextLine(
+                                                    text = text,
+                                                    top = it.top,
+                                                    bottom = it.bottom,
+                                                    left = it.left,
+                                                    right = it.right,
+                                                )
+                                            } ?: BillTextLine(text = text)
                                         }
                                     }
                                     val cards = PaymentCardDetector.fromLines(
@@ -326,32 +358,98 @@ open class PageRecognitionService : AccessibilityService() {
                                         screenHeightPx = height,
                                         pageIdentity = pageIdentity,
                                     )
-                                    val candidates = cards.mapNotNull { it.toCaptureCandidate(now) }
-                                    if (candidates.size != 1) {
-                                        // Zero: the screenshot worked; do not retry the
-                                        // same page until its content changes.
-                                        // Several: a history list, never bulk-book it.
-                                        lastPageIdentity = pageIdentity
-                                        lastCaptureAtMs = System.currentTimeMillis()
-                                        repository.recordDiagnostic(
-                                            attemptId = attemptId,
-                                            stage = TransactionDiagnostics.STAGE_PARSE,
-                                            result = TransactionDiagnostics.RESULT_WARNING,
-                                            details = if (candidates.isEmpty()) {
-                                                "OCR did not identify one completed bill"
+                                    when (val pageRoute = PaymentCardReviewQueue.route(
+                                        detections = cards,
+                                        capturedAtMs = now,
+                                        store = store,
+                                        screenshot = bytes,
+                                    )) {
+                                        is PaymentCardReviewQueue.Route.HeldForReview -> {
+                                            if (bytes == null) {
+                                                pageRoute.saved.saved.forEach { saved ->
+                                                    store.mark(
+                                                        saved.copy(
+                                                            screenshotUnavailableReason = CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_INVALID,
+                                                        ),
+                                                        CaptureCandidate.STATUS_PENDING,
+                                                    )
+                                                }
+                                            }
+                                            if (pageRoute.saved.saved.isNotEmpty()) {
+                                                ScreenshotReviewNotifier.notifyPending(
+                                                    applicationContext,
+                                                    store.pending(),
+                                                )
+                                            }
+                                            if (pageRoute.saved.indexFull > 0) {
+                                                ScreenshotReviewNotifier.notifyCandidateStorageFull(
+                                                    applicationContext,
+                                                    CandidateStorageIntakeKind.SCREENSHOT_PAGE,
+                                                )
+                                            }
+                                            val missingImages = if (bytes == null) {
+                                                pageRoute.saved.saved.size
                                             } else {
-                                                "OCR page contained multiple bill candidates"
-                                            },
-                                        )
-                                        capturing.set(false)
-                                    } else {
-                                        processCandidates(
-                                            candidates,
-                                            bytes,
-                                            allowAuto,
-                                            contextText = recognizedText,
-                                            diagnosticAttemptId = attemptId,
-                                        )
+                                                pageRoute.saved.saved.count {
+                                                    it.screenshotUnavailableReason != null ||
+                                                        it.reason.startsWith(CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_PREFIX)
+                                                }
+                                            }
+                                            val intendedCandidateCount = cards.count {
+                                                PaymentCardReviewQueue.candidate(it, now) != null
+                                            }
+                                            advancePageThrottleForBatch(
+                                                intendedCandidateCount = intendedCandidateCount,
+                                                saved = pageRoute.saved.saved,
+                                                failed = pageRoute.saved.failed,
+                                            )
+                                            repository.recordDiagnostic(
+                                                attemptId = attemptId,
+                                                stage = TransactionDiagnostics.STAGE_SAVE,
+                                                result = if (pageRoute.saved.failed > 0) TransactionDiagnostics.RESULT_FAILURE
+                                                else if (missingImages > 0) TransactionDiagnostics.RESULT_WARNING
+                                                else TransactionDiagnostics.RESULT_SUCCESS,
+                                                details = when {
+                                                    pageRoute.saved.indexFull > 0 ->
+                                                        "Candidate index budget full; OCR candidate was not saved"
+                                                    missingImages > 0 ->
+                                                        "OCR candidates saved for review; screenshot evidence unavailable"
+                                                    else -> "OCR payment candidates held for individual review"
+                                                },
+                                                outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +
+                                                    (if (pageRoute.saved.indexFull > 0) " · 存储已满，未保存 ${pageRoute.saved.indexFull} 笔"
+                                                    else if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "") +
+                                                    (if (missingImages > 0) " · 截图不可用 $missingImages 笔" else ""),
+                                            )
+                                            capturing.set(false)
+                                        }
+
+                                        is PaymentCardReviewQueue.Route.SingleCandidate -> {
+                                            processCandidates(
+                                                listOf(
+                                                    if (bytes == null) {
+                                                        pageRoute.candidate.copy(reason = "screenshot decode failed")
+                                                    } else {
+                                                        pageRoute.candidate
+                                                    },
+                                                ),
+                                                bytes,
+                                                allowAuto = allowAuto && bytes != null,
+                                                contextText = recognizedText,
+                                                diagnosticAttemptId = attemptId,
+                                            )
+                                        }
+
+                                        PaymentCardReviewQueue.Route.NoBookableCandidate -> {
+                                            // No completed card was parsed; a later event may retry.
+                                            repository.recordDiagnostic(
+                                                attemptId = attemptId,
+                                                stage = TransactionDiagnostics.STAGE_PARSE,
+                                                result = TransactionDiagnostics.RESULT_WARNING,
+                                                details = "OCR did not identify one completed bill",
+                                            )
+                                            capturing.set(false)
+                                        }
                                     }
                                 } catch (failure: Exception) {
                                     repository.recordDiagnostic(
@@ -396,35 +494,8 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     private fun PaymentCardDetection.toCaptureCandidate(now: Long): CaptureCandidate? {
-        if (!isFinal) return null
-        val candidateKind = when (kind) {
-            PaymentCardKind.PAYMENT -> CaptureCandidate.KIND_PAYMENT
-            PaymentCardKind.REFUND -> CaptureCandidate.KIND_REFUND
-            PaymentCardKind.PAY_AFTER_USE -> CaptureCandidate.KIND_AUTO_PAY
-            PaymentCardKind.TRANSFER -> CaptureCandidate.KIND_TRANSFER
-            PaymentCardKind.RED_PACKET -> CaptureCandidate.KIND_RED_PACKET
-            PaymentCardKind.WITHDRAWAL -> CaptureCandidate.KIND_WITHDRAWAL
-            PaymentCardKind.BILL -> CaptureCandidate.KIND_BILL
-        }
-        val candidateDirection = when (direction) {
-            PaymentDirection.EXPENSE -> CaptureCandidate.DIRECTION_EXPENSE
-            PaymentDirection.INCOME -> CaptureCandidate.DIRECTION_INCOME
-            PaymentDirection.UNKNOWN -> return null
-        }
-        return CaptureCandidate(
-            packageName = source.packageName,
-            pageIdentity = pageIdentity,
-            amountCents = amountCents,
-            merchantCandidates = merchantCandidates,
-            orderId = orderId,
-            capturedAtMs = now,
-            screenshotPath = null,
-            confidence = confidence,
-            reason = reason.ifBlank { "ok" }.take(80),
-            kind = candidateKind,
-            eventTimeMs = eventTimeMs ?: now,
-            direction = candidateDirection,
-        )
+        if (!isFinal || direction == PaymentDirection.UNKNOWN || reviewRequired) return null
+        return PaymentCardReviewQueue.candidate(this, now)
     }
 
     private fun encodeScreenshot(bitmap: Bitmap): ByteArray? = try {
@@ -494,7 +565,7 @@ open class PageRecognitionService : AccessibilityService() {
                                         details = "Screenshot unavailable; parsed text will be used",
                                     )
                                     processCandidates(
-                                        candidates,
+                                        candidates.map { it.copy(reason = "screenshot decode failed") },
                                         null,
                                         allowAuto,
                                         contextText,
@@ -595,6 +666,7 @@ open class PageRecognitionService : AccessibilityService() {
     ) {
         scope.launch {
             try {
+                var firstStored: CaptureCandidate? = null
                 candidates.forEachIndexed { index, candidate ->
                     val input = TransactionDiagnosticInput(
                         attemptId = if (index == 0 && diagnosticAttemptId != null) diagnosticAttemptId
@@ -627,40 +699,71 @@ open class PageRecognitionService : AccessibilityService() {
                             result = TransactionDiagnostics.RESULT_SUCCESS,
                             details = "Payment page parsed",
                         )
-                        val stored = store.save(
+                        val saveResult = store.saveWithResult(
                             candidate.copy(diagnosticAttemptId = input.attemptId),
                             screenshot,
                         )
-                        if (stored == null) {
+                        val stored = when (saveResult) {
+                            is CandidateSaveResult.Saved -> saveResult.candidate
+                            is CandidateSaveResult.Failed -> {
+                                val indexFull = saveResult.reason == CandidateSaveFailure.INDEX_FULL
+                                repository.recordDiagnostic(
+                                    attemptId = input.attemptId,
+                                    stage = TransactionDiagnostics.STAGE_SAVE,
+                                    result = TransactionDiagnostics.RESULT_FAILURE,
+                                    details = if (indexFull) {
+                                        "Candidate index budget full; OCR candidate was not saved"
+                                    } else {
+                                        "Capture candidate could not be stored"
+                                    },
+                                )
+                                if (indexFull) {
+                                    ScreenshotReviewNotifier.notifyCandidateStorageFull(
+                                        applicationContext,
+                                        CandidateStorageIntakeKind.SCREENSHOT_PAGE,
+                                    )
+                                }
+                                return@forEachIndexed
+                            }
+                        }
+                        if (firstStored == null) firstStored = stored
+                        if (PageCaptureScreenshotPolicy.isUnavailable(stored, screenshot)) {
                             repository.recordDiagnostic(
                                 attemptId = input.attemptId,
-                                stage = TransactionDiagnostics.STAGE_CAPTURE,
+                                stage = TransactionDiagnostics.STAGE_SAVE,
                                 result = TransactionDiagnostics.RESULT_FAILURE,
-                                details = "Capture candidate could not be stored",
+                                details = "Screenshot evidence unavailable; candidate kept for review",
                             )
+                            store.mark(stored, CaptureCandidate.STATUS_PENDING)
                             return@forEachIndexed
                         }
                         val now = System.currentTimeMillis()
-                        val dedupKey = stored.dedupKey()
-                        val recentlyCaptured = synchronized(recentCaptureKeys) {
-                            val firstSeen = recentCaptureKeys[dedupKey]
-                            if (firstSeen != null && now - firstSeen < CAPTURE_KEY_TTL_MS) {
-                                true
-                            } else {
-                                recentCaptureKeys[dedupKey] = now
-                                recentCaptureKeys.entries.removeAll {
-                                    now - it.value > CAPTURE_KEY_TTL_MS
+                        // Similar amount/merchant/time fields do not identify one
+                        // event. Only a non-empty platform order ID may suppress
+                        // another page callback before the repository check.
+                        val dedupKey = stored.orderId?.trim()?.takeIf(String::isNotEmpty)
+                            ?.let { stored.dedupKey() }
+                        val recentlyCaptured = dedupKey?.let { key ->
+                            synchronized(recentCaptureKeys) {
+                                val firstSeen = recentCaptureKeys[key]
+                                if (firstSeen != null && now - firstSeen < CAPTURE_KEY_TTL_MS) {
+                                    true
+                                } else {
+                                    recentCaptureKeys[key] = now
+                                    recentCaptureKeys.entries.removeAll {
+                                        now - it.value > CAPTURE_KEY_TTL_MS
+                                    }
+                                    false
                                 }
-                                false
                             }
-                        }
+                        } ?: false
                         if (recentlyCaptured) {
                             store.mark(stored, CaptureCandidate.STATUS_IGNORED)
                             repository.recordDiagnostic(
                                 attemptId = input.attemptId,
                                 stage = TransactionDiagnostics.STAGE_DEDUP,
                                 result = TransactionDiagnostics.RESULT_WARNING,
-                                details = "Recent page-capture fingerprint suppressed",
+                                details = "Recent platform order ID suppressed",
                             )
                             return@forEachIndexed
                         }
@@ -687,7 +790,6 @@ open class PageRecognitionService : AccessibilityService() {
                         // 但候选必须留在待确认列表并写明「疑似与已有记录重复」。
                         val result = repository.insertIfNotDuplicateResult(
                             transaction = mappedTransaction,
-                            windowMs = PAGE_DEDUP_WINDOW_MS,
                             notifySuccess = false,
                             diagnosticInput = input,
                             crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
@@ -703,13 +805,7 @@ open class PageRecognitionService : AccessibilityService() {
                             PageCaptureOutcome.HOLD_FOR_REVIEW -> {
                                 val existingId = (result as LedgerInsertResult.Duplicate)
                                     .existingTransactionId
-                                store.mark(
-                                    stored.copy(
-                                        reason = CaptureCandidate.REASON_LIKELY_DUPLICATE,
-                                        matchedTransactionId = existingId,
-                                    ),
-                                    CaptureCandidate.STATUS_PENDING,
-                                )
+                                PageCaptureReviewPolicy.holdPossibleDuplicate(result, stored, store)
                                 repository.recordDiagnostic(
                                     attemptId = input.attemptId,
                                     stage = TransactionDiagnostics.STAGE_DEDUP,
@@ -728,7 +824,11 @@ open class PageRecognitionService : AccessibilityService() {
                     } catch (failure: Exception) {
                         transaction?.let {
                             // Preserve retryability after a transient database error.
-                            synchronized(recentCaptureKeys) { recentCaptureKeys.remove(candidate.dedupKey()) }
+                            if (!candidate.orderId.isNullOrBlank()) {
+                                synchronized(recentCaptureKeys) {
+                                    recentCaptureKeys.remove(candidate.dedupKey())
+                                }
+                            }
                         }
                         repository.recordDiagnostic(
                             attemptId = input.attemptId,
@@ -738,8 +838,7 @@ open class PageRecognitionService : AccessibilityService() {
                         )
                     }
                 }
-                lastPageIdentity = candidates.firstOrNull()?.pageIdentity
-                lastCaptureAtMs = System.currentTimeMillis()
+                advancePageThrottle(firstStored)
                 if (BuildConfig.DEBUG) {
                     Log.d(TAG, "processed ${candidates.size} card candidates")
                 }
@@ -815,17 +914,92 @@ open class PageRecognitionService : AccessibilityService() {
     private fun saveCandidate(candidate: CaptureCandidate, screenshot: ByteArray?) {
         scope.launch {
             try {
-                store.save(candidate, screenshot)
-                lastPageIdentity = candidate.pageIdentity
-                lastCaptureAtMs = System.currentTimeMillis()
+                val result = store.saveWithResult(candidate, screenshot)
+                val stored = when (result) {
+                    is CandidateSaveResult.Saved -> result.candidate
+                    is CandidateSaveResult.Failed -> {
+                        val indexFull = result.reason == CandidateSaveFailure.INDEX_FULL
+                        recordCandidateSaveFailure(
+                            if (indexFull) "Candidate index budget full; page candidate was not saved"
+                            else "Page capture candidate save failed",
+                        )
+                        if (indexFull) {
+                            ScreenshotReviewNotifier.notifyCandidateStorageFull(
+                                applicationContext,
+                                CandidateStorageIntakeKind.SCREENSHOT_PAGE,
+                            )
+                        }
+                        Log.e(TAG, "candidate save failed: ${result.reason}")
+                        return@launch
+                    }
+                }
+                advancePageThrottle(stored)
+                if (PageCaptureScreenshotPolicy.isUnavailable(stored, screenshot)) {
+                    recordCandidateSaveFailure("Screenshot evidence unavailable; candidate saved without image")
+                }
                 if (BuildConfig.DEBUG) {
                     Log.d(TAG, "candidate saved identity=${candidate.pageIdentity}")
                 }
             } catch (failure: Exception) {
                 Log.e(TAG, "candidate save failed: ${failure.javaClass.simpleName}")
+                recordCandidateSaveFailure("Page capture candidate save failed")
             } finally {
                 capturing.set(false)
             }
+        }
+    }
+
+    private fun advancePageThrottle(stored: CaptureCandidate?) {
+        if (stored == null) return
+        val current = PageCaptureThrottleState(
+            identity = lastPageIdentity,
+            eventId = lastPageEventId,
+            capturedAtMs = lastCaptureAtMs,
+        )
+        val next = PageCaptureThrottlePolicy.afterVerifiedSave(
+            current = current,
+            stored = stored,
+            savedAtMs = System.currentTimeMillis(),
+        )
+        updatePageThrottle(next)
+    }
+
+    private fun advancePageThrottleForBatch(
+        intendedCandidateCount: Int,
+        saved: List<CaptureCandidate>,
+        failed: Int,
+    ) {
+        val current = PageCaptureThrottleState(
+            identity = lastPageIdentity,
+            eventId = lastPageEventId,
+            capturedAtMs = lastCaptureAtMs,
+        )
+        val next = PageCaptureThrottlePolicy.afterVerifiedBatch(
+            current = current,
+            intendedCandidateCount = intendedCandidateCount,
+            saved = saved,
+            failed = failed,
+            savedAtMs = System.currentTimeMillis(),
+        )
+        updatePageThrottle(next)
+    }
+
+    private fun updatePageThrottle(next: PageCaptureThrottleState) {
+        lastPageIdentity = next.identity
+        lastPageEventId = next.eventId
+        lastCaptureAtMs = next.capturedAtMs
+    }
+
+    private suspend fun recordCandidateSaveFailure(details: String) {
+        try {
+            repository.recordDiagnostic(
+                attemptId = TransactionDiagnostics.newAttemptId(),
+                stage = TransactionDiagnostics.STAGE_SAVE,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = details,
+            )
+        } catch (diagnosticFailure: Exception) {
+            Log.e(TAG, "candidate save diagnostic failed: ${diagnosticFailure.javaClass.simpleName}")
         }
     }
 
@@ -849,7 +1023,6 @@ open class PageRecognitionService : AccessibilityService() {
     companion object {
         private const val TAG = "BkPageRecognition"
         private const val PAGE_CAPTURE_DEDUP_MS = 5 * 60_000L
-        private const val PAGE_DEDUP_WINDOW_MS = 30_000L
         private const val CAPTURE_KEY_TTL_MS = 10 * 60_000L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
         private const val PAGE_RECOGNITION_CLASS =
@@ -882,6 +1055,71 @@ enum class PageCaptureOutcome {
     RETRY,
 }
 
+data class PageCaptureThrottleState(
+    val identity: String? = null,
+    val eventId: String? = null,
+    val capturedAtMs: Long = 0L,
+)
+
+/** Advances callback throttling only after the candidate store returned its verified row. */
+object PageCaptureThrottlePolicy {
+    fun afterVerifiedSave(
+        current: PageCaptureThrottleState,
+        stored: CaptureCandidate?,
+        savedAtMs: Long,
+    ): PageCaptureThrottleState = stored?.let {
+        PageCaptureThrottleState(
+            identity = it.pageIdentity,
+            eventId = it.orderId?.trim()?.takeIf(String::isNotEmpty),
+            capturedAtMs = savedAtMs,
+        )
+    } ?: current
+
+    fun afterVerifiedBatch(
+        current: PageCaptureThrottleState,
+        intendedCandidateCount: Int,
+        saved: List<CaptureCandidate>,
+        failed: Int,
+        savedAtMs: Long,
+    ): PageCaptureThrottleState {
+        if (failed != 0 || saved.size != intendedCandidateCount) return current
+        return afterVerifiedSave(
+            current = current,
+            stored = saved.firstOrNull(),
+            savedAtMs = savedAtMs,
+        )
+    }
+}
+
+/** Screenshot acquisition or storage failure always routes a page card to review. */
+object PageCaptureScreenshotPolicy {
+    fun isUnavailable(stored: CaptureCandidate, screenshot: ByteArray?): Boolean =
+        (screenshot != null && stored.screenshotPath == null) ||
+            stored.screenshotUnavailableReason != null ||
+            stored.reason.startsWith(CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_PREFIX) ||
+            stored.reason == "screenshot decode failed" ||
+            stored.reason == "screenshot start failed" ||
+            stored.reason.startsWith("screenshot error ")
+}
+
+/** A page text hash is only safe to throttle when it carries the same strong event ID. */
+object PageIdentityThrottlePolicy {
+    fun shouldSuppress(
+        previousIdentity: String?,
+        previousEventId: String?,
+        previousCapturedAtMs: Long,
+        identity: String,
+        eventId: String?,
+        nowMs: Long,
+        windowMs: Long,
+    ): Boolean {
+        val stableEventId = eventId?.trim()?.takeIf(String::isNotEmpty) ?: return false
+        return previousIdentity == identity &&
+            previousEventId?.trim() == stableEventId &&
+            nowMs - previousCapturedAtMs < windowMs
+    }
+}
+
 /**
  * 把 [LedgerInsertResult] 翻译成页面识别的候选状态。
  *
@@ -898,7 +1136,6 @@ object PageCaptureResultPolicy {
         is LedgerInsertResult.Duplicate -> when (result.reason) {
             DuplicateReason.CROSS_SOURCE_WEAK -> PageCaptureOutcome.HOLD_FOR_REVIEW
             DuplicateReason.SOURCE_ORDER_ID,
-            DuplicateReason.SAME_SOURCE_WINDOW,
             DuplicateReason.CROSS_SOURCE -> PageCaptureOutcome.IGNORED
         }
     }

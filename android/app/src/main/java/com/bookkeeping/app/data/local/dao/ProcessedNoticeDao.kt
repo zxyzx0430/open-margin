@@ -20,7 +20,8 @@ interface ProcessedNoticeDao {
     @Query("UPDATE processed_notices SET lastSeenMs = :seenMs, seenCount = seenCount + 1 WHERE fingerprint = :fingerprint")
     suspend fun touch(fingerprint: String, seenMs: Long)
 
-    // 指纹表只用于近窗口重放检测，老记录定期清理，避免无限增长。
-    @Query("DELETE FROM processed_notices WHERE lastSeenMs < :beforeMs")
-    suspend fun prune(beforeMs: Long): Int
+    // First-writer link only. A reused notification record key must never point
+    // away from the ledger row it was originally associated with.
+    @Query("UPDATE processed_notices SET transactionId = :transactionId WHERE fingerprint = :fingerprint AND transactionId IS NULL")
+    suspend fun linkTransactionIfUnlinked(fingerprint: String, transactionId: Long): Int
 }

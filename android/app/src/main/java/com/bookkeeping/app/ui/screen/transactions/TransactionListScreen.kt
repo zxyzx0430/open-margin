@@ -567,14 +567,21 @@ fun TransactionListScreen(
                 }
             }
 
-            if (captureReview.pending.isNotEmpty()) {
+            if (captureReview.pending.isNotEmpty() || captureReview.ignored.isNotEmpty() ||
+                captureReview.storageWarningKinds.isNotEmpty() || captureReview.intakeFailureNotice != null
+            ) {
                 item(key = "capture_review") {
                     CaptureReviewCard(
                         count = captureReview.pending.size,
+                        ignoredCount = captureReview.ignored.size,
+                        storageWarningKinds = captureReview.storageWarningKinds,
+                        intakeFailureNotice = captureReview.intakeFailureNotice,
                         onOpen = {
                             captureReviewViewModel.refresh()
                             showCaptureReview = true
                         },
+                        onAcknowledgeStorageWarning = captureReviewViewModel::acknowledgeStorageWarning,
+                        onAcknowledgeIntakeFailure = captureReviewViewModel::acknowledgeIntakeFailureNotice,
                     )
                 }
             }

@@ -348,6 +348,14 @@ private fun CaptureCandidateCard(
                 }
                 // 跨通道弱证据命中的候选仍可记入账本，这里只说明为什么要他核对、和哪一笔像。
                 LikelyDuplicateNotice(candidate)
+                CaptureReviewMapping.screenshotUnavailableNotice(candidate)?.let { warning ->
+                    Text(
+                        text = warning,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 if (needsDirection) {
                     if (directionChoice == null) {
                         Text(

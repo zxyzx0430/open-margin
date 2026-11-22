@@ -3,8 +3,8 @@ package com.bookkeeping.app.data.local.entity
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-// 已处理通知指纹（蓝图 D05）：持久保存，进程/设备重启后仍能识别
-// 同一条通知的重放，避免重复记账。只存哈希指纹与计数，不存通知原文。
+// 已处理通知指纹（蓝图 D05）：持久保存平台订单身份 claim 与通知记录链接。
+// 通知 key 只作为记录链接；订单身份指纹才可证明同一笔交易。只存哈希，不存原文。
 @Entity(tableName = "processed_notices")
 data class ProcessedNoticeEntity(
     @PrimaryKey val fingerprint: String,
@@ -13,6 +13,6 @@ data class ProcessedNoticeEntity(
     val firstSeenMs: Long,
     val lastSeenMs: Long,
     val seenCount: Int,
-    /** 关联的账目 id；影子模式下可为空。 */
+    /** First-writer ledger link; a reused notification key must never overwrite it. */
     val transactionId: Long? = null,
 )

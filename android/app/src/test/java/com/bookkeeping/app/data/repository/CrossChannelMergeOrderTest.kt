@@ -13,13 +13,10 @@ import org.junit.Test
 /**
  * 「通知先记一行（占位商户）+ 用户点开详情页（真实商户）」的处置顺序。
  *
- * 现场：通知侧商户是「微信支付」且永远没有订单号，页面侧有真实商户。旧顺序是
- * 层 2 跨通道（含弱证据）先返回 [DuplicateReason.CROSS_SOURCE_WEAK]，根本走不到
- * 层 3 的自动合并，于是用户还要再确认一次。
+ * 一侧缺订单号或只有占位商户时，金额与时间相似只够提示用户复核，不能证明同一笔。
  *
  * 这里钉死 [CaptureMergePolicy.crossChannelDisposition] —— 仓库层 2 唯一判定点：
- * - 弱证据能按「一侧缺商户」合并 → MERGE（不新增行、不问用户）；
- * - 超过 120 秒 / 商户矛盾 / 订单号矛盾 → HOLD（仍返回 CROSS_SOURCE_WEAK）；
+ * - 弱证据自动路径必须 HOLD（仍返回 CROSS_SOURCE_WEAK），显式确认后另起一行；
  * - 强证据（两侧同订单号）在自动路径仍然 HOLD（CROSS_SOURCE），只有用户显式确认
  *   才允许 MERGE 补全；
  * - 两笔同额同商户、订单号不同的真实交易永远不合并。
@@ -63,10 +60,10 @@ class CrossChannelMergeOrderTest {
             allowWeakEvidence = true,
         )
 
-    // ---------- B：弱证据先合并在前 ----------
+    // ---------- B：弱证据保留候选 ----------
 
     @Test
-    fun `notification placeholder plus page merchant merges instead of asking`() {
+    fun `notification placeholder plus page merchant stays held without exact ids`() {
         val notification = row(id = 10, merchant = "微信支付", timestamp = t0)
         val page = row(
             id = 0,
@@ -81,7 +78,7 @@ class CrossChannelMergeOrderTest {
         assertEquals(CrossSourceDuplicatePolicy.MatchStrength.WEAK, match!!.strength)
 
         assertEquals(
-            CaptureMergePolicy.CrossChannelDisposition.MERGE_INTO_EXISTING,
+            CaptureMergePolicy.CrossChannelDisposition.HOLD_FOR_REVIEW,
             CaptureMergePolicy.crossChannelDisposition(
                 matched = match.transaction,
                 incoming = page,
@@ -90,14 +87,7 @@ class CrossChannelMergeOrderTest {
             ),
         )
 
-        val merged = CaptureMergePolicy.mergeInto(match.transaction, page)
-        // 账本不增行：保留先入库那条的 id / 时间 / 金额，只补全信息。
-        assertEquals(10L, merged.id)
-        assertEquals(t0, merged.timestamp)
-        assertEquals(2000L, merged.amountCents)
-        assertEquals("麦当劳", merged.merchant)
-        assertEquals("4200001234567890", merged.sourceTransactionId)
-        assertEquals(t0 + 20_000L, merged.captureObservedAtMs)
+        assertNull(CaptureMergePolicy.planConfirmedMerge(match.transaction, page))
     }
 
     @Test
@@ -267,13 +257,42 @@ class CrossChannelMergeOrderTest {
     }
 
     @Test
+    fun `matching order text on different platforms is not a cross channel identity`() {
+        val wechat = row(
+            id = 10,
+            source = TransactionSource.WECHAT.name,
+            merchant = "Fixture shop",
+            orderId = "FIXTURE-SHARED-TEXT-ID",
+            timestamp = t0,
+        )
+        val alipay = row(
+            id = 0,
+            source = TransactionSource.ALIPAY.name,
+            merchant = "Fixture shop",
+            orderId = "FIXTURE-SHARED-TEXT-ID",
+            timestamp = t0 + 1_000L,
+            fromPage = true,
+        )
+
+        assertNull(
+            CrossSourceDuplicatePolicy.findMatchDetailed(
+                candidates = listOf(wechat),
+                incoming = alipay,
+                windowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+                allowWeakEvidence = true,
+            ),
+        )
+        assertFalse(CaptureMergePolicy.isSamePayment(wechat, alipay))
+    }
+
+    @Test
     fun `merged or excluded rows are never used as merge targets`() {
         val excluded = row(id = 11, merchant = "微信支付", timestamp = t0, reviewStatus = "excluded")
         val page = row(id = 0, merchant = "麦当劳", timestamp = t0 + 5_000L, fromPage = true)
 
         assertFalse(CaptureMergePolicy.canReceiveMerge(excluded))
         assertEquals(
-            CaptureMergePolicy.CrossChannelDisposition.HOLD_FOR_REVIEW,
+            CaptureMergePolicy.CrossChannelDisposition.INSERT_SEPARATELY,
             CaptureMergePolicy.crossChannelDisposition(
                 matched = excluded,
                 incoming = page,

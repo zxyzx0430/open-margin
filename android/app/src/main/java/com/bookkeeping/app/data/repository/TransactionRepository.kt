@@ -1,29 +1,41 @@
 package com.bookkeeping.app.data.repository
 
-import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
-import com.bookkeeping.app.data.local.dao.TransactionDao
+import android.content.Context
+import androidx.room.withTransaction
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
-import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.local.BookkeepingDatabase
+import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
+import com.bookkeeping.app.data.local.dao.TransactionDao
+import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
+import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.data.local.entity.TransactionSource
+import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.CaptureNotifier
 import com.bookkeeping.app.notification.KeepAliveService
+import com.bookkeeping.app.notification.NoticeFingerprint
+import com.bookkeeping.app.notification.NoticeReplayPolicy
+import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.notification.capture.CandidateSaveFailure
+import com.bookkeeping.app.notification.capture.CandidateSaveResult
+import com.bookkeeping.app.notification.capture.NotificationReviewCandidateFactory
+import com.bookkeeping.app.capture.screenshot.ScreenshotReviewNotifier
+import com.bookkeeping.app.capture.screenshot.CandidateStorageIntakeKind
 import com.bookkeeping.app.sync.TransactionSyncWorker
-import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
-import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
-import com.bookkeeping.app.data.local.entity.TransactionEntity
-import com.bookkeeping.app.data.local.entity.TransactionSource
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.util.UUID
 import kotlin.math.abs
 
 /**
@@ -55,13 +67,26 @@ sealed interface LedgerInsertResult {
     data class Failed(val cause: Throwable) : LedgerInsertResult
 }
 
-/** 判定重复的判据；前两条是确定重复，跨通道命中只是启发式。 */
+/** Result of an atomic notification event claim plus ledger write. */
+sealed interface NotificationInsertResult {
+    /** This exact platform-scoped transaction ID is already linked; no ledger write was attempted. */
+    data class Replayed(val transactionId: Long) : NotificationInsertResult
+
+    /** A record key or legacy fingerprint is ambiguous; it is preserved for review. */
+    data class NeedsReview(val reason: String, val candidateTransactionId: Long? = null) :
+        NotificationInsertResult
+
+    /** First delivery of this fingerprint; [ledgerResult] explains its ledger outcome. */
+    data class Processed(val ledgerResult: LedgerInsertResult) : NotificationInsertResult
+
+    /** The transaction rolled back, including its fingerprint claim; the caller may retry. */
+    data class Failed(val cause: Throwable) : NotificationInsertResult
+}
+
+/** 判定重复的判据；订单号是精确证据，跨通道命中可能仍需用户复核。 */
 enum class DuplicateReason {
     /** 同来源 + 同订单号：同一笔被重复上报。 */
     SOURCE_ORDER_ID,
-
-    /** 同来源 + 同商户 + 同金额 + 8 秒窗口：同一通道的重发。 */
-    SAME_SOURCE_WINDOW,
 
     /** 跨采集通道的同额同方强证据命中（两侧同一订单号）：已确认是同一笔。 */
     CROSS_SOURCE,
@@ -97,6 +122,7 @@ internal fun LedgerInsertResult.toLegacyTransactionId(): Long? = when (this) {
 class TransactionRepository @Inject constructor(
     private val dao: TransactionDao,
     private val processedNoticeDao: ProcessedNoticeDao,
+    private val database: BookkeepingDatabase,
     private val settings: SettingsPreferences,
     private val diagnostics: TransactionDiagnostics,
     @ApplicationContext private val context: Context,
@@ -121,6 +147,18 @@ class TransactionRepository @Inject constructor(
         transaction: TransactionEntity,
         notifySuccess: Boolean = false,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+    ): Long = insertInternal(
+        transaction = transaction,
+        notifySuccess = notifySuccess,
+        diagnosticInput = diagnosticInput,
+        deferPostCommitEffects = false,
+    )
+
+    private suspend fun insertInternal(
+        transaction: TransactionEntity,
+        notifySuccess: Boolean,
+        diagnosticInput: TransactionDiagnosticInput,
+        deferPostCommitEffects: Boolean,
     ): Long {
         val operationStage = if (transaction.source == "MANUAL") {
             TransactionDiagnostics.STAGE_ENTRY
@@ -208,7 +246,7 @@ class TransactionRepository @Inject constructor(
         // never affect the ledger or sync path.
         val possibleDuplicate = transaction.duplicateOfId != null ||
             transaction.remoteReviewStatus == "possible_duplicate"
-        if (notifySuccess && id > 0L) {
+        if (!deferPostCommitEffects && notifySuccess && id > 0L) {
             try {
                 // Duplicate review is an important prompt, not a success
                 // notification; it remains visible when success is disabled.
@@ -231,35 +269,23 @@ class TransactionRepository @Inject constructor(
                 )
             }
         }
-        requestSync(diagnosticInput, saved)
+        if (!deferPostCommitEffects) requestSync(diagnosticInput, saved)
         return id
     }
 
     // 自动抓取路径专用。
-    // 1) 同一订单号已经在库里 → 直接跳过（同一笔被重复上报）。
-    // 2) 8s 内同来源同商户同金额 → 跳过（同一通道重发）。
-    // 3) 120s 内同来源同金额，且商户/订单号互证 → 自动合并进先入库的那条：
-    //    不插新行、不弹「待确认重复」，把新记录里更全的信息写回旧行。
-    //    跨通道的一侧缺商户（通知占位名）+ 另一侧有真实商户也走这里，见
-    //    CaptureMergePolicy.isSamePaymentWithOneSidedMerchant。
-    // 4) 其余同金额/方向/币种、3 分钟内相近的记录只标注为「待确认重复」，
-    //    仍然插入账本，绝不删除旧记录，由用户在交易页决定保留还是删除新记录。
-    // 5) 跨通道只在截图/页面路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭，
-    //    通知/短信/手工完全不变）：同额同方同向、时间邻近、另一条通道已经记过
-    //    → 不插新行。通道靠 captureObservedAtMs 区分，不靠 source 字符串。
-    //    两侧同一订单号是强证据（CROSS_SOURCE）；一侧没商户、另一侧有商户的弱证据
-    //    只在调用方传 holdWeakCrossSourceMatch = true 时计算。弱证据命中后先试
-    //    「一侧缺商户」的自动合并（120s 窗口内），能合就并入已有行返回 Merged，
-    //    合不了才返回 CROSS_SOURCE_WEAK，调用方保留候选待确认。
-    //    用户显式确认时（mergeConfirmedCrossSource = true）强证据也允许把截图里
-    //    更完整的字段并进已有行，而不是只回一句「已存在」。
+    // 1) 同一非空平台订单号已经在库里 → 直接跳过。
+    // 2) 只有同一非空订单号能自动合并并补全先入库行；金额、商户、时间相似本身不足以
+    //    证明是同一事件，可能重复的行仍然插入并标记待复核。
+    // 3) 跨通道只在截图/页面路径显式传 crossSourceWindowMs 时检查（默认 0 = 关闭）。
+    //    两侧同一订单号是强证据（CROSS_SOURCE）；弱证据只在调用方明确要求时计算，
+    //    命中后保留候选待确认。用户确认后仍可合并已有行中的强证据匹配。
     /** Recent ledger rows for screenshot cross-source de-duplication (read-only). */
     suspend fun screenshotDedupRows(limit: Int = 500): List<TransactionEntity> =
         dao.recentForScreenshotDedup(limit)
 
     suspend fun insertIfNotDuplicate(
         transaction: TransactionEntity,
-        windowMs: Long = 8_000L,
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         /**
@@ -269,14 +295,13 @@ class TransactionRepository @Inject constructor(
          */
         crossSourceWindowMs: Long = 0L,
         /**
-         * 跨通道只有弱证据（一侧没有商户信息）时也不插新行，但把结果标成
-         * [DuplicateReason.CROSS_SOURCE_WEAK] 让调用方保留候选待确认。
+         * 自动路径遇到弱跨通道证据（一侧没有商户信息）时不插新行，把结果标成
+         * [DuplicateReason.CROSS_SOURCE_WEAK] 让调用方保留候选待确认。用户确认后按独立新行写入。
          * 默认 false：除页面识别外的调用方行为不变。
          */
         holdWeakCrossSourceMatch: Boolean = false,
     ): Long? = insertIfNotDuplicateResult(
         transaction = transaction,
-        windowMs = windowMs,
         notifySuccess = notifySuccess,
         diagnosticInput = diagnosticInput,
         crossSourceWindowMs = crossSourceWindowMs,
@@ -293,7 +318,6 @@ class TransactionRepository @Inject constructor(
      */
     suspend fun insertIfNotDuplicateResult(
         transaction: TransactionEntity,
-        windowMs: Long = 8_000L,
         notifySuccess: Boolean = true,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         crossSourceWindowMs: Long = 0L,
@@ -305,15 +329,16 @@ class TransactionRepository @Inject constructor(
          */
         mergeConfirmedCrossSource: Boolean = false,
     ): LedgerInsertResult = try {
-        insertIfNotDuplicateLocked(
-            transaction = transaction,
-            windowMs = windowMs,
-            notifySuccess = notifySuccess,
-            diagnosticInput = diagnosticInput,
-            crossSourceWindowMs = crossSourceWindowMs,
-            holdWeakCrossSourceMatch = holdWeakCrossSourceMatch,
-            mergeConfirmedCrossSource = mergeConfirmedCrossSource,
-        )
+        duplicateMutex.withLock {
+            insertIfNotDuplicateLocked(
+                transaction = transaction,
+                notifySuccess = notifySuccess,
+                diagnosticInput = diagnosticInput,
+                crossSourceWindowMs = crossSourceWindowMs,
+                holdWeakCrossSourceMatch = holdWeakCrossSourceMatch,
+                mergeConfirmedCrossSource = mergeConfirmedCrossSource,
+            )
+        }
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (failure: Exception) {
@@ -322,13 +347,13 @@ class TransactionRepository @Inject constructor(
 
     private suspend fun insertIfNotDuplicateLocked(
         transaction: TransactionEntity,
-        windowMs: Long,
         notifySuccess: Boolean,
         diagnosticInput: TransactionDiagnosticInput,
         crossSourceWindowMs: Long,
         holdWeakCrossSourceMatch: Boolean,
         mergeConfirmedCrossSource: Boolean = false,
-    ): LedgerInsertResult = duplicateMutex.withLock {
+        deferPostCommitEffects: Boolean = false,
+    ): LedgerInsertResult {
         val callSite = diagnosticInput.callSite ?: "TransactionRepository.insertIfNotDuplicate"
         val money = DiagnosticSummary.amountWithMerchant(
             amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
@@ -339,9 +364,9 @@ class TransactionRepository @Inject constructor(
             stage = TransactionDiagnostics.STAGE_DEDUP,
             result = TransactionDiagnostics.RESULT_STARTED,
             callSite = callSite,
-            inputSummary = "$money · 比对同商户同金额",
+            inputSummary = "$money · 检查订单号与事件证据",
         )
-        transaction.sourceTransactionId?.let { orderId ->
+        transaction.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)?.let { orderId ->
             val matched = try {
                 dao.findBySourceTransactionId(transaction.source, orderId)
             } catch (failure: Exception) {
@@ -366,59 +391,20 @@ class TransactionRepository @Inject constructor(
                     inputSummary = money,
                     outputSummary = "命中已有 #${matched.id}（订单号相同），跳过写入",
                 )
-                return@withLock LedgerInsertResult.Duplicate(
+                return LedgerInsertResult.Duplicate(
                     existingTransactionId = matched.id,
                     reason = DuplicateReason.SOURCE_ORDER_ID,
                 )
             }
         }
-        val existing = try {
-            dao.findRecentSameAmount(
-                source = transaction.source,
-                merchant = transaction.merchant,
-                amountCents = transaction.amountCents,
-                type = transaction.type,
-                currency = transaction.currency,
-                windowStartMs = transaction.timestamp - windowMs,
-                windowEndMs = transaction.timestamp + windowMs,
-            )
-        } catch (failure: Exception) {
-            diagnostics.record(
-                attemptId = diagnosticInput.attemptId,
-                stage = TransactionDiagnostics.STAGE_DEDUP,
-                result = TransactionDiagnostics.RESULT_FAILURE,
-                details = diagnosticError(failure),
-                callSite = callSite,
-                inputSummary = money,
-            )
-            throw failure
-        }
-        if (existing != null) {
-            diagnostics.record(
-                attemptId = diagnosticInput.attemptId,
-                stage = TransactionDiagnostics.STAGE_DEDUP,
-                result = TransactionDiagnostics.RESULT_WARNING,
-                details = "Exact duplicate candidate skipped",
-                transactionId = existing.id,
-                callSite = callSite,
-                inputSummary = money,
-                outputSummary = "命中已有 #${existing.id}，跳过写入",
-            )
-            return@withLock LedgerInsertResult.Duplicate(
-                existingTransactionId = existing.id,
-                reason = DuplicateReason.SAME_SOURCE_WINDOW,
-            )
-        }
-
         // 层 2：跨通道拦截。默认关闭（crossSourceWindowMs = 0），只有截图/页面路径显式
         // 传窗口才走到这里；通知/短信/手工记账的调用一行未改。
         //
         // 判定顺序刻意是「先看能不能合并，再决定是否拦下」：
         // - 强证据（两侧同一订单号）默认仍然只报 CROSS_SOURCE；只有用户显式确认
         //   （mergeConfirmedCrossSource）时才允许把截图里更完整的字段并进已有行。
-        // - 弱证据（一侧没有商户信息，另一侧有真实商户）命中时，先拿命中的那条做
-        //   「一侧缺商户」的自动合并判定；能合就直接并入（Merged），不再把用户
-        //   拦在待确认卡片前。合不了才返回 CROSS_SOURCE_WEAK 交人工确认。
+        // - 弱证据（一侧没有商户信息，另一侧有真实商户）只在调用方明确要求时计算；
+        //   自动路径保留候选给用户确认，用户确认后仍按独立新行写入，不做弱证据合并。
         val crossSourceMatch = if (crossSourceWindowMs > 0L) {
             try {
                 CrossSourceDuplicatePolicy.findMatchDetailed(
@@ -445,7 +431,7 @@ class TransactionRepository @Inject constructor(
         } else {
             null
         }
-        // 由跨通道命中直接确定要并入的已有行（弱证据自动合并 / 用户确认后的强证据补全）。
+        // 跨通道命中只会在强 ID 证据且用户确认后成为合并目标。
         var crossChannelMergeTarget: TransactionEntity? = null
         if (crossSourceMatch != null) {
             val weak = crossSourceMatch.strength == CrossSourceDuplicatePolicy.MatchStrength.WEAK
@@ -456,31 +442,48 @@ class TransactionRepository @Inject constructor(
                 weak = weak,
                 confirmedByUser = mergeConfirmedCrossSource,
             )
-            if (disposition == CaptureMergePolicy.CrossChannelDisposition.MERGE_INTO_EXISTING) {
-                crossChannelMergeTarget = matched
-            } else {
-                diagnostics.record(
-                    attemptId = diagnosticInput.attemptId,
-                    stage = TransactionDiagnostics.STAGE_DEDUP,
-                    result = TransactionDiagnostics.RESULT_WARNING,
-                    details = if (weak) {
-                        "Cross-channel weak duplicate held for review"
-                    } else {
-                        "Cross-channel duplicate candidate skipped"
-                    },
-                    transactionId = matched.id,
-                    callSite = callSite,
-                    inputSummary = money,
-                    outputSummary = if (weak) {
-                        "疑似与已有 #${matched.id} 重复，保留待确认"
-                    } else {
-                        "命中已有 #${matched.id}（跨通道同订单号），跳过写入"
-                    },
-                )
-                return@withLock LedgerInsertResult.Duplicate(
-                    existingTransactionId = matched.id,
-                    reason = if (weak) DuplicateReason.CROSS_SOURCE_WEAK else DuplicateReason.CROSS_SOURCE,
-                )
+            when (disposition) {
+                CaptureMergePolicy.CrossChannelDisposition.MERGE_INTO_EXISTING -> {
+                    crossChannelMergeTarget = matched
+                }
+
+                CaptureMergePolicy.CrossChannelDisposition.INSERT_SEPARATELY -> {
+                    diagnostics.record(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                        result = TransactionDiagnostics.RESULT_WARNING,
+                        details = "Weak cross-channel resemblance explicitly confirmed as a separate transaction",
+                        transactionId = matched.id,
+                        callSite = callSite,
+                        inputSummary = money,
+                        outputSummary = "弱相似度没有证明同一笔，按用户确认保留为新记录",
+                    )
+                }
+
+                CaptureMergePolicy.CrossChannelDisposition.HOLD_FOR_REVIEW -> {
+                    diagnostics.record(
+                        attemptId = diagnosticInput.attemptId,
+                        stage = TransactionDiagnostics.STAGE_DEDUP,
+                        result = TransactionDiagnostics.RESULT_WARNING,
+                        details = if (weak) {
+                            "Cross-channel weak duplicate held for review"
+                        } else {
+                            "Cross-channel duplicate candidate skipped"
+                        },
+                        transactionId = matched.id,
+                        callSite = callSite,
+                        inputSummary = money,
+                        outputSummary = if (weak) {
+                            "疑似与已有 #${matched.id} 重复，保留待确认"
+                        } else {
+                            "命中已有 #${matched.id}（跨通道同订单号），跳过写入"
+                        },
+                    )
+                    return LedgerInsertResult.Duplicate(
+                        existingTransactionId = matched.id,
+                        reason = if (weak) DuplicateReason.CROSS_SOURCE_WEAK else DuplicateReason.CROSS_SOURCE,
+                    )
+                }
             }
         }
 
@@ -521,10 +524,17 @@ class TransactionRepository @Inject constructor(
                     "并入已有 #${merged.id}，补全商户与订单号"
                 },
             )
-            update(merged, diagnosticInput, operationStage = TransactionDiagnostics.STAGE_CAPTURE)
-            CaptureHealth.onTransactionSaved(context)
-            KeepAliveService.refreshStatus(context)
-            if (notifySuccess) {
+            updateInternal(
+                merged,
+                diagnosticInput,
+                operationStage = TransactionDiagnostics.STAGE_CAPTURE,
+                requestSyncAfterWrite = !deferPostCommitEffects,
+            )
+            if (!deferPostCommitEffects) {
+                CaptureHealth.onTransactionSaved(context)
+                KeepAliveService.refreshStatus(context)
+            }
+            if (!deferPostCommitEffects && notifySuccess) {
                 try {
                     if (settings.successNotificationsEnabledNow()) {
                         CaptureNotifier.notifySaved(
@@ -546,7 +556,7 @@ class TransactionRepository @Inject constructor(
                     )
                 }
             }
-            return@withLock LedgerInsertResult.Merged(merged.id)
+            return LedgerInsertResult.Merged(merged.id)
         }
 
         val similar = try {
@@ -595,10 +605,17 @@ class TransactionRepository @Inject constructor(
                 "未命中重复，继续写入"
             },
         )
-        val id = insert(candidate, notifySuccess = notifySuccess, diagnosticInput = diagnosticInput)
+        val id = insertInternal(
+            candidate,
+            notifySuccess = notifySuccess,
+            diagnosticInput = diagnosticInput,
+            deferPostCommitEffects = deferPostCommitEffects,
+        )
         if (id > 0L) {
-            CaptureHealth.onTransactionSaved(context)
-            KeepAliveService.refreshStatus(context)
+            if (!deferPostCommitEffects) {
+                CaptureHealth.onTransactionSaved(context)
+                KeepAliveService.refreshStatus(context)
+            }
             LedgerInsertResult.Inserted(id)
         } else {
             // Room 的 REPLACE 冲突不会抛异常，只返回 -1；账本里没有这一行，
@@ -609,18 +626,18 @@ class TransactionRepository @Inject constructor(
         }
     }
 
-    /** 自动合并的目标：窗口内证据最充分的同来源记录，优先 id 最小（先入库）的那条。 */
+    /** 自动合并目标只允许同一非空平台订单号命中的记录。 */
     private suspend fun findAutoMergeTarget(transaction: TransactionEntity): TransactionEntity? =
-        CaptureMergePolicy.findMergeTarget(
-            candidates = dao.findRecentByAmount(
+        dao.findRecentByAmount(
                 amountCents = transaction.amountCents,
                 type = transaction.type,
                 currency = transaction.currency,
                 windowStartMs = transaction.timestamp - CaptureMergePolicy.AUTO_MERGE_WINDOW_MS,
                 windowEndMs = transaction.timestamp + CaptureMergePolicy.AUTO_MERGE_WINDOW_MS,
-            ),
-            incoming = transaction,
-        )
+            )
+            .asSequence()
+            .filter { CaptureMergePolicy.isSamePayment(it, transaction) }
+            .minByOrNull { it.id }
 
     /**
      * 一次性本地纠正：修掉升级前已经各插一条的重复对（通知缺商户 + 支付成功页有商户）。
@@ -652,34 +669,338 @@ class TransactionRepository @Inject constructor(
         mergedPairs
     }
 
-    // 用户在交易页确认“两笔都是真的”：清除本地标记，并把状态同步为已确认。
-    suspend fun keepBoth(transaction: TransactionEntity) {
-        if (transaction.duplicateOfId == null &&
-            transaction.remoteReviewStatus != "possible_duplicate") return
-        update(transaction.copy(duplicateOfId = null, remoteReviewStatus = "confirmed"))
+    /**
+     * Atomically persist transaction identity claims, notification record links,
+     * and the ledger write. Exact platform + order ID is the replay identity;
+     * a notification key is only a first-writer link and repeated key-only input
+     * returns NeedsReview. The repository mutex is acquired before Room, matching
+     * every other de-duplicating insert path.
+     * @param fingerprint Hash of the source notification record key, if available;
+     * it is not a payment identity and cannot independently produce Replayed.
+     */
+    suspend fun insertNotificationIfNotReplayed(
+        fingerprint: String?,
+        source: String,
+        seenMs: Long,
+        transaction: TransactionEntity,
+        notifySuccess: Boolean = false,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+        legacyFingerprints: Set<String> = emptySet(),
+    ): NotificationInsertResult {
+        val result = try {
+            duplicateMutex.withLock {
+                database.withTransaction {
+                    insertNotificationInTransaction(
+                        fingerprint = fingerprint,
+                        source = source,
+                        seenMs = seenMs,
+                        transaction = transaction,
+                        notifySuccess = notifySuccess,
+                        diagnosticInput = diagnosticInput,
+                        legacyFingerprints = legacyFingerprints,
+                    )
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (rollback: NotificationInsertRollback) {
+            return NotificationInsertResult.Failed(rollback.failure)
+        } catch (failure: Exception) {
+            return NotificationInsertResult.Failed(failure)
+        }
+
+        if (result is NotificationInsertResult.Processed) {
+            withContext(NonCancellable) {
+                postCommitNotificationEffects(
+                    ledgerResult = result.ledgerResult,
+                    transaction = transaction,
+                    notifySuccess = notifySuccess,
+                    diagnosticInput = diagnosticInput,
+                )
+            }
+        } else if (result is NotificationInsertResult.NeedsReview) {
+            val saved = try {
+                withContext(NonCancellable) {
+                    val store = CaptureCandidateStore(context)
+                    val candidate = NotificationReviewCandidateFactory.create(
+                        transaction = transaction,
+                        seenAtMs = seenMs,
+                        reason = result.reason,
+                        diagnosticAttemptId = diagnosticInput.attemptId,
+                        matchedTransactionId = result.candidateTransactionId,
+                    ) ?: throw IllegalArgumentException("ambiguous transaction cannot form a review candidate")
+                    when (val savedCandidate = store.saveWithResult(candidate, null)) {
+                        is CandidateSaveResult.Saved -> Unit
+                        is CandidateSaveResult.Failed -> {
+                            if (savedCandidate.reason == CandidateSaveFailure.INDEX_FULL) {
+                                diagnostics.record(
+                                    attemptId = diagnosticInput.attemptId,
+                                    stage = TransactionDiagnostics.STAGE_SAVE,
+                                    result = TransactionDiagnostics.RESULT_FAILURE,
+                                    details = "Candidate index budget full; notification review candidate was not saved",
+                                )
+                                val intakeKind = if (transaction.source == TransactionSource.BANK_SMS.name) {
+                                    CandidateStorageIntakeKind.SMS
+                                } else {
+                                    CandidateStorageIntakeKind.NOTIFICATION
+                                }
+                                ScreenshotReviewNotifier.notifyCandidateStorageFull(context, intakeKind)
+                            }
+                            throw IllegalStateException(
+                                if (savedCandidate.reason == CandidateSaveFailure.INDEX_FULL) {
+                                    "candidate review storage is full"
+                                } else {
+                                    "ambiguous transaction review candidate could not be stored"
+                                },
+                            )
+                        }
+                    }
+                    ScreenshotReviewNotifier.notifyPending(context, store.pending())
+                    true
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                return NotificationInsertResult.Failed(failure)
+            }
+            if (!saved) return NotificationInsertResult.Failed(
+                IllegalStateException("ambiguous transaction review candidate could not be stored"),
+            )
+        }
+        return result
     }
 
-    /**
-     * 上一条同指纹通知的持久记录；没记录过返回 null。
-     *
-     * 指纹只在入库成功之后才写入（见 [recordNoticeFingerprint]），所以非 null 就
-     * 表示这条通知对应的钱已经在账本里，同一指纹的重投递可以安全跳过。
-     */
-    suspend fun findProcessedNotice(fingerprint: String): ProcessedNoticeEntity? =
-        processedNoticeDao.find(fingerprint)
+    /** Caller holds [duplicateMutex] and a Room transaction. */
+    private suspend fun insertNotificationInTransaction(
+        fingerprint: String?,
+        source: String,
+        seenMs: Long,
+        transaction: TransactionEntity,
+        notifySuccess: Boolean,
+        diagnosticInput: TransactionDiagnosticInput,
+        legacyFingerprints: Set<String>,
+    ): NotificationInsertResult {
+        val orderId = transaction.sourceTransactionId?.trim()?.takeIf(String::isNotEmpty)
+        val transactionFingerprint = NoticeFingerprint.forPlatformTransaction(
+            platform = transaction.source,
+            transactionId = orderId,
+        )
 
-    /**
-     * 记录 / 续期一条**已经成功入账**的通知指纹（重放检测用；只存哈希，不存原文）。
-     *
-     * 记录时机是入库成功之后，而不是解析之后：写入失败（数据库异常、进程被杀）时
-     * 指纹不存在，用户再点一次通知还能重新入账，不会被重放检测误拦——重放检测
-     * 只允许「同一条通知重复投递」少记一次，绝不允许把没入账的钱当成已入账。
-     */
-    suspend fun recordNoticeFingerprint(
+        // Exact, platform-scoped order IDs are the only notification replay
+        // identity. A linked claim remains idempotent even if its ledger row was
+        // later removed; if it is still present, verify the claim before using it.
+        val previousTransactionClaim = transactionFingerprint?.let { processedNoticeDao.find(it) }
+        if (transactionFingerprint != null && previousTransactionClaim != null) {
+            val linkedId = previousTransactionClaim.transactionId
+            if (linkedId != null) {
+                val linked = dao.getById(linkedId)
+                if (linked != null && !linked.matchesPlatformOrder(transaction.source, orderId!!)) {
+                    return NotificationInsertResult.NeedsReview(
+                        reason = "Exact platform transaction identity points to a different ledger row",
+                        candidateTransactionId = linkedId,
+                    )
+                }
+                recordNotificationLinkIfAbsent(fingerprint, source, seenMs, linkedId)
+                processedNoticeDao.touch(transactionFingerprint, seenMs)
+                return NotificationInsertResult.Replayed(linkedId)
+            }
+
+            // A previous transaction claim without a ledger link is unresolved.
+            // An exact matching ledger row can safely repair that link; otherwise
+            // keep the claim intact and expose the ambiguity to diagnostics.
+            val exactExisting = dao.findBySourceTransactionId(transaction.source, orderId!!)
+            if (exactExisting != null && linkTransactionIdentity(
+                    transactionFingerprint,
+                    source,
+                    seenMs,
+                    exactExisting.id,
+                )
+            ) {
+                recordNotificationLinkIfAbsent(fingerprint, source, seenMs, exactExisting.id)
+                return NotificationInsertResult.Replayed(exactExisting.id)
+            }
+            return NotificationInsertResult.NeedsReview(
+                reason = "Exact platform transaction identity is already claimed without a proven ledger link",
+                candidateTransactionId = previousTransactionClaim.transactionId,
+            )
+        }
+
+        // A transaction ID can also match a ledger row captured through another
+        // path or an older app version. Exact platform + order ID is sufficient
+        // proof; the notification record link is inserted only if still unused.
+        if (transactionFingerprint != null) {
+            val exactExisting = dao.findBySourceTransactionId(transaction.source, orderId!!)
+            if (exactExisting != null) {
+                if (!linkTransactionIdentity(
+                        transactionFingerprint,
+                        source,
+                        seenMs,
+                        exactExisting.id,
+                    )
+                ) {
+                    return NotificationInsertResult.NeedsReview(
+                        reason = "Exact platform transaction identity conflicts with an existing claim",
+                        candidateTransactionId = exactExisting.id,
+                    )
+                }
+                recordNotificationLinkIfAbsent(fingerprint, source, seenMs, exactExisting.id)
+                return NotificationInsertResult.Replayed(exactExisting.id)
+            }
+        }
+
+        val previousRecord = fingerprint?.let { processedNoticeDao.find(it) }
+        if (previousRecord != null) {
+            val priorLedger = previousRecord.transactionId?.let { dao.getById(it) }
+            val priorMatchesTransaction = orderId != null && priorLedger?.matchesPlatformOrder(
+                transaction.source,
+                orderId,
+            ) == true
+            when (NoticeReplayPolicy.classifyRecordKey(
+                previousRecordExists = true,
+                hasTrustedTransactionId = transactionFingerprint != null,
+                previousLinkMatchesTransactionId = priorMatchesTransaction,
+            )) {
+                NoticeReplayPolicy.RecordKeyDecision.EXACT_TRANSACTION -> {
+                    val priorId = requireNotNull(previousRecord.transactionId)
+                    if (transactionFingerprint != null && !linkTransactionIdentity(
+                            transactionFingerprint,
+                            source,
+                            seenMs,
+                            priorId,
+                        )
+                    ) {
+                        return NotificationInsertResult.NeedsReview(
+                            reason = "Notification record link conflicts with the exact transaction identity",
+                            candidateTransactionId = priorId,
+                        )
+                    }
+                    return NotificationInsertResult.Replayed(priorId)
+                }
+                NoticeReplayPolicy.RecordKeyDecision.DISTINCT_TRANSACTION -> {
+                    // The exact incoming ID proves this is another payment. Keep
+                    // the original notification-key link unchanged and continue.
+                }
+                NoticeReplayPolicy.RecordKeyDecision.AMBIGUOUS_REUSE ->
+                    return NotificationInsertResult.NeedsReview(
+                        reason = "Notification record key was seen before, but no trustworthy transaction ID can distinguish a refresh from a new payment",
+                        candidateTransactionId = previousRecord.transactionId,
+                    )
+                NoticeReplayPolicy.RecordKeyDecision.NEW_RECORD -> Unit
+            }
+        }
+
+        // Historical content-only fingerprints are not event identities. Without
+        // an exact order ID they remain explicitly ambiguous; with an exact ID,
+        // the strong identity below safely distinguishes a new payment.
+        if (transactionFingerprint == null) {
+            for (legacyFingerprint in legacyFingerprints) {
+                if (legacyFingerprint == fingerprint) continue
+                val candidate = processedNoticeDao.find(legacyFingerprint) ?: continue
+                return resolveUnlinkedNotice(candidate)
+            }
+        }
+
+        // Claim the appropriate identity before writing the ledger row. A record
+        // key with no transaction ID can only claim once; a repeat is ambiguity,
+        // never an automatic replay. Strong transaction claims are namespaced by
+        // source platform and exact order ID.
+        var claimedRecordFingerprint = false
+        if (transactionFingerprint == null && fingerprint != null) {
+            val claimed = processedNoticeDao.insertIgnore(
+                ProcessedNoticeEntity(
+                    fingerprint = fingerprint,
+                    source = source,
+                    firstSeenMs = seenMs,
+                    lastSeenMs = seenMs,
+                    seenCount = 1,
+                ),
+            )
+            if (claimed == -1L) {
+                val winner = processedNoticeDao.find(fingerprint)
+                return NotificationInsertResult.NeedsReview(
+                    reason = "Notification record key was concurrently claimed without transaction-level identity",
+                    candidateTransactionId = winner?.transactionId,
+                )
+            }
+            claimedRecordFingerprint = true
+        }
+        if (transactionFingerprint != null) {
+            val claimed = processedNoticeDao.insertIgnore(
+                ProcessedNoticeEntity(
+                    fingerprint = transactionFingerprint,
+                    source = source,
+                    firstSeenMs = seenMs,
+                    lastSeenMs = seenMs,
+                    seenCount = 1,
+                ),
+            )
+            if (claimed == -1L) {
+                val winner = processedNoticeDao.find(transactionFingerprint)
+                if (winner?.transactionId != null && NoticeReplayPolicy.isSamePlatformTransaction(
+                        previousFingerprint = winner.fingerprint,
+                        incomingFingerprint = transactionFingerprint,
+                        linkedTransactionId = winner.transactionId,
+                    )
+                ) {
+                    recordNotificationLinkIfAbsent(fingerprint, source, seenMs, winner.transactionId)
+                    return NotificationInsertResult.Replayed(winner.transactionId)
+                }
+                return NotificationInsertResult.NeedsReview(
+                    reason = "Exact platform transaction identity was concurrently claimed without a ledger link",
+                    candidateTransactionId = winner?.transactionId,
+                )
+            }
+        }
+
+        val ledgerResult = insertIfNotDuplicateLocked(
+            transaction = transaction,
+            notifySuccess = notifySuccess,
+            diagnosticInput = diagnosticInput,
+            crossSourceWindowMs = 0L,
+            holdWeakCrossSourceMatch = false,
+            deferPostCommitEffects = true,
+        )
+        if (ledgerResult is LedgerInsertResult.Failed) {
+            // Throwing exits the Room transaction, removing the stable claim.
+            throw NotificationInsertRollback(ledgerResult.cause)
+        }
+        val transactionId = when (ledgerResult) {
+            is LedgerInsertResult.Inserted -> ledgerResult.transactionId
+            is LedgerInsertResult.Merged -> ledgerResult.transactionId
+            is LedgerInsertResult.Duplicate -> ledgerResult.existingTransactionId
+            is LedgerInsertResult.Failed -> error("handled above")
+        }
+        if (transactionFingerprint != null &&
+            processedNoticeDao.linkTransactionIfUnlinked(transactionFingerprint, transactionId) != 1
+        ) {
+            throw IllegalStateException("Could not link the exact transaction identity to its ledger row")
+        }
+        if (claimedRecordFingerprint &&
+            processedNoticeDao.linkTransactionIfUnlinked(requireNotNull(fingerprint), transactionId) != 1
+        ) {
+            throw IllegalStateException("Could not link the notification record key to its first ledger row")
+        }
+        if (transactionFingerprint != null) {
+            // A second, distinct order ID may reuse an Android notification key.
+            // Insert its record link only when no earlier notice has claimed it.
+            recordNotificationLinkIfAbsent(fingerprint, source, seenMs, transactionId)
+        }
+        return NotificationInsertResult.Processed(ledgerResult)
+    }
+
+    private fun resolveUnlinkedNotice(notice: ProcessedNoticeEntity): NotificationInsertResult {
+        return NotificationInsertResult.NeedsReview(
+            reason = "Legacy notification fingerprint has no proven ledger link",
+            candidateTransactionId = notice.transactionId,
+        )
+    }
+
+    private suspend fun linkTransactionIdentity(
         fingerprint: String,
         source: String,
         seenMs: Long,
-    ) = duplicateMutex.withLock {
+        transactionId: Long,
+    ): Boolean {
         val inserted = processedNoticeDao.insertIgnore(
             ProcessedNoticeEntity(
                 fingerprint = fingerprint,
@@ -687,17 +1008,106 @@ class TransactionRepository @Inject constructor(
                 firstSeenMs = seenMs,
                 lastSeenMs = seenMs,
                 seenCount = 1,
-            )
+                transactionId = transactionId,
+            ),
         )
-        if (inserted == -1L) {
-            processedNoticeDao.touch(fingerprint, seenMs)
+        if (inserted != -1L) return true
+        val existing = processedNoticeDao.find(fingerprint) ?: return false
+        if (existing.transactionId == transactionId) return true
+        if (existing.transactionId != null) return false
+        return processedNoticeDao.linkTransactionIfUnlinked(fingerprint, transactionId) == 1
+    }
+
+    private suspend fun recordNotificationLinkIfAbsent(
+        fingerprint: String?,
+        source: String,
+        seenMs: Long,
+        transactionId: Long,
+    ) {
+        if (fingerprint == null) return
+        processedNoticeDao.insertIgnore(
+            ProcessedNoticeEntity(
+                fingerprint = fingerprint,
+                source = source,
+                firstSeenMs = seenMs,
+                lastSeenMs = seenMs,
+                seenCount = 1,
+                transactionId = transactionId,
+            ),
+        )
+    }
+
+    private fun TransactionEntity.matchesPlatformOrder(platform: String, exactOrderId: String): Boolean =
+        source == platform && sourceTransactionId?.trim() == exactOrderId
+
+    /** Runs only after the claim and ledger row have both committed. */
+    private suspend fun postCommitNotificationEffects(
+        ledgerResult: LedgerInsertResult,
+        transaction: TransactionEntity,
+        notifySuccess: Boolean,
+        diagnosticInput: TransactionDiagnosticInput,
+    ) {
+        val transactionId = when (ledgerResult) {
+            is LedgerInsertResult.Inserted -> ledgerResult.transactionId
+            is LedgerInsertResult.Merged -> ledgerResult.transactionId
+            is LedgerInsertResult.Duplicate, is LedgerInsertResult.Failed -> return
         }
+        val committed = runCatching { dao.getById(transactionId) }.getOrNull()
+            ?: transaction.copy(id = transactionId)
+        runCatching { CaptureHealth.onTransactionSaved(context) }
+        runCatching { KeepAliveService.refreshStatus(context) }
+        requestSync(diagnosticInput, committed)
+        if (notifySuccess) {
+            val possibleDuplicate = committed.duplicateOfId != null ||
+                committed.remoteReviewStatus == "possible_duplicate"
+            try {
+                if (possibleDuplicate || settings.successNotificationsEnabledNow()) {
+                    CaptureNotifier.notifySaved(
+                        context = context,
+                        transaction = committed,
+                        possibleDuplicate = possibleDuplicate,
+                        merged = ledgerResult is LedgerInsertResult.Merged,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                diagnostics.record(
+                    attemptId = diagnosticInput.attemptId,
+                    stage = TransactionDiagnostics.STAGE_CAPTURE,
+                    result = TransactionDiagnostics.RESULT_WARNING,
+                    details = "Committed transaction notification failed",
+                    transactionId = transactionId,
+                )
+            }
+        }
+    }
+
+    private class NotificationInsertRollback(val failure: Throwable) : RuntimeException(failure)
+
+    // 用户在交易页确认“两笔都是真的”：清除本地标记，并把状态同步为已确认。
+    suspend fun keepBoth(transaction: TransactionEntity) {
+        if (transaction.duplicateOfId == null &&
+            transaction.remoteReviewStatus != "possible_duplicate") return
+        update(transaction.copy(duplicateOfId = null, remoteReviewStatus = "confirmed"))
     }
 
     suspend fun update(
         transaction: TransactionEntity,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
         operationStage: String = TransactionDiagnostics.STAGE_EDIT,
+    ) = updateInternal(
+        transaction = transaction,
+        diagnosticInput = diagnosticInput,
+        operationStage = operationStage,
+        requestSyncAfterWrite = true,
+    )
+
+    private suspend fun updateInternal(
+        transaction: TransactionEntity,
+        diagnosticInput: TransactionDiagnosticInput,
+        operationStage: String,
+        requestSyncAfterWrite: Boolean,
     ) {
         val updated = transaction.copy(
             syncDirty = true,
@@ -767,7 +1177,7 @@ class TransactionRepository @Inject constructor(
             callSite = callSite,
             outputSummary = "已更新 #${transaction.id}",
         )
-        requestSync(diagnosticInput, updated)
+        if (requestSyncAfterWrite) requestSync(diagnosticInput, updated)
     }
 
     suspend fun recordDiagnostic(
@@ -989,23 +1399,19 @@ class TransactionRepository @Inject constructor(
 /**
  * 跨来源防重复（纯逻辑，无 Android / Room 依赖，可直接跑 JVM 单测）。
  *
- * 现场：用户在微信里付了 ¥5.00，通知抓取已经记了一行；随后用户点开交易详情页，
- * 无障碍识别又抓到同一笔，账本变成两行。根因不是「来源字符串不同」——通知和截图
- * 都写 `source = WECHAT`（包名只进通知指纹表，不进账本）。真正的差别是**采集通道**：
- * 截图/卡片/页面识别会写 `captureObservedAtMs`，通知、短信、无障碍转账提取器都不写。
- * 加上 8 秒窗口和 `merchant = :merchant` 全等，[TransactionDao.findRecentSameAmount]
- * 在「几十秒后点开页面、且通知里没有商户名」的场景永远返回 null。
+ * 截图/页面识别会写 `captureObservedAtMs`，通知、短信、无障碍转账提取器不写。
+ * 同来源金额/商户/时间相似只用于保留疑似记录供用户复核，不能阻止账本新行；通知
+ * 重投由 Room 事务内的稳定事件指纹 claim 处理。
  *
  * 这里只在截图/页面路径显式启用（[TransactionRepository.insertIfNotDuplicate] 的
- * `crossSourceWindowMs`，默认 0 = 关闭），所以通知/短信/手工记账的行为不变。
+ * `crossSourceWindowMs`，默认 0 = 关闭），所以通知/短信/手工记账不会走跨来源判定。
  *
  * 判据分两级，因为「不写新行」判错就等于用户看不见那笔钱：
  * - **强证据**：两侧都存在且相等的平台内订单号（[MatchStrength.STRONG]）。命中即
  *   确认是同一笔，直接不插新行。
  * - **弱证据**（[MatchStrength.WEAK]，只有调用方显式允许时才计算）：一侧完全没有
  *   商户信息（空 / 「微信支付」这类占位名），另一侧有真实商户，金额、方向、币种、
- *   平台、时间窗全部一致。通知通道永远拿不到订单号，这是唯一能对上页面记录的线索；
- *   命中后调用方**必须把候选留在待确认列表**，不能当成已入账丢掉。
+ *   平台、时间窗全部一致。自动路径把候选留在待确认列表；用户确认后保留为独立新行。
  *
  * 两级都要求：本行来自页面/截图采集（`captureObservedAtMs` 非空）、对侧来自另一条
  * 通道（该字段为空）、同平台、同额、同向、同币种、时间在窗口内。跨平台（微信 vs
@@ -1072,7 +1478,7 @@ object CrossSourceDuplicatePolicy {
             .filter { it.id != incoming.id }
             .filter { !it.syncDeleted && it.duplicateOfId == null }
             .filter { it.remoteReviewStatus !in SKIPPED_STATUSES }
-            // 对侧必须来自另一条通道，否则只是同一通道的重发，交给 8 秒窗口。
+            // 对侧必须来自另一条通道；同通道重放只由精确订单号或稳定事件指纹拦截。
             .filter { it.captureObservedAtMs == null }
             // 微信和支付宝同额同方也是两笔钱：按支付平台比较，不按 source 字符串。
             .filter { samePaymentPlatform(it.source, incoming.source) }

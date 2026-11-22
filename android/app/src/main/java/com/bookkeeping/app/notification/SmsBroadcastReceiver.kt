@@ -9,6 +9,8 @@ import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.repository.LedgerInsertResult
+import com.bookkeeping.app.data.repository.NotificationInsertResult
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
@@ -125,11 +127,51 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                     details = "Bank SMS parsed",
                     rawText = rawText,
                 )
-                val id = repository.insertIfNotDuplicate(parsed, diagnosticInput = diagnosticInput)
-                if (id == null) {
-                    if (BuildConfig.DEBUG) Log.d(TAG, "Skipped duplicate SMS")
-                } else {
-                    Log.i(TAG, "Auto-captured bank SMS: id=$id")
+                // SMS_RECEIVED does not give this receiver a stable provider URI
+                // or message ID. The content tuple is only a legacy-ambiguity
+                // lookup key; it is never claimed as a replay identity.
+                val legacyFingerprint = NoticeFingerprint.of(
+                    packageName = "BANK_SMS",
+                    title = sender,
+                    body = fullBody,
+                    originalTimeMs = timestamp,
+                )
+                when (val insertion = repository.insertNotificationIfNotReplayed(
+                    fingerprint = null,
+                    source = "BANK_SMS",
+                    seenMs = System.currentTimeMillis(),
+                    transaction = parsed,
+                    notifySuccess = false,
+                    diagnosticInput = diagnosticInput,
+                    legacyFingerprints = setOf(legacyFingerprint),
+                )) {
+                    is NotificationInsertResult.Replayed -> {
+                        if (BuildConfig.DEBUG) Log.d(TAG, "Skipped replayed bank SMS")
+                    }
+                    is NotificationInsertResult.NeedsReview -> {
+                        repository.recordDiagnostic(
+                            attemptId = diagnosticInput.attemptId,
+                            stage = TransactionDiagnostics.STAGE_DEDUP,
+                            result = TransactionDiagnostics.RESULT_WARNING,
+                            details = insertion.reason,
+                            transactionId = insertion.candidateTransactionId,
+                            outputSummary = "短信重放身份存在歧义，已保留待复核",
+                            rawText = rawText,
+                        )
+                    }
+                    is NotificationInsertResult.Failed -> throw (insertion.cause as? Exception
+                        ?: IllegalStateException("SMS ledger write failed", insertion.cause))
+                    is NotificationInsertResult.Processed -> when (val result = insertion.ledgerResult) {
+                        is LedgerInsertResult.Failed -> throw (result.cause as? Exception
+                            ?: IllegalStateException("SMS ledger write failed", result.cause))
+                        is LedgerInsertResult.Duplicate -> {
+                            if (BuildConfig.DEBUG) Log.d(TAG, "Skipped exact duplicate SMS")
+                        }
+                        is LedgerInsertResult.Inserted ->
+                            Log.i(TAG, "Auto-captured bank SMS: id=${result.transactionId}")
+                        is LedgerInsertResult.Merged ->
+                            Log.i(TAG, "Auto-captured bank SMS: id=${result.transactionId}")
+                    }
                 }
             } catch (failure: CancellationException) {
                 throw failure

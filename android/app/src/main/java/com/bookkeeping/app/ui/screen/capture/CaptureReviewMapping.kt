@@ -5,6 +5,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.merchant.MerchantIconCatalog
+import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.CategoryClassifier
 import com.bookkeeping.app.notification.ClassificationDirection
 import com.bookkeeping.app.notification.ClassificationInput
@@ -13,8 +14,45 @@ import com.bookkeeping.app.notification.ClassificationResult
 import com.bookkeeping.app.notification.ClassificationSource
 import com.bookkeeping.app.notification.ClassificationStatus
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 
 object CaptureReviewMapping {
+    /** Explain when a review card has no usable original image. */
+    fun screenshotUnavailableNotice(candidate: CaptureCandidate): String? {
+        candidate.screenshotUnavailableReason?.let { reason ->
+            return when (reason) {
+                CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_QUOTA ->
+                    tr("截图未保留（空间不足）；释放空间后重新导入。")
+                CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_IO ->
+                    tr("截图保存失败；请重新选择图片后核对。")
+                CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_INVALID ->
+                    tr("图片无效，截图未保留；请换图重新导入。")
+                CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_MISSING ->
+                    tr("截图未提供或未保留；请重新导入原图。")
+                else -> null
+            }
+        }
+        return when {
+            candidate.reason == CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_QUOTA ->
+                tr("截图未保留（空间不足）；释放空间后重新导入。")
+            candidate.reason == CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_IO ->
+                tr("截图保存失败；请重新选择图片后核对。")
+            candidate.reason == CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_INVALID ->
+                tr("图片无效，截图未保留；请换图重新导入。")
+            candidate.reason == CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_MISSING ->
+                tr("截图未提供或未保留；请重新导入原图。")
+            candidate.reason == "screenshot decode failed" ||
+                candidate.reason == "screenshot start failed" ||
+                candidate.reason.startsWith("screenshot error ") ->
+                tr("截图无法读取；请重新选择图片。")
+            candidate.reason == "screenshot unsupported" ->
+                tr("图片格式不支持；请换一张截图。")
+            candidate.reason.startsWith(CaptureCandidateStore.SCREENSHOT_UNAVAILABLE_PREFIX) ->
+                tr("截图未能保留；请重新导入原图。")
+            else -> null
+        }
+    }
+
     fun classificationFor(
         candidate: CaptureCandidate,
         merchant: String,
@@ -53,7 +91,9 @@ object CaptureReviewMapping {
     }
 
     fun defaultCategory(candidate: CaptureCandidate): TransactionCategory =
-        classificationFor(
+        candidate.transactionCategory
+            ?.let { runCatching { TransactionCategory.valueOf(it) }.getOrNull() }
+            ?: classificationFor(
             candidate = candidate,
             merchant = candidate.merchantCandidates.firstOrNull().orEmpty(),
         ).category
@@ -63,12 +103,21 @@ object CaptureReviewMapping {
         merchant: String,
         category: TransactionCategory,
     ): TransactionEntity {
-        val source = when (candidate.paymentPlatform) {
+        val source = candidate.transactionSource
+            ?.let { runCatching { TransactionSource.valueOf(it) }.getOrNull() }
+            ?: when (candidate.paymentPlatform) {
             CaptureCandidate.PLATFORM_WECHAT -> TransactionSource.WECHAT
             CaptureCandidate.PLATFORM_ALIPAY -> TransactionSource.ALIPAY
             else -> TransactionSource.OTHER
         }
-        val sourceLabel = when (candidate.paymentPlatform) {
+        val sourceLabel = when (source) {
+            TransactionSource.BANK_SMS -> "银行短信"
+            TransactionSource.WECHAT -> "微信"
+            TransactionSource.ALIPAY -> "支付宝"
+            TransactionSource.MANUAL -> "手动"
+            TransactionSource.OTHER -> "其他来源"
+        }
+        val platformLabel = when (candidate.paymentPlatform) {
             CaptureCandidate.PLATFORM_WECHAT -> "微信"
             CaptureCandidate.PLATFORM_ALIPAY -> "支付宝"
             else -> "页面"
@@ -88,7 +137,11 @@ object CaptureReviewMapping {
                 else -> "未知商户"
             }
         }
-        val note = buildString {
+        val note = if (candidate.intakeMethod == CaptureCandidate.INTAKE_SMS) {
+            "[银行短信待确认]"
+        } else if (candidate.intakeMethod == CaptureCandidate.INTAKE_NOTIFICATION) {
+            "[支付通知待确认] $sourceLabel"
+        } else buildString {
             append(
                 when (candidate.kind) {
                     CaptureCandidate.KIND_REFUND -> "[退款] "
@@ -100,7 +153,7 @@ object CaptureReviewMapping {
                     else -> "[扫描] "
                 },
             )
-            append(sourceLabel)
+            append(platformLabel)
             when (candidate.kind) {
                 CaptureCandidate.KIND_TRANSFER,
                 CaptureCandidate.KIND_RED_PACKET -> append(if (income) " · 收入" else " · 支出")
@@ -112,8 +165,9 @@ object CaptureReviewMapping {
             amountCents = requireNotNull(candidate.amountCents) {
                 "A transaction cannot be created without a verified amount"
             },
+            currency = candidate.transactionCurrency ?: "CNY",
             type = if (income) TransactionType.INCOME.name else TransactionType.EXPENSE.name,
-            category = when {
+            category = candidate.transactionCategory ?: when {
                 refund -> TransactionCategory.OTHER.name
                 redPacketIncome -> TransactionCategory.GIFT.name
                 transferLike -> TransactionCategory.TRANSFER.name
@@ -124,6 +178,7 @@ object CaptureReviewMapping {
             source = source.name,
             timestamp = candidate.eventTimeMs?.takeIf { it > 0L } ?: candidate.capturedAtMs,
             merchantIconKey = MerchantIconCatalog.forMerchant(name)?.key,
+            account = candidate.transactionAccount,
             remoteReviewStatus = when {
                 refund -> "refund"
                 transferLike -> "transfer"
