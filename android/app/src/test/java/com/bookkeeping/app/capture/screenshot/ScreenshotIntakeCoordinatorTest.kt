@@ -607,7 +607,9 @@ class ScreenshotIntakeCoordinatorTest {
             assertEquals(CaptureCandidate.STATUS_APPROVED, store.latest().single().status)
             assertTrue(
                 "the diagnostic must distinguish unavailable screenshot dedup from a clean no-match",
-                notes.any { it.details.contains("fingerprint index unavailable") },
+                notes.any {
+                    it.details == "Image fingerprint lookup unavailable; ledger duplicate checks remain active"
+                },
             )
             assertFalse(
                 "unavailable index must not be reported as a clean no-duplicate result",
