@@ -123,13 +123,19 @@ class ScreenshotIntakeCoordinatorTest {
                 listOf(ScreenshotIntakeFailureNotice(IntakeSource.MEDIASTORE, FailureReason.DECODE_FAILED)),
                 notices,
             )
+            val noticeMessage = ScreenshotIntakeFailureNoticeCopy.message(notices.single()) { EnglishUiText.translate(it) }
+            val activityMessage = ScreenshotIntakeFailureNoticeCopy.activityMessage(outcome.failure!!) { EnglishUiText.translate(it) }
+            println("decode-notice-expected=Album watcher import failed: The image could not be decoded. Select the original image or capture again from the payment app.")
+            println("decode-notice-actual=$noticeMessage")
+            println("decode-activity-expected=The image could not be decoded. Check the image, then reselect or share the original image.")
+            println("decode-activity-actual=$activityMessage")
             assertEquals(
                 "Album watcher import failed: The image could not be decoded. Select the original image or capture again from the payment app.",
-                ScreenshotIntakeFailureNoticeCopy.message(notices.single()) { EnglishUiText.translate(it) },
+                noticeMessage,
             )
             assertEquals(
                 "The image could not be decoded. Check the image, then reselect or share the original image.",
-                ScreenshotIntakeFailureNoticeCopy.activityMessage(outcome.failure!!) { EnglishUiText.translate(it) },
+                activityMessage,
             )
             assertTrue(store.latest().isEmpty())
             assertEquals(0, ledgerWrites)
