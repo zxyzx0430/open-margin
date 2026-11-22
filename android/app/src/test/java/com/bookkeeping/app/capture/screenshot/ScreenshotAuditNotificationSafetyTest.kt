@@ -1,6 +1,7 @@
 package com.bookkeeping.app.capture.screenshot
 
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue

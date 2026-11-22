@@ -612,18 +612,18 @@ class CaptureCandidateStoreSafetyTest {
             val now = System.currentTimeMillis()
             val oldFingerprint = "9".repeat(64)
             writeLegacyCandidate(
-                root.toPath(),
+                root,
                 candidate("unmatched-old", capturedAtMs = now).copy(imageFingerprint = oldFingerprint),
             )
             assertEquals(
                 ImageFingerprintLookup.Match,
-                CaptureCandidateStore(root).lookupImageFingerprint(oldFingerprint, now + 1L),
+                CaptureCandidateStore(root.toFile()).lookupImageFingerprint(oldFingerprint, now + 1L),
             )
 
             var interrupted = false
             try {
                 CaptureCandidateStore(
-                    filesRoot = root,
+                    filesRoot = root.toFile(),
                     writeFaultInjector = { point ->
                         if (point == CandidateHistoryWriteFaultPoint.AFTER_INDEX_REPLACEMENT) {
                             throw IllegalStateException("fixture process interruption")
@@ -635,19 +635,19 @@ class CaptureCandidateStoreSafetyTest {
             }
             assertTrue(interrupted)
             writeLegacyCandidate(
-                root.toPath(),
+                root,
                 candidate("unrecorded-index", capturedAtMs = now + 3L),
             )
 
-            val store = CaptureCandidateStore(root)
+            val store = CaptureCandidateStore(root.toFile())
             assertEquals(
                 CandidateSaveResult.Failed(CandidateSaveFailure.STORAGE_UNAVAILABLE),
                 store.saveWithResult(candidate("must-not-write"), null, now + 4L),
             )
-            assertTrue(root.toPath().resolve("page_capture/candidates.legacy-write-ahead").toFile().isFile)
+            assertTrue(root.resolve("page_capture/candidates.legacy-write-ahead").toFile().isFile)
             assertEquals(listOf("unrecorded-index"), store.pending().map { it.candidateId })
         } finally {
-            root.deleteRecursively()
+            root.toFile().deleteRecursively()
         }
     }
 
