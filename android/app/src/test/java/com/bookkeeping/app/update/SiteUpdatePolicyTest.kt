@@ -212,16 +212,20 @@ class SiteUpdatePolicyTest {
     fun packageGateSeparatesProductionAndTestBuilds() {
         assertTrue(SiteUpdatePolicy.isOfficialPackage("com.bookkeeping.app"))
         assertFalse(SiteUpdatePolicy.isOfficialPackage("com.bookkeeping.app.sync2"))
+        assertFalse(SiteUpdatePolicy.isOfficialPackage("com.bookkeeping.app.sync3"))
         assertTrue(SiteUpdatePolicy.isTestPackage("com.bookkeeping.app.sync2"))
+        assertTrue(SiteUpdatePolicy.isTestPackage("com.bookkeeping.app.sync3"))
         assertFalse(SiteUpdatePolicy.isTestPackage("com.bookkeeping.app"))
 
         assertTrue(SiteUpdatePolicy.canShowBanner("com.bookkeeping.app"))
         assertTrue(SiteUpdatePolicy.canShowBanner("com.bookkeeping.app.sync2"))
+        assertTrue(SiteUpdatePolicy.canShowBanner("com.bookkeeping.app.sync3"))
         assertFalse(SiteUpdatePolicy.canShowBanner("com.example.other"))
 
         // Only the production package may download or open the installer.
         assertTrue(SiteUpdatePolicy.canAutoDownload("com.bookkeeping.app"))
         assertFalse(SiteUpdatePolicy.canAutoDownload("com.bookkeeping.app.sync2"))
+        assertFalse(SiteUpdatePolicy.canAutoDownload("com.bookkeeping.app.sync3"))
         assertFalse(SiteUpdatePolicy.canAutoDownload("com.example.other"))
     }
 

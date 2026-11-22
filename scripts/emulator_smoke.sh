@@ -21,16 +21,16 @@ chmod +x gradlew
 # Instrumentation tests may uninstall the app when they finish.
 # Reinstall explicitly before the independent application-start check.
 adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell pm list packages | grep -F 'package:com.bookkeeping.app.sync2'
-adb shell am start -W -n com.bookkeeping.app.sync2/com.bookkeeping.app.MainActivity
+adb shell pm list packages | grep -F 'package:com.bookkeeping.app.sync3'
+adb shell am start -W -n com.bookkeeping.app.sync3/com.bookkeeping.app.MainActivity
 sleep 8
-adb shell pidof com.bookkeeping.app.sync2
+adb shell pidof com.bookkeeping.app.sync3
 
 # Enable the accessibility service via emulator-only ADB settings,
 # then prove Android actually invoked onServiceConnected.
 # These commands never run on a personal / production device.
 adb logcat -c
-adb shell settings put secure enabled_accessibility_services "com.bookkeeping.app.sync2/com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService"
+adb shell settings put secure enabled_accessibility_services "com.bookkeeping.app.sync3/com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService"
 adb shell settings put secure accessibility_enabled 1
 
 success=0
@@ -43,7 +43,7 @@ for i in $(seq 1 15); do
 done
 test "$success" -eq 1
 
-adb shell pidof com.bookkeeping.app.sync2
+adb shell pidof com.bookkeeping.app.sync3
 mkdir -p emulator-proof
 adb shell dumpsys accessibility > "emulator-proof/accessibility-api-${API_LEVEL}.txt"
 adb logcat -d -s BkAccessibility:D > "emulator-proof/accessibility-lifecycle-api-${API_LEVEL}.txt"

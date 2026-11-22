@@ -44,7 +44,7 @@ android {
         debug {
             // Different Actions runners produce different debug signing keys.
             // Keep the original installed app/data untouched during migration.
-            applicationIdSuffix = ".sync2"
+            applicationIdSuffix = ".sync3"
             resValue("string", "app_name", "清衡测试")
             resValue("string", "page_recognition_service_label", "清衡测试 · 页面识别")
             resValue("string", "accessibility_fallback_service_label", "清衡测试 · 转账红包兜底")

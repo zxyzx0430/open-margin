@@ -20,7 +20,7 @@
 5. 打开微信、支付宝各一次，只浏览非敏感页面，返回清衡刷新，确认“上次页面事件”在操作后更新。
 6. 切至后台、锁屏、等待 15–30 分钟；解锁并重复第 4–5 步。验证是否断连或出现新增异常。
 7. 重启手机后重复第 4–5 步，确认服务可在系统允许的条件下重新连接。
-8. Windows PowerShell 在仓库根目录运行 `powershell -ExecutionPolicy Bypass -File .\scripts\Check-Android16Accessibility.ps1`。若安装了 debug 构建，将参数改为 `-PackageName com.bookkeeping.app.sync2`。
+8. Windows PowerShell 在仓库根目录运行 `powershell -ExecutionPolicy Bypass -File .\scripts\Check-Android16Accessibility.ps1`。若安装了 debug 构建，将参数改为 `-PackageName com.bookkeeping.app.sync3`。
 9. 验收结果：Android 版本、ROM、清衡版本、连接/页面事件时间、是否故障、最近异常阶段和类名、是否重启恢复。**不记录聊天正文、金额、订单号、完整 logcat 或银行卡信息**。
 
 ### 验收标准

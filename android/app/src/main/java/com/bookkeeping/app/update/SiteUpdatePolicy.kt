@@ -18,7 +18,8 @@ object SiteUpdatePolicy {
     const val SITE_HOST = "zxyzx.me"
     const val STABLE_CHANNEL = "stable"
     const val OFFICIAL_PACKAGE = "com.bookkeeping.app"
-    const val TEST_PACKAGE = "com.bookkeeping.app.sync2"
+    const val TEST_PACKAGE = "com.bookkeeping.app.sync3"
+    private const val LEGACY_TEST_PACKAGE = "com.bookkeeping.app.sync2"
 
     /** At most one silent check per day when the ledger page is opened. */
     const val CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
@@ -42,7 +43,8 @@ object SiteUpdatePolicy {
     fun isOfficialPackage(packageName: String?): Boolean = packageName == OFFICIAL_PACKAGE
 
     /** Test builds may render the banner for UI verification, nothing else. */
-    fun isTestPackage(packageName: String?): Boolean = packageName == TEST_PACKAGE
+    fun isTestPackage(packageName: String?): Boolean =
+        packageName == TEST_PACKAGE || packageName == LEGACY_TEST_PACKAGE
 
     fun canShowBanner(packageName: String?): Boolean =
         isOfficialPackage(packageName) || isTestPackage(packageName)
