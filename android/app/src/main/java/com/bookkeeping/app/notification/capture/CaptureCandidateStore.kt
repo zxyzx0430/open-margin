@@ -710,7 +710,7 @@ class CaptureCandidateStore internal constructor(
                 val digest = fields[offset + 3].takeIf { it.matches(Regex("[a-f0-9]{64}")) }
                     ?: return null
                 if (!exists && (count != 0 || bytes != 0L || digest != sha256(ByteArray(0)))) return null
-                CandidateHistoryIndexState(exists, count, bytes, digest)
+                return CandidateHistoryIndexState(exists, count, bytes, digest)
             }
             val oldIndex = state(1) ?: return@runCatching null
             val newIndex = state(5)?.takeIf { it.exists } ?: return@runCatching null
