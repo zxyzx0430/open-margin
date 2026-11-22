@@ -260,7 +260,7 @@ class ScreenshotImportDuplicateHintTest {
     }
 
     @Test
-    fun `a non transaction page is ignored without a duplicate hint`() {
+    fun `a non transaction page is ignored while ambiguous money stays review only`() {
         // 风景照 / 聊天截图：没有平台、没有金额，连候选都不该生成。
         val photo = listOf(block("IMG_20261119_123456", 10), block("HDR", 40))
         val photoPlan = ScreenshotImportPipeline.plan(
@@ -273,23 +273,26 @@ class ScreenshotImportDuplicateHintTest {
         assertTrue(photoPlan.decisions.isEmpty())
         assertTrue(photoPlan.bookings.isEmpty())
 
-        // 真正的 IGNORE 决策（同一张卡片上有两个不同金额，读不准）：仍然不进
-        // 账本，也不该显示「疑似重复」——它跟重复无关。
+        // 同一张卡片上有两个不同金额，读不准：必须保留给人工检查、禁止写账，
+        // 但不该显示「疑似重复」——它跟重复无关。
         val twoAmounts = listOf(
             TextBlock(text = "支付宝"),
             TextBlock(text = "¥18.00"),
             TextBlock(text = "¥28.00"),
             TextBlock(text = "商品说明"),
         )
-        val decision = ScreenshotImportPipeline.plan(
+        val plan = ScreenshotImportPipeline.plan(
             request = request(),
             blocks = twoAmounts,
             existing = emptyList(),
             timeZone = zone,
-        ).decisions.single()
+        )
+        val decision = plan.decisions.single()
 
         assertFalse("两个不同金额不能被当成一笔唯一的钱", decision.draft.amountUnambiguous)
-        assertEquals(Action.IGNORE, decision.action)
+        assertEquals(Action.ASK_USER, decision.action)
+        assertFalse(decision.ledgerWriteAllowed)
+        assertTrue(plan.bookings.isEmpty())
         assertEquals(DuplicateHint.NONE, decision.duplicateHint)
         assertNull(likelyDuplicateNoticeText(candidateOf(decision)))
     }

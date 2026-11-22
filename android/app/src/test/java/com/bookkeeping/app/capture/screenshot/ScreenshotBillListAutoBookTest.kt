@@ -21,9 +21,9 @@ import java.util.TimeZone
  *    sub-totals: 商品金额 / 订单金额 / 实付金额);
  *  - the row carries its own `账单详情 >` footer or payment-method sentence;
  *  - no 待收款 / 已取消 / 支付失败 / 待付款 anywhere in that card.
- * Everything else keeps asking: non-final rows, refunds, transfers, red
- * packets, withdrawals, an unproven direction, an ambiguous amount, and every
- * import where auto booking is off.
+ * Non-final rows and rows whose amount/direction is unclear still cannot book.
+ * Transaction kind alone (refund, transfer, red packet, withdrawal) is not a
+ * confirmation gate when the row is settled and its amount/direction are clear.
  *
  * No screenshot bytes and no raw OCR dump are stored here.
  */
@@ -125,12 +125,11 @@ class ScreenshotBillListAutoBookTest {
     }
 
     /**
-     * Requirement: a list proves money moved, it does not prove a transfer was
-     * accepted. 转账给 张三 without any status word is completed only by the
-     * list's own context, so the completion is inferred — the user confirms it.
+     * A settled bill-list row proves completion for every transaction kind.
+     * With a clear direction, a transfer row does not need a second confirmation.
      */
     @Test
-    fun `a transfer row inferred from the list still asks`() {
+    fun `a completed transfer row inferred from the list auto books with clear direction`() {
         val blocks = listOf(blockAt("微信支付", 20, 10, 160)) +
             row("祐迎迎生鲜超市(岭南店)", "¥ 8.00", 100) +
             row("转账给 张三", "¥ 6.00", 360, payment = "使用零钱支付")
@@ -146,8 +145,8 @@ class ScreenshotBillListAutoBookTest {
 
         val result = plan(blocks)
         val decision = result.decisions.single { it.draft.amountCents == 600L }
-        assertEquals(Action.ASK_USER, decision.action)
-        assertEquals(setOf(800L), result.bookings.mapNotNull { it.draft.amountCents }.toSet())
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        assertEquals(setOf(800L, 600L), result.bookings.mapNotNull { it.draft.amountCents }.toSet())
     }
 
     /**
@@ -266,31 +265,32 @@ class ScreenshotBillListAutoBookTest {
         assertTrue(result.decisions.none { it.action == Action.AUTO_BOOK })
     }
 
-    // ---- kinds that always need the user, even on a list row ----
+    // ---- kind does not override settled status and clear direction ----
 
     @Test
-    fun `refund transfer red packet and withdrawal rows still ask`() {
+    fun `completed refund transfer red packet and withdrawal rows auto book when core fields are clear`() {
         val specials = listOf(
-            "退款" to "¥ 5.00",
-            "转账给 张三" to "¥ 6.00",
-            "微信红包" to "¥ 7.00",
-            "提现到中国银行储蓄卡" to "¥ 9.00",
+            Triple("退款", "¥ 5.00", "退款成功"),
+            Triple("转账给 张三", "¥ 6.00", null),
+            Triple("微信红包", "¥ 7.00", null),
+            Triple("提现到中国银行储蓄卡", "¥ 9.00", null),
         )
 
-        specials.forEach { (label, amount) ->
+        specials.forEach { (label, amount, status) ->
             val blocks = listOf(blockAt("微信支付", 20, 10, 160)) +
                 row("祐迎迎生鲜超市(岭南店)", "¥ 8.00", 100) +
-                row(label, amount, 360, payment = "使用零钱支付")
+                row(label, amount, 360, status = status, payment = "使用零钱支付")
 
             val result = plan(blocks)
             val special = result.decisions.single { it.draft.amountCents != 800L }
 
-            assertNotEquals("$label must not be auto booked", Action.AUTO_BOOK, special.action)
-            assertEquals("$label must be confirmed", Action.ASK_USER, special.action)
-            assertTrue("$label is still a settled row", special.draft.settledBillRow)
+            assertEquals("$label must be a completed transaction", CaptureCandidate.COMPLETION_COMPLETED,
+                special.draft.completionStatus)
+            assertTrue("$label must have a clear direction", special.draft.directionExplicit)
+            assertEquals("$label must not be blocked by kind", Action.AUTO_BOOK, special.action)
             assertEquals(
-                "$label must not reach the ledger",
-                setOf(800L),
+                "$label must reach the booking list",
+                setOf(800L, special.draft.amountCents),
                 result.bookings.mapNotNull { it.draft.amountCents }.toSet(),
             )
         }

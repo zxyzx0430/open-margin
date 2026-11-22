@@ -83,7 +83,6 @@ object ScreenshotImportPipeline {
 
         val decisions = mutableListOf<CandidateDecision>()
         val draftsSeenHere = mutableListOf<TransactionDraft>()
-        var mediumAsked = false
         evidence.drafts.forEach { draft ->
             val dedup = deduplicate(draft, existing)
             val assessment = ScreenshotCapturePolicy.assess(
@@ -106,10 +105,8 @@ object ScreenshotImportPipeline {
                 previewOnly = previewOnly,
             )
             var action = assessment.action
-            // Belt and braces: the policy already asks for these kinds, but a
-            // screenshot decision must never carry AUTO_BOOK for money that
-            // only the user can classify, even if a caller forgets to pass the
-            // kind into the evidence.
+            // Keep the secondary kind guard in sync with policy. No kind is
+            // confirm-only today; core evidence, not the label, gates booking.
             if (action == Action.AUTO_BOOK && ScreenshotCapturePolicy.requiresConfirmation(draft.kind)) {
                 action = Action.ASK_USER
             }
@@ -124,7 +121,26 @@ object ScreenshotImportPipeline {
             val sameImageRepeat = action == Action.AUTO_BOOK &&
                 draftsSeenHere.any { isSameMoneyAsEarlierDraft(draft, it) }
             if (crossSource != null || sameImageRepeat) action = Action.ASK_USER
-            draftsSeenHere += draft
+            val directionReadable = draft.direction in setOf(
+                CaptureCandidate.DIRECTION_EXPENSE,
+                CaptureCandidate.DIRECTION_INCOME,
+            ) && draft.directionExplicit
+            val decisionDraft = if (directionReadable ||
+                (draft.direction == CaptureCandidate.DIRECTION_UNKNOWN && !draft.directionExplicit)
+            ) {
+                draft
+            } else {
+                draft.copy(
+                    direction = CaptureCandidate.DIRECTION_UNKNOWN,
+                    directionExplicit = false,
+                )
+            }
+            draftsSeenHere += decisionDraft
+            val strongIdentityConflict = dedup.first == ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS &&
+                dedup.second != null
+            // This flag is the preview/auto-disable safety latch, not a verdict
+            // on whether the user may resolve and confirm a review candidate.
+            val ledgerWriteAllowed = allowAuto && !previewOnly
             // 结构化标记：只描述「为什么被降级」。跨通道与同图重复是两种不同的断言
             //（前者指向账本里的一行，后者指向同一张图里的另一条草稿），所以不合并。
             // 动作判定顺序不变：这一步只读上面已经算好的结果。
@@ -134,45 +150,32 @@ object ScreenshotImportPipeline {
                 else -> DuplicateHint.NONE
             }
             var reason = draft.reason
-            var matched: Long? = null
+            var matched: Long? = dedup.second.takeIf {
+                dedup.first == ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS
+            }
             when (action) {
                 Action.LINK_EXISTING -> {
                     matched = dedup.second
                     reason = "existing ledger transaction"
                 }
-                Action.AUTO_BOOK -> reason = "high confidence; auto booked"
+                Action.AUTO_BOOK -> reason = "completed transaction; core fields clear; auto booked"
                 Action.ASK_USER -> {
-                    if (mediumAsked) {
-                        decisions += CandidateDecision(
-                            index = draft.index,
-                            tier = assessment.tier,
-                            action = action,
-                            reason = "queued behind the previous confirmation",
-                            draft = draft,
-                            queued = true,
-                            ledgerWriteAllowed = allowAuto && !previewOnly,
-                            duplicateHint = duplicateHint,
-                        )
-                        return@forEach
-                    }
-                    mediumAsked = true
                     reason = when {
+                        strongIdentityConflict ->
+                            "matching transaction ID has conflicting or incomplete core fields"
                         crossSource != null -> "same amount already recorded from another channel"
                         sameImageRepeat -> "same amount appears twice in this screenshot"
-                        ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
-                            "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
-                        // 金额读到了、方向没读到：卡片的第一个动作是让用户点 支出/收入，
-                        // 这句写进候选 reason，方便诊断时区分「问方向」和「问重复」。
-                        draft.direction == CaptureCandidate.DIRECTION_UNKNOWN ->
+                        draft.amountCents == null -> "transaction amount missing; manual review required"
+                        !draft.amountUnambiguous -> "transaction amount ambiguous; manual review required"
+                        evidence.conflictingFields -> "transaction fields conflict; manual review required"
+                        !directionReadable ->
                             "transaction direction not readable; asking the user to pick"
-                        // A list row infers completion from its place in the
-                        // list; that is enough for a payment, not for a
-                        // transfer, whose state word the list never prints.
-                        draft.kind == CaptureCandidate.KIND_TRANSFER &&
-                            draft.completionInferredFromList ->
-                            "transfer completion inferred from a bill list; needs confirmation"
-                        assessment.tier == CaptureCandidate.TIER_HIGH ->
-                            "high confidence but auto booking disabled"
+                        draft.completionStatus != CaptureCandidate.COMPLETION_COMPLETED ->
+                            "transaction completion not clear; review required"
+                        dedup.first == ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS ->
+                            "possible transaction duplicate; review this candidate"
+                        !allowAuto -> "auto booking disabled"
+                        previewOnly -> "preview only; ledger writes disabled"
                         else -> "needs user confirmation"
                     }
                 }
@@ -194,9 +197,9 @@ object ScreenshotImportPipeline {
                 tier = assessment.tier,
                 action = action,
                 reason = reason,
-                draft = draft,
+                draft = decisionDraft,
                 matchedTransactionId = matched,
-                ledgerWriteAllowed = allowAuto && !previewOnly,
+                ledgerWriteAllowed = ledgerWriteAllowed,
                 duplicateHint = duplicateHint,
             )
         }
@@ -206,9 +209,10 @@ object ScreenshotImportPipeline {
     /**
      * Only a positively identified row may be linked.
      *
-     * 1. An exact platform-scoped order id is the only proof that two captures
-     *    describe one transaction, so it is the only path to EXACT_MATCH. Two
-     *    rows sharing an order id are one payment; a second match is AMBIGUOUS.
+     * 1. An exact platform-scoped order id plus matching amount, direction and
+     *    currency is the only proof that two captures describe one transaction,
+     *    so it is the only path to EXACT_MATCH. A conflicting shape stays
+     *    reviewable and points at the specific row.
      * 2. Without an order id, platform + amount + direction + currency +
      *    merchant + the two-minute window is a *resemblance*, not an identity:
      *    a convenience store rings up the same amount twice in a row, so the
@@ -226,21 +230,39 @@ object ScreenshotImportPipeline {
     ): Pair<ScreenshotCapturePolicy.DuplicateResult, Long?> {
         val orderId = draft.orderId?.trim()?.takeIf(String::isNotEmpty)
         val platform = platformOf(draft.pageIdentity)
-        if (orderId != null) {
-            if (platform == CaptureCandidate.PLATFORM_UNKNOWN) {
-                return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
-            }
+        if (orderId != null && platform != CaptureCandidate.PLATFORM_UNKNOWN) {
             val exact = existing.filter {
                 it.platform == platform && it.platform != CaptureCandidate.PLATFORM_UNKNOWN &&
                     it.orderId?.trim() == orderId
             }
             when {
-                exact.size == 1 -> return ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to exact.single().transactionId
+                exact.size == 1 -> {
+                    val row = exact.single()
+                    val draftMerchant = draft.merchantCandidates.firstOrNull()
+                        ?.takeIf(CaptureMergePolicy::hasMerchantInfo)
+                    val ledgerMerchant = row.merchant?.takeIf(CaptureMergePolicy::hasMerchantInfo)
+                    val merchantsCompatible = draftMerchant == null || ledgerMerchant == null ||
+                        CrossSourceDuplicatePolicy.merchantsSame(draftMerchant, ledgerMerchant)
+                    val shapeMatches = draft.amountCents != null && draft.amountUnambiguous &&
+                        draft.directionExplicit && draft.direction in setOf(
+                            CaptureCandidate.DIRECTION_EXPENSE,
+                            CaptureCandidate.DIRECTION_INCOME,
+                        ) && row.amountCents == draft.amountCents && row.direction == draft.direction &&
+                        normalizeCurrency(row.currency) == normalizeCurrency(draft.currency) &&
+                        merchantsCompatible
+                    return if (shapeMatches) {
+                        ScreenshotCapturePolicy.DuplicateResult.EXACT_MATCH to row.transactionId
+                    } else {
+                        ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to row.transactionId
+                    }
+                }
                 exact.size > 1 -> return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
             }
         }
         val amount = draft.amountCents ?: return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
-        if (platform == CaptureCandidate.PLATFORM_UNKNOWN) {
+        if (platform == CaptureCandidate.PLATFORM_UNKNOWN || !draft.directionExplicit ||
+            draft.direction !in setOf(CaptureCandidate.DIRECTION_EXPENSE, CaptureCandidate.DIRECTION_INCOME)
+        ) {
             return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
         }
         val merchant = normalize(draft.merchantCandidates.firstOrNull())
@@ -254,12 +276,20 @@ object ScreenshotImportPipeline {
         if (sameShape.isEmpty()) {
             return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
         }
+        val merchantCompatible = sameShape.filter { row ->
+            val existingMerchant = normalize(row.merchant)
+            merchant.isEmpty() || existingMerchant.isEmpty() || existingMerchant == merchant
+        }
+        if (merchantCompatible.isEmpty()) {
+            return ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
+        }
         // Without a real transaction time nothing can be placed inside (or
-        // outside) the window, so the match stays reviewable.
+        // outside) the window. Only a same/unknown merchant is a concrete
+        // competing row; a different merchant does not create a time-only ask.
         if (draft.eventTimeMs == null) {
             return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
         }
-        val inWindow = sameShape.filter { row ->
+        val inWindow = merchantCompatible.filter { row ->
             row.eventTimeMs <= 0L ||
                 kotlin.math.abs(row.eventTimeMs - draft.eventTimeMs) <= DEDUP_WINDOW_MS
         }
@@ -271,17 +301,13 @@ object ScreenshotImportPipeline {
         if (merchant.isEmpty() || inWindow.any { normalize(it.merchant).isEmpty() }) {
             return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
         }
-        val identified = inWindow.filter { normalize(it.merchant) == merchant }
         // Two distinct payments to one shop in the same two minutes look exactly
         // like this, and nothing here can tell them apart: ask, never link.
         // Only the order id branch above may ever return EXACT_MATCH.
-        return when {
-            identified.isEmpty() -> ScreenshotCapturePolicy.DuplicateResult.CLEAR to null
-            else -> ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
-        }
+        return ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS to null
     }
 
-    /** Next medium-confidence candidate to ask about; the rest stay queued. */
+    /** First review candidate for callers that need a deterministic ordering. */
     fun nextConfirmation(decisions: List<CandidateDecision>): CandidateDecision? =
         decisions.filter { it.action == Action.ASK_USER }.minByOrNull { it.index }
 
@@ -336,7 +362,9 @@ object ScreenshotImportPipeline {
     fun isSameMoneyAsEarlierDraft(draft: TransactionDraft, earlier: TransactionDraft): Boolean {
         val amount = draft.amountCents?.takeIf { it > 0L } ?: return false
         if (earlier.amountCents != amount) return false
-        if (earlier.direction != draft.direction) return false
+        if (!draft.directionExplicit || !earlier.directionExplicit) return false
+        if (draft.direction !in setOf(CaptureCandidate.DIRECTION_EXPENSE, CaptureCandidate.DIRECTION_INCOME)) return false
+        if (draft.direction != earlier.direction) return false
         if (normalizeCurrency(earlier.currency) != normalizeCurrency(draft.currency)) return false
         val mine = draft.merchantCandidates.firstOrNull().orEmpty()
         val theirs = earlier.merchantCandidates.firstOrNull().orEmpty()

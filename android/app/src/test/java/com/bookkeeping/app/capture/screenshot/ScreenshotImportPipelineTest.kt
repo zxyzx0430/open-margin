@@ -206,6 +206,23 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
+    fun `completed transaction without a known platform auto books when core fields are clear`() {
+        val blocks = listOf(
+            block("收款方 便利店", 20),
+            block("-¥8.00", 50),
+            block("交易成功", 80),
+        )
+
+        val evidence = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone)
+        assertEquals(CaptureCandidate.PLATFORM_UNKNOWN, evidence.platform)
+        val plan = ScreenshotImportPipeline.plan(request(), blocks, emptyList(), timeZone = zone)
+
+        assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
+        assertEquals(1, plan.bookings.size)
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, plan.bookings.single().draft.direction)
+    }
+
+    @Test
     fun `completed transfer is auto booked like any other settled payment`() {
         val plan = ScreenshotImportPipeline.plan(request(), wechatSuccess(), emptyList(), timeZone = zone)
         val decision = plan.decisions.single()
@@ -222,18 +239,19 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `refund arrival is held for confirmation and writes nothing`() {
+    fun `completed incoming refund books without reversing its explicit direction`() {
         val plan = ScreenshotImportPipeline.plan(request(), wechatRefundArrival(), emptyList(), timeZone = zone)
         val decision = plan.decisions.single()
         assertEquals(CaptureCandidate.KIND_REFUND, decision.draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_INCOME, decision.draft.direction)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, decision.action)
-        assertNothingBooked(plan)
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        assertEquals(1, plan.bookings.size)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, plan.bookings.single().draft.direction)
     }
 
     @Test
-    fun `red packet and withdrawal are held for confirmation and write nothing`() {
+    fun `completed red packet and withdrawal book when amount and direction are clear`() {
         val redPacket = listOf(
             block("微信红包", 10),
             block("¥8.88", 40),
@@ -252,35 +270,45 @@ class ScreenshotImportPipelineTest {
         val redPacketDecision = redPacketPlan.decisions.single()
         assertEquals(CaptureCandidate.KIND_RED_PACKET, redPacketDecision.draft.kind)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, redPacketDecision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, redPacketDecision.action)
-        assertNothingBooked(redPacketPlan)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, redPacketDecision.draft.direction)
+        assertEquals(Action.AUTO_BOOK, redPacketDecision.action)
+        assertEquals(1, redPacketPlan.bookings.size)
 
         val withdrawalPlan = ScreenshotImportPipeline.plan(request(), withdrawal, emptyList(), timeZone = zone)
         val withdrawalDecision = withdrawalPlan.decisions.single()
         assertEquals(CaptureCandidate.KIND_WITHDRAWAL, withdrawalDecision.draft.kind)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, withdrawalDecision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, withdrawalDecision.action)
-        assertNothingBooked(withdrawalPlan)
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, withdrawalDecision.draft.direction)
+        assertEquals(Action.AUTO_BOOK, withdrawalDecision.action)
+        assertEquals(1, withdrawalPlan.bookings.size)
     }
 
     @Test
-    fun `a forged auto booking for a refund never reaches the booking list`() {
+    fun `booking projection does not apply a second kind-only block to a completed refund`() {
+        val plan = ScreenshotImportPipeline.plan(request(), wechatRefundArrival(), emptyList(), timeZone = zone)
+
+        assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
+        assertEquals(1, plan.bookings.size)
+        assertEquals(CaptureCandidate.KIND_REFUND, plan.bookings.single().draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, plan.bookings.single().draft.direction)
+    }
+
+    @Test
+    fun `booking projection still blocks a review-only refund from writing`() {
         val draft = ScreenshotPageInterpreter.interpret(wechatRefundArrival(), capturedAt, zone).drafts.single()
         val plan = ImportPlan(
-            listOf(
+            decisions = listOf(
                 CandidateDecision(
-                    index = 0,
+                    index = draft.index,
                     tier = CaptureCandidate.TIER_HIGH,
                     action = Action.AUTO_BOOK,
-                    reason = "forged",
+                    reason = "preview only",
                     draft = draft,
+                    ledgerWriteAllowed = false,
                 ),
             ),
         )
-        // The model layer is the last lock: refund / red packet / withdrawal can
-        // never appear in ImportPlan.bookings, whatever a decision claims.
-        // Completed transfers are allowed now, but only after the policy gates
-        // (completed + explicit direction + known platform) have passed.
+
         assertTrue(plan.bookings.isEmpty())
     }
 
@@ -384,7 +412,7 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `several medium drafts ask one at a time`() {
+    fun `several medium drafts remain reviewable without a serial queue`() {
         val twoMedium = listOf(
             block("微信支付", 10),
             block("¥11.00", 40),
@@ -395,8 +423,8 @@ class ScreenshotImportPipelineTest {
         val plan = ScreenshotImportPipeline.plan(request(), twoMedium, emptyList(), timeZone = zone)
         val asked = plan.needsConfirmation
         assertEquals(2, asked.size)
-        assertFalse(asked.first().queued)
-        assertTrue(asked.last().queued)
+        assertTrue(asked.all { !it.queued })
+        assertTrue(asked.none { it.reason == "queued behind the previous confirmation" })
         assertEquals(asked.first().index, ScreenshotImportPipeline.nextConfirmation(plan.decisions)?.index)
         assertTrue(plan.bookings.isEmpty())
     }
@@ -416,6 +444,7 @@ class ScreenshotImportPipelineTest {
 
         assertEquals(2, plan.needsConfirmation.size)
         assertTrue(plan.needsConfirmation.all { !it.ledgerWriteAllowed })
+        assertTrue(plan.needsConfirmation.all { !it.queued })
         assertTrue(plan.bookings.isEmpty())
     }
 
@@ -450,6 +479,29 @@ class ScreenshotImportPipelineTest {
         val decision = plan.decisions.single()
         assertEquals(Action.LINK_EXISTING, decision.action)
         assertEquals(77L, decision.matchedTransactionId)
+        assertTrue(plan.bookings.isEmpty())
+    }
+
+    @Test
+    fun `matching order id with conflicting amount is review only and not writable`() {
+        val existing = listOf(
+            LedgerFingerprint(
+                transactionId = 77,
+                platform = CaptureCandidate.PLATFORM_WECHAT,
+                amountCents = 3651,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+                orderId = "1000123456789012",
+                merchant = "便利店",
+                eventTimeMs = parsedEventTime(),
+            ),
+        )
+
+        val plan = ScreenshotImportPipeline.plan(request(), wechatMerchantSuccess(), existing, timeZone = zone)
+        val decision = plan.decisions.single()
+
+        assertEquals(Action.ASK_USER, decision.action)
+        assertEquals(77L, decision.matchedTransactionId)
+        assertTrue(decision.ledgerWriteAllowed)
         assertTrue(plan.bookings.isEmpty())
     }
 
@@ -968,6 +1020,8 @@ class ScreenshotImportPipelineTest {
         )
         val plan = ScreenshotImportPipeline.plan(request(), noTime, emptyList(), timeZone = zone)
         val decision = plan.decisions.single()
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        assertEquals(1, plan.bookings.size)
         assertNull(decision.draft.eventTimeMs)
         val candidate = ScreenshotCandidateFactory.create(
             decision = decision,

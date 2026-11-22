@@ -83,7 +83,7 @@ class ScreenshotAuditDedupTest {
     fun `a matching order id is still an exact match`() {
         // Same page identity, same order id: positively the same transaction.
         val existing = listOf(
-            fingerprint(transactionId = 601, orderId = "2026111922001234567"),
+            fingerprint(transactionId = 601, orderId = "2026111922001234567", merchant = null),
         )
         val (result, matched) = decision(
             draft(orderId = "2026111922001234567"),
@@ -92,6 +92,36 @@ class ScreenshotAuditDedupTest {
 
         assertEquals(DuplicateResult.EXACT_MATCH, result)
         assertEquals(601L, matched)
+    }
+
+    @Test
+    fun `a matching order id with a conflicting transaction shape is reviewable not exact`() {
+        val orderId = "2026111922001234567"
+        val conflicts = listOf(
+            fingerprint(transactionId = 601, amountCents = 2900L, orderId = orderId),
+            fingerprint(transactionId = 601, direction = CaptureCandidate.DIRECTION_INCOME, orderId = orderId),
+            fingerprint(transactionId = 601, currency = "USD", orderId = orderId),
+            fingerprint(transactionId = 601, merchant = "全家", orderId = orderId),
+        )
+
+        conflicts.forEach { row ->
+            val (result, matched) = decision(draft(orderId = orderId), listOf(row))
+
+            assertEquals(DuplicateResult.AMBIGUOUS, result)
+            assertEquals(601L, matched)
+        }
+    }
+
+    @Test
+    fun `an order id without a known platform is not treated as a duplicate`() {
+        val orderId = "2026111922001234567"
+        val existing = fingerprint(transactionId = 602, orderId = orderId)
+        val unscoped = draft(orderId = orderId, pageIdentity = "unknown:detail:2800:starbucks")
+
+        val (result, matched) = decision(unscoped, listOf(existing))
+
+        assertEquals(DuplicateResult.CLEAR, result)
+        assertNull(matched)
     }
 
     @Test

@@ -22,13 +22,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 转账从「无条件确认」改成「按证据放行」的边界。
- *
- * 用户实测：截图里明明是「已被接收」（对方已收，钱已经转出），却还要再确认一次。
- * 这里钉死两点：
- * - 已完成 + 状态显式 + 方向显式 + 平台已知 → 允许 AUTO_BOOK；
- * - 其余（待接收、状态不明、方向不明、平台未知、allowAuto=false、previewOnly）
- *   一律不得自动入账；退款 / 红包 / 提现仍然永远确认。
+ * Automatic booking depends on settled status and reliable core fields, not on
+ * the transaction kind or optional platform metadata.
  */
 class ScreenshotCapturePolicyTest {
 
@@ -107,34 +102,37 @@ class ScreenshotCapturePolicyTest {
     }
 
     @Test
-    fun `transfer with a non explicit completion marker is not auto bookable`() {
-        val implicit = evidence(kind = KIND_TRANSFER, completionExplicit = false)
+    fun `completed transfer inferred from a settled list is auto bookable`() {
+        val inferred = evidence(
+            kind = KIND_TRANSFER,
+            completionExplicit = false,
+            completionInferredFromList = true,
+        )
 
-        assertFalse(ScreenshotCapturePolicy.transferAutoBookAllowed(implicit))
-        assertEquals(Action.ASK_USER, ScreenshotCapturePolicy.assess(implicit, allowAuto = true).action)
+        assertTrue(ScreenshotCapturePolicy.transferAutoBookAllowed(inferred))
+        assertEquals(Action.AUTO_BOOK, ScreenshotCapturePolicy.assess(inferred, allowAuto = true).action)
     }
 
     @Test
-    fun `transfer from an unknown platform keeps asking`() {
+    fun `completed transfer without a known platform is still auto bookable`() {
         val unknownPlatform = evidence(kind = KIND_TRANSFER, platformKnown = false)
 
-        assertFalse(ScreenshotCapturePolicy.transferAutoBookAllowed(unknownPlatform))
+        assertTrue(ScreenshotCapturePolicy.transferAutoBookAllowed(unknownPlatform))
         val assessment = ScreenshotCapturePolicy.assess(unknownPlatform, allowAuto = true)
         assertEquals(TIER_MEDIUM, assessment.tier)
-        assertEquals(Action.ASK_USER, assessment.action)
+        assertEquals(Action.AUTO_BOOK, assessment.action)
     }
 
     @Test
-    fun `transfer whose completion is only inferred from a bill list still asks`() {
-        // 账单列表行没有状态词：COMPLETED 是从「它在已成交列表里」推断出来的。
-        // 普通支付可以据此入账，转账不行——列表没有写 已被接收 / 已收款。
+    fun `transfer whose completion is inferred from a bill list books when direction is clear`() {
+        // A settled bill-list row proves completion for every kind; direction is
+        // the remaining core field and is explicit here.
         val inferred = evidence(kind = KIND_TRANSFER, completionInferredFromList = true)
 
-        assertFalse(ScreenshotCapturePolicy.transferAutoBookAllowed(inferred))
+        assertTrue(ScreenshotCapturePolicy.transferAutoBookAllowed(inferred))
         val assessment = ScreenshotCapturePolicy.assess(inferred, allowAuto = true)
-        // 金额与方向都是硬的，缺的只是页面那句状态词：高置信，但仍要一次确认。
         assertEquals(TIER_HIGH, assessment.tier)
-        assertEquals(Action.ASK_USER, assessment.action)
+        assertEquals(Action.AUTO_BOOK, assessment.action)
     }
 
     @Test
@@ -196,30 +194,37 @@ class ScreenshotCapturePolicyTest {
     }
 
     @Test
-    fun `an ambiguous amount is still ignored even with an unknown direction`() {
+    fun `an ambiguous amount requires manual review even with an unknown direction`() {
         val ambiguous = evidence(
             direction = DIRECTION_UNKNOWN,
             directionExplicit = false,
             amountUnambiguous = false,
         )
 
-        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(ambiguous, allowAuto = true).action)
+        assertEquals(Action.ASK_USER, ScreenshotCapturePolicy.assess(ambiguous, allowAuto = true).action)
     }
 
     @Test
-    fun `conflicting fields are still ignored even with an unknown direction`() {
+    fun `conflicting fields require manual review even with an unknown direction`() {
         val conflicting = evidence(
             direction = DIRECTION_UNKNOWN,
             directionExplicit = false,
             conflictingFields = true,
         )
 
-        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(conflicting, allowAuto = true).action)
+        assertEquals(Action.ASK_USER, ScreenshotCapturePolicy.assess(conflicting, allowAuto = true).action)
     }
 
     @Test
-    fun `a missing or out of range amount is still ignored with an unknown direction`() {
-        listOf(null, 0L, -1L, CaptureCandidate.MAX_CENTS + 1).forEach { amount ->
+    fun `a missing amount requires manual review while out of range values are rejected`() {
+        val missing = evidence(
+            direction = DIRECTION_UNKNOWN,
+            directionExplicit = false,
+            amountCents = null,
+        )
+        assertEquals(Action.ASK_USER, ScreenshotCapturePolicy.assess(missing, allowAuto = true).action)
+
+        listOf(0L, -1L, CaptureCandidate.MAX_CENTS + 1).forEach { amount ->
             val bad = evidence(
                 direction = DIRECTION_UNKNOWN,
                 directionExplicit = false,
@@ -234,11 +239,10 @@ class ScreenshotCapturePolicyTest {
     }
 
     @Test
-    fun `a direction that is neither readable nor unknown stays ignored`() {
-        // 只有 UNKNOWN 是 UI 能提供选项的状态；其它读不出来的取值照旧不进收件箱。
+    fun `an unrecognised direction requires manual selection rather than auto booking`() {
         val broken = evidence(direction = "SOMETHING_ELSE", directionExplicit = true)
 
-        assertEquals(Action.IGNORE, ScreenshotCapturePolicy.assess(broken, allowAuto = true).action)
+        assertEquals(Action.ASK_USER, ScreenshotCapturePolicy.assess(broken, allowAuto = true).action)
     }
 
     @Test
@@ -255,16 +259,21 @@ class ScreenshotCapturePolicyTest {
         assertEquals(Action.WAIT_FOR_EVIDENCE, assessment.action)
     }
 
-    // ---------- 硬约束：其余 kind 一律不得放宽 ----------
+    // ---------- kind alone is never a confirmation gate ----------
 
     @Test
-    fun `refund red packet and withdrawal stay confirm only even at high confidence`() {
-        listOf(KIND_REFUND, KIND_RED_PACKET, KIND_WITHDRAWAL).forEach { kind ->
-            val completed = evidence(kind = kind, direction = DIRECTION_INCOME)
-            assertTrue("$kind must stay confirm-only", ScreenshotCapturePolicy.requiresConfirmation(kind))
+    fun `refund red packet and withdrawal auto book when completed amount and direction are clear`() {
+        listOf(
+            KIND_REFUND to DIRECTION_INCOME,
+            KIND_REFUND to DIRECTION_EXPENSE,
+            KIND_RED_PACKET to DIRECTION_INCOME,
+            KIND_WITHDRAWAL to DIRECTION_EXPENSE,
+        ).forEach { (kind, direction) ->
+            val completed = evidence(kind = kind, direction = direction)
+            assertFalse("$kind must not be confirm-only", ScreenshotCapturePolicy.requiresConfirmation(kind))
             assertEquals(
-                "$kind must keep asking",
-                Action.ASK_USER,
+                "$kind must preserve its explicit direction and book",
+                Action.AUTO_BOOK,
                 ScreenshotCapturePolicy.assess(completed, allowAuto = true).action,
             )
         }
@@ -273,9 +282,9 @@ class ScreenshotCapturePolicyTest {
     @Test
     fun `transfer is no longer an unconditional confirm only kind`() {
         assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_TRANSFER))
-        assertTrue(ScreenshotCapturePolicy.requiresConfirmation(KIND_REFUND))
-        assertTrue(ScreenshotCapturePolicy.requiresConfirmation(KIND_RED_PACKET))
-        assertTrue(ScreenshotCapturePolicy.requiresConfirmation(KIND_WITHDRAWAL))
+        assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_REFUND))
+        assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_RED_PACKET))
+        assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_WITHDRAWAL))
     }
 
     // ---------- allowAuto / previewOnly 仍然优先 ----------
