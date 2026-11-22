@@ -42,17 +42,21 @@ object ScreenshotPageInterpreter {
     private val WECHAT_MARKERS = listOf(
         "微信支付", "微信", "零钱", "转账给", "收款方", "付款给", "当前状态", "支付分",
     )
-    private val ALIPAY_MARKERS = listOf("支付宝", "账单详情", "交易成功", "付款方式", "订单号", "花呗", "余额宝")
+    private val ALIPAY_MARKERS = listOf(
+        "支付宝", "账单详情", "交易成功", "付款方式", "订单号", "花呗", "余额宝",
+        "Payment successful", "Payment method", "Trading partner",
+    )
     private val LIST_MARKERS = listOf("全部账单", "账单明细", "收支明细", "账单记录")
     private val CHECKOUT_MARKERS = listOf("立即支付", "确认付款", "确认转账", "请输入金额")
 
     private val COMPLETED_MARKERS = listOf(
         "交易成功", "支付成功", "付款成功", "转账成功", "交易完成", "已到账",
-        "已存入零钱", "已收款", "收款成功", "支付完成",
+        "已存入零钱", "已收款", "收款成功", "支付完成", "自动扣款成功", "Payment successful",
+        "零钱提现已到账",
     )
     /** A refund that arrived is finished money, even though 已退回 reads like a cancellation. */
     private val REFUND_COMPLETED_MARKERS = listOf(
-        "退款成功", "退款到账", "退款完成", "退款已到账", "退款已原路退回", "已全额退款",
+        "退款成功", "退款到账", "退款到账通知", "退款完成", "退款已到账", "退款已原路退回", "已全额退款",
     )
     private val PENDING_MARKERS = listOf(
         "等待对方确认", "待收款", "待领取", "待对方接收", "处理中", "转账处理中", "对方未领取",
@@ -93,31 +97,40 @@ object ScreenshotPageInterpreter {
         "退款金额", "退款成功", "退款到账", "退款详情", "退款已原路退回", "已全额退款",
     )
 
-    /** Footer / app-chrome statistics that sit under a payment page and are not transactions. */
+    /** Footer / app-chrome statistics and promo banners that sit under a payment page and are not transactions. */
     private val NOISE_LINE_MARKERS = listOf(
         "记账日报", "昨日支出", "昨日收入", "今日支出", "本周支出",
         "本月统计", "本月支出", "上月支出", "收支分析", "账单分析", "消费报表",
+        "支付奖励", "签到金", "攒满可提现", "无门槛到店红包", "碰一下券包",
+        "神奇物种抽卡", "提现免费券", "提现笔笔省", "分分捐计划进行中",
+        "领小红花状态", "可给对方留言", "如有银行入账结果等疑问",
+        "可查看详情和联系银行客服", "查看此银行卡余额",
+        "管理当前自动扣款服务", "管理自动扣款服务",
     )
 
     /** Field labels and chrome that must never be read as a merchant name. */
     private val MERCHANT_STOPWORDS = listOf(
         "金额", "时间", "单号", "状态", "方式", "备注", "说明", "详情", "统计", "日报",
         "支付", "收款", "转账", "退款", "订单", "零钱", "钱包", "账单",
+        "商户名称", "商品详情", "支付服务", "服务消息", "支付消息", "我的账单", "优惠",
+        "Payment successful", "Payment method", "Debit amount", "Total debit", "Trading partner",
     )
 
     /**
      * Rows that surround a bill-list card and can never be a shop name: the
      * payment-method sentence (使用…支付 / 零钱 / 储蓄卡 / 信用卡 / 余额), the
      * 账单详情 row and the 分分捐 / 领小红花 footer. On these cards the shop
-     * header itself sits two to four rows above the amount.
+     * header itself sits two to seven rows above the amount.
      */
     private val MERCHANT_INTERFERENCE = listOf(
-        "使用", "支付方式", "零钱", "储蓄卡", "信用卡", "余额",
-        "账单详情", "交易详情", "分分捐", "领小红花",
+        "使用", "支付方式", "付款方式", "Payment method", "Debit amount", "Total debit",
+        "Trading partner", "零钱", "储蓄卡", "信用卡", "余额", "花呗", "Huabei",
+        "账单详情", "交易详情", "查看详情", "查看退款详情", "查看交易详情",
+        "分分捐", "领小红花", "支付服务", "我的账单", "服务消息", "支付消息",
     )
 
     /** How many rows above the amount a shop name may sit on a bill-list card. */
-    private const val MERCHANT_LOOKUP_LINES = 4
+    private const val MERCHANT_LOOKUP_LINES = 7
 
     /**
      * The footer a bill-list card prints under its amount. A detail page is
@@ -128,7 +141,7 @@ object ScreenshotPageInterpreter {
     /** The payment-method sentence every bill-list card carries. */
     private fun isPaymentMethodRow(line: String): Boolean {
         val text = line.trim()
-        if (text.contains("支付方式") || text.contains("付款方式")) return true
+        if (text.contains("支付方式") || text.contains("付款方式") || text.contains("Payment method")) return true
         return text.startsWith("使用") && text.contains("支付")
     }
 
@@ -188,6 +201,11 @@ object ScreenshotPageInterpreter {
     private val RELATIVE_DAY_REGEX = Regex("大前天|前天|昨天|昨日|今天|今日")
     /** `周一` / `星期天`: a weekday label is date evidence, not merchant text. */
     private val WEEKDAY_REGEX = Regex("(?:^|[\\s:：])(?:星期|周)([一二三四五六日天])")
+    private val WALLET_LEDGER_AMOUNT_REGEX = Regex("^([-+])([0-9][0-9,]*(?:\\.[0-9]{1,2})?)$")
+    private val YEAR_MONTH_HEADER_REGEX = Regex("(\\d{4})年(\\d{1,2})月")
+    private val STATUS_BAR_CLOCK_REGEX = Regex("^\\d{1,2}:\\d{2}[….•·\\s]+$")
+    private val STATUS_BAR_BACK_BADGE_REGEX = Regex("^<\\d+$")
+    private val APP_HEADER_MARKERS = listOf("微信支付", "支付消息", "服务消息", "零钱明细")
 
     fun interpret(
         blocks: List<TextBlock>,
@@ -206,9 +224,14 @@ object ScreenshotPageInterpreter {
                 reason = "no text recognised",
             )
         }
-        // Footer statistics belong to the app shell, not to the transaction.
-        val content = ordered.filterNot { isNoiseLine(it.text) }
+        // Footer statistics, promo banners and phone status-bar chrome belong to the shell, not to the transaction.
+        val content = stripStatusBarChrome(ordered).filterNot { isNoiseLine(it.text) }
         val allText = content.joinToString("\n") { it.text }
+        if (allText.contains("零钱明细") &&
+            content.any { WALLET_LEDGER_AMOUNT_REGEX.matchEntire(it.text.trim()) != null }
+        ) {
+            parseWechatWalletLedger(content, capturedAtMs, timeZone)?.let { return it }
+        }
         val platform = detectPlatform(allText).let { detected ->
             // A chat screenshot often carries no app name at all. The transfer
             // bubble itself (amount + 已被接收/已收款/待接收 + 转账) is then the
@@ -253,6 +276,10 @@ object ScreenshotPageInterpreter {
             )
         }
 
+        tryConsolidateChatTransfer(content, platform, pageType, capturedAtMs, timeZone)?.let {
+            return it
+        }
+
         val segments = splitSegments(content)
         if (segments.isEmpty()) {
             return ScreenshotPageEvidence(
@@ -271,7 +298,7 @@ object ScreenshotPageInterpreter {
         // Status evidence belongs to the card that carries it. A refund marker on
         // one card must not retype, complete or suppress another payment card on
         // the same page, and a future-debit marker must not hide its neighbour.
-        val cards = mergeRepeatedRefundCards(segments)
+        val cards = mergeWithdrawalProgressCards(mergeRepeatedRefundCards(segments))
         // A bill list prints only money that already moved, so a row with no
         // unfinished word is settled. Card-level, because one list screenshot
         // can hold several rows and one unfinished row must not stop the rest.
@@ -643,6 +670,7 @@ object ScreenshotPageInterpreter {
             completionOf(segment)
         }
         val merchant = merchantOf(segment, amountBlock)
+        val account = accountOf(segment)
         val orderId = ORDER_ID_REGEX.find(segmentText)?.groupValues?.get(1)
         val eventTime = eventTimeOf(segmentText, capturedAtMs, timeZone)
         val supported = platform != CaptureCandidate.PLATFORM_UNKNOWN &&
@@ -661,6 +689,7 @@ object ScreenshotPageInterpreter {
             completionStatus = completion.first,
             completionExplicit = completion.second,
             merchantCandidates = merchant,
+            account = account,
             orderId = orderId,
             eventTimeMs = eventTime,
             pageIdentity = "${platform.lowercase(Locale.ROOT)}:$pageType:${amount ?: 0}:${noiseKey(merchant.firstOrNull())}",
@@ -697,6 +726,8 @@ object ScreenshotPageInterpreter {
         }
         return when {
             cleaned.contains("支付") || text.contains("转账给") || text.contains("付款") ||
+                text.contains("自动扣款成功") || text.contains("Payment successful") ||
+                text.contains("Payment method") || text.contains("Trading partner") ||
                 pageType == PAGE_CHECKOUT -> CaptureCandidate.DIRECTION_EXPENSE
             else -> CaptureCandidate.DIRECTION_UNKNOWN
         }
@@ -708,7 +739,8 @@ object ScreenshotPageInterpreter {
         text.contains("红包") -> CaptureCandidate.KIND_RED_PACKET
         text.contains("提现") -> CaptureCandidate.KIND_WITHDRAWAL
         text.contains("转账") -> CaptureCandidate.KIND_TRANSFER
-        text.contains("花呗") || text.contains("自动扣款") || text.contains("先用后付") ->
+        text.contains("花呗") || text.contains("Huabei") ||
+            text.contains("自动扣款") || text.contains("先用后付") ->
             CaptureCandidate.KIND_AUTO_PAY
         direction == CaptureCandidate.DIRECTION_UNKNOWN -> CaptureCandidate.KIND_PAYMENT
         else -> CaptureCandidate.KIND_PAYMENT
@@ -899,7 +931,7 @@ object ScreenshotPageInterpreter {
         max(MIN_STATUS_HORIZONTAL_GAP, max(a.bottom - a.top, b.bottom - b.top) * 4)
 
     private fun merchantOf(segment: List<TextBlock>, amountBlock: TextBlock): List<String> {
-        val labels = listOf("收款方", "付款给", "转账给", "商户全称", "对方", "收款人")
+        val labels = listOf("收款方", "付款给", "转账给", "商户全称", "商户名称", "对方", "收款人")
         segment.forEachIndexed { index, block ->
             labels.forEach { label ->
                 if (block.text.startsWith(label) || block.text.contains("$label：") ||
@@ -909,6 +941,11 @@ object ScreenshotPageInterpreter {
                     merchantName(inline, allowDigit = true)?.let { return listOf(it) }
                     merchantName(segment.getOrNull(index + 1)?.text, allowDigit = true)?.let {
                         return listOf(it)
+                    }
+                    if (block.text.trim() == label) {
+                        merchantName(segment.getOrNull(index - 1)?.text, allowDigit = true)?.let {
+                            return listOf(it)
+                        }
                     }
                 }
                 // "转账给 张三" on one line
@@ -923,15 +960,20 @@ object ScreenshotPageInterpreter {
         // never be read as a shop name.
         if (transferBubbleOf(segment.joinToString("\n") { it.text }) != null) return emptyList()
         // Fall back to the rows above the amount. A bill-list card prints the
-        // shop two to four rows above it (icon row, payment method, timestamp),
+        // shop two to seven rows above it (icon row, payment method, timestamp),
         // so giving up after one rejected row is exactly what left real shops
         // unread. Walk at most [MERCHANT_LOOKUP_LINES] rows, nearest first, and
         // skip the chrome that can never be a shop name.
         val amountIndex = segment.indexOfFirst { it === amountBlock }
         val above = if (amountIndex > 0) segment.subList(0, amountIndex) else emptyList()
-        above.takeLast(MERCHANT_LOOKUP_LINES).asReversed().forEach { block ->
-            if (isMerchantInterference(block.text)) return@forEach
-            merchantName(block.text, allowDigit = true)?.let { return listOf(it) }
+        val window = above.takeLast(MERCHANT_LOOKUP_LINES)
+        for (i in window.indices.reversed()) {
+            val line = window[i].text.trim()
+            if (isMerchantInterference(line)) continue
+            if (isAvatarBadgeArtifact(line, window.getOrNull(i - 1)?.text, window.getOrNull(i + 1)?.text)) {
+                continue
+            }
+            merchantName(line, allowDigit = true)?.let { return listOf(it) }
         }
         return emptyList()
     }
@@ -946,12 +988,21 @@ object ScreenshotPageInterpreter {
      */
     private fun isMerchantInterference(line: String): Boolean {
         val text = line.trim()
-        if (text.isEmpty()) return true
+        if (text.isEmpty() || text.length == 1) return true
         if (amountOf(text) != null) return true
         if (isTimeOrDateLine(text)) return true
+        if (STATUS_BAR_BACK_BADGE_REGEX.matches(text)) return true
         if (MERCHANT_INTERFERENCE.any(text::contains)) return true
+        if (text.startsWith("进入") || text.startsWith("管理")) return true
         if (text.all { it.isDigit() || it.isWhitespace() || it in ".,:：" }) return true
         return false
+    }
+
+    /** Short ASCII-only icon OCR artifacts (e.g. `O`, `UD`, `BDE`) sitting next to `00` / `06` avatar badges. */
+    private fun isAvatarBadgeArtifact(line: String, prev: String?, next: String?): Boolean {
+        if (!line.matches(Regex("[A-Za-z]{1,3}"))) return false
+        val neighbors = listOfNotNull(prev?.trim(), next?.trim())
+        return neighbors.any { it.matches(Regex("[0-9\\s]{2,4}")) || isTimeOrDateLine(it) }
     }
 
     /** `21:46`, `昨天 14:01`, `11月19日 20:10`, `2026-11-19 20:15`: never a shop. */
@@ -974,7 +1025,8 @@ object ScreenshotPageInterpreter {
         if (text.isEmpty() || text.length > 40) return null
         if (!allowDigit && text.any(Char::isDigit)) return null
         if (text.contains('¥') || text.contains('￥') || text.endsWith("元")) return null
-        if (MERCHANT_STOPWORDS.any { text == it || text.endsWith(it) || text.startsWith(it) }) return null
+        val isWithdrawalName = text.startsWith("零钱提现")
+        if (!isWithdrawalName && MERCHANT_STOPWORDS.any { text == it || text.endsWith(it) || text.startsWith(it) }) return null
         val status = COMPLETED_MARKERS + REFUND_COMPLETED_MARKERS + CANCELLED_MARKERS +
             PENDING_MARKERS + FAILED_MARKERS + CREATED_MARKERS + NOTICE_MARKERS +
             listOf("当前状态", "支付方式", "商品详情", "交易详情", "账单详情", "订单号", "交易单号")
@@ -1180,6 +1232,259 @@ object ScreenshotPageInterpreter {
 
     private fun noiseKey(value: String?): String =
         value.orEmpty().trim().lowercase(Locale.ROOT).replace(Regex("\\s+"), "").take(24)
+
+    /** Extract clearly visible payment / bank / refund account from a card segment. */
+    private fun accountOf(segment: List<TextBlock>): String? {
+        for (i in segment.indices) {
+            val line = segment[i].text.trim()
+            Regex("^使用(.+?)支付$").find(line)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
+            Regex("^退回支付卡\\((.+?)\\)$").find(line)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let { return it }
+            for (prefix in listOf("付款方式", "支付方式", "Payment method", "提现银行", "退款方式")) {
+                if (line.startsWith(prefix)) {
+                    val inline = line.removePrefix(prefix).trimStart('：', ':', ' ')
+                    val value = if (inline.isNotEmpty()) inline else segment.getOrNull(i + 1)?.text?.trim().orEmpty()
+                    Regex("^退回支付卡\\((.+?)\\)$").find(value)?.groupValues?.get(1)?.trim()
+                        ?.takeIf { it.isNotEmpty() }?.let { return it }
+                    if (value.isNotEmpty() && !isTimeOrDateLine(value) && amountOf(value) == null) {
+                        return value
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    /** Strip phone status-bar clock / back-badge chrome above the app header so it never pollutes card timestamps or merchants. */
+    private fun stripStatusBarChrome(blocks: List<TextBlock>): List<TextBlock> {
+        val headerIdx = blocks.indexOfFirst { block ->
+            val t = block.text.trim()
+            APP_HEADER_MARKERS.any { t == it || t.contains(it) }
+        }
+        val headerTop = if (headerIdx >= 0 && hasGeometry(blocks[headerIdx])) blocks[headerIdx].top else Int.MAX_VALUE
+        return blocks.filterIndexed { idx, block ->
+            val t = block.text.trim()
+            if (amountOf(t) != null) return@filterIndexed true
+            if (STATUS_BAR_BACK_BADGE_REGEX.matches(t)) return@filterIndexed false
+            if (STATUS_BAR_CLOCK_REGEX.matches(t)) return@filterIndexed false
+            if (headerIdx > 0 && idx < headerIdx && hasGeometry(block) && block.top < headerTop) {
+                if (LIST_MARKERS.any(t::contains) || CHECKOUT_MARKERS.any(t::contains)) return@filterIndexed true
+                if (t.length <= 8 && !isTimeOrDateLine(t)) return@filterIndexed false
+            }
+            true
+        }
+    }
+
+    /** Fold `零钱提现发起` + `零钱提现已到账` for the same withdrawal into one final-state card. */
+    private fun mergeWithdrawalProgressCards(cards: List<Card>): List<Card> {
+        if (cards.size < 2) return cards
+        val finalCards = cards.filter { c -> c.blocks.any { it.text.contains("零钱提现已到账") } }
+        val initCards = cards.filter { c -> c.blocks.any { it.text.contains("零钱提现发起") } }
+        if (finalCards.isEmpty() || initCards.isEmpty()) return cards
+        val dropped = mutableSetOf<Int>()
+        for (fin in finalCards) {
+            val amt = fin.blocks.firstNotNullOfOrNull { amountOf(it.text) } ?: continue
+            val bank = accountOf(fin.blocks)
+            for (init in initCards) {
+                val initAmt = init.blocks.firstNotNullOfOrNull { amountOf(it.text) }
+                val initBank = accountOf(init.blocks)
+                if (initAmt == amt && (bank == null || initBank == null || bank == initBank)) {
+                    dropped += init.index
+                }
+            }
+        }
+        if (dropped.isEmpty()) return cards
+        return cards.filterNot { it.index in dropped }.map { card ->
+            if (card.blocks.any { it.text.contains("零钱提现已到账") }) {
+                val bank = accountOf(card.blocks)
+                val injected = if (bank != null && card.blocks.none { it.text.startsWith("收款方") }) {
+                    listOf(TextBlock("收款方：零钱提现-到$bank")) + card.blocks.filterNot { it.text.contains("预计到账时间") }
+                } else {
+                    card.blocks.filterNot { it.text.contains("预计到账时间") }
+                }
+                card.copy(blocks = injected)
+            } else {
+                card
+            }
+        }
+    }
+
+    /** Consolidate two WeChat chat transfer bubbles (`已被接收` + `已收款` of same amount) into one incoming transfer. */
+    private fun tryConsolidateChatTransfer(
+        content: List<TextBlock>,
+        platform: String,
+        pageType: String,
+        capturedAtMs: Long,
+        timeZone: TimeZone,
+    ): ScreenshotPageEvidence? {
+        val allText = content.joinToString("\n") { it.text }
+        if (platform != CaptureCandidate.PLATFORM_WECHAT || !isTransferBubbleText(allText)) {
+            return null
+        }
+        val segments = splitSegments(content)
+        if (segments.size < 2) return null
+        val hasAccepted = allText.contains("已被接收") || allText.contains("已接收")
+        val hasReceived = allText.contains("已收款")
+        if (!hasAccepted || !hasReceived) return null
+        val bubbleSegments = segments.filter { seg ->
+            seg.any {
+                it.text.contains("已被接收") || it.text.contains("已接收") ||
+                    it.text.contains("已收款") || it.text.contains("转账")
+            }
+        }
+        if (bubbleSegments.size < 2) return null
+        // Guard against two opposite-side bubbles with no chat header/timestamp (e.g. stacked test fixtures).
+        val amounts = bubbleSegments.mapNotNull { seg -> seg.firstNotNullOfOrNull { amountOf(it.text) } }.distinct()
+        val amount = amounts.singleOrNull() ?: return null
+
+        // Contact name sits near the top below status-bar clock and above the first chat timestamp.
+        val firstTsIdx = content.indexOfFirst { b ->
+            val t = b.text.trim()
+            !TIME_ONLY_REGEX.matches(t) && isTimeOrDateLine(t)
+        }
+        val contact = if (firstTsIdx > 0) {
+            content.subList(0, firstTsIdx).firstOrNull { b ->
+                val t = b.text.trim()
+                !TIME_ONLY_REGEX.matches(t) &&
+                    !STATUS_BAR_BACK_BADGE_REGEX.matches(t) &&
+                    !t.matches(Regex("\\d+")) &&
+                    t.length in 1..24 &&
+                    !t.contains("转账")
+            }?.text?.trim()
+        } else {
+            null
+        }
+        // Transfer timestamp sits immediately above the first transfer bubble, before any later voice message timestamp.
+        val firstBubbleAmount = bubbleSegments.first().first { amountOf(it.text) != null }
+        val transferTimeBlock = content
+            .filter { b -> b.top <= firstBubbleAmount.top && isTimeOrDateLine(b.text) && !TIME_ONLY_REGEX.matches(b.text.trim()) }
+            .lastOrNull()
+        val eventTimeMs = transferTimeBlock?.let { eventTimeOf(it.text, capturedAtMs, timeZone) }
+        if (contact == null || transferTimeBlock == null) return null
+
+        val draft = TransactionDraft(
+            index = 0,
+            amountCents = amount,
+            amountUnambiguous = true,
+            direction = CaptureCandidate.DIRECTION_INCOME,
+            directionExplicit = true,
+            kind = CaptureCandidate.KIND_TRANSFER,
+            completionStatus = CaptureCandidate.COMPLETION_COMPLETED,
+            completionExplicit = true,
+            merchantCandidates = listOfNotNull(contact),
+            eventTimeMs = eventTimeMs,
+            pageIdentity = "wechat:$pageType:$amount:${noiseKey(contact)}",
+            supportedPaymentPage = true,
+            reason = "consolidated chat transfer bubbles",
+        )
+        return ScreenshotPageEvidence(
+            platform = CaptureCandidate.PLATFORM_WECHAT,
+            pageType = PAGE_SUCCESS,
+            transactionLike = true,
+            drafts = listOf(draft),
+            reason = "parsed",
+        )
+    }
+
+    /** Parse WeChat `零钱明细` wallet ledger list rows (signed amounts without `¥`, `零钱余额...` ignored). */
+    private fun parseWechatWalletLedger(
+        content: List<TextBlock>,
+        capturedAtMs: Long,
+        timeZone: TimeZone,
+    ): ScreenshotPageEvidence? {
+        val headerYear = content.firstNotNullOfOrNull {
+            YEAR_MONTH_HEADER_REGEX.find(it.text)?.groupValues?.get(1)?.toIntOrNull()
+        }
+        val rows = content.filterNot { b ->
+            val t = b.text.trim()
+            t == "零钱明细" || t == "x" || YEAR_MONTH_HEADER_REGEX.matches(t) || t.startsWith("零钱余额")
+        }
+        val anchors = rows.filter { WALLET_LEDGER_AMOUNT_REGEX.matchEntire(it.text.trim()) != null }
+        if (anchors.isEmpty()) return null
+        val hasBoxes = anchors.all { hasGeometry(it) } && rows.any { hasGeometry(it) }
+        val segments = anchors.map { mutableListOf<TextBlock>() }
+        if (hasBoxes) {
+            var anchorIdx = 0
+            rows.forEach { block ->
+                if (WALLET_LEDGER_AMOUNT_REGEX.matchEntire(block.text.trim()) != null) {
+                    segments[anchorIdx++] += block
+                } else {
+                    val best = anchors.indices.minByOrNull { i -> abs((block.top - anchors[i].top).toLong()) } ?: 0
+                    segments[best] += block
+                }
+            }
+        } else {
+            var current = 0
+            rows.forEach { block ->
+                if (WALLET_LEDGER_AMOUNT_REGEX.matchEntire(block.text.trim()) != null) {
+                    segments[current] += block
+                    if (current + 1 < segments.size) current++
+                } else {
+                    segments[current] += block
+                }
+            }
+        }
+        val drafts = segments.mapIndexedNotNull { idx, seg ->
+            val amtBlock = seg.firstOrNull { WALLET_LEDGER_AMOUNT_REGEX.matchEntire(it.text.trim()) != null }
+                ?: return@mapIndexedNotNull null
+            val match = WALLET_LEDGER_AMOUNT_REGEX.matchEntire(amtBlock.text.trim()) ?: return@mapIndexedNotNull null
+            val sign = match.groupValues[1]
+            val cents = centsOf(match.groupValues[2]) ?: return@mapIndexedNotNull null
+            val direction = if (sign == "+") CaptureCandidate.DIRECTION_INCOME else CaptureCandidate.DIRECTION_EXPENSE
+            val title = seg.firstOrNull { b ->
+                b !== amtBlock && !isTimeOrDateLine(b.text) && !b.text.trim().startsWith("零钱余额") && b.text.trim().length > 1
+            }?.text?.trim()
+            val kind = when {
+                title == null -> CaptureCandidate.KIND_PAYMENT
+                title.contains("提现") && !title.contains("服务费") && !title.contains("手续费") ->
+                    CaptureCandidate.KIND_WITHDRAWAL
+                title.contains("转账") -> CaptureCandidate.KIND_TRANSFER
+                title.contains("退款") -> CaptureCandidate.KIND_REFUND
+                else -> CaptureCandidate.KIND_PAYMENT
+            }
+            val account = if (title != null && title.contains("提现") && title.contains("-到")) {
+                title.substringAfter("-到").trim().ifEmpty { "零钱" }
+            } else {
+                "零钱"
+            }
+            val timeLine = seg.firstOrNull { isTimeOrDateLine(it.text) }?.text
+            val eventTimeMs = timeLine?.let { raw ->
+                val withYear = if (headerYear != null && !raw.contains("年") && MONTH_DAY_TIME_REGEX.containsMatchIn(raw)) {
+                    "${headerYear}年$raw"
+                } else {
+                    raw
+                }
+                eventTimeOf(withYear, capturedAtMs, timeZone)
+            }
+            TransactionDraft(
+                index = idx,
+                amountCents = cents,
+                amountUnambiguous = true,
+                direction = direction,
+                directionExplicit = true,
+                kind = kind,
+                completionStatus = CaptureCandidate.COMPLETION_COMPLETED,
+                completionExplicit = true,
+                merchantCandidates = listOfNotNull(title),
+                account = account,
+                eventTimeMs = eventTimeMs,
+                pageIdentity = "wechat:$PAGE_LIST:$cents:${noiseKey(title)}",
+                supportedPaymentPage = true,
+                settledBillRow = true,
+                completionInferredFromList = true,
+                reason = "settled wechat wallet ledger row",
+            )
+        }
+        if (drafts.isEmpty()) return null
+        return ScreenshotPageEvidence(
+            platform = CaptureCandidate.PLATFORM_WECHAT,
+            pageType = PAGE_LIST,
+            transactionLike = true,
+            drafts = drafts,
+            reason = "parsed",
+        )
+    }
 
     private const val MIN_STATUS_HORIZONTAL_GAP = 72
     private const val FUTURE_TOLERANCE_MS = 5L * 60 * 1000

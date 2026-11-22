@@ -57,6 +57,7 @@ data class TransactionDraft(
     val completionStatus: String,
     val completionExplicit: Boolean,
     val merchantCandidates: List<String> = emptyList(),
+    val account: String? = null,
     val orderId: String? = null,
     val eventTimeMs: Long? = null,
     /** Only currency-shaped amounts (¥ / 元) are parsed, so drafts are CNY. */

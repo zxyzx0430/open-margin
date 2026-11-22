@@ -60,6 +60,7 @@ object ScreenshotCandidateFactory {
             directionExplicit = draft.directionExplicit,
             matchedTransactionId = decision.matchedTransactionId,
             ledgerWriteAllowed = decision.ledgerWriteAllowed,
+            transactionAccount = draft.account?.takeIf { it.isNotBlank() }?.take(80),
         )
     }
 
