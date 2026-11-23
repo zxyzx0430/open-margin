@@ -62,6 +62,8 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.components.DateTimePickerTab
+import com.bookkeeping.app.ui.components.LedgerDateTimePickerDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureImagePreview
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -391,50 +393,18 @@ fun TransactionEditScreen(
         }
     }
 
-    if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = TransactionEditRules.localDateToUtcMillis(timestamp),
-        )
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        timestamp = TransactionEditRules.applyUtcDateToMillis(it, timestamp)
-                    }
-                    showDatePicker = false
-                }) { Text(tr("确定")) }
+    if (showDatePicker || showTimePicker) {
+        LedgerDateTimePickerDialog(
+            initialTimestampMs = timestamp,
+            initialTab = if (showTimePicker) DateTimePickerTab.TIME else DateTimePickerTab.DATE,
+            onDismiss = {
+                showDatePicker = false
+                showTimePicker = false
             },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text(tr("取消")) }
-            },
-        ) {
-            DatePicker(state = datePickerState)
-        }
-    }
-
-    if (showTimePicker) {
-        val timePickerState = rememberTimePickerState(
-            initialHour = TransactionEditRules.hourOf(timestamp),
-            initialMinute = TransactionEditRules.minuteOf(timestamp),
-            is24Hour = true,
-        )
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            title = { Text(tr("时间")) },
-            text = { TimePicker(state = timePickerState) },
-            confirmButton = {
-                TextButton(onClick = {
-                    timestamp = TransactionEditRules.withLocalTime(
-                        timestamp,
-                        timePickerState.hour,
-                        timePickerState.minute,
-                    )
-                    showTimePicker = false
-                }) { Text(tr("确定")) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text(tr("取消")) }
+            onConfirm = { pickedMs ->
+                timestamp = pickedMs
+                showDatePicker = false
+                showTimePicker = false
             },
         )
     }

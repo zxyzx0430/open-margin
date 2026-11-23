@@ -45,6 +45,7 @@ import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,12 +60,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -114,6 +120,7 @@ import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.flowOf
@@ -141,6 +148,10 @@ class ScreenshotImportActivity : ComponentActivity() {
     private val batchProgress = mutableStateOf<BatchProgress?>(null)
     private val message = mutableStateOf<String?>(null)
     private val selectedTransactionId = mutableStateOf<Long?>(null)
+    private val highlightedTransactionId = mutableStateOf<Long?>(null)
+    private val lastIgnoredCandidate = mutableStateOf<CaptureCandidate?>(null)
+    private var batchJob: Job? = null
+    private var sessionImageCounter: Int = 0
 
     private val pickImages = registerForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(ScreenshotBatchPolicy.MAX_BATCH_IMAGES),
@@ -197,12 +208,25 @@ class ScreenshotImportActivity : ComponentActivity() {
                         },
                         onDelete = { current -> deleteTransaction(current) },
                         onConfirmEventTime = { current -> confirmTransactionTime(current) },
+                        onUpdateEventTime = { current, pickedMs ->
+                            updateTransactionTime(current, pickedMs)
+                        },
                     )
                 } else {
                     ScreenshotImportScreen(
                         state = state,
                         bookedTransactions = bookedTransactions,
+                        highlightedTransactionId = highlightedTransactionId.value,
+                        onHighlightFinished = { id ->
+                            if (highlightedTransactionId.value == id) {
+                                highlightedTransactionId.value = null
+                            }
+                        },
                         progress = batchProgress.value,
+                        onStopBatch = { stopBatch() },
+                        lastIgnored = lastIgnoredCandidate.value,
+                        onUndoIgnore = { candidate -> undoIgnore(candidate) },
+                        onUndoDismissed = { lastIgnoredCandidate.value = null },
                         message = message.value,
                         onClose = { close() },
                         onPickImages = { openPicker() },
@@ -302,33 +326,52 @@ class ScreenshotImportActivity : ComponentActivity() {
         if (uris.isEmpty()) return
         message.value = null
         val total = uris.size
+        val hadContentBefore = review.value.hasAnyContent
         batchProgress.value = BatchProgress(current = 1, total = total)
-        scope.launch {
-            uris.forEachIndexed { index, uri ->
-                runOnUiThread {
-                    batchProgress.value = BatchProgress(current = index + 1, total = total)
+        batchJob?.cancel()
+        batchJob = scope.launch {
+            try {
+                uris.forEachIndexed { index, uri ->
+                    val globalIndex = ++sessionImageCounter
+                    runOnUiThread {
+                        batchProgress.value = BatchProgress(current = index + 1, total = total)
+                    }
+                    val outcome = runCatching { coordinator.ingest(uri, source) }.getOrNull()
+                    runOnUiThread {
+                        applyOutcome(
+                            outcome = outcome,
+                            globalIndex = globalIndex,
+                            isMultiImage = total > 1 || hadContentBefore,
+                            showDuplicateToast = hadContentBefore && total == 1,
+                        )
+                    }
                 }
-                val outcome = runCatching { coordinator.ingest(uri, source) }.getOrNull()
-                runOnUiThread { applyOutcome(outcome, index + 1, total) }
-            }
-            runOnUiThread {
-                batchProgress.value = null
+            } finally {
+                runOnUiThread {
+                    batchProgress.value = null
+                }
             }
         }
     }
 
+    private fun stopBatch() {
+        batchJob?.cancel()
+        batchJob = null
+        batchProgress.value = null
+        Toast.makeText(this, tr("已停止识别剩余截图"), Toast.LENGTH_SHORT).show()
+    }
+
     private fun applyOutcome(
         outcome: ScreenshotIntakeCoordinator.Outcome?,
-        index: Int,
-        total: Int,
+        globalIndex: Int,
+        isMultiImage: Boolean,
+        showDuplicateToast: Boolean,
     ) {
         if (outcome == null) {
-            val note = if (total > 1) {
-                tr("第 %d 张：%s").format(index, tr("图片读不出来"))
-            } else {
-                tr("图片读不出来")
-            }
+            val detail = tr("图片读不出来")
+            val note = if (isMultiImage) tr("第 %d 张：%s").format(globalIndex, detail) else detail
             review.value = review.value.withNotice(note)
+            if (showDuplicateToast) Toast.makeText(this, detail, Toast.LENGTH_SHORT).show()
             return
         }
         var next = review.value
@@ -342,8 +385,11 @@ class ScreenshotImportActivity : ComponentActivity() {
             outcome.confirmationCandidates.isNotEmpty()
         if (!hasDirectResult) {
             val detail = describe(outcome)
-            val note = if (total > 1) tr("第 %d 张：%s").format(index, detail) else detail
+            val note = if (isMultiImage) tr("第 %d 张：%s").format(globalIndex, detail) else detail
             next = next.withNotice(note)
+            if (showDuplicateToast || outcome.repeatImage) {
+                Toast.makeText(this, detail, Toast.LENGTH_SHORT).show()
+            }
         }
         review.value = next
     }
@@ -397,6 +443,7 @@ class ScreenshotImportActivity : ComponentActivity() {
                             candidateId = candidate.candidateId,
                             transactionId = outcome.transactionId,
                         )
+                        highlightedTransactionId.value = outcome.transactionId
                     }
                     is WriteOutcome.SuspectedDuplicate -> {
                         Toast.makeText(
@@ -553,6 +600,20 @@ class ScreenshotImportActivity : ComponentActivity() {
         }
     }
 
+    private fun updateTransactionTime(entity: TransactionEntity, timestampMs: Long) {
+        if (TransactionEditRules.timestampError(timestampMs, System.currentTimeMillis()) != null) return
+        if (entity.timestamp == timestampMs && !entity.eventTimeNeedsConfirmation) return
+        val repo = repository ?: return
+        scope.launch {
+            repo.update(
+                entity.copy(
+                    timestamp = timestampMs,
+                    eventTimeNeedsConfirmation = false,
+                ),
+            )
+        }
+    }
+
     private fun ignore(candidate: CaptureCandidate) {
         if (!review.value.canConfirm(candidate.candidateId)) return
         review.value = review.value.begin(candidate.candidateId)
@@ -563,12 +624,33 @@ class ScreenshotImportActivity : ComponentActivity() {
             runOnUiThread {
                 if (ignored) {
                     review.value = review.value.skip(candidate.candidateId)
+                    lastIgnoredCandidate.value = candidate
                 } else {
                     review.value = review.value.fail(candidate.candidateId)
                     Toast.makeText(
                         this@ScreenshotImportActivity,
                         tr("候选状态未能更新，请重试"),
                         Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun undoIgnore(candidate: CaptureCandidate) {
+        lastIgnoredCandidate.value = null
+        scope.launch {
+            val restored = runCatching {
+                store.mark(candidate, CaptureCandidate.STATUS_PENDING)
+            }.getOrDefault(false)
+            runOnUiThread {
+                if (restored) {
+                    review.value = review.value.restore(candidate.candidateId)
+                } else {
+                    Toast.makeText(
+                        this@ScreenshotImportActivity,
+                        tr("撤销失败，请稍后重试"),
+                        Toast.LENGTH_SHORT,
                     ).show()
                 }
             }
@@ -688,7 +770,9 @@ private fun ScreenshotImportScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (progress != null) {
-                item(key = "recognizing") { RecognizingCard(progress = progress) }
+                item(key = "recognizing") {
+                    RecognizingCard(progress = progress, onStopBatch = onStopBatch)
+                }
             }
             if (!state.hasAnyContent) {
                 if (progress == null) {
@@ -747,6 +831,8 @@ private fun ScreenshotImportScreen(
                                     LedgerTransactionRow(
                                         transaction = transaction,
                                         timeText = timeFormat.format(Date(transaction.timestamp)),
+                                        highlightedTransactionId = highlightedTransactionId,
+                                        onHighlightFinished = onHighlightFinished,
                                         onClick = { onOpenTransaction(transaction.id) },
                                     )
                                     if (index != bookedTransactions.lastIndex) {
@@ -978,7 +1064,7 @@ private fun PickImageCard(message: String?, onPickImages: () -> Unit) {
 }
 
 @Composable
-private fun RecognizingCard(progress: BatchProgress) {
+private fun RecognizingCard(progress: BatchProgress, onStopBatch: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -988,16 +1074,19 @@ private fun RecognizingCard(progress: BatchProgress) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
                 strokeWidth = 2.dp,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
                     text = if (progress.total > 1) {
                         tr("正在识别第 %d / %d 张截图").format(progress.current, progress.total)
@@ -1009,9 +1098,14 @@ private fun RecognizingCard(progress: BatchProgress) {
                 )
                 Text(
                     text = tr("识别微信 / 支付宝交易截图"),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (progress.total > 1) {
+                TextButton(onClick = onStopBatch) {
+                    Text(tr("停止剩余"))
+                }
             }
         }
     }
@@ -1100,10 +1194,7 @@ private fun ImportCandidateCard(
                 val image = thumbnail
                 val path = candidate.screenshotPath
                 if (image != null) {
-                    Image(
-                        bitmap = image,
-                        contentDescription = tr("扫描截图"),
-                        contentScale = ContentScale.Crop,
+                    Box(
                         modifier = Modifier
                             .size(56.dp)
                             .clip(RoundedCornerShape(14.dp))
@@ -1114,7 +1205,32 @@ private fun ImportCandidateCard(
                                     Modifier
                                 },
                             ),
-                    )
+                    ) {
+                        Image(
+                            bitmap = image,
+                            contentDescription = tr("扫描截图"),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        if (!path.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(3.dp)
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.55f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomIn,
+                                    contentDescription = tr("查看大图"),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp),
+                                )
+                            }
+                        }
+                    }
                 } else {
                     CategoryIcon(category = category, size = 56.dp)
                 }
@@ -1288,6 +1404,31 @@ private fun amountColor(candidate: CaptureCandidate, directionChoice: String?): 
 
 private fun confidenceLabel(candidate: CaptureCandidate): String = tr(
     when (candidate.confidenceTier) {
+        CaptureCandidate.TIER_HIGH -> "高置信度"
+        CaptureCandidate.TIER_LOW -> "低置信度"
+        else -> "需要确认"
+    },
+)
+
+private fun timeLabel(candidate: CaptureCandidate): String {
+    val time = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
+        .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs))
+    val order = candidate.orderId?.let { " · " + tr("单号") + " " + it }.orEmpty()
+    return time + order
+}
+
+private fun initialCategory(candidate: CaptureCandidate): TransactionCategory = when (candidate.kind) {
+    CaptureCandidate.KIND_TRANSFER,
+    CaptureCandidate.KIND_WITHDRAWAL -> TransactionCategory.TRANSFER
+    CaptureCandidate.KIND_RED_PACKET ->
+        if (candidate.direction == CaptureCandidate.DIRECTION_INCOME) {
+            TransactionCategory.GIFT
+        } else {
+            TransactionCategory.TRANSFER
+        }
+    else -> CaptureReviewMapping.defaultCategory(candidate)
+}
+ier) {
         CaptureCandidate.TIER_HIGH -> "高置信度"
         CaptureCandidate.TIER_LOW -> "低置信度"
         else -> "需要确认"

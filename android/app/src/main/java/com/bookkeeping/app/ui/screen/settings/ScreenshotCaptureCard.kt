@@ -10,12 +10,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import java.util.Locale
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -161,21 +167,65 @@ internal fun ScreenshotCaptureCard() {
                 retentionMode = next
             },
         )
+        var evidenceBytes by remember {
+            mutableLongStateOf(ReceiptEvidenceStore(context).totalSizeBytes())
+        }
+        var confirmingClearEvidence by remember { mutableStateOf(false) }
         SettingsRowDivider()
         SettingsActionRow(
             icon = Icons.Filled.Share,
             title = tr("清理扫描原图缓存"),
-            subtitle = tr("仅清理本地归档原图，不影响账单记录"),
+            subtitle = if (evidenceBytes > 0L) {
+                tr("当前约 %s · 仅清理本地归档原图，不影响账单记录")
+                    .format(formatEvidenceBytes(evidenceBytes))
+            } else {
+                tr("当前暂无本地原图缓存")
+            },
             onClick = {
-                val removed = ReceiptEvidenceStore(context).clearAll()
-                Toast.makeText(
-                    context,
-                    tr("已清理 %d 张本地原图").format(removed),
-                    Toast.LENGTH_SHORT,
-                ).show()
+                if (evidenceBytes > 0L) {
+                    confirmingClearEvidence = true
+                } else {
+                    Toast.makeText(
+                        context,
+                        tr("当前暂无本地原图缓存"),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
             },
         )
+        if (confirmingClearEvidence) {
+            AlertDialog(
+                onDismissRequest = { confirmingClearEvidence = false },
+                title = { Text(tr("清理扫描原图缓存？")) },
+                text = { Text(tr("将删除本地归档的扫描原图（约 %s），已记入的账单记录不会受影响。").format(formatEvidenceBytes(evidenceBytes))) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val removed = ReceiptEvidenceStore(context).clearAll()
+                        evidenceBytes = ReceiptEvidenceStore(context).totalSizeBytes()
+                        confirmingClearEvidence = false
+                        Toast.makeText(
+                            context,
+                            tr("已清理 %d 张本地原图").format(removed),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }) {
+                        Text(tr("确认清理"), color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmingClearEvidence = false }) {
+                        Text(tr("取消"))
+                    }
+                },
+            )
+        }
     }
+}
+
+private fun formatEvidenceBytes(bytes: Long): String = when {
+    bytes >= 1024L * 1024L -> "%.1f MB".format(Locale.CHINA, bytes / (1024.0 * 1024.0))
+    bytes >= 1024L -> "%d KB".format(Locale.CHINA, (bytes + 1023L) / 1024L)
+    else -> "$bytes B"
 }
 
 /** 相册读取权限：Android 13 起是 READ_MEDIA_IMAGES，更早是存储读取。 */

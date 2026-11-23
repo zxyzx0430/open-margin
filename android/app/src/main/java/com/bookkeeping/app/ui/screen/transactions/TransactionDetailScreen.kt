@@ -64,6 +64,8 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.CategoryIcon
+import com.bookkeeping.app.ui.components.DateTimePickerTab
+import com.bookkeeping.app.ui.components.LedgerDateTimePickerDialog
 import com.bookkeeping.app.ui.components.MerchantRuleDialog
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
@@ -108,6 +110,9 @@ fun TransactionDetailScreen(
         },
         onDelete = { current -> transactionViewModel.delete(current) },
         onConfirmEventTime = { current -> transactionViewModel.confirmEventTime(current) },
+        onUpdateEventTime = { current, pickedMs ->
+            transactionViewModel.updateEventTime(current, pickedMs)
+        },
     )
 }
 
@@ -124,6 +129,7 @@ fun TransactionDetailScreenContent(
     onSaveMerchantRule: (String, TransactionCategory) -> Unit,
     onDelete: (TransactionEntity) -> Unit,
     onConfirmEventTime: (TransactionEntity) -> Unit,
+    onUpdateEventTime: (TransactionEntity, Long) -> Unit,
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
@@ -138,6 +144,7 @@ fun TransactionDetailScreenContent(
         }
     }
     var editing by remember { mutableStateOf(false) }
+    var editingTimeInline by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
     var previewEvidencePath by remember { mutableStateOf<String?>(null) }
@@ -194,7 +201,7 @@ fun TransactionDetailScreenContent(
             } else {
                 DetailContent(
                     entry = entry,
-                    onEditTime = { editing = true },
+                    onEditTime = { editingTimeInline = true },
                     onConfirmEventTime = { onConfirmEventTime(entry) },
                     onPreviewEvidence = { path -> previewEvidencePath = path },
                     modifier = Modifier
@@ -225,6 +232,18 @@ fun TransactionDetailScreenContent(
                 confirmingDelete = false
                 editing = false
                 onDeleted()
+            },
+        )
+    }
+
+    if (editingTimeInline && entry != null) {
+        LedgerDateTimePickerDialog(
+            initialTimestampMs = entry.timestamp,
+            initialTab = DateTimePickerTab.TIME,
+            onDismiss = { editingTimeInline = false },
+            onConfirm = { pickedMs ->
+                onUpdateEventTime(entry, pickedMs)
+                editingTimeInline = false
             },
         )
     }

@@ -93,11 +93,26 @@
   - `FieldCard` 支持在「发生时间」行下方（同一张 16dp 圆角白卡内部）渲染一条通栏 `10.dp` 圆角**淡琥珀色提示条**（使用暖琥珀 Warning 语义色，与支出/删除红明确区分）。
   - 提示条布局：左侧 `Icons.Outlined.Schedule` 图标 +「时间为截图时间，建议核对」，右侧提供两个紧凑文字操作：
     - **「确认」**：一键将 `eventTimeNeedsConfirmation` 置为 `false`（经 `TransactionRepository.update` 落库并标记 `syncDirty`，无需进入编辑页空保存）；
-    - **「修改」**：直接进入 `TransactionEditScreen` 修改时间。
+    - **「修改」**：直接在详情页原地弹出自定义日期时间选择器 `LedgerDateTimePickerDialog`，选完直接保存并清除待确认标记。
 
 ---
 
-## 5. 影响文件与测试清单
+## 5. 自定义日期时间选择器与 1–10 项交互打磨
+
+- **清衡自定义日期时间选择器（`LedgerDateTimePickerDialog`）**：替换 `TransactionEditScreen` 与详情页原地改时间中的安卓原生 Material3 `DatePickerDialog` / `TimePicker`，在单张 20dp 圆角卡片内提供「日期 / 时间」双段切换、7 列极简月历、「今天 / 昨天」快捷切换、双列可滚动时/分选择与 `:00 / :15 / :30 / :45 / 现在` 快捷点选，并内嵌未来时间校验。
+- **批量导入交互打磨**：
+  - 0 记入且无待办时自动展开「未记入说明」并切换引导文案；
+  - 批量审阅点「忽略」后弹出 4 秒 Snackbar 支持一键「撤销」；
+  - 待确认卡片缩略图右下角增加半透明放大镜角标；
+  - 多批「继续导入」采用会话累计序号区分，重复图额外弹轻 Toast；
+  - 批量识别进度卡增加「停止剩余」按钮；
+  - 审阅确认入账后自动触发 `LedgerTransactionRow` 高亮动画定位落位；
+  - 设置页「清理扫描原图缓存」展示当前占用体积，点击先弹二次确认框；
+  - 普通扫描付款且无订单号时不再自动写入 `[扫描] 微信` 冗余备注。
+
+---
+
+## 6. 影响文件与测试清单
 
 ### 主要新增 / 修改文件
 - **数据与存储**：`TransactionEntity.kt`、`BookkeepingDatabase.kt`（v12→v13）、`TransactionDao.kt`、`TransactionRepository.kt`、`CaptureMergePolicy.kt`、`ReceiptEvidenceStore.kt`（新增）、`ReceiptEvidenceSettings.kt`（新增）、`ScreenshotEvidenceRetentionWorker.kt`

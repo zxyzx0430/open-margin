@@ -1535,6 +1535,27 @@ internal object EnglishUiText {
         "清理扫描原图缓存" to "Clear archived screenshots",
         "仅清理本地归档原图，不影响账单记录" to "Deletes local archived images only; ledger rows stay intact",
         "已清理 %d 张本地原图" to "Cleared %d archived screenshots",
+        "选择发生时间" to "Select transaction time",
+        "今天" to "Today",
+        "昨天" to "Yesterday",
+        "上个月" to "Previous month",
+        "下个月" to "Next month",
+        "时" to "Hour",
+        "分" to "Min",
+        "现在" to "Now",
+        "当前约 %s · 仅清理本地归档原图，不影响账单记录" to
+            "Using about %s · Deletes local archived images only; ledger rows stay intact",
+        "当前暂无本地原图缓存" to "No archived screenshots yet",
+        "清理扫描原图缓存？" to "Clear archived screenshots?",
+        "将删除本地归档的扫描原图（约 %s），已记入的账单记录不会受影响。" to
+            "Deletes local archived screenshots (about %s). Recorded transactions will not be affected.",
+        "确认清理" to "Clear",
+        "已停止识别剩余截图" to "Stopped recognizing remaining screenshots",
+        "停止剩余" to "Stop",
+        "已忽略这笔候选" to "Candidate ignored",
+        "撤销失败，请稍后重试" to "Could not undo; please try again",
+        "本次没有新记入账单，可在下方查看原因" to "No new transactions recorded; see details below",
+        "查看大图" to "View full image",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(

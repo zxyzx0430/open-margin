@@ -108,6 +108,10 @@ data class ScreenshotImportReviewState(
     fun skip(candidateId: String): ScreenshotImportReviewState =
         transition(candidateId, from = setOf(Status.PENDING, Status.SAVING), to = Status.SKIPPED)
 
+    /** SKIPPED -> PENDING so an accidental ignore can be undone immediately. */
+    fun restore(candidateId: String): ScreenshotImportReviewState =
+        transition(candidateId, from = setOf(Status.SKIPPED), to = Status.PENDING)
+
     /** SAVING -> PENDING so a failed write can be retried; other rows untouched. */
     fun fail(candidateId: String): ScreenshotImportReviewState =
         transition(candidateId, from = setOf(Status.SAVING), to = Status.PENDING)
