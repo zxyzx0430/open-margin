@@ -1080,21 +1080,34 @@ private fun DuplicateReviewCard(
     onDeleteNew: (TransactionEntity) -> Unit,
 ) {
     val semantic = LocalQingSemanticColors.current
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = semantic.warningContainer),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, semantic.warningText.copy(alpha = 0.28f)),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = tr("待确认重复") + "（" + candidates.size + "）",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = semantic.warningText,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = semantic.warningContainer,
+                ) {
+                    Text(
+                        text = "${tr("待确认重复")} · ${candidates.size}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = semantic.warningText,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
             Text(
                 text = tr("这些记录金额和时间相近，但没有足够证据自动合并。请确认每笔是否真实；确认前不计入本机统计。"),
                 style = MaterialTheme.typography.bodySmall,
@@ -1102,37 +1115,77 @@ private fun DuplicateReviewCard(
             )
             candidates.take(if (expanded) candidates.size else 3).forEach { item ->
                 val row = item.candidate
-                Column(Modifier.fillMaxWidth()) {
-                    Text(
-                        text = (if (item.original != null) tr("新记录：") else tr("待确认记录：")) +
-                            transactionSummary(row),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = item.original?.let {
-                            tr("疑似原记录：") + transactionSummary(it)
-                        } ?: tr("原记录不可用（可能来自服务器）"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        TextButton(onClick = { onKeepBoth(row) }) {
-                            Text(if (item.original != null) tr("保留两笔") else tr("确认不是重复"))
-                        }
-                        TextButton(onClick = { onDeleteNew(row) }) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                if (item.original != null) tr("删除新记录") else tr("删除此记录"),
-                                color = MaterialTheme.colorScheme.error,
+                                text = (if (item.original != null) tr("新记录：") else tr("待确认记录：")) +
+                                    transactionSummary(row),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
+                            Text(
+                                text = item.original?.let {
+                                    tr("疑似原记录：") + transactionSummary(it)
+                                } ?: tr("原记录不可用（可能来自服务器）"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { onKeepBoth(row) },
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                            ) {
+                                Text(
+                                    text = if (item.original != null) tr("保留两笔") else tr("确认不是重复"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                )
+                            }
+                            Surface(
+                                onClick = { onDeleteNew(row) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = if (item.original != null) tr("删除新记录") else tr("删除此记录"),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
             if (candidates.size > 3) {
-                TextButton(onClick = onToggleExpanded) {
+                TextButton(
+                    onClick = onToggleExpanded,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(
                         if (expanded) tr("收起")
                         else tr("展开全部") + " ${candidates.size} " + tr("条")

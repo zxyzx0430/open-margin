@@ -450,9 +450,10 @@ class CaptureCandidateStore internal constructor(
             it.candidateId == candidateId && it.status == CaptureCandidate.STATUS_IGNORED
         } ?: return false
         val remaining = latest.filterNot { it.candidateId == target.candidateId }
+        val nowMs = System.currentTimeMillis()
         runCatching {
             check(writeCandidateIndexLocked(remaining))
-            deleteScreenshotIfUnreferenced(target.screenshotPath, remaining)
+            target.screenshotPath?.let { deleteScreenshotIfUnreferenced(it, remaining, nowMs) }
             true
         }.getOrDefault(false)
     }
@@ -467,9 +468,12 @@ class CaptureCandidateStore internal constructor(
         val removed = latest.filter { it.status == CaptureCandidate.STATUS_IGNORED }
         if (removed.isEmpty()) return 0
         val remaining = latest.filterNot { it.status == CaptureCandidate.STATUS_IGNORED }
+        val nowMs = System.currentTimeMillis()
         runCatching {
             check(writeCandidateIndexLocked(remaining))
-            removed.forEach { deleteScreenshotIfUnreferenced(it.screenshotPath, remaining) }
+            removed.forEach { candidate ->
+                candidate.screenshotPath?.let { deleteScreenshotIfUnreferenced(it, remaining, nowMs) }
+            }
             removed.size
         }.getOrDefault(0)
     }
