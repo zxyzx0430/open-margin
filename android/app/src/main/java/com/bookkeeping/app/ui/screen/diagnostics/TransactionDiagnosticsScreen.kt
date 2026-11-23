@@ -66,12 +66,25 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 fun TransactionDiagnosticsScreen(
     onBack: () -> Unit,
+    onOpenTransaction: (Long) -> Unit = {},
     viewModel: TransactionDiagnosticsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
     // The DAO returns newest-first; the timeline wants oldest-first so rows that
     // share a millisecond keep their real insertion order.
-    val attempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
+    val allAttempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
+    var onlyIssues by remember { mutableStateOf(false) }
+    val attempts = remember(allAttempts, onlyIssues) {
+        if (!onlyIssues) {
+            allAttempts
+        } else {
+            allAttempts.filter {
+                it.outcome == DiagnosticTimeline.Outcome.FAILURE ||
+                    it.outcome == DiagnosticTimeline.Outcome.PARTIAL ||
+                    it.outcome == DiagnosticTimeline.Outcome.WARNING
+            }
+        }
+    }
     var expandedAttempts by remember { mutableStateOf(emptySet<String>()) }
     var openedNewest by remember { mutableStateOf(false) }
     var confirmClearRawText by remember { mutableStateOf(false) }
