@@ -1664,19 +1664,6 @@ private fun AboutUpdateCard(
                 },
             )
         }
-        if (testBuild) {
-            SettingsRowDivider()
-            SettingsSwitchRow(
-                icon = Icons.Filled.Visibility,
-                title = tr("预览更新提醒"),
-                subtitle = tr("仅测试包：显示样例横幅，不下载"),
-                checked = previewBanner,
-                onCheckedChange = { enabled ->
-                    previewBanner = enabled
-                    sitePrefs.setPreviewBannerEnabled(enabled)
-                },
-            )
-        }
         if (officialBuild) {
             siteUpdate?.let { update ->
                 SettingsRowDivider()
