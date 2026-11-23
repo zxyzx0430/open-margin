@@ -4,11 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticRetention
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.dao.TransactionDiagnosticDao
 import com.bookkeeping.app.data.local.entity.TransactionDiagnosticEventEntity
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,12 +31,13 @@ internal inline fun handleDiagnosticQueryFailure(
 @HiltViewModel
 class TransactionDiagnosticsViewModel @Inject constructor(
     private val dao: TransactionDiagnosticDao,
+    private val transactionDao: TransactionDao,
     private val diagnostics: TransactionDiagnostics,
 ) : ViewModel() {
     data class UiState(
         val query: String = "",
-        val selectedTransactionId: Long? = null,
-        val transactionIds: List<Long> = emptyList(),
+        val channelFilter: DiagnosticChannelFilter = DiagnosticChannelFilter.ALL,
+        val outcomeFilter: DiagnosticOutcomeFilter = DiagnosticOutcomeFilter.ALL,
         val events: List<TransactionDiagnosticEventEntity> = emptyList(),
         val limit: Int = PAGE_SIZE,
         val loading: Boolean = true,
@@ -60,16 +62,7 @@ class TransactionDiagnosticsViewModel @Inject constructor(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // Pruning is best-effort and does not block loading filters.
-            }
-            dao.observeRecentTransactionIds(
-                cutoffMs = TransactionDiagnosticRetention.cutoffMs(System.currentTimeMillis()),
-                limit = MAX_BILL_FILTERS,
-            ).catch { failure ->
-                if (failure is CancellationException) throw failure
-                _state.value = _state.value.copy(error = "无法加载账单筛选项")
-            }.collect { ids ->
-                _state.value = _state.value.copy(transactionIds = ids)
+                // Pruning is best-effort and does not block loading events.
             }
         }
         reload()
@@ -81,10 +74,14 @@ class TransactionDiagnosticsViewModel @Inject constructor(
         reload()
     }
 
-    fun selectTransaction(id: Long?) {
-        if (_state.value.selectedTransactionId == id) return
-        _state.value = _state.value.copy(selectedTransactionId = id, limit = PAGE_SIZE)
-        reload()
+    fun setChannelFilter(filter: DiagnosticChannelFilter) {
+        if (_state.value.channelFilter == filter) return
+        _state.value = _state.value.copy(channelFilter = filter)
+    }
+
+    fun setOutcomeFilter(filter: DiagnosticOutcomeFilter) {
+        if (_state.value.outcomeFilter == filter) return
+        _state.value = _state.value.copy(outcomeFilter = filter)
     }
 
     fun loadMore() {
@@ -127,16 +124,28 @@ class TransactionDiagnosticsViewModel @Inject constructor(
         _state.value = _state.value.copy(rawTextNotice = null)
     }
 
-    suspend fun loadEventsForExport(limit: Int = EXPORT_EVENT_LIMIT): List<TransactionDiagnosticEventEntity> {
+    suspend fun loadEventsForExport(
+        exportAll: Boolean = false,
+        limit: Int = EXPORT_EVENT_LIMIT,
+    ): List<TransactionDiagnosticEventEntity> {
         val current = _state.value
-        return dao.observeEvents(
+        val eventsNewestFirst = dao.observeEvents(
             cutoffMs = TransactionDiagnosticRetention.cutoffMs(System.currentTimeMillis()),
-            transactionId = current.selectedTransactionId,
-            query = current.query.trim(),
+            transactionId = null,
+            query = if (exportAll) "" else current.query.trim(),
             limit = limit,
             offset = 0,
         ).first()
+        if (exportAll) return eventsNewestFirst
+        return DiagnosticTimeline.filterEventsForExport(
+            eventsNewestFirst = eventsNewestFirst,
+            channelFilter = current.channelFilter,
+            outcomeFilter = current.outcomeFilter,
+        )
     }
+
+    suspend fun countLedgerPossibleDuplicates(): Int =
+        runCatching { transactionDao.findPossibleDuplicates().size }.getOrDefault(0)
 
     fun publishNotice(message: String) {
         _state.value = _state.value.copy(rawTextNotice = message)
@@ -154,7 +163,7 @@ class TransactionDiagnosticsViewModel @Inject constructor(
                 diagnostics.pruneExpired()
                 dao.observeEvents(
                     cutoffMs = TransactionDiagnosticRetention.cutoffMs(System.currentTimeMillis()),
-                    transactionId = request.selectedTransactionId,
+                    transactionId = null,
                     query = request.query.trim(),
                     limit = request.limit,
                     offset = 0,
@@ -189,7 +198,6 @@ class TransactionDiagnosticsViewModel @Inject constructor(
 
     companion object {
         private const val PAGE_SIZE = 100
-        private const val MAX_BILL_FILTERS = 200
         private const val EXPORT_EVENT_LIMIT = 1000
     }
 }
@@ -254,6 +262,23 @@ internal object DiagnosticTimeline {
                 .thenByDescending { it.startedAtMs }
                 .thenBy { it.attemptId },
         )
+    }
+
+    fun filterEventsForExport(
+        eventsNewestFirst: List<TransactionDiagnosticEventEntity>,
+        channelFilter: DiagnosticChannelFilter,
+        outcomeFilter: DiagnosticOutcomeFilter,
+    ): List<TransactionDiagnosticEventEntity> {
+        if (channelFilter == DiagnosticChannelFilter.ALL &&
+            outcomeFilter == DiagnosticOutcomeFilter.ALL
+        ) {
+            return eventsNewestFirst
+        }
+        val attempts = build(eventsNewestFirst.asReversed())
+        val allowedAttemptIds = DiagnosticHumanizer
+            .filterAttempts(attempts, channelFilter, outcomeFilter)
+            .mapTo(HashSet()) { it.attemptId }
+        return eventsNewestFirst.filter { it.attemptId in allowedAttemptIds }
     }
 
     /**

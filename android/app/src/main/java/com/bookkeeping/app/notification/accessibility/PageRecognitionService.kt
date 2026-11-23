@@ -14,6 +14,7 @@ import com.bookkeeping.app.capture.success.PaymentPage
 import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
 import com.bookkeeping.app.capture.screenshot.ScreenshotReviewNotifier
 import com.bookkeeping.app.capture.screenshot.CandidateStorageIntakeKind
+import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -79,6 +80,12 @@ open class PageRecognitionService : AccessibilityService() {
             )
             store = CaptureCandidateStore(applicationContext)
             repository = entryPoint.transactionRepository()
+            ServiceHealthLog.record(
+                context = applicationContext,
+                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                event = ServiceHealthLog.EVENT_CONNECTED,
+                summary = "页面识别服务已连接",
+            )
             if (BuildConfig.DEBUG) Log.d(TAG, "PageRecognitionService connected")
         } catch (failure: Exception) {
             Log.e(TAG, "connect failed: ${failure.javaClass.simpleName}")
@@ -140,6 +147,16 @@ open class PageRecognitionService : AccessibilityService() {
         // names, timestamps and unread badges. Never feed them to the payment
         // card parser: those pages can look like multiple small payments.
         if (PageActivityGuard.isChatOrHomePage(packageName, activity, pageText)) return
+        if (PaymentCardDetector.isBillListPage(pageText)) {
+            ServiceHealthLog.record(
+                context = applicationContext,
+                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                event = ServiceHealthLog.EVENT_SKIPPED,
+                summary = "已跳过账单列表页（避免批量误抓）",
+                detail = packageName,
+            )
+            return
+        }
         val allowStrictAuto = strictSuccessAllowance(packageName, activity, snapshot)
 
         // Payment/bill cards: merchant payment, transfer, red packet, withdrawal,
@@ -158,6 +175,13 @@ open class PageRecognitionService : AccessibilityService() {
                     windowMs = PAGE_CAPTURE_DEDUP_MS,
                 )
             ) {
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                    event = ServiceHealthLog.EVENT_THROTTLED,
+                    summary = "同页面重复触发已节流跳过",
+                    detail = firstIdentity,
+                )
                 return
             }
             when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store)) {
@@ -165,6 +189,13 @@ open class PageRecognitionService : AccessibilityService() {
                     lastPageIdentity = firstIdentity
                     lastPageEventId = firstOrderId
                     lastCaptureAtMs = now
+                    ServiceHealthLog.record(
+                        context = applicationContext,
+                        channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                        event = ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
+                        summary = "页面识别多笔/待确认候选，已转入待确认",
+                        detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
+                    )
                     if (pageRoute.saved.saved.isNotEmpty()) {
                         ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
                     }
@@ -194,7 +225,16 @@ open class PageRecognitionService : AccessibilityService() {
                             nowMs = now,
                             windowMs = PAGE_CAPTURE_DEDUP_MS,
                         )
-                    ) return
+                    ) {
+                        ServiceHealthLog.record(
+                            context = applicationContext,
+                            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                            event = ServiceHealthLog.EVENT_THROTTLED,
+                            summary = "同页面重复触发已节流跳过",
+                            detail = pageIdentity,
+                        )
+                        return
+                    }
                     if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
                     capturing.set(true)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -246,6 +286,13 @@ open class PageRecognitionService : AccessibilityService() {
                     windowMs = PAGE_CAPTURE_DEDUP_MS,
                 )
             ) {
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                    event = ServiceHealthLog.EVENT_THROTTLED,
+                    summary = "同页面重复触发已节流跳过",
+                    detail = pageIdentity,
+                )
                 return
             }
             if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
@@ -254,6 +301,13 @@ open class PageRecognitionService : AccessibilityService() {
             lastCaptureAtMs = now
             capturing.set(true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                    event = ServiceHealthLog.EVENT_OCR_FALLBACK,
+                    summary = "无障碍节点不全，启动页面截图 OCR 兜底",
+                    detail = pageIdentity,
+                )
                 captureScreenshotForOcr(
                     packageName,
                     pageIdentity,
@@ -286,7 +340,16 @@ open class PageRecognitionService : AccessibilityService() {
                 nowMs = now,
                 windowMs = PAGE_CAPTURE_DEDUP_MS,
             )
-        ) return
+        ) {
+            ServiceHealthLog.record(
+                context = applicationContext,
+                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                event = ServiceHealthLog.EVENT_THROTTLED,
+                summary = "同页面重复触发已节流跳过",
+                detail = detection.pageIdentity,
+            )
+            return
+        }
         if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
         val amount = detection.amountCents ?: return
         val candidate = CaptureCandidate(
@@ -396,6 +459,13 @@ open class PageRecognitionService : AccessibilityService() {
                                         screenshot = bytes,
                                     )) {
                                         is PaymentCardReviewQueue.Route.HeldForReview -> {
+                                            ServiceHealthLog.record(
+                                                context = applicationContext,
+                                                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                                                event = ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
+                                                summary = "OCR 识别到待确认交易，已转入待确认",
+                                                detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
+                                            )
                                             if (bytes == null) {
                                                 pageRoute.saved.saved.forEach { saved ->
                                                     store.mark(
@@ -1046,16 +1116,33 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        // No polling or long-running work to stop here.
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+            event = ServiceHealthLog.EVENT_INTERRUPTED,
+            summary = "页面识别服务被系统中断",
+        )
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         capturing.set(false)
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+            event = ServiceHealthLog.EVENT_DISCONNECTED,
+            summary = "页面识别服务已解绑",
+        )
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
         capturing.set(false)
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+            event = ServiceHealthLog.EVENT_DESTROYED,
+            summary = "页面识别服务已停止",
+        )
         ocrEngine?.close()
         ocrEngine = null
         scope.cancel()

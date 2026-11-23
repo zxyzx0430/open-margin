@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
+import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -127,45 +128,56 @@ object ScreenshotWatchController {
     }
 
     private suspend fun scanMissed(context: Context) {
-        val lastScannedId = baselineId(context) ?: return
+        val stored = ScreenshotWatchSettings.lastScannedId(context)
+        val maxId = maxImageId(context) ?: return
+        if (stored == null) {
+            val initial = resolveBaselineId(null, maxId)
+            ScreenshotWatchSettings.setLastScannedId(context, initial)
+            ServiceHealthLog.record(
+                context = context,
+                channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
+                event = ServiceHealthLog.EVENT_SCAN_MISSED,
+                summary = "初始化相册监听水位: baseline=$initial",
+            )
+            return
+        }
+        val lastScannedId = resolveBaselineId(stored, maxId)
+        if (lastScannedId != stored) ScreenshotWatchSettings.setLastScannedId(context, lastScannedId)
         val ids = nextIdsToScan(
             lastScannedId = lastScannedId,
             availableIds = imageIdsAfter(context, lastScannedId),
             limit = MAX_CATCH_UP_IMAGES,
         )
+        var scanned = 0
+        var skipped = 0
+        var unreadableRetries = 0
+        var unreadRows = 0
         for (id in ids) {
             // 观察者正在处理这一张：它归观察者，水位照常推进，但不重复 OCR。
             if (id in inFlight) {
                 ScreenshotWatchSettings.setLastScannedId(context, id)
+                skipped++
                 continue
             }
             // 只有真的读到这一行才推进水位；读不到（相册行还没落盘）就留着下次再试，
             // 后面的 _ID 照常前进，不会因为一张坏行把整个监听卡死。
-            val read = runCatching { ingestNow(context, id, enforceFreshness = false) }
-                .getOrDefault(false)
-            if (read) ScreenshotWatchSettings.setLastScannedId(context, id)
+            val result = runCatching { ingestNow(context, id, enforceFreshness = false) }
+                .getOrElse { IngestAttemptResult(read = false, disposition = "error", detail = it.javaClass.simpleName) }
+            if (result.read) {
+                ScreenshotWatchSettings.setLastScannedId(context, id)
+                if (result.ingested) scanned++ else skipped++
+                if (result.retriedUnreadable) unreadableRetries++
+            } else {
+                unreadRows++
+            }
         }
-    }
-
-    /**
-     * Watermark to scan after, or null when this run has nothing to do.
-     *
-     * A null [ScreenshotWatchSettings.lastScannedId] means "never scanned": the
-     * current maximum `_ID` becomes the baseline and no old row is imported. A
-     * stored watermark above the current maximum means MediaStore was reset
-     * (or the app was restored onto another phone); re-baselining keeps the
-     * watcher from going deaf forever.
-     */
-    private fun baselineId(context: Context): Long? {
-        val stored = ScreenshotWatchSettings.lastScannedId(context)
-        val maxId = maxImageId(context) ?: return null
-        if (stored == null) {
-            ScreenshotWatchSettings.setLastScannedId(context, resolveBaselineId(null, maxId))
-            return null
-        }
-        val baseline = resolveBaselineId(stored, maxId)
-        if (baseline != stored) ScreenshotWatchSettings.setLastScannedId(context, baseline)
-        return baseline
+        ServiceHealthLog.record(
+            context = context,
+            channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
+            event = ServiceHealthLog.EVENT_SCAN_MISSED,
+            summary = "相册补扫 $lastScannedId->$maxId: scanned=$scanned, skipped=$skipped, retry=$unreadableRetries",
+            detail = if (unreadRows > 0) "unread=$unreadRows" else null,
+        )
     }
 
     private fun handleCandidate(context: Context, uri: Uri) {
@@ -173,48 +185,86 @@ object ScreenshotWatchController {
         inFlight.add(id)
         scope.launch {
             try {
-                val read = runCatching { ingestNow(context, id, enforceFreshness = true) }
-                    .getOrDefault(false)
-                if (read) {
+                val result = runCatching { ingestNow(context, id, enforceFreshness = true) }
+                    .getOrElse { IngestAttemptResult(read = false, disposition = "error", detail = it.javaClass.simpleName) }
+                if (result.read) {
                     val current = ScreenshotWatchSettings.lastScannedId(context)
                     if (current == null || id > current) {
                         ScreenshotWatchSettings.setLastScannedId(context, id)
                     }
                 }
+                ServiceHealthLog.record(
+                    context = context,
+                    channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
+                    event = ServiceHealthLog.EVENT_CANDIDATE_INTAKE,
+                    summary = "相册新图 id=$id: ${result.disposition}",
+                    detail = result.detail,
+                )
             } finally {
                 inFlight.remove(id)
             }
         }
     }
 
+    private data class IngestAttemptResult(
+        val read: Boolean,
+        val ingested: Boolean = false,
+        val retriedUnreadable: Boolean = false,
+        val disposition: String,
+        val detail: String? = null,
+    )
+
     /**
      * One MediaStore row → one intake. Shared by the observer and the fallback
      * scan so both paths skip the same things: plain photos, this app's own
      * screenshots, and (observer only) rows older than this process.
      *
-     * Returns true when the row was read, i.e. when "did not import" was a
-     * decision and not a missing row; the fallback scan only advances its
-     * watermark on a read row.
+     * Returns [IngestAttemptResult.read] = true when the row was read, i.e. when
+     * "did not import" was a decision and not a missing row; the fallback scan
+     * only advances its watermark on a read row.
      */
-    private suspend fun ingestNow(context: Context, id: Long, enforceFreshness: Boolean): Boolean {
+    private suspend fun ingestNow(context: Context, id: Long, enforceFreshness: Boolean): IngestAttemptResult {
         val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-        val row = readRow(context, contentUri) ?: return false
-        if (!looksLikeScreenshot(row.name, row.relativePath)) return true
+        val row = readRow(context, contentUri)
+            ?: return IngestAttemptResult(read = false, disposition = "row_missing")
+        if (!looksLikeScreenshot(row.name, row.relativePath)) {
+            return IngestAttemptResult(read = true, disposition = "skipped_non_screenshot")
+        }
         // 本 app 自己的界面（详情页角标之类）不是交易：连 OCR 都不跑，
         // 否则「未同步」会被当成商户名生成一张假候选。
-        if (isOwnAppScreenshot(row.name, context.packageName)) return true
+        if (isOwnAppScreenshot(row.name, context.packageName)) {
+            return IngestAttemptResult(read = true, disposition = "skipped_own_app")
+        }
         // Only the observer path uses the time gate; a delayed callback for a
         // stale row must not be imported retroactively. The fallback scan has
         // the `_ID` watermark instead and must not be blocked by wall-clock.
-        if (enforceFreshness && row.addedAtMs > 0 && row.addedAtMs < startedAtMs - GRACE_MS) return true
-        ScreenshotIntakeCoordinator(context).use { coordinator ->
+        if (enforceFreshness && row.addedAtMs > 0 && row.addedAtMs < startedAtMs - GRACE_MS) {
+            return IngestAttemptResult(read = true, disposition = "skipped_stale")
+        }
+        var retried = false
+        val finalOutcome = ScreenshotIntakeCoordinator(context).use { coordinator ->
             val outcome = coordinator.ingest(contentUri, IntakeSource.MEDIASTORE)
             if (outcome.failure == FailureReason.UNREADABLE) {
+                retried = true
                 kotlinx.coroutines.delay(450L)
                 coordinator.ingest(contentUri, IntakeSource.MEDIASTORE)
+            } else {
+                outcome
             }
         }
-        return true
+        val summary = buildString {
+            append("booked=${finalOutcome.booked}, pending=${finalOutcome.pending}, ignored=${finalOutcome.ignored}")
+            if (finalOutcome.repeatImage) append(", repeat=true")
+            finalOutcome.failure?.let { append(", failure=${it.name}") }
+            if (retried) append(", retried=UNREADABLE")
+        }
+        return IngestAttemptResult(
+            read = true,
+            ingested = true,
+            retriedUnreadable = retried,
+            disposition = if (finalOutcome.failure != null) "failed" else "ingested",
+            detail = summary,
+        )
     }
 
     private data class ImageRow(

@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticRetentionWorker
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.merchant.MerchantRules
@@ -47,6 +48,12 @@ class BookkeepingApplication : Application() {
         AppLanguage.restoreApplicationLocale(this)
         // 最先安装：后面任何初始化出错都能留下堆栈
         CrashCatcher.install(this)
+        ServiceHealthLog.record(
+            context = this,
+            channel = ServiceHealthLog.CHANNEL_APP,
+            event = ServiceHealthLog.EVENT_COLD_START,
+            summary = "应用进程冷启动",
+        )
         installVoiceAsr()
         applicationScope.launch {
             MerchantRules.replace(settings.merchantRulesBlocking())

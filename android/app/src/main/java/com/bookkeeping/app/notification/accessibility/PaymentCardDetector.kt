@@ -608,7 +608,7 @@ object PaymentCardDetector {
         }
     }
 
-    private fun isBillListPage(text: String): Boolean {
+    fun isBillListPage(text: String): Boolean {
         val isDetailOrVoucherPage = containsAny(
             text,
             "账单详情", "交易详情", "订单详情", "交易单号", "商户单号", "商户订单号",

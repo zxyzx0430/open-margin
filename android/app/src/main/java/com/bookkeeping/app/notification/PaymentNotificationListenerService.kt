@@ -11,6 +11,7 @@ import android.util.Log
 import com.bookkeeping.app.BuildConfig
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
+import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.repository.LedgerInsertResult
@@ -52,6 +53,12 @@ class PaymentNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         CaptureHealth.onListenerConnected(applicationContext)
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+            event = ServiceHealthLog.EVENT_CONNECTED,
+            summary = "通知监听服务已连接",
+        )
         KeepAliveService.refreshStatus(applicationContext)
     }
 
@@ -62,6 +69,13 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             "permission_revoked"
         }
         CaptureHealth.onListenerDisconnected(applicationContext, reason)
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+            event = ServiceHealthLog.EVENT_DISCONNECTED,
+            summary = "通知监听服务已断开",
+            detail = reason,
+        )
         KeepAliveService.refreshStatus(applicationContext)
         if (NotificationListenerHelper.isEnabled(this)) {
             scheduleRebind()
@@ -70,10 +84,31 @@ class PaymentNotificationListenerService : NotificationListenerService() {
     }
 
     private fun scheduleRebind() {
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+            event = ServiceHealthLog.EVENT_REBIND_SCHEDULED,
+            summary = "已计划重连通知监听服务",
+            detail = "delayMs=$REBIND_DELAY_MS",
+        )
         Handler(Looper.getMainLooper()).postDelayed({
             runCatching {
                 requestRebind(ComponentName(this, PaymentNotificationListenerService::class.java))
+            }.onSuccess {
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+                    event = ServiceHealthLog.EVENT_REBIND_REQUESTED,
+                    summary = "已向系统请求重连通知监听",
+                )
             }.onFailure {
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+                    event = ServiceHealthLog.EVENT_REBIND_FAILED,
+                    summary = "请求重连通知监听失败",
+                    detail = it.javaClass.simpleName,
+                )
                 Log.e(TAG, "Listener rebind failed: ${it.javaClass.simpleName}")
             }
         }, REBIND_DELAY_MS)
@@ -99,7 +134,18 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         // 分组汇总通知只是把子通知汇总展示，子通知会各自回调；
         // 汇总若再处理一次就会重复记账，直接跳过。
         // Children arrive individually, so the summary would double-count.
-        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            if (packageName in setOf("com.eg.android.AlipayGphone", "com.tencent.mm")) {
+                val appLabel = if (packageName == "com.tencent.mm") "微信" else "支付宝"
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+                    event = ServiceHealthLog.EVENT_SKIPPED,
+                    summary = "已跳过${appLabel}汇总通知（避免重复）",
+                )
+            }
+            return
+        }
 
         val title = extras.getCharSequence("android.title")?.toString()
         val text = extras.getCharSequence("android.text")?.toString()
@@ -187,6 +233,13 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             throw failure
         }
         if (parsed == null) {
+            ServiceHealthLog.record(
+                context = applicationContext,
+                channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+                event = ServiceHealthLog.EVENT_SKIPPED,
+                summary = "已忽略非交易或无金额的${appLabel}通知",
+                detail = title?.take(60),
+            )
             scope.launch {
                 repository.recordDiagnostic(
                     attemptId = diagnosticInput.attemptId,
@@ -255,6 +308,12 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     legacyFingerprints = setOf(legacyFingerprint),
                 )) {
                     is NotificationInsertResult.Replayed -> {
+                        ServiceHealthLog.record(
+                            context = applicationContext,
+                            channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+                            event = ServiceHealthLog.EVENT_SKIPPED,
+                            summary = "已忽略重复${appLabel}通知（指纹/订单号已记录）",
+                        )
                         repository.recordDiagnostic(
                             attemptId = diagnosticInput.attemptId,
                             stage = TransactionDiagnostics.STAGE_DEDUP,
@@ -286,6 +345,13 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                         is LedgerInsertResult.Failed -> throw (result.cause as? Exception
                             ?: IllegalStateException("notification ledger write failed", result.cause))
                         is LedgerInsertResult.Duplicate -> {
+                            ServiceHealthLog.record(
+                                context = applicationContext,
+                                channel = ServiceHealthLog.CHANNEL_NOTIFICATION,
+                                event = ServiceHealthLog.EVENT_SKIPPED,
+                                summary = "已忽略重复${appLabel}通知（账本已有相同交易）",
+                                detail = "existingId=${result.existingTransactionId}",
+                            )
                             if (BuildConfig.DEBUG) Log.d(TAG, "Skipped exact duplicate notification")
                         }
                         is LedgerInsertResult.Inserted ->

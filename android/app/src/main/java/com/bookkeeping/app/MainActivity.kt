@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
+import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
 import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.KeepAliveService
@@ -109,6 +110,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        ServiceHealthLog.record(
+            context = this,
+            channel = ServiceHealthLog.CHANNEL_APP,
+            event = ServiceHealthLog.EVENT_FOREGROUND,
+            summary = "应用回到前台",
+        )
         // 回到前台是一次可靠的补偿点：观察者可能在后台被系统静默丢掉回调，
         // 这里按 MediaStore 的 _ID 水位补扫一次（首轮只记基线，不回溯旧图）。
         runCatching { ScreenshotWatchController.catchUp(this) }

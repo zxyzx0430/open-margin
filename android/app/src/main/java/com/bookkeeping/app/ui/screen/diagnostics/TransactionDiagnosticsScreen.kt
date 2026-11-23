@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.diagnostics
 
+import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,18 +58,26 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.FileProvider
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
+import com.bookkeeping.app.data.diagnostics.ServiceHealthEntry
+import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
 import com.bookkeeping.app.data.local.entity.TransactionDiagnosticEventEntity
 import com.bookkeeping.app.i18n.EnglishUiText
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.notification.CaptureConnectionState
+import com.bookkeeping.app.notification.CaptureHealth
+import com.bookkeeping.app.notification.capture.CaptureCandidateStore
+import com.bookkeeping.app.ui.components.AutomationStatus
 import com.bookkeeping.app.ui.screen.settings.SettingsGroupCard
 import java.io.File
 import java.text.SimpleDateFormat
@@ -78,6 +87,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private data class CaptureOverviewSnapshot(
+    val notificationState: CaptureConnectionState = CaptureConnectionState.UNKNOWN,
+    val disconnectCount24h: Int = 0,
+    val pageRecognitionEnabled: Boolean = false,
+    val pendingCount: Int = 0,
+    val albumWatchActive: Boolean = false,
+    val recentEntries: List<ServiceHealthEntry> = emptyList(),
+)
+
+private suspend fun loadCaptureOverview(context: Context): CaptureOverviewSnapshot =
+    withContext(Dispatchers.IO) {
+        val appContext = context.applicationContext
+        val captureSnapshot = CaptureHealth.snapshot(appContext, serviceStartedAtMs = 0L)
+        val entries = ServiceHealthLog.entries(appContext)
+        val disconnects = ServiceHealthLog.countDisconnectsLast24h(entries)
+        val pendingCount = runCatching { CaptureCandidateStore(appContext).pending().size }.getOrDefault(0)
+        val albumActive = ScreenshotWatchController.state(appContext) == ScreenshotWatchController.State.ACTIVE
+        CaptureOverviewSnapshot(
+            notificationState = captureSnapshot.state,
+            disconnectCount24h = disconnects,
+            pageRecognitionEnabled = AutomationStatus.isPageRecognitionEnabled(appContext),
+            pendingCount = pendingCount,
+            albumWatchActive = albumActive,
+            recentEntries = entries,
+        )
+    }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,25 +128,27 @@ fun TransactionDiagnosticsScreen(
     // The DAO returns newest-first; the timeline wants oldest-first so rows that
     // share a millisecond keep their real insertion order.
     val allAttempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
-    var onlyIssues by remember { mutableStateOf(false) }
-    val attempts = remember(allAttempts, onlyIssues) {
-        if (!onlyIssues) {
-            allAttempts
-        } else {
-            allAttempts.filter {
-                it.outcome == DiagnosticTimeline.Outcome.FAILURE ||
-                    it.outcome == DiagnosticTimeline.Outcome.PARTIAL ||
-                    it.outcome == DiagnosticTimeline.Outcome.WARNING
-            }
-        }
+    val attempts = remember(allAttempts, state.channelFilter, state.outcomeFilter) {
+        DiagnosticHumanizer.filterAttempts(
+            attempts = allAttempts,
+            channelFilter = state.channelFilter,
+            outcomeFilter = state.outcomeFilter,
+        )
     }
+    var overview by remember { mutableStateOf(CaptureOverviewSnapshot()) }
+    var overviewExpanded by remember { mutableStateOf(false) }
     var expandedAttempts by remember { mutableStateOf(emptySet<String>()) }
     var openedNewest by remember { mutableStateOf(false) }
     var confirmClearRawText by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var exportIncludeRawText by remember { mutableStateOf(true) }
+    var exportAll by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
     var pendingSaveContent by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        overview = loadCaptureOverview(context)
+    }
 
     val saveDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("text/plain"),
@@ -181,7 +219,7 @@ fun TransactionDiagnosticsScreen(
     ) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 tr("记录每笔账从采集到入库经过的每一步，含原始正文。仅保存在本机，最长 7 天。"),
@@ -189,6 +227,15 @@ fun TransactionDiagnosticsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            CaptureOverviewCard(
+                overview = overview,
+                expanded = overviewExpanded,
+                onToggle = {
+                    overviewExpanded = !overviewExpanded
+                    scope.launch { overview = loadCaptureOverview(context) }
+                },
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
             state.rawTextNotice?.let { notice ->
@@ -221,21 +268,24 @@ fun TransactionDiagnosticsScreen(
                     .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                FilterChip(
-                    selected = onlyIssues,
-                    onClick = { onlyIssues = !onlyIssues },
-                    label = { Text(tr("仅失败与警告"), maxLines = 1, softWrap = false) },
-                )
-                FilterChip(
-                    selected = state.selectedTransactionId == null,
-                    onClick = { viewModel.selectTransaction(null) },
-                    label = { Text(tr("全部账单"), maxLines = 1, softWrap = false) },
-                )
-                state.transactionIds.forEach { id ->
+                DiagnosticChannelFilter.entries.forEach { channel ->
                     FilterChip(
-                        selected = state.selectedTransactionId == id,
-                        onClick = { viewModel.selectTransaction(id) },
-                        label = { Text("#${id}", maxLines = 1, softWrap = false) },
+                        selected = state.channelFilter == channel,
+                        onClick = { viewModel.setChannelFilter(channel) },
+                        label = { Text(channelFilterLabel(channel), maxLines = 1, softWrap = false) },
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DiagnosticOutcomeFilter.entries.forEach { outcome ->
+                    FilterChip(
+                        selected = state.outcomeFilter == outcome,
+                        onClick = { viewModel.setOutcomeFilter(outcome) },
+                        label = { Text(outcomeFilterLabel(outcome), maxLines = 1, softWrap = false) },
                     )
                 }
             }
@@ -257,12 +307,11 @@ fun TransactionDiagnosticsScreen(
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
+                    val hasFilter = state.query.isNotBlank() ||
+                        state.channelFilter != DiagnosticChannelFilter.ALL ||
+                        state.outcomeFilter != DiagnosticOutcomeFilter.ALL
                     Text(
-                        if (state.query.isBlank() && state.selectedTransactionId == null && !onlyIssues) {
-                            tr("暂无诊断日志")
-                        } else {
-                            tr("没有匹配的日志")
-                        },
+                        if (!hasFilter) tr("暂无诊断日志") else tr("没有匹配的日志"),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -360,7 +409,7 @@ fun TransactionDiagnosticsScreen(
                     .fillMaxWidth()
                     .navigationBarsPadding()
                     .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
                     text = tr("导出排障日志"),
@@ -368,10 +417,25 @@ fun TransactionDiagnosticsScreen(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = tr("包含应用版本、机型、权限健康快照、诊断链路及最近崩溃堆栈；仅在你确认保存或发送时本地生成，不会自动上传。"),
+                    text = tr("包含环境快照、服务运行轨迹、待确认现场与完整诊断链路；仅在你确认保存或发送时本地生成，不会自动上传。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = !exportAll,
+                        onClick = { if (!exporting) exportAll = false },
+                        label = { Text(tr("仅导出当前筛选范围"), maxLines = 1, softWrap = false) },
+                    )
+                    FilterChip(
+                        selected = exportAll,
+                        onClick = { if (!exporting) exportAll = true },
+                        label = { Text(tr("导出全部 7 天"), maxLines = 1, softWrap = false) },
+                    )
+                }
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -423,11 +487,16 @@ fun TransactionDiagnosticsScreen(
                             scope.launch {
                                 try {
                                     val report = withContext(Dispatchers.IO) {
-                                        val events = viewModel.loadEventsForExport()
+                                        val events = viewModel.loadEventsForExport(exportAll = exportAll)
+                                        val ledgerDupCount = viewModel.countLedgerPossibleDuplicates()
                                         val meta = DiagnosticExportFormatter.collectMeta(
                                             context = context,
-                                            selectedTransactionId = state.selectedTransactionId,
-                                            query = state.query,
+                                            selectedTransactionId = null,
+                                            query = if (exportAll) "" else state.query,
+                                            channelFilter = if (exportAll) DiagnosticChannelFilter.ALL else state.channelFilter,
+                                            outcomeFilter = if (exportAll) DiagnosticOutcomeFilter.ALL else state.outcomeFilter,
+                                            exportAll = exportAll,
+                                            ledgerPossibleDuplicateCount = ledgerDupCount,
                                         )
                                         DiagnosticExportFormatter.format(
                                             meta = meta,
@@ -460,11 +529,16 @@ fun TransactionDiagnosticsScreen(
                                 try {
                                     val fileName = DiagnosticExportFormatter.defaultFileName()
                                     val shareFile = withContext(Dispatchers.IO) {
-                                        val events = viewModel.loadEventsForExport()
+                                        val events = viewModel.loadEventsForExport(exportAll = exportAll)
+                                        val ledgerDupCount = viewModel.countLedgerPossibleDuplicates()
                                         val meta = DiagnosticExportFormatter.collectMeta(
                                             context = context,
-                                            selectedTransactionId = state.selectedTransactionId,
-                                            query = state.query,
+                                            selectedTransactionId = null,
+                                            query = if (exportAll) "" else state.query,
+                                            channelFilter = if (exportAll) DiagnosticChannelFilter.ALL else state.channelFilter,
+                                            outcomeFilter = if (exportAll) DiagnosticOutcomeFilter.ALL else state.outcomeFilter,
+                                            exportAll = exportAll,
+                                            ledgerPossibleDuplicateCount = ledgerDupCount,
                                         )
                                         val report = DiagnosticExportFormatter.format(
                                             meta = meta,
@@ -503,6 +577,209 @@ fun TransactionDiagnosticsScreen(
     }
 }
 
+@Composable
+private fun CaptureOverviewCard(
+    overview: CaptureOverviewSnapshot,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SettingsGroupCard(modifier = modifier.clickable(onClick = onToggle)) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = tr("采集运行概览"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (expanded) tr("收起轨迹") else tr("查看轨迹"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OverviewMetric(
+                    label = tr("通知监听"),
+                    value = when (overview.notificationState) {
+                        CaptureConnectionState.CONNECTED -> tr("已连接")
+                        CaptureConnectionState.DISCONNECTED -> tr("已断开")
+                        CaptureConnectionState.PERMISSION_OFF -> tr("未授权")
+                        CaptureConnectionState.UNKNOWN -> tr("正在确认")
+                    } + " · " + tr("近24h断开 %d 次").format(overview.disconnectCount24h),
+                    valueColor = when (overview.notificationState) {
+                        CaptureConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+                        CaptureConnectionState.DISCONNECTED,
+                        CaptureConnectionState.PERMISSION_OFF -> MaterialTheme.colorScheme.error
+                        CaptureConnectionState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                OverviewMetric(
+                    label = tr("页面识别"),
+                    value = if (overview.pageRecognitionEnabled) tr("已开启") else tr("未开启"),
+                    valueColor = if (overview.pageRecognitionEnabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OverviewMetric(
+                    label = tr("待确认积压"),
+                    value = tr("%d 笔").format(overview.pendingCount),
+                    valueColor = if (overview.pendingCount > 0) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                OverviewMetric(
+                    label = tr("相册监听"),
+                    value = if (overview.albumWatchActive) tr("已开启") else tr("未开启"),
+                    valueColor = if (overview.albumWatchActive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (expanded) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Text(
+                    text = tr("最近系统运行轨迹"),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (overview.recentEntries.isEmpty()) {
+                    Text(
+                        text = tr("暂无系统运行轨迹"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        overview.recentEntries.take(30).forEach { entry ->
+                            ServiceHealthRow(entry = entry)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OverviewMetric(
+    label: String,
+    value: String,
+    valueColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = valueColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ServiceHealthRow(entry: ServiceHealthEntry) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = formatHmsTime(entry.occurredAtMs),
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text = serviceChannelLabel(entry.channel),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+            Text(
+                text = entry.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (entry.event == ServiceHealthLog.EVENT_DISCONNECTED ||
+                    entry.event == ServiceHealthLog.EVENT_REBIND_FAILED ||
+                    entry.event == ServiceHealthLog.EVENT_ERROR
+                ) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        entry.detail?.let { detail ->
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 58.dp),
+            )
+        }
+    }
+}
+
 /**
  * One capture chain: what entered, what the chain produced, how long it took and
  * where it ended. Expanding lists every step in order with its own input/output.
@@ -516,6 +793,9 @@ private fun AttemptCard(
 ) {
     val clipboard = LocalClipboardManager.current
     var copied by remember(attempt.attemptId) { mutableStateOf(false) }
+    val semanticOutcome = remember(attempt) { DiagnosticHumanizer.semanticOutcome(attempt) }
+    val primarySummary = remember(attempt) { DiagnosticHumanizer.extractPrimarySummary(attempt) }
+    val explanationKey = remember(attempt) { DiagnosticHumanizer.explainAttemptKey(attempt) }
     LaunchedEffect(copied) {
         if (copied) {
             delay(1_600L)
@@ -527,28 +807,47 @@ private fun AttemptCard(
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        text = entryLabel(attempt.entry),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
                 Text(
-                    entryLabel(attempt.entry),
+                    text = primarySummary ?: formatFullTime(attempt.startedAtMs),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Text(
-                    outcomeLabel(attempt.outcome),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = outcomeColor(attempt.outcome),
-                    maxLines = 1,
-                    softWrap = false,
-                )
+                SemanticOutcomePill(semanticOutcome)
             }
             Text(
-                "${formatFullTime(attempt.startedAtMs)} · ${tr("耗时")} ${DiagnosticTimeline.formatDuration(attempt.durationMs)}",
+                text = tr(explanationKey),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "${formatFullTime(attempt.startedAtMs)} · ${tr("耗时")} ${DiagnosticTimeline.formatDuration(attempt.durationMs)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
             )
             attempt.transactionId?.let { id ->
                 Text(
@@ -560,14 +859,30 @@ private fun AttemptCard(
             }
             if (expanded) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                attempt.steps.forEach { step ->
+                    StepRow(
+                        step = step,
+                        attemptStartMs = attempt.startedAtMs,
+                        showSummaries = attempt.hasReadableSummaries,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val primaryCallSite = attempt.steps.firstNotNullOfOrNull { it.callSite }
+                    val techText = buildString {
+                        append("${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}")
+                        if (!primaryCallSite.isNullOrBlank()) {
+                            append(" · $primaryCallSite")
+                        }
+                    }
                     Text(
-                        "${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}",
+                        text = techText,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -587,9 +902,6 @@ private fun AttemptCard(
                         )
                     }
                 }
-                attempt.steps.forEach { step ->
-                    StepRow(step = step, showSummaries = attempt.hasReadableSummaries)
-                }
             }
             Text(
                 if (expanded) tr("收起") else tr("查看详情"),
@@ -597,6 +909,36 @@ private fun AttemptCard(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
+    }
+}
+
+@Composable
+private fun SemanticOutcomePill(outcome: DiagnosticSemanticOutcome) {
+    val (bg, fg) = when (outcome) {
+        DiagnosticSemanticOutcome.AUTO_BOOKED ->
+            MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        DiagnosticSemanticOutcome.HELD_FOR_REVIEW ->
+            MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
+        DiagnosticSemanticOutcome.DEDUP_IGNORED,
+        DiagnosticSemanticOutcome.SKIPPED,
+        DiagnosticSemanticOutcome.RUNNING ->
+            MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        DiagnosticSemanticOutcome.FAILED ->
+            MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+    }
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = bg,
+    ) {
+        Text(
+            text = semanticOutcomeLabel(outcome),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = fg,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -618,15 +960,17 @@ private fun formatFullAttemptTrace(attempt: DiagnosticTimeline.Attempt): String 
 @Composable
 private fun StepRow(
     step: TransactionDiagnosticEventEntity,
+    attemptStartMs: Long,
     showSummaries: Boolean,
 ) {
+    val offsetMs = (step.occurredAtMs - attemptStartMs).coerceAtLeast(0L)
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                formatStepTime(step.occurredAtMs),
+                "${formatStepTime(step.occurredAtMs)} (+${DiagnosticTimeline.formatDuration(offsetMs)})",
                 style = MaterialTheme.typography.labelMedium,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -638,7 +982,7 @@ private fun StepRow(
                 style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 10.dp),
+                modifier = Modifier.weight(1f).padding(start = 8.dp),
             )
             Text(
                 diagnosticResult(step.result),
@@ -657,27 +1001,31 @@ private fun StepRow(
             overflow = TextOverflow.Ellipsis,
         )
         if (showSummaries) {
-            Text(
-                "${tr("输入")}：${step.inputSummary ?: "—"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                "${tr("输出")}：${step.outputSummary ?: "—"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
+            step.inputSummary?.let { input ->
+                Text(
+                    "${tr("输入")}：$input",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            step.outputSummary?.let { output ->
+                Text(
+                    "${tr("输出")}：$output",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         step.callSite?.let { callSite ->
             Text(
                 callSite,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -770,6 +1118,9 @@ private fun formatFullTime(occurredAtMs: Long): String =
 private fun formatStepTime(occurredAtMs: Long): String =
     SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(occurredAtMs))
 
+private fun formatHmsTime(occurredAtMs: Long): String =
+    SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(occurredAtMs))
+
 @Composable
 private fun resultColor(result: String) = when (result) {
     "failure" -> MaterialTheme.colorScheme.error
@@ -779,13 +1130,40 @@ private fun resultColor(result: String) = when (result) {
 }
 
 @Composable
-private fun outcomeColor(outcome: DiagnosticTimeline.Outcome) = when (outcome) {
-    DiagnosticTimeline.Outcome.FAILURE -> MaterialTheme.colorScheme.error
-    DiagnosticTimeline.Outcome.PARTIAL -> MaterialTheme.colorScheme.error
-    DiagnosticTimeline.Outcome.WARNING -> MaterialTheme.colorScheme.tertiary
-    DiagnosticTimeline.Outcome.RUNNING -> MaterialTheme.colorScheme.onSurfaceVariant
-    DiagnosticTimeline.Outcome.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
-    DiagnosticTimeline.Outcome.SUCCESS -> MaterialTheme.colorScheme.primary
+private fun channelFilterLabel(filter: DiagnosticChannelFilter): String = when (filter) {
+    DiagnosticChannelFilter.ALL -> tr("全部来源")
+    DiagnosticChannelFilter.NOTIFICATION -> tr("通知")
+    DiagnosticChannelFilter.ACCESSIBILITY -> tr("页面识别")
+    DiagnosticChannelFilter.SCREENSHOT -> tr("截图")
+    DiagnosticChannelFilter.SMS -> tr("短信")
+    DiagnosticChannelFilter.IMPORT -> tr("导入")
+    DiagnosticChannelFilter.SYNC -> tr("同步")
+}
+
+@Composable
+private fun outcomeFilterLabel(filter: DiagnosticOutcomeFilter): String = when (filter) {
+    DiagnosticOutcomeFilter.ALL -> tr("全部结果")
+    DiagnosticOutcomeFilter.NON_AUTO_BOOKED -> tr("待确认/去重/跳过/失败")
+    DiagnosticOutcomeFilter.ISSUES_ONLY -> tr("仅失败与警告")
+}
+
+@Composable
+private fun semanticOutcomeLabel(outcome: DiagnosticSemanticOutcome): String = when (outcome) {
+    DiagnosticSemanticOutcome.AUTO_BOOKED -> tr("已自动记账")
+    DiagnosticSemanticOutcome.HELD_FOR_REVIEW -> tr("转入待确认")
+    DiagnosticSemanticOutcome.DEDUP_IGNORED -> tr("已去重忽略")
+    DiagnosticSemanticOutcome.SKIPPED -> tr("已跳过")
+    DiagnosticSemanticOutcome.FAILED -> tr("处理失败")
+    DiagnosticSemanticOutcome.RUNNING -> tr("进行中")
+}
+
+@Composable
+private fun serviceChannelLabel(channel: String): String = when (channel) {
+    ServiceHealthLog.CHANNEL_NOTIFICATION -> tr("通知")
+    ServiceHealthLog.CHANNEL_ACCESSIBILITY -> tr("页面识别")
+    ServiceHealthLog.CHANNEL_SCREENSHOT -> tr("相册")
+    ServiceHealthLog.CHANNEL_APP -> tr("应用")
+    else -> channel
 }
 
 @Composable
@@ -793,7 +1171,7 @@ private fun entryLabel(entry: DiagnosticTimeline.Entry): String = when (entry) {
     DiagnosticTimeline.Entry.SCREENSHOT -> tr("截图")
     DiagnosticTimeline.Entry.NOTIFICATION -> tr("通知")
     DiagnosticTimeline.Entry.SMS -> tr("短信")
-    DiagnosticTimeline.Entry.ACCESSIBILITY -> tr("无障碍")
+    DiagnosticTimeline.Entry.ACCESSIBILITY -> tr("页面识别")
     DiagnosticTimeline.Entry.MANUAL -> tr("手工")
     DiagnosticTimeline.Entry.VOICE -> tr("语音")
     DiagnosticTimeline.Entry.IMPORT -> tr("导入")
@@ -802,16 +1180,6 @@ private fun entryLabel(entry: DiagnosticTimeline.Entry): String = when (entry) {
     DiagnosticTimeline.Entry.DELETE -> tr("删除")
     DiagnosticTimeline.Entry.CAPTURE -> tr("采集")
     DiagnosticTimeline.Entry.UNKNOWN -> tr("其他")
-}
-
-@Composable
-private fun outcomeLabel(outcome: DiagnosticTimeline.Outcome): String = when (outcome) {
-    DiagnosticTimeline.Outcome.SUCCESS -> tr("成功")
-    DiagnosticTimeline.Outcome.WARNING -> tr("待确认")
-    DiagnosticTimeline.Outcome.FAILURE -> tr("失败")
-    DiagnosticTimeline.Outcome.PARTIAL -> tr("部分失败")
-    DiagnosticTimeline.Outcome.RUNNING -> tr("进行中")
-    DiagnosticTimeline.Outcome.UNKNOWN -> tr("结果未记录")
 }
 
 @Composable

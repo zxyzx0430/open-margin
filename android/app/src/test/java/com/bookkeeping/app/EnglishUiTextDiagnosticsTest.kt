@@ -27,6 +27,18 @@ class EnglishUiTextDiagnosticsTest {
             "成功",
             "警告",
             "失败",
+            "采集运行概览",
+            "最近系统运行轨迹",
+            "全部来源",
+            "全部结果",
+            "待确认/去重/跳过/失败",
+            "仅导出当前筛选范围",
+            "导出全部 7 天",
+            "已自动记账",
+            "转入待确认",
+            "已去重忽略",
+            "已跳过",
+            "处理失败",
         )
         labels.forEach { label ->
             assertTrue("Missing English translation: $label", EnglishUiText.hasTranslation(label))
