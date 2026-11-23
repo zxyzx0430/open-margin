@@ -709,7 +709,13 @@ private data class ImportDraft(
 private fun ScreenshotImportScreen(
     state: ScreenshotImportReviewState,
     bookedTransactions: List<TransactionEntity>,
+    highlightedTransactionId: Long?,
+    onHighlightFinished: (Long) -> Unit,
     progress: BatchProgress?,
+    onStopBatch: () -> Unit,
+    lastIgnored: CaptureCandidate?,
+    onUndoIgnore: (CaptureCandidate) -> Unit,
+    onUndoDismissed: () -> Unit,
     message: String?,
     onClose: () -> Unit,
     onPickImages: () -> Unit,
@@ -722,10 +728,30 @@ private fun ScreenshotImportScreen(
     var previewScreenshotPath by remember { mutableStateOf<String?>(null) }
     val pendingRows = state.pendingRows
     val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    val onlyNotices = bookedTransactions.isEmpty() && pendingRows.isEmpty() && state.notices.isNotEmpty()
+    LaunchedEffect(onlyNotices) {
+        if (onlyNotices) noticesExpanded = true
+    }
+    LaunchedEffect(lastIgnored?.candidateId) {
+        val ignored = lastIgnored ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = tr("已忽略这笔候选"),
+            actionLabel = tr("撤销"),
+            duration = SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            onUndoIgnore(ignored)
+        } else {
+            onUndoDismissed()
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
