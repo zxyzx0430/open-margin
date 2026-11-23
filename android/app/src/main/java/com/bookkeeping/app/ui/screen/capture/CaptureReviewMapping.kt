@@ -102,6 +102,7 @@ object CaptureReviewMapping {
         candidate: CaptureCandidate,
         merchant: String,
         category: TransactionCategory,
+        evidenceImageName: String? = null,
     ): TransactionEntity {
         val source = candidate.transactionSource
             ?.let { runCatching { TransactionSource.valueOf(it) }.getOrNull() }
@@ -141,6 +142,9 @@ object CaptureReviewMapping {
             "[银行短信待确认]"
         } else if (candidate.intakeMethod == CaptureCandidate.INTAKE_NOTIFICATION) {
             "[支付通知待确认] $sourceLabel"
+        } else if (candidate.kind == CaptureCandidate.KIND_PAYMENT && candidate.orderId.isNullOrBlank()) {
+            // 普通扫描付款已有 captureKind + 来源 + 扫描原图，不再重复塞入「[扫描] 微信」备注。
+            ""
         } else buildString {
             append(
                 when (candidate.kind) {
@@ -188,6 +192,7 @@ object CaptureReviewMapping {
             captureConfidence = candidate.confidence,
             captureKind = candidate.kind,
             captureObservedAtMs = candidate.capturedAtMs,
+            evidenceImageName = evidenceImageName,
             eventTimeNeedsConfirmation = candidate.eventTimeNeedsConfirmation,
         )
     }

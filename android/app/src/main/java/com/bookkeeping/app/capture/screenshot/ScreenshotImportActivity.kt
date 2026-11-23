@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
@@ -18,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,9 +43,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -58,6 +60,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -65,6 +71,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.repository.CrossSourceDuplicatePolicy
 import com.bookkeeping.app.data.repository.DuplicateReason
 import com.bookkeeping.app.data.repository.LedgerInsertResult
@@ -96,9 +104,14 @@ import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.LedgerFilterChip
+import com.bookkeeping.app.ui.screen.capture.CaptureImagePreview
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDirection
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewMapping
 import com.bookkeeping.app.ui.screen.capture.LikelyDuplicateNotice
+import com.bookkeeping.app.ui.screen.transactions.LedgerTransactionRow
+import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreenContent
+import com.bookkeeping.app.ui.screen.transactions.TransactionEditFields
+import com.bookkeeping.app.ui.screen.transactions.TransactionEditRules
 import com.bookkeeping.app.ui.theme.BookkeepingAppTheme
 import dagger.hilt.android.EntryPointAccessors
 import java.text.SimpleDateFormat
@@ -107,52 +120,62 @@ import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * One screen for both manual intakes: ACTION_SEND from another app, and the
- * in-app Photo Picker. Both hand the URI to [ScreenshotIntakeCoordinator], so
- * there is exactly one recognition path.
+ * 截图批量导入页：统一承载应用内选图（点击后才弹出，单次最多 10 张）与系统分享
+ * （ACTION_SEND / ACTION_SEND_MULTIPLE）。
  *
- * A screenshot can hold several transactions, so the recognised candidates are
- * listed in one scrolling page and filled in any order: the user no longer has
- * to tap "next" once per transaction.
+ * 导入完成后停留在结果页，按「先清待办」顺序展示：
+ * 顶部进度/汇总 → 待你确认区 → 本次已记入账本（主页同款卡片，点击可进详情）→
+ * 可折叠的重复/未识别说明；由用户点击「完成」主动退出。
  */
 class ScreenshotImportActivity : ComponentActivity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var coordinator: ScreenshotIntakeCoordinator
     private lateinit var store: CaptureCandidateStore
+    private lateinit var evidenceStore: ReceiptEvidenceStore
     private var repository: TransactionRepository? = null
     private val settings by lazy { SettingsPreferences(applicationContext) }
 
     private val review = mutableStateOf(ScreenshotImportReviewState())
-    private val recognizing = mutableStateOf(false)
+    private val batchProgress = mutableStateOf<BatchProgress?>(null)
     private val message = mutableStateOf<String?>(null)
-    /** True when [message] is a recognition result: show it, then leave. */
-    private val resultMessage = mutableStateOf(false)
-    /** A picker is on screen; the summary must not close the page underneath it. */
-    private val picking = mutableStateOf(false)
+    private val selectedTransactionId = mutableStateOf<Long?>(null)
+    private val highlightedTransactionId = mutableStateOf<Long?>(null)
+    private val lastIgnoredCandidate = mutableStateOf<CaptureCandidate?>(null)
+    private var batchJob: Job? = null
+    private var sessionImageCounter: Int = 0
 
-    private val pickImage = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        picking.value = false
-        if (uri == null) {
-            // Nothing has been imported yet, so cancelling the picker leaves
-            // nothing on screen: close instead of showing an empty page.
-            if (review.value.rows.isEmpty() && !recognizing.value) finish()
-        } else {
-            ingest(uri, IntakeSource.PHOTO_PICKER)
+    private val pickImages = registerForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(ScreenshotBatchPolicy.MAX_BATCH_IMAGES),
+    ) { uris ->
+        if (uris.isEmpty()) return@registerForActivityResult
+        val capped = ScreenshotBatchPolicy.capSelection(uris, ScreenshotBatchPolicy.MAX_BATCH_IMAGES)
+        if (capped.truncated) {
+            Toast.makeText(
+                this,
+                tr("单次最多导入 %d 张截图，已自动选取前 %d 张").format(
+                    ScreenshotBatchPolicy.MAX_BATCH_IMAGES,
+                    ScreenshotBatchPolicy.MAX_BATCH_IMAGES,
+                ),
+                Toast.LENGTH_LONG,
+            ).show()
         }
+        ingestBatch(capped.accepted, IntakeSource.PHOTO_PICKER)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         coordinator = ScreenshotIntakeCoordinator(applicationContext)
         store = CaptureCandidateStore(applicationContext)
+        evidenceStore = ReceiptEvidenceStore(applicationContext)
         repository = runCatching {
             EntryPointAccessors.fromApplication(
                 applicationContext,
@@ -164,37 +187,68 @@ class ScreenshotImportActivity : ComponentActivity() {
 
         setContent {
             BookkeepingAppTheme {
-                ScreenshotImportScreen(
-                    state = review.value,
-                    recognizing = recognizing.value,
-                    message = message.value,
-                    closeAfterMessage = resultMessage.value,
-                    picking = picking.value,
-                    onClose = { close() },
-                    onPickImage = { openPicker() },
-                    onConfirm = { candidate, merchant, category, direction ->
-                        confirm(candidate, merchant, category, direction)
-                    },
-                    onIgnore = { candidate -> ignore(candidate) },
-                )
+                val allTransactions by (repository?.observeAll() ?: flowOf(emptyList()))
+                    .collectAsState(initial = emptyList())
+                val state = review.value
+                val byId = remember(allTransactions) { allTransactions.associateBy { it.id } }
+                val bookedTransactions = remember(state.bookedTransactionIds, byId) {
+                    state.bookedTransactionIds.mapNotNull { byId[it] }
+                }
+                val activeDetailId = selectedTransactionId.value
+                if (activeDetailId != null) {
+                    BackHandler { selectedTransactionId.value = null }
+                    TransactionDetailScreenContent(
+                        entry = byId[activeDetailId],
+                        onBack = { selectedTransactionId.value = null },
+                        onDeleted = { selectedTransactionId.value = null },
+                        onSave = { current, fields -> saveEditedTransaction(current, fields) },
+                        onToggleExclude = { current -> toggleExcludeTransaction(current) },
+                        onSaveMerchantRule = { merchant, category ->
+                            saveMerchantRule(merchant, category)
+                        },
+                        onDelete = { current -> deleteTransaction(current) },
+                        onConfirmEventTime = { current -> confirmTransactionTime(current) },
+                        onUpdateEventTime = { current, pickedMs ->
+                            updateTransactionTime(current, pickedMs)
+                        },
+                    )
+                } else {
+                    ScreenshotImportScreen(
+                        state = state,
+                        bookedTransactions = bookedTransactions,
+                        highlightedTransactionId = highlightedTransactionId.value,
+                        onHighlightFinished = { id ->
+                            if (highlightedTransactionId.value == id) {
+                                highlightedTransactionId.value = null
+                            }
+                        },
+                        progress = batchProgress.value,
+                        onStopBatch = { stopBatch() },
+                        lastIgnored = lastIgnoredCandidate.value,
+                        onUndoIgnore = { candidate -> undoIgnore(candidate) },
+                        onUndoDismissed = { lastIgnoredCandidate.value = null },
+                        message = message.value,
+                        onClose = { close() },
+                        onPickImages = { openPicker() },
+                        onOpenTransaction = { id -> selectedTransactionId.value = id },
+                        onConfirm = { candidate, merchant, category, direction ->
+                            confirm(candidate, merchant, category, direction)
+                        },
+                        onIgnore = { candidate -> ignore(candidate) },
+                    )
+                }
             }
         }
 
-        when (intent?.action) {
-            // A rotation replays onCreate with the same intent; rows kept above
-            // mean this image was already admitted, so nothing is re-ingested.
-            Intent.ACTION_SEND -> if (review.value.rows.isEmpty()) handleSend(intent)
-            // Re-opening the picker on every recreation would stack a second
-            // system sheet on top of the first.
-            else -> if (savedInstanceState == null && review.value.rows.isEmpty()) openPicker()
+        // 仅外部系统分享进来时直接开始识别；App 内点进时停留在落地页，由用户点按钮再弹选图器。
+        if (!review.value.hasAnyContent) {
+            when (intent?.action) {
+                Intent.ACTION_SEND -> handleSendSingle(intent)
+                Intent.ACTION_SEND_MULTIPLE -> handleSendMultiple(intent)
+            }
         }
     }
 
-    /**
-     * A rotation or a dark-mode switch recreates this screen. Without this, every
-     * card the user already filled in would silently reset (and the share intent
-     * would be ingested a second time).
-     */
     @Suppress("DEPRECATION")
     private fun restoreRetainedReview() {
         (lastCustomNonConfigurationInstance as? ScreenshotImportReviewState)?.let { kept ->
@@ -221,20 +275,15 @@ class ScreenshotImportActivity : ComponentActivity() {
     }
 
     private fun openPicker() {
-        picking.value = true
         message.value = null
-        // A picker that cannot open stays on screen so the message is readable
-        // and the row list is not thrown away.
-        resultMessage.value = false
         runCatching {
-            pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }.onFailure {
-            picking.value = false
             message.value = tr("当前系统不支持图片选择器")
         }
     }
 
-    private fun handleSend(intent: Intent) {
+    private fun handleSendSingle(intent: Intent) {
         val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
         } else {
@@ -242,45 +291,107 @@ class ScreenshotImportActivity : ComponentActivity() {
             intent.getParcelableExtra(Intent.EXTRA_STREAM)
         }
         if (uri == null) {
-            resultMessage.value = false
             message.value = tr("没有收到图片")
             return
         }
-        ingest(uri, IntakeSource.SHARE)
+        ingestBatch(listOf(uri), IntakeSource.SHARE)
     }
 
-    private fun ingest(uri: Uri, source: IntakeSource) {
-        // Share intents and the Photo Picker both hand over a read grant with the
-        // URI; a revoked grant surfaces as UNREADABLE / PERMISSION_DENIED below.
-        recognizing.value = true
+    private fun handleSendMultiple(intent: Intent) {
+        val uris: List<Uri> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+        }
+        if (uris.isEmpty()) {
+            message.value = tr("没有收到图片")
+            return
+        }
+        val capped = ScreenshotBatchPolicy.capSelection(uris, ScreenshotBatchPolicy.MAX_BATCH_IMAGES)
+        if (capped.truncated) {
+            Toast.makeText(
+                this,
+                tr("单次最多导入 %d 张截图，已自动选取前 %d 张").format(
+                    ScreenshotBatchPolicy.MAX_BATCH_IMAGES,
+                    ScreenshotBatchPolicy.MAX_BATCH_IMAGES,
+                ),
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+        ingestBatch(capped.accepted, IntakeSource.SHARE)
+    }
+
+    private fun ingestBatch(uris: List<Uri>, source: IntakeSource) {
+        if (uris.isEmpty()) return
         message.value = null
-        scope.launch {
-            val outcome = runCatching { coordinator.ingest(uri, source) }.getOrNull()
-            runOnUiThread { applyOutcome(outcome) }
+        val total = uris.size
+        val hadContentBefore = review.value.hasAnyContent
+        batchProgress.value = BatchProgress(current = 1, total = total)
+        batchJob?.cancel()
+        batchJob = scope.launch {
+            try {
+                uris.forEachIndexed { index, uri ->
+                    val globalIndex = ++sessionImageCounter
+                    runOnUiThread {
+                        batchProgress.value = BatchProgress(current = index + 1, total = total)
+                    }
+                    val outcome = runCatching { coordinator.ingest(uri, source) }.getOrNull()
+                    runOnUiThread {
+                        applyOutcome(
+                            outcome = outcome,
+                            globalIndex = globalIndex,
+                            isMultiImage = total > 1 || hadContentBefore,
+                            showDuplicateToast = hadContentBefore && total == 1,
+                        )
+                    }
+                }
+            } finally {
+                runOnUiThread {
+                    batchProgress.value = null
+                }
+            }
         }
     }
 
-    private fun applyOutcome(outcome: ScreenshotIntakeCoordinator.Outcome?) {
-        recognizing.value = false
+    private fun stopBatch() {
+        batchJob?.cancel()
+        batchJob = null
+        batchProgress.value = null
+        Toast.makeText(this, tr("已停止识别剩余截图"), Toast.LENGTH_SHORT).show()
+    }
+
+    private fun applyOutcome(
+        outcome: ScreenshotIntakeCoordinator.Outcome?,
+        globalIndex: Int,
+        isMultiImage: Boolean,
+        showDuplicateToast: Boolean,
+    ) {
         if (outcome == null) {
-            resultMessage.value = true
-            message.value = tr("图片读不出来")
+            val detail = tr("图片读不出来")
+            val note = if (isMultiImage) tr("第 %d 张：%s").format(globalIndex, detail) else detail
+            review.value = review.value.withNotice(note)
+            if (showDuplicateToast) Toast.makeText(this, detail, Toast.LENGTH_SHORT).show()
             return
+        }
+        var next = review.value
+        if (outcome.bookedTransactionIds.isNotEmpty()) {
+            next = next.withBookedTransactions(outcome.bookedTransactionIds)
         }
         if (outcome.confirmationCandidates.isNotEmpty()) {
-            // Every recognised transaction joins the same page; nothing is queued
-            // behind a "next" step.
-            review.value = review.value.withCandidates(outcome.confirmationCandidates)
-            message.value = null
-            return
+            next = next.withCandidates(outcome.confirmationCandidates)
         }
-        val text = describe(outcome)
-        if (review.value.rows.isEmpty()) {
-            resultMessage.value = true
-            message.value = text
-        } else {
-            Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+        val hasDirectResult = outcome.bookedTransactionIds.isNotEmpty() ||
+            outcome.confirmationCandidates.isNotEmpty()
+        if (!hasDirectResult) {
+            val detail = describe(outcome)
+            val note = if (isMultiImage) tr("第 %d 张：%s").format(globalIndex, detail) else detail
+            next = next.withNotice(note)
+            if (showDuplicateToast || outcome.repeatImage) {
+                Toast.makeText(this, detail, Toast.LENGTH_SHORT).show()
+            }
         }
+        review.value = next
     }
 
     private fun describe(outcome: ScreenshotIntakeCoordinator.Outcome): String {
@@ -295,8 +406,6 @@ class ScreenshotImportActivity : ComponentActivity() {
             outcome.linked > 0 -> tr("这笔已经在账本里")
             else -> tr("没有可记录的交易")
         }
-        // Waiting placeholders this import closed are part of the result: say so
-        // instead of silently dropping them from the count.
         return if (outcome.superseded > 0) {
             base + tr("（已更新 %d 笔旧记录）").format(outcome.superseded)
         } else {
@@ -304,14 +413,6 @@ class ScreenshotImportActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Books one card with the merchant and category the user left in the row.
-     *
-     * The review page writes through the same repository call as the capture
-     * inbox, so edits are honoured; [ScreenshotIntakeCoordinator.confirmCandidate]
-     * cannot take them because it re-derives merchant/category from the stored
-     * candidate.
-     */
     private fun confirm(
         candidate: CaptureCandidate,
         merchant: String,
@@ -337,10 +438,14 @@ class ScreenshotImportActivity : ComponentActivity() {
             val outcome = writeToLedger(resolved, merchant.trim(), category)
             runOnUiThread {
                 when (outcome) {
-                    WriteOutcome.SAVED -> review.value = review.value.save(candidate.candidateId)
+                    is WriteOutcome.Saved -> {
+                        review.value = review.value.save(
+                            candidateId = candidate.candidateId,
+                            transactionId = outcome.transactionId,
+                        )
+                        highlightedTransactionId.value = outcome.transactionId
+                    }
                     is WriteOutcome.SuspectedDuplicate -> {
-                        // 仓库已经先试过合并；这里剩下的是无法安全合并的跨通道匹配。
-                        // 卡片留在待确认，绝不因为「已在账本中」把用户的信息丢掉。
                         Toast.makeText(
                             this@ScreenshotImportActivity,
                             tr("疑似与账本里已有的一笔重复，请核对后再决定（已有记录 #%d）")
@@ -383,11 +488,13 @@ class ScreenshotImportActivity : ComponentActivity() {
             return@withContext WriteOutcome.NOT_WRITABLE
         }
         val repo = repository ?: return@withContext WriteOutcome.FAILED
+        val evidenceImageName = evidenceStore.archiveFromPath(candidate.screenshotPath)
         val entity = try {
             CaptureReviewMapping.toTransactionEntity(
                 candidate = candidate,
                 merchant = merchant,
                 category = category,
+                evidenceImageName = evidenceImageName,
             )
         } catch (_: Exception) {
             return@withContext WriteOutcome.FAILED
@@ -399,12 +506,7 @@ class ScreenshotImportActivity : ComponentActivity() {
                 diagnosticInput = TransactionDiagnosticInput(
                     attemptId = candidate.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId(),
                 ),
-                // 审阅页的确认同样是「截图通道」：账本里可能已有通知记下的同一笔。
-                // 用户已经确认要记，就把截图的商户/订单号并进那一行，而不是再插一行、
-                // 也不是把卡片当成「已存在」丢掉。
                 crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
-                // 用户确认时精确 ID 可补全已有行；弱相似度不足以证明重复，
-                // 所以不合并，按独立新行写入。
                 holdWeakCrossSourceMatch = true,
                 mergeConfirmedCrossSource = true,
             )
@@ -414,28 +516,19 @@ class ScreenshotImportActivity : ComponentActivity() {
             return@withContext WriteOutcome.FAILED
         }
         return@withContext when (inserted) {
-            is LedgerInsertResult.Inserted, is LedgerInsertResult.Merged -> {
-                store.mark(candidate, CaptureCandidate.STATUS_APPROVED)
-                if (merchant.isNotBlank()) {
-                    try {
-                        settings.recordCategoryLearning(merchant, category)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        // Category learning is best effort; the booking already landed.
-                    }
-                }
-                WriteOutcome.SAVED
+            is LedgerInsertResult.Inserted -> {
+                finalizeSavedCandidate(candidate, merchant, category)
+                WriteOutcome.Saved(inserted.transactionId)
+            }
+            is LedgerInsertResult.Merged -> {
+                finalizeSavedCandidate(candidate, merchant, category)
+                WriteOutcome.Saved(inserted.transactionId)
             }
             is LedgerInsertResult.Duplicate -> when (inserted.reason) {
-                // 跨通道的同一笔只有在无法安全合并时才会走到这里（商户矛盾、
-                // 订单号矛盾、超出合并窗口）：卡片保留待确认，账本不动。
                 DuplicateReason.CROSS_SOURCE,
                 DuplicateReason.CROSS_SOURCE_WEAK,
                 -> WriteOutcome.SuspectedDuplicate(inserted.existingTransactionId)
-                // 同一通道的精确重发：账本已经有这一行，卡片可以收起。
-                DuplicateReason.SOURCE_ORDER_ID,
-                -> {
+                DuplicateReason.SOURCE_ORDER_ID -> {
                     store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
                     WriteOutcome.ALREADY_EXISTS
                 }
@@ -444,20 +537,94 @@ class ScreenshotImportActivity : ComponentActivity() {
         }
     }
 
+    private suspend fun finalizeSavedCandidate(
+        candidate: CaptureCandidate,
+        merchant: String,
+        category: TransactionCategory,
+    ) {
+        store.mark(candidate, CaptureCandidate.STATUS_APPROVED)
+        if (merchant.isNotBlank()) {
+            try {
+                settings.recordCategoryLearning(merchant, category)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Category learning is best effort; the booking already landed.
+            }
+        }
+    }
+
+    private fun saveEditedTransaction(original: TransactionEntity, fields: TransactionEditFields) {
+        val now = System.currentTimeMillis()
+        if (!TransactionEditRules.errorsOf(fields, now).isValid) return
+        if (!TransactionEditRules.hasChanges(original, fields)) return
+        val repo = repository ?: return
+        scope.launch {
+            repo.update(TransactionEditRules.applyTo(original, fields), TransactionDiagnosticInput())
+            val category = runCatching { TransactionCategory.valueOf(fields.category) }.getOrNull()
+            if (category != null && original.category != fields.category && fields.merchant.isNotBlank()) {
+                runCatching { settings.recordCategoryLearning(fields.merchant, category) }
+            }
+        }
+    }
+
+    private fun toggleExcludeTransaction(entity: TransactionEntity) {
+        if (entity.remoteReviewStatus == "refund") return
+        val nextStatus = if (entity.remoteReviewStatus == "excluded") "unverified" else "excluded"
+        val repo = repository ?: return
+        scope.launch {
+            repo.update(
+                entity.copy(
+                    remoteReviewStatus = nextStatus,
+                    duplicateOfId = if (nextStatus == "excluded") null else entity.duplicateOfId,
+                ),
+            )
+        }
+    }
+
+    private fun saveMerchantRule(merchant: String, category: TransactionCategory) {
+        if (merchant.isBlank()) return
+        scope.launch { settings.rememberMerchantCategory(merchant, category) }
+    }
+
+    private fun deleteTransaction(entity: TransactionEntity) {
+        val repo = repository ?: return
+        scope.launch { repo.delete(entity) }
+    }
+
+    private fun confirmTransactionTime(entity: TransactionEntity) {
+        if (!entity.eventTimeNeedsConfirmation) return
+        val repo = repository ?: return
+        scope.launch {
+            repo.update(entity.copy(eventTimeNeedsConfirmation = false))
+        }
+    }
+
+    private fun updateTransactionTime(entity: TransactionEntity, timestampMs: Long) {
+        if (TransactionEditRules.timestampError(timestampMs, System.currentTimeMillis()) != null) return
+        if (entity.timestamp == timestampMs && !entity.eventTimeNeedsConfirmation) return
+        val repo = repository ?: return
+        scope.launch {
+            repo.update(
+                entity.copy(
+                    timestamp = timestampMs,
+                    eventTimeNeedsConfirmation = false,
+                ),
+            )
+        }
+    }
+
     private fun ignore(candidate: CaptureCandidate) {
         if (!review.value.canConfirm(candidate.candidateId)) return
         review.value = review.value.begin(candidate.candidateId)
         scope.launch {
-            // Marked through the store, exactly like the capture inbox: the
-            // coordinator's ignoreCandidate() looks the card up in
-            // store.pending(), which returns only the oldest card per image, so
-            // the second transaction of one screenshot could never be ignored.
             val ignored = runCatching {
                 store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
             }.getOrDefault(false)
             runOnUiThread {
                 if (ignored) {
                     review.value = review.value.skip(candidate.candidateId)
+                    lastIgnoredCandidate.value = candidate
                 } else {
                     review.value = review.value.fail(candidate.candidateId)
                     Toast.makeText(
@@ -470,11 +637,30 @@ class ScreenshotImportActivity : ComponentActivity() {
         }
     }
 
+    private fun undoIgnore(candidate: CaptureCandidate) {
+        lastIgnoredCandidate.value = null
+        scope.launch {
+            val restored = runCatching {
+                store.mark(candidate, CaptureCandidate.STATUS_PENDING)
+            }.getOrDefault(false)
+            runOnUiThread {
+                if (restored) {
+                    review.value = review.value.restore(candidate.candidateId)
+                } else {
+                    Toast.makeText(
+                        this@ScreenshotImportActivity,
+                        tr("撤销失败，请稍后重试"),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
     private fun close() {
         if (!isFinishing) finish()
     }
 
-    /** Keeps the reviewed rows (and their settled status) across recreation. */
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onRetainCustomNonConfigurationInstance(): Any = review.value
 
@@ -492,21 +678,19 @@ class ScreenshotImportActivity : ComponentActivity() {
     }
 }
 
+private data class BatchProgress(
+    val current: Int,
+    val total: Int,
+)
+
 private sealed interface WriteOutcome {
-    data object SAVED : WriteOutcome
+    data class Saved(val transactionId: Long) : WriteOutcome
     data object ALREADY_EXISTS : WriteOutcome
     data class SuspectedDuplicate(val existingTransactionId: Long) : WriteOutcome
     data object NOT_WRITABLE : WriteOutcome
     data object FAILED : WriteOutcome
 }
 
-/**
- * What the user typed for one row.
- *
- * Held above the LazyColumn: a row that scrolls out of the viewport is disposed,
- * and its remember{} state with it, so merchant/category edits would silently
- * revert if they lived inside the card.
- */
 private data class ImportDraft(
     val merchant: String,
     val category: TransactionCategory,
@@ -524,35 +708,50 @@ private data class ImportDraft(
 @Composable
 private fun ScreenshotImportScreen(
     state: ScreenshotImportReviewState,
-    recognizing: Boolean,
+    bookedTransactions: List<TransactionEntity>,
+    highlightedTransactionId: Long?,
+    onHighlightFinished: (Long) -> Unit,
+    progress: BatchProgress?,
+    onStopBatch: () -> Unit,
+    lastIgnored: CaptureCandidate?,
+    onUndoIgnore: (CaptureCandidate) -> Unit,
+    onUndoDismissed: () -> Unit,
     message: String?,
-    closeAfterMessage: Boolean,
-    picking: Boolean,
     onClose: () -> Unit,
-    onPickImage: () -> Unit,
+    onPickImages: () -> Unit,
+    onOpenTransaction: (Long) -> Unit,
     onConfirm: (CaptureCandidate, String, TransactionCategory, String?) -> Unit,
     onIgnore: (CaptureCandidate) -> Unit,
 ) {
-    // Everything handled -> summary, then leave by itself (完成 closes sooner).
-    // A one-off result (nothing recognised) leaves the same way, matching the old
-    // toast-and-exit flow. Never close while the photo picker is open on top.
-    LaunchedEffect(state.isDone, picking, message, closeAfterMessage, recognizing) {
-        val closesAfterSummary = state.isDone && !picking
-        val closesAfterMessage = closeAfterMessage && !recognizing &&
-            state.rows.isEmpty() && message != null && !picking
-        if (closesAfterSummary || closesAfterMessage) {
-            delay(if (closesAfterSummary) 2600 else 2200)
-            onClose()
+    val drafts = remember { mutableStateMapOf<String, ImportDraft>() }
+    var noticesExpanded by remember { mutableStateOf(false) }
+    var previewScreenshotPath by remember { mutableStateOf<String?>(null) }
+    val pendingRows = state.pendingRows
+    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.CHINA) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    val onlyNotices = bookedTransactions.isEmpty() && pendingRows.isEmpty() && state.notices.isNotEmpty()
+    LaunchedEffect(onlyNotices) {
+        if (onlyNotices) noticesExpanded = true
+    }
+    LaunchedEffect(lastIgnored?.candidateId) {
+        val ignored = lastIgnored ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = tr("已忽略这笔候选"),
+            actionLabel = tr("撤销"),
+            duration = SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            onUndoIgnore(ignored)
+        } else {
+            onUndoDismissed()
         }
     }
-
-    // Row edits live here, not inside the LazyColumn: a card that scrolls out is
-    // disposed and would silently drop a half-typed merchant.
-    val drafts = remember { mutableStateMapOf<String, ImportDraft>() }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -580,8 +779,11 @@ private fun ScreenshotImportScreen(
             )
         },
         bottomBar = {
-            if (state.rows.isNotEmpty() && !state.isDone) {
-                ImportBottomBar(state = state, onPickImage = onPickImage)
+            if (state.hasAnyContent && progress == null) {
+                ImportResultBottomBar(
+                    onPickImages = onPickImages,
+                    onClose = onClose,
+                )
             }
         },
     ) { innerPadding ->
@@ -593,36 +795,218 @@ private fun ScreenshotImportScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (recognizing) {
-                item(key = "recognizing") { RecognizingCard() }
-            }
-            if (state.rows.isEmpty()) {
-                if (!recognizing) {
-                    item(key = "pick") { PickImageCard(message = message, onPickImage = onPickImage) }
+            if (progress != null) {
+                item(key = "recognizing") {
+                    RecognizingCard(progress = progress, onStopBatch = onStopBatch)
                 }
-            } else {
-                item(key = "header") {
-                    if (state.isDone) {
-                        SummaryCard(state = state, onClose = onClose)
-                    } else {
-                        ReviewHeader(state = state, message = message)
+            }
+            if (!state.hasAnyContent) {
+                if (progress == null) {
+                    item(key = "pick") {
+                        PickImageCard(message = message, onPickImages = onPickImages)
                     }
                 }
-                items(state.rows, key = { it.candidate.candidateId }) { row ->
-                    when (row.status) {
-                        ScreenshotImportReviewState.Status.PENDING,
-                        ScreenshotImportReviewState.Status.SAVING -> ImportCandidateCard(
+            } else {
+                item(key = "summary") {
+                    ImportSummaryBanner(
+                        bookedCount = bookedTransactions.size,
+                        pendingCount = pendingRows.size,
+                        noticeCount = state.notices.size,
+                        message = message,
+                    )
+                }
+
+                // 1. 先清待办：需要手动确认的候选排在最前面
+                if (pendingRows.isNotEmpty()) {
+                    item(key = "pending-header") {
+                        SectionTitle(
+                            title = tr("待你确认"),
+                            count = pendingRows.size,
+                        )
+                    }
+                    items(pendingRows, key = { "pending-${it.candidate.candidateId}" }) { row ->
+                        ImportCandidateCard(
                             row = row,
                             draft = drafts[row.candidate.candidateId] ?: ImportDraft.of(row.candidate),
                             onDraftChange = { next -> drafts[row.candidate.candidateId] = next },
+                            onPreviewImage = { path -> previewScreenshotPath = path },
                             onConfirm = { merchant, category, direction ->
                                 onConfirm(row.candidate, merchant, category, direction)
                             },
                             onIgnore = { onIgnore(row.candidate) },
                         )
-                        // Settled rows collapse to one line: the page keeps the
-                        // history of this import without shouting about it.
-                        else -> SettledRow(row = row)
+                    }
+                }
+
+                // 2. 本次已记入账本：复用主页同款账单卡片，点击直达账单详情
+                if (bookedTransactions.isNotEmpty()) {
+                    item(key = "booked-header") {
+                        SectionTitle(
+                            title = tr("本次已记入账本"),
+                            count = bookedTransactions.size,
+                        )
+                    }
+                    item(key = "booked-card") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                                bookedTransactions.forEachIndexed { index, transaction ->
+                                    LedgerTransactionRow(
+                                        transaction = transaction,
+                                        timeText = timeFormat.format(Date(transaction.timestamp)),
+                                        highlightedTransactionId = highlightedTransactionId,
+                                        onHighlightFinished = onHighlightFinished,
+                                        onClick = { onOpenTransaction(transaction.id) },
+                                    )
+                                    if (index != bookedTransactions.lastIndex) {
+                                        HorizontalDivider(
+                                            color = MaterialTheme.colorScheme.outlineVariant,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. 重复 / 未识别说明（默认折叠，按需展开）
+                if (state.notices.isNotEmpty()) {
+                    item(key = "notices") {
+                        CollapsibleNoticesCard(
+                            notices = state.notices,
+                            expanded = noticesExpanded,
+                            onToggle = { noticesExpanded = !noticesExpanded },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    previewScreenshotPath?.let { path ->
+        CaptureImagePreview(
+            path = path,
+            onDismiss = { previewScreenshotPath = null },
+        )
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, count: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun ImportSummaryBanner(
+    bookedCount: Int,
+    pendingCount: Int,
+    noticeCount: Int,
+    message: String?,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val summary = buildList {
+                add(tr("已记 %d 笔").format(bookedCount))
+                if (pendingCount > 0) add(tr("待确认 %d 笔").format(pendingCount))
+                if (noticeCount > 0) add(tr("跳过或未识别 %d 项").format(noticeCount))
+            }.joinToString(" · ")
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = if (pendingCount > 0) {
+                    tr("先确认待办，点下方账单卡片可查看原图或修改")
+                } else {
+                    tr("点击下方账单卡片可查看扫描原图、修改时间或分类")
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (message != null) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleNoticesCard(
+    notices: List<String>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = tr("未记入说明（%d）").format(notices.size),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (expanded) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    notices.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -630,9 +1014,8 @@ private fun ScreenshotImportScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PickImageCard(message: String?, onPickImage: () -> Unit) {
+private fun PickImageCard(message: String?, onPickImages: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -668,7 +1051,7 @@ private fun PickImageCard(message: String?, onPickImage: () -> Unit) {
                 textAlign = TextAlign.Center,
             )
             Text(
-                text = tr("识别微信 / 支付宝交易截图"),
+                text = tr("支持批量导入微信 / 支付宝交易截图，单次最多 10 张"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -689,7 +1072,7 @@ private fun PickImageCard(message: String?, onPickImage: () -> Unit) {
             }
             Spacer(Modifier.height(2.dp))
             Button(
-                onClick = onPickImage,
+                onClick = onPickImages,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -700,14 +1083,14 @@ private fun PickImageCard(message: String?, onPickImage: () -> Unit) {
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(tr("选择图片"))
+                Text(tr("选择截图"))
             }
         }
     }
 }
 
 @Composable
-private fun RecognizingCard() {
+private fun RecognizingCard(progress: BatchProgress, onStopBatch: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
@@ -717,155 +1100,48 @@ private fun RecognizingCard() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(horizontal = 18.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(22.dp),
                 strokeWidth = 2.dp,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
-                    text = tr("正在识别截图"),
+                    text = if (progress.total > 1) {
+                        tr("正在识别第 %d / %d 张截图").format(progress.current, progress.total)
+                    } else {
+                        tr("正在识别截图")
+                    },
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
                     text = tr("识别微信 / 支付宝交易截图"),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun ReviewHeader(state: ScreenshotImportReviewState, message: String?) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = tr("全部 %d 笔都在这里，上下滑动逐笔确认").format(state.rows.size),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
-            text = tr("扫描只在本机保存结构化字段和截图，确认后才会写入账本。"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (message != null) {
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SummaryCard(state: ScreenshotImportReviewState, onClose: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.CheckCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp),
-                )
+            if (progress.total > 1) {
+                TextButton(onClick = onStopBatch) {
+                    Text(tr("停止剩余"))
+                }
             }
-            Text(
-                text = tr("全部处理完了"),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = tr("已记 %d 笔 · 跳过 %d 笔").format(state.savedCount, state.skippedCount),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(2.dp))
-            Button(
-                onClick = onClose,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-            ) { Text(tr("完成")) }
-        }
-    }
-}
-
-/** One compact line for a card that is already saved or skipped. */
-@Composable
-private fun SettledRow(row: ScreenshotImportReviewState.Row) {
-    val saved = row.status == ScreenshotImportReviewState.Status.SAVED
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(
-                imageVector = if (saved) Icons.Filled.Check else Icons.Filled.Close,
-                contentDescription = null,
-                tint = if (saved) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.size(18.dp),
-            )
-            Text(
-                text = amountLabel(row.candidate, directionChoice = null),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = if (saved) tr("已记入账本") else tr("已跳过"),
-                style = MaterialTheme.typography.labelLarge,
-                color = if (saved) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
         }
     }
 }
 
 @Composable
-private fun ImportBottomBar(state: ScreenshotImportReviewState, onPickImage: () -> Unit) {
+private fun ImportResultBottomBar(
+    onPickImages: () -> Unit,
+    onClose: () -> Unit,
+) {
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -877,29 +1153,23 @@ private fun ImportBottomBar(state: ScreenshotImportReviewState, onPickImage: () 
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(
+                OutlinedButton(
+                    onClick = onPickImages,
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text(
-                        text = tr("还有 %d 笔待确认").format(state.pendingCount),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = tr("已记 %d 笔 · 跳过 %d 笔").format(state.savedCount, state.skippedCount),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                OutlinedButton(onClick = onPickImage) {
                     Icon(
                         imageVector = Icons.Filled.Add,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(6.dp))
-                    Text(tr("再选一张"))
+                    Text(tr("继续导入"))
+                }
+                Button(
+                    onClick = onClose,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(tr("完成"))
                 }
             }
         }
@@ -911,6 +1181,7 @@ private fun ImportCandidateCard(
     row: ScreenshotImportReviewState.Row,
     draft: ImportDraft,
     onDraftChange: (ImportDraft) -> Unit,
+    onPreviewImage: (String) -> Unit,
     onConfirm: (String, TransactionCategory, String?) -> Unit,
     onIgnore: () -> Unit,
 ) {
@@ -918,7 +1189,6 @@ private fun ImportCandidateCard(
     val saving = row.status == ScreenshotImportReviewState.Status.SAVING
     val merchant = draft.merchant
     val category = draft.category
-    // 方向未知的候选只能由用户点选支出/收入后才能记入；默认不选中。
     val needsDirection = CaptureReviewDirection.requiresSelection(candidate)
     val directionChoice = draft.directionChoice
     var categoryMenu by remember(candidate.candidateId) { mutableStateOf(false) }
@@ -948,15 +1218,45 @@ private fun ImportCandidateCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 val image = thumbnail
+                val path = candidate.screenshotPath
                 if (image != null) {
-                    Image(
-                        bitmap = image,
-                        contentDescription = tr("扫描截图"),
-                        contentScale = ContentScale.Crop,
+                    Box(
                         modifier = Modifier
                             .size(56.dp)
-                            .clip(RoundedCornerShape(14.dp)),
-                    )
+                            .clip(RoundedCornerShape(14.dp))
+                            .then(
+                                if (!path.isNullOrBlank()) {
+                                    Modifier.clickable { onPreviewImage(path) }
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                    ) {
+                        Image(
+                            bitmap = image,
+                            contentDescription = tr("扫描截图"),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        if (!path.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(3.dp)
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.55f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomIn,
+                                    contentDescription = tr("查看大图"),
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp),
+                                )
+                            }
+                        }
+                    }
                 } else {
                     CategoryIcon(category = category, size = 56.dp)
                 }
@@ -990,7 +1290,6 @@ private fun ImportCandidateCard(
                 }
             }
 
-            // 与待确认弹窗共用同一句提示和同一套文案，避免两个入口解释不一致。
             LikelyDuplicateNotice(candidate)
             CaptureReviewMapping.screenshotUnavailableNotice(candidate)?.let { warning ->
                 Text(
@@ -1101,7 +1400,6 @@ private fun ImportCandidateCard(
     }
 }
 
-/** Amount with the sign the current direction implies; no sign while unknown. */
 private fun amountLabel(candidate: CaptureCandidate, directionChoice: String?): String {
     val cents = candidate.amountCents ?: return tr("金额待补")
     val directionUnknown = candidate.direction == CaptureCandidate.DIRECTION_UNKNOWN

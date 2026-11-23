@@ -528,6 +528,26 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch { repository.delete(entity) }
     }
 
+    fun confirmEventTime(entity: TransactionEntity) {
+        if (!entity.eventTimeNeedsConfirmation) return
+        viewModelScope.launch {
+            repository.update(entity.copy(eventTimeNeedsConfirmation = false))
+        }
+    }
+
+    fun updateEventTime(entity: TransactionEntity, timestampMs: Long) {
+        if (TransactionEditRules.timestampError(timestampMs, System.currentTimeMillis()) != null) return
+        if (entity.timestamp == timestampMs && !entity.eventTimeNeedsConfirmation) return
+        viewModelScope.launch {
+            repository.update(
+                entity.copy(
+                    timestamp = timestampMs,
+                    eventTimeNeedsConfirmation = false,
+                ),
+            )
+        }
+    }
+
     fun keepBoth(entity: TransactionEntity) {
         viewModelScope.launch { repository.keepBoth(entity) }
     }

@@ -22,6 +22,8 @@ enum class HoldRelease {
 object QuickEntryRule {
     /** 按住满 0.75 秒就开始录音（不是松手才录）；不足 0.75 秒松手仍是普通点击。 */
     const val HOLD_TO_RECORD_MS = 750L
+    const val DOUBLE_TAP_WINDOW_MS = 280L
+    const val HOLD_VISUAL_DELAY_MS = 100L
 
     /** 按住 0.5 秒轻震一次：提示「再坚持一下」。 */
     const val HAPTIC_TICK_MS = 500L
@@ -35,6 +37,22 @@ object QuickEntryRule {
     /** 0 → 1 的进度：到 0.75 秒正好扫满一圈，之后保持满格。 */
     fun ringProgress(elapsedMs: Long): Float =
         (elapsedMs.coerceAtLeast(0L).toFloat() / HOLD_TO_RECORD_MS).coerceIn(0f, 1f)
+
+    /** 前 100ms 保持加号，不绘制语音进度弧；750ms 时仍准时扫满。 */
+    fun visualRingProgress(elapsedMs: Long): Float =
+        ((elapsedMs - HOLD_VISUAL_DELAY_MS).coerceAtLeast(0L).toFloat() /
+            (HOLD_TO_RECORD_MS - HOLD_VISUAL_DELAY_MS)).coerceIn(0f, 1f)
+
+    /** 双击的第二次按下必须在首击松手后 280ms 内，并落在相近位置。 */
+    fun isSecondTap(
+        firstReleaseMs: Long,
+        secondDownMs: Long,
+        distancePx: Float,
+        maxDistancePx: Float,
+    ): Boolean = firstReleaseMs >= 0L &&
+        secondDownMs >= firstReleaseMs &&
+        secondDownMs - firstReleaseMs <= DOUBLE_TAP_WINDOW_MS &&
+        distancePx <= maxDistancePx
 
     /** 是否已经按够了 0.75 秒（到达这一帧就开录，不等松手）。 */
     fun isLongEnough(elapsedMs: Long): Boolean = elapsedMs >= HOLD_TO_RECORD_MS

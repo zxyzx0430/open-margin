@@ -255,27 +255,27 @@ class ScreenshotCapturePolicyTest {
         assertEquals(Action.WAIT_FOR_EVIDENCE, assessment.action)
     }
 
-    // ---------- 硬约束：其余 kind 一律不得放宽 ----------
+    // ---------- 退款 / 红包 / 提现不再强制人工确认 ----------
 
     @Test
-    fun `refund red packet and withdrawal stay confirm only even at high confidence`() {
+    fun `completed refund red packet and withdrawal auto book at high confidence`() {
         listOf(KIND_REFUND, KIND_RED_PACKET, KIND_WITHDRAWAL).forEach { kind ->
             val completed = evidence(kind = kind, direction = DIRECTION_INCOME)
-            assertTrue("$kind must stay confirm-only", ScreenshotCapturePolicy.requiresConfirmation(kind))
+            assertFalse("$kind no longer requires unconditional confirmation", ScreenshotCapturePolicy.requiresConfirmation(kind))
             assertEquals(
-                "$kind must keep asking",
-                Action.ASK_USER,
+                "$kind should auto book at high confidence",
+                Action.AUTO_BOOK,
                 ScreenshotCapturePolicy.assess(completed, allowAuto = true).action,
             )
         }
     }
 
     @Test
-    fun `transfer is no longer an unconditional confirm only kind`() {
+    fun `no kind is an unconditional confirm only kind`() {
         assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_TRANSFER))
-        assertTrue(ScreenshotCapturePolicy.requiresConfirmation(KIND_REFUND))
-        assertTrue(ScreenshotCapturePolicy.requiresConfirmation(KIND_RED_PACKET))
-        assertTrue(ScreenshotCapturePolicy.requiresConfirmation(KIND_WITHDRAWAL))
+        assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_REFUND))
+        assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_RED_PACKET))
+        assertFalse(ScreenshotCapturePolicy.requiresConfirmation(KIND_WITHDRAWAL))
     }
 
     // ---------- allowAuto / previewOnly 仍然优先 ----------

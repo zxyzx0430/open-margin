@@ -85,12 +85,12 @@ internal fun OnboardingWelcome(
                     else "开启通知使用权后，识别微信、支付宝付款通知。")
                 WelcomeFeature(Icons.Filled.Add,
                     if (english) "Add a transaction" else "随手记一笔",
-                    if (english) "Tap + to enter a transaction; touch and hold + to speak."
-                    else "点击「＋」手动记账，长按「＋」语音记账。")
+                    if (english) "Tap + to enter a transaction, double-tap + to import screenshots, or touch and hold + to speak."
+                    else "点击「＋」手动记账，双击「＋」导入截图，长按「＋」语音记账。")
                 WelcomeFeature(Icons.Outlined.ReceiptLong,
                     if (english) "Review and edit" else "查看和修改账单",
-                    if (english) "Tap a transaction to view, edit, or delete it."
-                    else "点击一笔账单，可以查看详情、编辑或删除。")
+                    if (english) "Tap a transaction to view details and its original screenshot, or edit time and category."
+                    else "点击一笔账单，可以查看详情、扫描原图，或直接修改时间与分类。")
                 WelcomeFeature(Icons.Outlined.CalendarMonth,
                     if (english) "Understand your spending" else "看清花费",
                     if (english) "Touch and hold a date, then drag to see spending; explore statistics and budgets."

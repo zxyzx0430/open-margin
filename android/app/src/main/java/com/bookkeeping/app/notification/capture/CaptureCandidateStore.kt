@@ -439,6 +439,45 @@ class CaptureCandidateStore internal constructor(
         }
     }
 
+    /** Permanently remove a single ignored candidate and its unreferenced screenshot file. */
+    fun deleteIgnored(candidateId: String): Boolean = synchronized(lock) {
+        if (!dir.exists()) return false
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return false
+        val latest = readLatestCandidatesStrict() ?: return false
+        val target = latest.lastOrNull {
+            it.candidateId == candidateId && it.status == CaptureCandidate.STATUS_IGNORED
+        } ?: return false
+        val remaining = latest.filterNot { it.candidateId == target.candidateId }
+        val nowMs = System.currentTimeMillis()
+        runCatching {
+            check(writeCandidateIndexLocked(remaining))
+            target.screenshotPath?.let { deleteScreenshotIfUnreferenced(it, remaining, nowMs) }
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Permanently remove all ignored candidates and their unreferenced screenshot files. */
+    fun clearIgnored(): Int = synchronized(lock) {
+        if (!dir.exists()) return 0
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return 0
+        val latest = readLatestCandidatesStrict() ?: return 0
+        val removed = latest.filter { it.status == CaptureCandidate.STATUS_IGNORED }
+        if (removed.isEmpty()) return 0
+        val remaining = latest.filterNot { it.status == CaptureCandidate.STATUS_IGNORED }
+        val nowMs = System.currentTimeMillis()
+        runCatching {
+            check(writeCandidateIndexLocked(remaining))
+            removed.forEach { candidate ->
+                candidate.screenshotPath?.let { deleteScreenshotIfUnreferenced(it, remaining, nowMs) }
+            }
+            removed.size
+        }.getOrDefault(0)
+    }
+
     fun clear() {
         synchronized(lock) { dir.deleteRecursively() }
     }
@@ -598,6 +637,12 @@ class CaptureCandidateStore internal constructor(
         }.getOrDefault(false)
     }
 
+    /**
+     * Candidate-history genesis is independent of the screenshot fingerprint index.
+     * A corrupt fingerprint-only index must not prevent saving the FIRST review card.
+     * It is still treated as unavailable by lookupImageFingerprint: this check
+     * never declares the fingerprint history clean or deletes its evidence.
+     */
     private fun hasNoCandidateHistoryArtifactsLocked(): Boolean =
         !indexFile.exists() &&
             !File(dir, INDEX_TMP_NAME).exists() &&
@@ -606,12 +651,7 @@ class CaptureCandidateStore internal constructor(
             !candidateHistoryMetadataJournalFile.exists() &&
             !File(dir, CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME).exists() &&
             !legacyCandidateHistoryFile.exists() &&
-            !legacyCandidateHistoryJournalFile.exists() &&
-            !File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists() &&
-            !imageFingerprintFile.exists() &&
-            !imageFingerprintMetadataFile.exists() &&
-            !File(dir, FINGERPRINT_TMP_NAME).exists() &&
-            !File(dir, FINGERPRINT_METADATA_TMP_NAME).exists()
+            !legacyCandidateHistoryJournalFile.exists()
 
     private fun isNewCandidateHistoryLocked(): Boolean =
         hasNoCandidateHistoryArtifactsLocked() &&

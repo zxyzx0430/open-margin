@@ -224,4 +224,15 @@ interface TransactionDao {
               ORDER BY MAX(timestamp) DESC
               LIMIT :limit""")
     suspend fun recentMerchants(limit: Int): List<String>
+
+    @Query("""SELECT COUNT(*) FROM transactions
+              WHERE syncDeleted = 0 AND evidenceImageName = :imageName""")
+    suspend fun countActiveByEvidenceImageName(imageName: String): Int
+
+    @Query("""SELECT DISTINCT evidenceImageName FROM transactions
+              WHERE syncDeleted = 0 AND evidenceImageName IS NOT NULL AND evidenceImageName <> ''""")
+    suspend fun activeEvidenceImageNames(): List<String>
+
+    @Query("UPDATE transactions SET evidenceImageName = NULL WHERE evidenceImageName IS NOT NULL")
+    suspend fun clearAllEvidenceImageNames()
 }

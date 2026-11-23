@@ -57,6 +57,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -112,6 +113,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Sms
@@ -143,7 +148,7 @@ fun SettingsScreen(
     onReplayOnboarding: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
-    // 账单页横幅的「查看」：滚到「关于与更新」卡片。
+    // 账单页横幅的「查看」：滚到最后的「关于与更新」卡片。
     focusUpdateCard: Boolean = false,
     onUpdateCardFocused: () -> Unit = {},
 ) {
@@ -200,13 +205,12 @@ fun SettingsScreen(
     var exportFeedback by remember { mutableStateOf<String?>(null) }
     var exportInProgress by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
+    var permissionsExpanded by rememberSaveable { mutableStateOf(false) }
     val settingsListState = rememberLazyListState()
 
     LaunchedEffect(focusUpdateCard) {
         if (focusUpdateCard) {
-            // The about card is the third item from the end (section header,
-            // card, then the ROM header/card). Deriving the index from the
-            // current list avoids a hard-coded position drifting.
+            // 关于与更新卡片是列表最后一项，分组重排也不会影响目标位置。
             delay(200)
             var total = settingsListState.layoutInfo.totalItemsCount
             var attempts = 0
@@ -215,7 +219,7 @@ fun SettingsScreen(
                 total = settingsListState.layoutInfo.totalItemsCount
                 attempts++
             }
-            val target = if (total >= 3) total - 3 else 0
+            val target = (total - 1).coerceAtLeast(0)
             runCatching { settingsListState.animateScrollToItem(target) }
             onUpdateCardFocused()
         }
@@ -323,42 +327,83 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item { SectionHeader(tr("权限与运行状态")) }
-            item {
-                PermissionStatusGroup(
-                    postNotificationsGranted = postNotificationsGranted,
-                    notificationEnabled = notificationEnabled,
-                    pageRecognitionEnabled = pageRecognitionEnabled,
-                    smsGranted = smsGranted,
-                    accessibilityHealth = accessibilityHealth,
-                    onOpenSystemNotifications = { openAppNotificationSettings(context) },
-                    onOpenNotificationSettings = {
-                        NotificationListenerHelper.openSettings(context)
-                    },
-                    onOpenPageRecognitionSettings = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
-                    },
-                    onOpenAccessibilityDetails = { detailDialog = "accessibility" },
-                    onOpenSmsSettings = { openAppDetailsSettings(context) },
-                )
+            item(key = "status_overview") {
+                val needsAttention = !notificationEnabled || pendingConflicts > 0
+                val overviewSubtitle = when {
+                    pendingConflicts > 0 -> tr("%d 笔同步冲突待处理").format(pendingConflicts)
+                    !notificationEnabled -> tr("通知使用权未开启，自动采集不可用")
+                    !postNotificationsGranted -> tr("通知采集已授权，系统提醒未开启")
+                    else -> tr("通知采集权限已就绪")
+                }
+                SettingsGroupCard {
+                    SettingsStatusRow(
+                        icon = if (needsAttention) Icons.Filled.Warning else Icons.Filled.Notifications,
+                        title = tr("采集与同步状态"),
+                        subtitle = overviewSubtitle,
+                        statusText = if (needsAttention) tr("待处理") else tr("已就绪"),
+                        tone = if (needsAttention) StatusTone.WARNING else StatusTone.POSITIVE,
+                        onClick = { permissionsExpanded = !permissionsExpanded },
+                    )
+                    if (pendingConflicts > 0) {
+                        SettingsRowDivider()
+                        SettingsStatusRow(
+                            icon = Icons.Filled.Warning,
+                            title = tr("同步冲突"),
+                            subtitle = tr("逐笔核对后继续同步"),
+                            statusText = tr("%d 笔").format(pendingConflicts),
+                            tone = StatusTone.WARNING,
+                            onClick = onOpenPendingConflicts,
+                        )
+                    }
+                    if (permissionsExpanded) {
+                        SettingsRowDivider()
+                        PermissionStatusGroup(
+                            postNotificationsGranted = postNotificationsGranted,
+                            notificationEnabled = notificationEnabled,
+                            pageRecognitionEnabled = pageRecognitionEnabled,
+                            smsGranted = smsGranted,
+                            accessibilityHealth = accessibilityHealth,
+                            onOpenSystemNotifications = { openAppNotificationSettings(context) },
+                            onOpenNotificationSettings = {
+                                NotificationListenerHelper.openSettings(context)
+                            },
+                            onOpenPageRecognitionSettings = {
+                                runCatching {
+                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                }
+                            },
+                            onOpenAccessibilityDetails = { detailDialog = "accessibility" },
+                            onOpenSmsSettings = { openAppDetailsSettings(context) },
+                        )
+                    }
+                }
             }
-            item { SectionHeader(tr("截图记账")) }
-            item { ScreenshotCaptureCard() }
 
+            item { SectionHeader(tr("记账与采集")) }
+            item { ScreenshotCaptureCard() }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
                         icon = Icons.Filled.Notifications,
-                        title = tr("自动记账设置"),
-                        subtitle = tr("通知、页面识别与无障碍回退的开启向导"),
+                        title = tr("自动记账向导"),
+                        subtitle = tr("通知权限与页面识别的 4 步开启向导"),
                         onClick = { detailDialog = "automation" },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Store,
+                        title = tr("商户分类记忆"),
+                        subtitle = if (merchantRules.isEmpty()) {
+                            tr("修改分类即记住")
+                        } else {
+                            merchantRules.size.toString() + " " + tr("个商户")
+                        },
+                        onClick = onOpenMerchantRules,
                     )
                 }
             }
 
-            item { SectionHeader(tr("同步")) }
+            item { SectionHeader(tr("数据与同步")) }
             item {
                 SyncOverviewGroup(
                     enabled = syncEnabled,
@@ -371,8 +416,6 @@ fun SettingsScreen(
                     onOpenPendingConflicts = onOpenPendingConflicts,
                 )
             }
-
-            item { SectionHeader(tr("账单导入")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -386,7 +429,7 @@ fun SettingsScreen(
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
-                        icon = Icons.Filled.Info,
+                        icon = Icons.Filled.HelpOutline,
                         title = tr("微信 / 支付宝导出账单教程"),
                         subtitle = tr("两分钟导出 CSV"),
                         onClick = { showExportGuide = true },
@@ -394,35 +437,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("自动分类")) }
-            item {
-                SettingsGroupCard {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Sync,
-                        title = tr("商户分类记忆"),
-                        subtitle = if (merchantRules.isEmpty()) {
-                            tr("修改分类即记住")
-                        } else {
-                            merchantRules.size.toString() + " " + tr("个商户")
-                        },
-                        onClick = onOpenMerchantRules,
-                    )
-                }
-            }
-
-            item { SectionHeader(tr("诊断日志")) }
-            item {
-                SettingsGroupCard {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Info,
-                        title = tr("账单诊断日志"),
-                        subtitle = tr("本机保存 7 天"),
-                        onClick = onOpenTransactionDiagnostics,
-                    )
-                }
-            }
-
-            item { SectionHeader(tr("提醒与语言")) }
+            item { SectionHeader(tr("偏好设置")) }
             item {
                 SettingsGroupCard {
                     SettingsSwitchRow(
@@ -442,7 +457,7 @@ fun SettingsScreen(
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
-                        icon = Icons.Filled.Sync,
+                        icon = Icons.Filled.Cloud,
                         title = tr("常驻状态详情"),
                         subtitle = tr("连接状态与通知排查"),
                         onClick = { detailDialog = "keepAlive" },
@@ -451,33 +466,36 @@ fun SettingsScreen(
             }
             item { LanguageCard() }
 
+            item { SectionHeader(tr("诊断与关于")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
-                        icon = Icons.Filled.Info,
-                        title = tr("重看引导"),
-                        subtitle = tr("再次查看清衡的主要功能"),
-                        onClick = onReplayOnboarding,
+                        icon = Icons.Filled.BugReport,
+                        title = tr("账单诊断日志"),
+                        subtitle = tr("本机保存 7 天"),
+                        onClick = onOpenTransactionDiagnostics,
                     )
-                }
-            }
-
-            item { SectionHeader(tr("关于与更新")) }
-            item { AboutUpdateCard(
-                onOpenAbout = { detailDialog = "about" },
-                onOpenFeedback = { detailDialog = "feedback" },
-            ) }
-
-            item { SectionHeader(tr("国产 ROM 后台白名单")) }
-            item {
-                SettingsGroupCard {
+                    SettingsRowDivider()
                     SettingsActionRow(
                         icon = Icons.Filled.Warning,
                         title = tr("后台运行设置"),
                         subtitle = tr("自启动与省电策略"),
                         onClick = { detailDialog = "rom" },
                     )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.HelpOutline,
+                        title = tr("重看引导"),
+                        subtitle = tr("再次查看清衡的主要功能"),
+                        onClick = onReplayOnboarding,
+                    )
                 }
+            }
+            item(key = "about_update") {
+                AboutUpdateCard(
+                    onOpenAbout = { detailDialog = "about" },
+                    onOpenFeedback = { detailDialog = "feedback" },
+                )
             }
 
         }
@@ -565,26 +583,73 @@ fun SettingsScreen(
     }
 
     if (showExportGuide) {
-        AlertDialog(
-            onDismissRequest = { showExportGuide = false },
-            title = { Text(tr("导出微信 / 支付宝账单")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("微信"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「…」→「下载账单」→「用于个人对账」→ 选时间范围 → 接收方式选「微信」，文件直接发到微信支付服务号，无需邮箱、无需解压；也可以选邮箱。"))
-                    Text(tr("支付宝"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」→ 选时间范围与交易类型 → 接收方式选「支付宝」，文件直接发到支付宝消息；也可以选邮箱。"))
+        SettingsDetailDialog(
+            title = tr("导出微信 / 支付宝账单"),
+            onDismiss = { showExportGuide = false },
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
-                        tr("导入时选择下载到的账单文件（CSV / XLSX）即可。"),
+                        text = tr("微信"),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = tr("我 → 服务 → 钱包 → 账单 → 右上角「…」→「下载账单」→「用于个人对账」→ 选时间范围 → 接收方式选「微信」，文件直接发到微信支付服务号，无需邮箱、无需解压；也可以选邮箱。"),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showExportGuide = false }) { Text(tr("知道了")) }
-            },
-        )
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = tr("支付宝"),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」→ 选时间范围与交易类型 → 接收方式选「支付宝」，文件直接发到支付宝消息；也可以选邮箱。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Text(
+                text = tr("导入时选择下载到的账单文件（CSV / XLSX）即可。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = { showExportGuide = false },
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+            ) {
+                Text(
+                    text = tr("知道了"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
     }
 }
 
@@ -700,7 +765,7 @@ private fun PermissionStatusGroup(
     }
     // 副标题只写功能，不再追加「上次断开（原因）」：那是诊断信息，详情在无障碍诊断页。
     val accessibilitySubtitle = tr("转账与红包入账")
-    SettingsGroupCard {
+    Column {
         SettingsStatusRow(
             icon = Icons.Filled.Notifications,
             title = tr("系统通知"),
@@ -722,20 +787,22 @@ private fun PermissionStatusGroup(
         SettingsStatusRow(
             icon = Icons.Filled.Visibility,
             title = tr("页面识别"),
-            subtitle = tr("识别支付页面"),
+            subtitle = tr("识别付款、转账、红包、账单"),
             statusText = if (pageRecognitionEnabled) tr("已开启") else tr("未开启"),
             tone = if (pageRecognitionEnabled) StatusTone.POSITIVE else StatusTone.ERROR,
             onClick = onOpenPageRecognitionSettings,
         )
-        SettingsRowDivider()
-        SettingsStatusRow(
-            icon = Icons.Filled.AccessibilityNew,
-            title = tr("无障碍兜底"),
-            subtitle = accessibilitySubtitle,
-            statusText = accessibilityStatus,
-            tone = accessibilityTone,
-            onClick = onOpenAccessibilityDetails,
-        )
+        if (accessibilityHealth.state != AccessibilityConnectionState.PERMISSION_OFF) {
+            SettingsRowDivider()
+            SettingsStatusRow(
+                icon = Icons.Filled.AccessibilityNew,
+                title = tr("无障碍兜底"),
+                subtitle = accessibilitySubtitle,
+                statusText = accessibilityStatus,
+                tone = accessibilityTone,
+                onClick = onOpenAccessibilityDetails,
+            )
+        }
         SettingsRowDivider()
         SettingsStatusRow(
             icon = Icons.Filled.Sms,
@@ -972,66 +1039,93 @@ private fun AutomationStepCard(
     secondaryLabel: String? = null,
     onSecondary: (() -> Unit)? = null,
 ) {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = stepLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Text(
+                    text = stepLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
             LinearProgressIndicator(
                 progress = { (stepIndex / AUTOMATION_WIZARD_STEPS.toFloat()).coerceIn(0f, 1f) },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
+                    .weight(1f)
+                    .height(6.dp),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 drawStopIndicator = {},
             )
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (status != null) {
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (statusIsError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Button(
+            onClick = onPrimary,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+        ) {
             Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
+                text = primaryLabel,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (status != null) {
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (statusIsError) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Button(
-                onClick = onPrimary,
+        }
+        val secondaryAction = onSecondary
+        if (secondaryLabel != null && secondaryAction != null) {
+            TextButton(
+                onClick = secondaryAction,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(primaryLabel)
-            }
-            val secondaryAction = onSecondary
-            if (secondaryLabel != null && secondaryAction != null) {
-                TextButton(onClick = secondaryAction) {
-                    Text(secondaryLabel)
-                }
+                Text(secondaryLabel)
             }
         }
     }
 }
 
 @Composable
-private fun SettingsDetailDialog(
+internal fun SettingsDetailDialog(
     title: String,
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
@@ -1050,9 +1144,9 @@ private fun SettingsDetailDialog(
         ) {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 560.dp)
+                    .heightIn(max = 620.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1070,7 +1164,6 @@ private fun SettingsDetailDialog(
                         )
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 content()
             }
         }
@@ -1314,70 +1407,85 @@ private fun formatHealthTime(timestampMs: Long): String =
 
 @Composable
 private fun RomGuideCard() {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = tr("为什么需要？"),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = tr("小米、华为、OPPO、vivo 等国产 ROM 默认会激进省电，把不常用的 app 进程彻底杀掉，") +
-                       tr("导致支付通知到达时本应用没法被系统拉起，漏抓账单。") +
-                       tr("需要手动把本应用加进各家的「允许后台运行」/「自启动」白名单。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-            )
-
-            RomEntry(
-                brand = tr("小米 / Redmi"),
-                path = tr("设置 → 应用设置 → 应用管理 → 找到本应用 → 「自启动」打开 +「省电策略」选「无限制」"),
-            )
-            RomEntry(
-                brand = tr("华为 / 荣耀"),
-                path = tr("设置 → 应用 → 应用启动管理 → 找到本应用 → 关闭「自动管理」→ 手动管理三项全开"),
-            )
-            RomEntry(
-                brand = tr("OPPO / 一加 / realme"),
-                path = tr("设置 → 电池 → 应用耗电管理 → 找到本应用 → 允许后台运行 + 允许关联启动"),
-            )
-            RomEntry(
-                brand = "vivo / iQOO",
-                path = tr("设置 → 电池 → 后台应用管理 → 找到本应用 → 允许后台运行"),
-            )
-            RomEntry(
-                brand = tr("三星"),
-                path = tr("设置 → 设备维护 → 电池 → 未受监视应用 → 添加本应用"),
-            )
-            RomEntry(
-                brand = tr("原生 Android (Pixel)"),
-                path = tr("一般不用动。如有问题：设置 → 电池 → 电池优化 → 本应用 → 不优化"),
-            )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = tr("为什么需要？"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = tr("小米、华为、OPPO、vivo 等国产 ROM 默认会激进省电，把不常用的 app 进程彻底杀掉，") +
+                           tr("导致支付通知到达时本应用没法被系统拉起，漏抓账单。") +
+                           tr("需要手动把本应用加进各家的「允许后台运行」/「自启动」白名单。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+
+        RomEntry(
+            brand = tr("小米 / Redmi"),
+            path = tr("设置 → 应用设置 → 应用管理 → 找到本应用 → 「自启动」打开 +「省电策略」选「无限制」"),
+        )
+        RomEntry(
+            brand = tr("华为 / 荣耀"),
+            path = tr("设置 → 应用 → 应用启动管理 → 找到本应用 → 关闭「自动管理」→ 手动管理三项全开"),
+        )
+        RomEntry(
+            brand = tr("OPPO / 一加 / realme"),
+            path = tr("设置 → 电池 → 应用耗电管理 → 找到本应用 → 允许后台运行 + 允许关联启动"),
+        )
+        RomEntry(
+            brand = "vivo / iQOO",
+            path = tr("设置 → 电池 → 后台应用管理 → 找到本应用 → 允许后台运行"),
+        )
+        RomEntry(
+            brand = tr("三星"),
+            path = tr("设置 → 设备维护 → 电池 → 未受监视应用 → 添加本应用"),
+        )
+        RomEntry(
+            brand = tr("原生 Android (Pixel)"),
+            path = tr("一般不用动。如有问题：设置 → 电池 → 电池优化 → 本应用 → 不优化"),
+        )
     }
 }
 
 @Composable
 private fun RomEntry(brand: String, path: String) {
-    Column(modifier = Modifier.padding(vertical = 6.dp)) {
-        Text(
-            text = brand,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = path,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = brand,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = path,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
     }
 }
 
@@ -1613,19 +1721,6 @@ private fun AboutUpdateCard(
                             siteUpdate = SiteUpdateCoordinator.cachedManifest(context)
                         }
                     }
-                },
-            )
-        }
-        if (testBuild) {
-            SettingsRowDivider()
-            SettingsSwitchRow(
-                icon = Icons.Filled.Visibility,
-                title = tr("预览更新提醒"),
-                subtitle = tr("仅测试包：显示样例横幅，不下载"),
-                checked = previewBanner,
-                onCheckedChange = { enabled ->
-                    previewBanner = enabled
-                    sitePrefs.setPreviewBannerEnabled(enabled)
                 },
             )
         }

@@ -612,4 +612,50 @@ class BillImportMappingTest {
             ),
         )
     }
+
+    @Test
+    fun openMarginExportRoundTripsCategoryAccountSourceNoteAndDedupesCleanly() {
+        val csv = """
+            时间,类型,金额（元）,分类,商户,账户,来源,备注
+            2026-11-23 16:43:36,支出,7.00,餐饮,采蝶轩,微信,微信,[扫描] 微信
+            2026-11-22 10:30:00,支出,74.81,其他,"Langbase, Inc.",花呗,支付宝,[自动支付] 支付宝
+            2026-11-22 08:28:54,支出,4.00,其他,,微信,微信,[自动抓取] 微信支付 已支付¥4.00
+            2026-10-11 18:03:34,收入,500.00,转账,,,手动,
+        """.trimIndent() + "\n"
+
+        val preview = BillImportParser.parse(csv.toByteArray(Charsets.UTF_8), "清衡账单-20261123.csv")
+        val entities = preview.validRows.mapNotNull(BillImportMapping::toTransactionEntity)
+        assertEquals(4, entities.size)
+
+        assertEquals(TransactionType.EXPENSE.name, entities[0].type)
+        assertEquals(TransactionCategory.FOOD.name, entities[0].category)
+        assertEquals("采蝶轩", entities[0].merchant)
+        assertEquals("微信", entities[0].account)
+        assertEquals(TransactionSource.WECHAT.name, entities[0].source)
+        assertEquals("[扫描] 微信", entities[0].note)
+
+        assertEquals("Langbase, Inc.", entities[1].merchant)
+        assertEquals("花呗", entities[1].account)
+        assertEquals(TransactionSource.ALIPAY.name, entities[1].source)
+
+        assertEquals("", entities[2].merchant)
+        assertEquals("[自动抓取] 微信支付 已支付¥4.00", entities[2].note)
+
+        assertEquals(TransactionType.INCOME.name, entities[3].type)
+        assertEquals(TransactionCategory.TRANSFER.name, entities[3].category)
+        assertEquals(TransactionSource.MANUAL.name, entities[3].source)
+        assertEquals(null, entities[3].account)
+        assertEquals("", entities[3].note)
+
+        // Re-importing the same CSV into a ledger containing those entities
+        // marks all rows as duplicates without falsely flagging them as enrichable.
+        val marked = BillImportMapping.markExistingRows(
+            preview = preview,
+            transactions = entities,
+            duplicateMessage = "账本已有相同记录",
+        )
+        assertEquals(0, marked.validRows.size)
+        assertEquals(4, marked.duplicateRows.size)
+        assertEquals(0, marked.enrichableRows.size)
+    }
 }

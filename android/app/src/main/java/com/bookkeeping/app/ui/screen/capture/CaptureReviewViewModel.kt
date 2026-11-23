@@ -148,10 +148,13 @@ class CaptureReviewViewModel @Inject constructor(
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
+                    val evidenceImageName = com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore(context)
+                        .archiveFromPath(resolved.screenshotPath)
                     val entity = CaptureReviewMapping.toTransactionEntity(
                         candidate = resolved,
                         merchant = merchant,
                         category = category,
+                        evidenceImageName = evidenceImageName,
                     )
                     repository.insertIfNotDuplicate(
                         entity,
@@ -306,11 +309,48 @@ class CaptureReviewViewModel @Inject constructor(
 
     /** Open/close the "已忽略的截图" recovery list. */
     fun showIgnored(show: Boolean) {
-        _state.update { it.copy(showingIgnored = show) }
+        _state.update { it.copy(showingIgnored = show, message = null) }
         if (!show) return
         viewModelScope.launch {
             val ignored = withContext(Dispatchers.IO) { store.ignored() }
             _state.update { it.copy(ignored = ignored) }
+        }
+    }
+
+    /** Permanently delete one ignored candidate. */
+    fun deleteIgnored(candidate: CaptureCandidate) {
+        if (_state.value.restoring) return
+        val candidateId = candidate.candidateId
+        _state.update { it.copy(restoring = true, message = null) }
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) { store.deleteIgnored(candidateId) }
+            val ignored = withContext(Dispatchers.IO) { store.ignored() }
+            _state.update {
+                it.copy(
+                    ignored = ignored,
+                    restoring = false,
+                    undo = it.undo?.takeIf { offer -> offer.candidate.candidateId != candidateId },
+                    message = if (deleted) AppLanguage.tr(context, "已删除") else null,
+                )
+            }
+        }
+    }
+
+    /** Permanently delete all ignored candidates. */
+    fun clearAllIgnored() {
+        if (_state.value.restoring) return
+        _state.update { it.copy(restoring = true, message = null) }
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) { store.clearIgnored() }
+            val ignored = withContext(Dispatchers.IO) { store.ignored() }
+            _state.update {
+                it.copy(
+                    ignored = ignored,
+                    restoring = false,
+                    undo = null,
+                    message = if (count > 0) AppLanguage.tr(context, "已删除") else null,
+                )
+            }
         }
     }
 

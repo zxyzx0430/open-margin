@@ -37,7 +37,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
@@ -46,19 +48,19 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.i18n.tr
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 账单页右下角的「+」：点一下手动新建账单，**按住满 0.75 秒立刻开始录音**。
  *
- * 时序（时间常量都在 [QuickEntryRule]，改那里就是改这里）：
- * - 按下：图标立刻从「+」换成麦克风，进度弧从 0 开始，在 1000ms 内正好扫满一圈；
- * - 500ms：轻震一次（TextHandleMove），提示「再坚持一下」；
- * - 1000ms：重震一次（LongPress）+ 进度弧满格 + **立即回调 [onLongPressStart]**（开录音、开面板），
- *   不等松手——这就是「按住即录」；
- * - 松手（已开录）：什么也不发生，录音继续；
- * - 松手（没到 0.75 秒）：取消计时、进度弧回弹，按普通点击回调 [onTap]；
- * - 开录后手指仍按住时滑出两倍触摸阈值：回调 [onAbort]（取消录音并关面板），不当作点击；
- * - 没开录就滑出 / 系统取消：只收弧，什么都不回调。
+ * 时序（常量由 [QuickEntryRule] 统一管理）：
+ * - 单击：280ms 双击窗口结束后，打开手动记账；
+ * - 双击：直接进入截图批量导入；
+ * - 按住 100ms 后才切换麦克风及绘制进度弧，750ms 时立即开录音；
+ * - 500ms 轻震，750ms 重震；滑出取消逻辑保持不变。
  *
  * 为什么手势装在 `pointerInput(Unit)` 上而不是 `pointerInput(enabled)`：满 0.75 秒时面板会打开，
  * 上层同时把 `enabled` 置 false（禁止再开第二个会话）。如果手势跟着 key 重建，正在按着的
@@ -70,6 +72,7 @@ import com.bookkeeping.app.i18n.tr
 @Composable
 fun VoiceFab(
     onTap: () -> Unit,
+    onDoubleTap: () -> Unit,
     onLongPressStart: () -> Unit,
     onAbort: () -> Unit,
     modifier: Modifier = Modifier,
@@ -81,16 +84,19 @@ fun VoiceFab(
 ) {
     val haptics = rememberUpdatedState(LocalHapticFeedback.current)
     val tapAction = rememberUpdatedState(onTap)
+    val doubleTapAction = rememberUpdatedState(onDoubleTap)
     val startAction = rememberUpdatedState(onLongPressStart)
     val abortAction = rememberUpdatedState(onAbort)
     val enabledState = rememberUpdatedState(enabled)
     val primary = MaterialTheme.colorScheme.primary
     val onPrimary = MaterialTheme.colorScheme.onPrimary
-    val description = tr("新建账单，长按说话记账")
+    val description = tr("点一下记一笔，双击导截图，长按说话记账")
+    val doubleTapLabel = tr("截图批量导入")
     val tapLabel = tr("新建账单")
     val voiceLabel = tr("语音记账")
 
     var pressing by remember { mutableStateOf(false) }
+    var holdVisualStarted by remember { mutableStateOf(false) }
     // 满 0.75 秒已经开录：抬手只结束按压，不结束录音。
     var armed by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -103,6 +109,7 @@ fun VoiceFab(
     // 满 0.75 秒这一帧就回调 onLongPressStart（开始录音 + 开面板），然后退出循环把进度留在满格。
     LaunchedEffect(pressing) {
         if (!pressing) {
+            holdVisualStarted = false
             val from = progress
             if (from > 0f) {
                 val startFrame = withFrameNanos { it }
@@ -125,7 +132,8 @@ fun VoiceFab(
             // 松手后立即退出，避免松手与满 0.75 秒撞在同一帧时还多推一帧进度。
             if (!pressing) return@LaunchedEffect
             val elapsed = SystemClock.uptimeMillis() - startMs
-            progress = QuickEntryRule.ringProgress(elapsed)
+            holdVisualStarted = elapsed >= QuickEntryRule.HOLD_VISUAL_DELAY_MS
+            progress = QuickEntryRule.visualRingProgress(elapsed)
             if (!ticked && QuickEntryRule.shouldTick(elapsed)) {
                 ticked = true
                 haptics.value.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -185,13 +193,32 @@ fun VoiceFab(
                 // key 固定为 Unit：面板打开会把 enabled 置 false，但已经开始的按压手势不能重建，
                 // 否则仍按住时的滑出取消会收不到。
                 .pointerInput(Unit) {
+                    coroutineScope {
+                    // 同一个指针协程内等待第二次点击；离开页面时延迟任务自动取消。
+                    var pendingTapJob: Job? = null
+                    var lastTapReleaseMs = -1L
+                    var lastTapPosition: Offset? = null
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        // 只在按下这一刻检查：面板开着时既不录音，也不抢底下的点击。
                         if (!enabledState.value) return@awaitEachGesture
                         down.consume()
+                        val previousPosition = lastTapPosition
+                        val secondTap = pendingTapJob?.isActive == true &&
+                            previousPosition != null &&
+                            QuickEntryRule.isSecondTap(
+                                firstReleaseMs = lastTapReleaseMs,
+                                secondDownMs = down.uptimeMillis,
+                                distancePx = (down.position - previousPosition).getDistance(),
+                                maxDistancePx = viewConfiguration.touchSlop * 2f,
+                            )
+                        if (secondTap) {
+                            pendingTapJob?.cancel()
+                            pendingTapJob = null
+                        }
+
                         val downPosition = down.position
                         armed = false
+                        holdVisualStarted = false
                         pressing = true
                         var cancelled = false
                         try {
@@ -204,22 +231,35 @@ fun VoiceFab(
                                 }
                                 val drift = (change.position - downPosition).getDistance()
                                 if (drift > viewConfiguration.touchSlop * 2f) {
-                                    // 手指已经滑出 FAB：整段放弃，不能把划走当成录音。
                                     cancelled = true
                                     change.consume()
                                     break
                                 }
                             }
                         } finally {
-                            // 抬手、滑出、被系统取消都要停表：不能留下一条还在走的进度弧。
                             pressing = false
                         }
                         when (QuickEntryRule.releaseAction(armed = armed, cancelled = cancelled)) {
-                            HoldRelease.TAP -> tapAction.value()
+                            HoldRelease.TAP -> {
+                                if (secondTap) {
+                                    doubleTapAction.value()
+                                    lastTapReleaseMs = -1L
+                                    lastTapPosition = null
+                                } else {
+                                    lastTapReleaseMs = SystemClock.uptimeMillis()
+                                    lastTapPosition = downPosition
+                                    pendingTapJob?.cancel()
+                                    pendingTapJob = launch {
+                                        delay(QuickEntryRule.DOUBLE_TAP_WINDOW_MS)
+                                        tapAction.value()
+                                    }
+                                }
+                            }
                             HoldRelease.ABORT_RECORDING -> abortAction.value()
                             HoldRelease.NOTHING -> Unit
                         }
                         armed = false
+                    }
                     }
                 }
                 // TalkBack：读屏用户长按走 onLongClick 动作，不依赖计时手势；
@@ -236,13 +276,19 @@ fun VoiceFab(
                             startAction.value()
                             true
                         }
+                        customActions = listOf(
+                            CustomAccessibilityAction(doubleTapLabel) {
+                                doubleTapAction.value()
+                                true
+                            },
+                        )
                     }
                 },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 // 按住时图标换成麦克风：一眼就能看出「现在是说话，不是新建」。
-                imageVector = if (pressing || armed) Icons.Filled.Mic else Icons.Filled.Add,
+                imageVector = if ((pressing && holdVisualStarted) || armed) Icons.Filled.Mic else Icons.Filled.Add,
                 contentDescription = null,
                 tint = onPrimary,
                 modifier = Modifier.size(24.dp),

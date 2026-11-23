@@ -257,6 +257,7 @@ object CaptureMergePolicy {
                 .maxOrNull(),
             captureKind = keep.captureKind ?: incoming.captureKind,
             captureObservedAtMs = keep.captureObservedAtMs ?: incoming.captureObservedAtMs,
+            evidenceImageName = keep.evidenceImageName ?: incoming.evidenceImageName,
             // 合并后这条不再是「待确认」：清掉本地标记，状态回到未核实。
             duplicateOfId = null,
             remoteReviewStatus = if (keep.remoteReviewStatus == STATUS_POSSIBLE_DUPLICATE) {

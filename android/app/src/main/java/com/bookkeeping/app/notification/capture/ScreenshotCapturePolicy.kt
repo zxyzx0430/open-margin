@@ -6,25 +6,13 @@ object ScreenshotCapturePolicy {
     enum class Action { AUTO_BOOK, ASK_USER, WAIT_FOR_EVIDENCE, LINK_EXISTING, IGNORE }
 
     /**
-     * Kinds that move money in a way a payment page cannot prove.
-     *
-     * A refund is not ordinary income, a red packet is not a merchant payment
-     * and a withdrawal moves money between the user's own accounts. These are
-     * never auto booked, however high the confidence; the user confirms them
-     * one at a time.
-     *
-     * Transfers are deliberately **not** in this set any more. A completed
-     * transfer that names its own direction (已被接收 / 已收款) and comes from a
-     * known platform is a settled payment, so [transferAutoBookAllowed] lets it
-     * through. Anything weaker — 待接收, unknown completion, a completion
-     * inferred only from a bill-list row, unproven direction — still goes to
-     * [Action.ASK_USER] through that same function.
+     * Kinds that are unconditionally held for manual confirmation regardless of
+     * confidence. Currently empty: completed refunds, red packets, and
+     * withdrawals with an explicit direction and known platform now follow the
+     * normal high-confidence auto-book gate; incomplete or ambiguous ones still
+     * wait for evidence or ask the user.
      */
-    val CONFIRM_ONLY_KINDS = setOf(
-        CaptureCandidate.KIND_REFUND,
-        CaptureCandidate.KIND_RED_PACKET,
-        CaptureCandidate.KIND_WITHDRAWAL,
-    )
+    val CONFIRM_ONLY_KINDS: Set<String> = emptySet()
 
     data class Evidence(
         val supportedPaymentPage: Boolean,

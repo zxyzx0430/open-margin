@@ -83,6 +83,10 @@ data class TransactionEntity(
     val captureKind: String? = null,
     val captureObservedAtMs: Long? = null,
 
+    // Local-only archived screenshot evidence filename inside filesDir/receipt_evidence/.
+    // Never uploaded or overwritten by sync.
+    val evidenceImageName: String? = null,
+
     // Bill-level provenance marker; follows ledger sync, never screenshot evidence.
     @ColumnInfo(defaultValue = "0")
     val eventTimeNeedsConfirmation: Boolean = false,

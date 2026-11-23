@@ -57,6 +57,18 @@ object BillImportParser {
             "商品说明", "商品", "商品名称",
             "description", "product",
         ),
+        "account" to setOf(
+            "账户",
+            "account",
+        ),
+        "source" to setOf(
+            "来源",
+            "source",
+        ),
+        "note" to setOf(
+            "备注",
+            "note",
+        ),
     )
 
     fun parse(
@@ -123,8 +135,10 @@ object BillImportParser {
                 message = "未找到账单表头（需要交易时间、金额、商户/收支列）",
             )
 
-        val source = detectSource(fileName, rows[header.rowIndex])
+        val headerRow = rows[header.rowIndex]
+        val source = detectSource(fileName, headerRow)
         val columns = header.columns
+        val openMarginExport = isOpenMarginExport(headerRow, columns)
         val previewRows = mutableListOf<BillPreviewRow>()
         val seen = mutableMapOf<String, Int>()
         var dataRows = 0
@@ -153,6 +167,9 @@ object BillImportParser {
             val payment = value(raw, columns.payment).takeIf { it.isNotBlank() }
             val sourceCategory = value(raw, columns.category).takeIf { it.isNotBlank() }
             val description = value(raw, columns.description).takeIf { it.isNotBlank() }
+            val account = value(raw, columns.account).takeIf { it.isNotBlank() }
+            val ledgerSource = value(raw, columns.source).takeIf { it.isNotBlank() }
+            val note = value(raw, columns.note).takeIf { it.isNotBlank() }
 
             val occurredAt = parseTime(timeRaw, options.timeZoneId)
             val amount = parseAmount(amountRaw)
@@ -163,14 +180,23 @@ object BillImportParser {
 
             val merchant = merchantRaw.trim()
             val direction = parseDirection(directionRaw, amount?.negative == true)
-            val status = parseStatus(statusRaw)
+            val status = if (openMarginExport && columns.status < 0) {
+                BillStatus.SUCCESS
+            } else {
+                parseStatus(statusRaw)
+            }
+            val rowSource = if (openMarginExport) {
+                detectRowSource(ledgerSource, source)
+            } else {
+                source
+            }
 
             val parsed = if (occurredAt != null && amount != null) {
                 BillImportRow(
-                    source = source,
+                    source = rowSource,
                     rowNumber = rowNumber,
                     occurredAtMs = occurredAt,
-                    merchant = merchant.ifBlank { "未知商户" },
+                    merchant = if (openMarginExport) merchant else merchant.ifBlank { "未知商户" },
                     amountCents = amount.cents,
                     direction = direction,
                     status = status,
@@ -179,6 +205,10 @@ object BillImportParser {
                     sourceCategory = sourceCategory,
                     description = description,
                     rawFields = raw,
+                    isOpenMarginExport = openMarginExport,
+                    ledgerSource = ledgerSource,
+                    account = account,
+                    note = note,
                 )
             } else {
                 null
@@ -189,7 +219,7 @@ object BillImportParser {
                 occurredAt == null -> "无法解析交易时间：$timeRaw"
                 amountRaw.isBlank() -> "金额为空"
                 amount == null -> "无法解析金额：$amountRaw"
-                merchant.isBlank() -> "商户为空，需人工确认"
+                merchant.isBlank() && !openMarginExport -> "商户为空，需人工确认"
                 else -> null
             }
             if (parseError != null) {
@@ -277,6 +307,9 @@ object BillImportParser {
         val payment: Int,
         val category: Int,
         val description: Int,
+        val account: Int,
+        val source: Int,
+        val note: Int,
     )
 
     private data class HeaderMatch(val rowIndex: Int, val columns: ColumnMap, val score: Int)
@@ -286,16 +319,20 @@ object BillImportParser {
         for (index in rows.indices) {
             val row = rows[index]
             if (row.isEmpty()) continue
+            val rawDirection = findColumn(row, HEADER_ALIASES.getValue("direction"))
             val columns = ColumnMap(
                 time = findColumn(row, HEADER_ALIASES.getValue("time")),
                 merchant = findColumn(row, HEADER_ALIASES.getValue("merchant")),
                 amount = findColumn(row, HEADER_ALIASES.getValue("amount")),
-                direction = findColumn(row, HEADER_ALIASES.getValue("direction")),
+                direction = if (rawDirection >= 0) rawDirection else findColumn(row, setOf("类型", "type")),
                 status = findColumn(row, HEADER_ALIASES.getValue("status")),
                 orderId = findColumn(row, HEADER_ALIASES.getValue("orderId")),
                 payment = findColumn(row, HEADER_ALIASES.getValue("payment")),
                 category = findColumn(row, HEADER_ALIASES.getValue("category")),
                 description = findColumn(row, HEADER_ALIASES.getValue("description")),
+                account = findColumn(row, HEADER_ALIASES.getValue("account")),
+                source = findColumn(row, HEADER_ALIASES.getValue("source")),
+                note = findColumn(row, HEADER_ALIASES.getValue("note")),
             )
             if (columns.time < 0 || columns.amount < 0) continue
             val score = listOf(columns.time, columns.merchant, columns.amount, columns.direction, columns.status)
@@ -306,6 +343,29 @@ object BillImportParser {
             }
         }
         return best
+    }
+
+    private fun isOpenMarginExport(headerRow: List<String>, columns: ColumnMap): Boolean {
+        if (columns.status >= 0) return false
+        val headers = headerRow.map(::normalizeHeader).toSet()
+        val hasTime = "时间" in headers || "time" in headers
+        val hasType = "类型" in headers || "type" in headers
+        val hasAmount = "金额" in headers || "amount" in headers
+        val hasMerchant = "商户" in headers || "merchant" in headers
+        val hasOpenMarginCols = ("来源" in headers && "备注" in headers) ||
+            ("账户" in headers && "来源" in headers) ||
+            ("source" in headers && "note" in headers)
+        return hasTime && hasType && hasAmount && hasMerchant && hasOpenMarginCols
+    }
+
+    private fun detectRowSource(ledgerSource: String?, fallback: BillSource): BillSource {
+        val text = ledgerSource?.trim().orEmpty()
+        if (text.isEmpty()) return fallback
+        return when (text.uppercase(Locale.ROOT)) {
+            "微信", "WECHAT" -> BillSource.WECHAT
+            "支付宝", "ALIPAY" -> BillSource.ALIPAY
+            else -> BillSource.UNKNOWN
+        }
     }
 
     private fun findColumn(row: List<String>, aliases: Set<String>): Int {

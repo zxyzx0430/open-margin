@@ -127,6 +127,7 @@ class ScreenshotIntakeCoordinator private constructor(
         val repeatImage: Boolean = false,
         val autoBookAllowed: Boolean = true,
         val confirmationCandidates: List<CaptureCandidate> = emptyList(),
+        val bookedTransactionIds: List<Long> = emptyList(),
     ) {
         val handled: Int get() = booked + pending + waiting + linked
     }
@@ -325,7 +326,25 @@ class ScreenshotIntakeCoordinator private constructor(
         }.getOrElse {
             ImageFingerprintLookup.Unavailable("fingerprint index lookup failed")
         }
-        val previousFingerprints = if (fingerprintLookup == ImageFingerprintLookup.Match) {
+        // 手动重新导入（相册选择/分享）时，如果该图不是仍挂在待确认/等待列表里的候选，
+        // 放行给下方的账本实时查重：用户删掉误记的账单后再传同一张图可以正常重录，
+        // 而账单还在账本里时仍会被账本查重拦截，不会静默重复记账。
+        // 后台 MediaStore 自动监听保持指纹去重，避免重复扫描旧截图。
+        val manualReimport = source == IntakeSource.PHOTO_PICKER || source == IntakeSource.SHARE
+        val previousCandidate = if (fingerprintLookup == ImageFingerprintLookup.Match) {
+            runCatching { store.findByImageFingerprint(fingerprint) }.getOrNull()
+        } else {
+            null
+        }
+        val allowManualReimport = manualReimport &&
+            repository != null &&
+            previousCandidate?.status !in setOf(
+                CaptureCandidate.STATUS_PENDING,
+                CaptureCandidate.STATUS_WAITING,
+            )
+        val previousFingerprints = if (
+            fingerprintLookup == ImageFingerprintLookup.Match && !allowManualReimport
+        ) {
             setOf(fingerprint)
         } else {
             emptySet()
@@ -529,15 +548,19 @@ class ScreenshotIntakeCoordinator private constructor(
                         return@forEach
                     }
                     insertLedger?.let { writer ->
-                        val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
+                        val merchant = stored.merchantCandidates.firstOrNull().orEmpty()
+                        val evidenceImageName = context?.let {
+                            ReceiptEvidenceStore(it).archiveFromPath(stored.screenshotPath)
+                        }
                         val entity = CaptureReviewMapping.toTransactionEntity(
-                            candidate = candidate,
+                            candidate = stored,
                             merchant = merchant,
                             category = CaptureReviewMapping.classificationFor(
-                                candidate = candidate,
+                                candidate = stored,
                                 merchant = merchant,
                                 contextText = merchant,
                             ).category,
+                            evidenceImageName = evidenceImageName,
                         )
                         // Keep the ledger write inside this chain: same attempt id
                         // so the log reads capture → parse → dedup → save as one run.
@@ -699,6 +722,7 @@ class ScreenshotIntakeCoordinator private constructor(
             superseded = superseded,
             autoBookAllowed = allowAuto && !previewOnly,
             confirmationCandidates = confirmationCandidates,
+            bookedTransactionIds = bookedIds.toList(),
         )
     }
 
@@ -716,10 +740,14 @@ class ScreenshotIntakeCoordinator private constructor(
             merchant = merchant,
             contextText = merchant,
         ).category
+        val evidenceImageName = context?.let {
+            ReceiptEvidenceStore(it).archiveFromPath(current.screenshotPath)
+        }
         val entity = CaptureReviewMapping.toTransactionEntity(
             candidate = current,
             merchant = merchant,
             category = category,
+            evidenceImageName = evidenceImageName,
         )
         val attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId()
         val result = try {

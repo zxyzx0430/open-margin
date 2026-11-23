@@ -222,18 +222,18 @@ class ScreenshotImportPipelineTest {
     }
 
     @Test
-    fun `refund arrival is held for confirmation and writes nothing`() {
+    fun `completed refund arrival auto books at high confidence`() {
         val plan = ScreenshotImportPipeline.plan(request(), wechatRefundArrival(), emptyList(), timeZone = zone)
         val decision = plan.decisions.single()
         assertEquals(CaptureCandidate.KIND_REFUND, decision.draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_INCOME, decision.draft.direction)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, decision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, decision.action)
-        assertNothingBooked(plan)
+        assertEquals(Action.AUTO_BOOK, decision.action)
+        assertEquals(1, plan.bookings.size)
     }
 
     @Test
-    fun `red packet and withdrawal are held for confirmation and write nothing`() {
+    fun `completed red packet and withdrawal auto book at high confidence`() {
         val redPacket = listOf(
             block("微信红包", 10),
             block("¥8.88", 40),
@@ -252,36 +252,33 @@ class ScreenshotImportPipelineTest {
         val redPacketDecision = redPacketPlan.decisions.single()
         assertEquals(CaptureCandidate.KIND_RED_PACKET, redPacketDecision.draft.kind)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, redPacketDecision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, redPacketDecision.action)
-        assertNothingBooked(redPacketPlan)
+        assertEquals(Action.AUTO_BOOK, redPacketDecision.action)
+        assertEquals(1, redPacketPlan.bookings.size)
 
         val withdrawalPlan = ScreenshotImportPipeline.plan(request(), withdrawal, emptyList(), timeZone = zone)
         val withdrawalDecision = withdrawalPlan.decisions.single()
         assertEquals(CaptureCandidate.KIND_WITHDRAWAL, withdrawalDecision.draft.kind)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, withdrawalDecision.draft.completionStatus)
-        assertEquals(Action.ASK_USER, withdrawalDecision.action)
-        assertNothingBooked(withdrawalPlan)
+        assertEquals(Action.AUTO_BOOK, withdrawalDecision.action)
+        assertEquals(1, withdrawalPlan.bookings.size)
     }
 
     @Test
-    fun `a forged auto booking for a refund never reaches the booking list`() {
+    fun `auto booking for a refund still obeys ledgerWriteAllowed`() {
         val draft = ScreenshotPageInterpreter.interpret(wechatRefundArrival(), capturedAt, zone).drafts.single()
-        val plan = ImportPlan(
+        val blocked = ImportPlan(
             listOf(
                 CandidateDecision(
                     index = 0,
                     tier = CaptureCandidate.TIER_HIGH,
                     action = Action.AUTO_BOOK,
-                    reason = "forged",
+                    reason = "preview",
                     draft = draft,
+                    ledgerWriteAllowed = false,
                 ),
             ),
         )
-        // The model layer is the last lock: refund / red packet / withdrawal can
-        // never appear in ImportPlan.bookings, whatever a decision claims.
-        // Completed transfers are allowed now, but only after the policy gates
-        // (completed + explicit direction + known platform) have passed.
-        assertTrue(plan.bookings.isEmpty())
+        assertTrue(blocked.bookings.isEmpty())
     }
 
     @Test

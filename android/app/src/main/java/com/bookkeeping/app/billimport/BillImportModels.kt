@@ -31,6 +31,14 @@ data class BillImportRow(
     /** Official product/description column, used only as classification context. */
     val description: String? = null,
     val rawFields: List<String> = emptyList(),
+    /** True when this row came from an Open Margin (清衡) ledger CSV export. */
+    val isOpenMarginExport: Boolean = false,
+    /** Explicit ledger source column from an Open Margin export (e.g. "微信", "手动"). */
+    val ledgerSource: String? = null,
+    /** Explicit account column from an Open Margin export (e.g. "花呗", "微信"). */
+    val account: String? = null,
+    /** Explicit note column from an Open Margin export. */
+    val note: String? = null,
 )
 
 data class BillPreviewRow(

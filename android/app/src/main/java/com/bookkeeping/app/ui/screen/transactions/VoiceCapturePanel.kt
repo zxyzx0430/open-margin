@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
@@ -55,7 +57,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
@@ -90,6 +92,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.theme.QingErrorContainer
+import com.bookkeeping.app.ui.theme.QingExpense
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingSurface
+import com.bookkeeping.app.ui.theme.QingSurfaceVariant
+import com.bookkeeping.app.ui.theme.QingText
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 import com.bookkeeping.app.voice.asr.AsrErrorCode
 import com.bookkeeping.app.voice.asr.AsrEvent
 import com.bookkeeping.app.voice.asr.AsrModelException
@@ -465,11 +475,12 @@ fun VoiceCapturePanel(
                         is VoiceCaptureState.Delivered -> Unit
                         VoiceCaptureState.Cancelled -> Unit
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     Text(
                         text = tr("本地识别，音频不会上传"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingTextSecondary.copy(alpha = 0.75f),
                         textAlign = TextAlign.Center,
                     )
     }
@@ -477,25 +488,48 @@ fun VoiceCapturePanel(
 
 @Composable
 private fun RecordingBadge(state: VoiceCaptureState) {
-    val (label, color) = when (state) {
-        is VoiceCaptureState.Listening -> tr("录音中…") to MaterialTheme.colorScheme.error
-        is VoiceCaptureState.Review -> tr("已停止录音") to MaterialTheme.colorScheme.onSurfaceVariant
+    val (label, dotColor, bgColor, textColor) = when (state) {
+        is VoiceCaptureState.Listening -> Quadruple(
+            tr("录音中…"),
+            QingExpense,
+            QingErrorContainer,
+            QingExpense,
+        )
+        is VoiceCaptureState.Review -> Quadruple(
+            tr("已停止录音"),
+            QingTextSecondary,
+            QingSurfaceVariant,
+            QingTextSecondary,
+        )
         else -> return
     }
-    Box(
-        modifier = Modifier
-            .size(8.dp)
-            .background(color, RoundedCornerShape(4.dp)),
-    )
-    Spacer(Modifier.width(6.dp))
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = bgColor,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(7.dp)
+                    .background(dotColor, RoundedCornerShape(50)),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 /**
  * 可编辑的文本区 + 冻结提示 + 按钮。Listening 与 Review 共用：
@@ -533,29 +567,61 @@ private fun EditorBody(
     }
     val submittable = VoiceCaptureLogic.isSubmittable(text)
 
-    OutlinedTextField(
-        value = field,
-        onValueChange = onFieldChange,
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 116.dp),
-        textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-        placeholder = {
-            Text(
-                text = if (listening) tr("请说话…") else tr("没有听清，请再说一次"),
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        minLines = 2,
-        maxLines = 5,
-        shape = RoundedCornerShape(16.dp),
-    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = QingSurfaceVariant.copy(alpha = 0.55f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (listening) QingExpense.copy(alpha = 0.35f) else QingOutline.copy(alpha = 0.6f),
+        ),
+    ) {
+        BasicTextField(
+            value = field,
+            onValueChange = onFieldChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 112.dp)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            textStyle = MaterialTheme.typography.titleLarge.copy(
+                fontWeight = FontWeight.SemiBold,
+                color = QingText,
+            ),
+            cursorBrush = SolidColor(QingPrimary),
+            maxLines = 5,
+            decorationBox = { innerTextField ->
+                Box {
+                    if (field.text.isEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (listening) {
+                                Icon(
+                                    imageVector = Icons.Filled.Mic,
+                                    contentDescription = null,
+                                    tint = QingExpense.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Text(
+                                text = if (listening) tr("请说话…") else tr("没有听清，请再说一次"),
+                                style = MaterialTheme.typography.titleLarge,
+                                color = QingTextSecondary.copy(alpha = 0.55f),
+                            )
+                        }
+                    }
+                    innerTextField()
+                }
+            },
+        )
+    }
 
-    Spacer(Modifier.height(8.dp))
     // 一行状态：跟随中 / 已冻结（可恢复）/ 正在识别 / 没听清。
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -564,7 +630,7 @@ private fun EditorBody(
                 Text(
                     text = tr("点停止结束，说话时可以直接改"),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = QingTextSecondary,
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -573,7 +639,7 @@ private fun EditorBody(
                 Text(
                     text = tr("已暂停自动更新"),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = QingTextSecondary,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -588,7 +654,7 @@ private fun EditorBody(
             Text(
                 text = tr("正在识别最后几个字…"),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = QingTextSecondary,
                 modifier = Modifier.weight(1f),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -598,7 +664,7 @@ private fun EditorBody(
             Text(
                 text = tr("没有听清，请再说一次"),
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = QingTextSecondary,
             )
         }
     }
@@ -616,26 +682,37 @@ private fun EditorBody(
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
             },
         )
-        Spacer(Modifier.height(4.dp))
     }
 
-    Spacer(Modifier.height(12.dp))
-    FlowRow(
+    Spacer(Modifier.height(6.dp))
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(onClick = onCancel) { Text(tr("取消"), maxLines = 1) }
         if (!listening && onRetry != null && submittable) {
-            OutlinedButton(onClick = onRetry) { Text(tr("重说"), maxLines = 1) }
+            OutlinedButton(
+                onClick = onRetry,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.height(48.dp),
+                border = BorderStroke(1.dp, QingOutline),
+            ) {
+                Text(tr("重说"), maxLines = 1)
+            }
         }
         Button(
             onClick = onPrimary,
+            shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .weight(1f)
-                .widthIn(min = 96.dp),
+                .height(48.dp),
         ) {
-            Text(primaryLabel)
+            Text(
+                text = primaryLabel,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
     }
 }

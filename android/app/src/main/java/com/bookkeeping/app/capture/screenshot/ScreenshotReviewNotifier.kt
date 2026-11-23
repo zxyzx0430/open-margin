@@ -196,11 +196,6 @@ object ScreenshotReviewNotifier {
             tr("同一张截图里有相似记录，请核对是否重复后再决定是否记入。")
         null -> when {
         !candidate.ledgerWriteAllowed -> tr("仅预览，不能记入账本")
-        candidate.kind in setOf(
-            CaptureCandidate.KIND_REFUND,
-            CaptureCandidate.KIND_RED_PACKET,
-            CaptureCandidate.KIND_WITHDRAWAL,
-        ) -> tr("这类交易需要人工确认")
         candidate.reason.contains("auto booking disabled") -> tr("自动记账已关闭")
         // Transfers are not in the "always manual" group any more: a completed
         // transfer with a proven direction and platform can auto-book. Explain

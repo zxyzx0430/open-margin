@@ -11,10 +11,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,9 +26,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -33,8 +37,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -75,6 +83,7 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 fun TransactionDiagnosticsScreen(
     onBack: () -> Unit,
+    onOpenTransaction: (Long) -> Unit = {},
     viewModel: TransactionDiagnosticsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -82,12 +91,24 @@ fun TransactionDiagnosticsScreen(
     val scope = rememberCoroutineScope()
     // The DAO returns newest-first; the timeline wants oldest-first so rows that
     // share a millisecond keep their real insertion order.
-    val attempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
+    val allAttempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
+    var onlyIssues by remember { mutableStateOf(false) }
+    val attempts = remember(allAttempts, onlyIssues) {
+        if (!onlyIssues) {
+            allAttempts
+        } else {
+            allAttempts.filter {
+                it.outcome == DiagnosticTimeline.Outcome.FAILURE ||
+                    it.outcome == DiagnosticTimeline.Outcome.PARTIAL ||
+                    it.outcome == DiagnosticTimeline.Outcome.WARNING
+            }
+        }
+    }
     var expandedAttempts by remember { mutableStateOf(emptySet<String>()) }
     var openedNewest by remember { mutableStateOf(false) }
     var confirmClearRawText by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
-    var exportIncludeRawText by remember { mutableStateOf(false) }
+    var exportIncludeRawText by remember { mutableStateOf(true) }
     var exporting by remember { mutableStateOf(false) }
     var pendingSaveContent by remember { mutableStateOf<String?>(null) }
 
@@ -186,6 +207,13 @@ fun TransactionDiagnosticsScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setQuery("") }) {
+                            Icon(Icons.Filled.Close, contentDescription = tr("清空搜索"))
+                        }
+                    }
+                },
                 label = { Text(tr("搜索账单 ID 或日志"), maxLines = 1) },
             )
             Row(
@@ -193,6 +221,11 @@ fun TransactionDiagnosticsScreen(
                     .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                FilterChip(
+                    selected = onlyIssues,
+                    onClick = { onlyIssues = !onlyIssues },
+                    label = { Text(tr("仅失败与警告"), maxLines = 1, softWrap = false) },
+                )
                 FilterChip(
                     selected = state.selectedTransactionId == null,
                     onClick = { viewModel.selectTransaction(null) },
@@ -225,7 +258,7 @@ fun TransactionDiagnosticsScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (state.query.isBlank() && state.selectedTransactionId == null) {
+                        if (state.query.isBlank() && state.selectedTransactionId == null && !onlyIssues) {
                             tr("暂无诊断日志")
                         } else {
                             tr("没有匹配的日志")
@@ -243,6 +276,7 @@ fun TransactionDiagnosticsScreen(
                         AttemptCard(
                             attempt = attempt,
                             expanded = expanded,
+                            onOpenTransaction = onOpenTransaction,
                             onToggle = {
                                 expandedAttempts = if (expanded) {
                                     expandedAttempts - attempt.attemptId
@@ -316,39 +350,74 @@ fun TransactionDiagnosticsScreen(
     }
 
     if (showExportDialog) {
-        AlertDialog(
+        ModalBottomSheet(
             onDismissRequest = { if (!exporting) showExportDialog = false },
-            title = { Text(tr("导出诊断排障包")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        tr("包含版本、机型、权限快照、诊断链路及最近崩溃堆栈；仅保存在你选择的位置或发送给指定对象，不会自动上传。"),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    text = tr("导出排障日志"),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = tr("包含应用版本、机型、权限健康快照、诊断链路及最近崩溃堆栈；仅在你确认保存或发送时本地生成，不会自动上传。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    onClick = { if (!exporting) exportIncludeRawText = !exportIncludeRawText },
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable(enabled = !exporting) {
-                                exportIncludeRawText = !exportIncludeRawText
-                            },
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Checkbox(
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = tr("附带原始抓取文本"),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                text = tr("默认开启，以提高排障准确度；可关闭仅导出脱敏摘要"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
                             checked = exportIncludeRawText,
                             onCheckedChange = { exportIncludeRawText = it },
                             enabled = !exporting,
                         )
-                        Text(
-                            tr("附带原始抓取文本（默认关闭以脱敏）"),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
                     }
                 }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
                         enabled = !exporting,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
                         onClick = {
                             exporting = true
                             scope.launch {
@@ -377,10 +446,14 @@ fun TransactionDiagnosticsScreen(
                             }
                         },
                     ) {
-                        Text(tr("保存文件"))
+                        Text(tr("保存到文件"), maxLines = 1, softWrap = false)
                     }
-                    TextButton(
+                    Button(
                         enabled = !exporting,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
                         onClick = {
                             exporting = true
                             scope.launch {
@@ -422,19 +495,11 @@ fun TransactionDiagnosticsScreen(
                             }
                         },
                     ) {
-                        Text(tr("分享日志"))
+                        Text(tr("分享给开发者"), maxLines = 1, softWrap = false)
                     }
                 }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !exporting,
-                    onClick = { showExportDialog = false },
-                ) {
-                    Text(tr("取消"))
-                }
-            },
-        )
+            }
+        }
     }
 }
 
@@ -446,6 +511,7 @@ fun TransactionDiagnosticsScreen(
 private fun AttemptCard(
     attempt: DiagnosticTimeline.Attempt,
     expanded: Boolean,
+    onOpenTransaction: (Long) -> Unit,
     onToggle: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
@@ -485,41 +551,42 @@ private fun AttemptCard(
                 maxLines = 2,
             )
             attempt.transactionId?.let { id ->
-                Text("${tr("账单")} #$id", style = MaterialTheme.typography.bodySmall)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    text = tr("查看账单 #%d").format(id),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onOpenTransaction(id) },
                 )
-                TextButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(attempt.attemptId))
-                        copied = true
-                    },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        if (copied) tr("已复制") else tr("复制"),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
             }
-            Text(
-                tr("同一次采集的每一步共用，便于把过程串起来"),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
             if (expanded) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(formatFullAttemptTrace(attempt)))
+                            copied = true
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            if (copied) tr("已复制") else tr("复制整条链路"),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
                 attempt.steps.forEach { step ->
                     StepRow(step = step, showSummaries = attempt.hasReadableSummaries)
                 }
@@ -530,6 +597,20 @@ private fun AttemptCard(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
+    }
+}
+
+private fun formatFullAttemptTrace(attempt: DiagnosticTimeline.Attempt): String = buildString {
+    appendLine("Attempt: ${attempt.attemptId}")
+    appendLine("Time: ${formatFullTime(attempt.startedAtMs)} (${DiagnosticTimeline.formatDuration(attempt.durationMs)})")
+    appendLine("Entry: ${attempt.entry.name} | Outcome: ${attempt.outcome.name}")
+    attempt.transactionId?.let { appendLine("Transaction: #$it") }
+    attempt.steps.forEach { step ->
+        appendLine("- [${formatStepTime(step.occurredAtMs)}] ${step.stage}/${step.result}: ${step.details}")
+        step.inputSummary?.let { appendLine("  in: $it") }
+        step.outputSummary?.let { appendLine("  out: $it") }
+        step.callSite?.let { appendLine("  at: $it") }
+        step.rawText?.let { appendLine("  raw: $it") }
     }
 }
 

@@ -7,6 +7,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,11 +49,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.style.TextAlign
@@ -109,6 +113,7 @@ import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.VoiceFab
+import com.bookkeeping.app.capture.screenshot.ScreenshotImportActivity
 import com.bookkeeping.app.ui.components.VoiceHintBubble
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
@@ -404,6 +409,16 @@ fun TransactionListScreen(
                             addDialogDiagnosticAttemptId = null
                             showAddDialog = true
                         },
+                        onDoubleTap = {
+                            dismissVoiceHint()
+                            runCatching {
+                                context.startActivity(ScreenshotImportActivity.intent(context))
+                            }.onFailure {
+                                android.widget.Toast.makeText(
+                                    context, tr("无法打开截图导入"), android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
                         // 达到长按阈值：立刻打开面板并开始录音（不等松手）。
                         onLongPressStart = {
                             dismissVoiceHint()
@@ -418,7 +433,7 @@ fun TransactionListScreen(
                     )
                     if (showVoiceHint) {
                         VoiceHintBubble(
-                            text = tr("长按开始说话，点停止结束"),
+                            text = tr("点一下记一笔 · 双击导截图 · 长按说话记账"),
                             onDismiss = dismissVoiceHint,
                         )
                     }
@@ -588,12 +603,27 @@ fun TransactionListScreen(
             }
 
             item(key = "period") {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = periodLabel,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (activeDrilldown != null || exactDateFilter != null) {
+                        TextButton(
+                            onClick = {
+                                activeDrilldown = null
+                                exactDateFilter = null
+                                viewModel.clearFilters()
+                            },
+                        ) {
+                            Text(tr("全部账单"))
+                        }
+                    }
                 }
             }
 
@@ -1045,164 +1075,7 @@ private fun DayCard(
  * 排序：商户 → 金额；副行「[扫描]/[导入] 分类 · 来源 · 时间」。
  * 审核状态只显示已确认/不计入/转账/退款这类非默认值，默认状态不占字。
  */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun LedgerTransactionRow(
-    transaction: TransactionEntity,
-    timeText: String,
-    scrollTargetTransactionId: Long?,
-    highlightedTransactionId: Long?,
-    onScrollTargetReached: (Long) -> Unit,
-    onHighlightFinished: (Long) -> Unit,
-    onClick: () -> Unit,
-) {
-    val category = runCatching { TransactionCategory.valueOf(transaction.category) }
-        .getOrDefault(TransactionCategory.OTHER)
-    val type = runCatching { TransactionType.valueOf(transaction.type) }
-        .getOrDefault(TransactionType.EXPENSE)
-    val semantic = LocalQingSemanticColors.current
-    val status = transactionStatusLabel(transaction)
-    val sourceTag = transactionSourceTag(transaction)
-    val bringIntoViewRequester = remember(transaction.id) { BringIntoViewRequester() }
-    val highlightAlpha = remember(transaction.id) { Animatable(0f) }
-
-    LaunchedEffect(scrollTargetTransactionId) {
-        if (scrollTargetTransactionId == transaction.id) {
-            bringIntoViewRequester.bringIntoView()
-            onScrollTargetReached(transaction.id)
-        }
-    }
-    LaunchedEffect(highlightedTransactionId) {
-        if (highlightedTransactionId == transaction.id) {
-            highlightAlpha.snapTo(0.32f)
-            delay(1_100L)
-            highlightAlpha.animateTo(0f, animationSpec = tween(durationMillis = 500))
-            onHighlightFinished(transaction.id)
-        } else {
-            highlightAlpha.snapTo(0f)
-        }
-    }
-
-    val amount = if (transaction.currency == "CNY") {
-        formatCny(transaction.amountCents)
-    } else {
-        transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = highlightAlpha.value),
-                shape = RoundedCornerShape(14.dp),
-            )
-            .bringIntoViewRequester(bringIntoViewRequester)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        MerchantAvatar(
-            merchant = transaction.merchant,
-            merchantIconKey = transaction.merchantIconKey,
-            merchantIconPath = transaction.merchantIconPath,
-            category = category,
-            size = 42.dp,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = transaction.merchant.ifBlank { tr(category.displayName) },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                status?.let { (label, color) ->
-                    Text(
-                        text = " · " + label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = color,
-                        modifier = Modifier.widthIn(max = 104.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                SoftBadge(text = sourceTag, tone = StatusTone.NEUTRAL)
-                if (transaction.eventTimeNeedsConfirmation) {
-                    SoftBadge(text = tr("时间待确认"), tone = StatusTone.WARNING)
-                }
-                Text(
-                    text = transactionSubtitle(
-                        categoryLabel = tr(category.displayName),
-                        sourceLabel = transactionSourceLabel(transaction.source),
-                        account = transaction.account,
-                        timeText = timeText,
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        AutoSizeAmountText(
-            text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.widthIn(min = 80.dp),
-            fontWeight = FontWeight.SemiBold,
-            color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
-            textAlign = TextAlign.End,
-        )
-    }
-}
-
-/** 非默认审核状态才有文案；默认（未核实）返回 null，行内不显示。 */
-@Composable
-private fun transactionStatusLabel(transaction: TransactionEntity): Pair<String, Color>? {
-    val semantic = LocalQingSemanticColors.current
-    return when {
-        transaction.duplicateOfId != null ||
-            transaction.remoteReviewStatus == "possible_duplicate" ->
-            tr("待确认重复") to semantic.warningText
-        transaction.remoteReviewStatus == "excluded" ->
-            tr("不计入") to MaterialTheme.colorScheme.onSurfaceVariant
-        transaction.remoteReviewStatus == "refund" -> tr("退款") to semantic.income
-        transaction.remoteReviewStatus == "transfer" ->
-            tr("转账") to MaterialTheme.colorScheme.onSurfaceVariant
-        transaction.remoteReviewStatus == "confirmed" -> tr("已确认") to semantic.income
-        else -> null
-    }
-}
-
-/** 来源标注：每笔都显示一个来源，优先看扫描/导入前缀，其次看来源字段。 */
-private fun transactionSourceTag(transaction: TransactionEntity): String {
-    val prefix = SOURCE_TAG.find(transaction.note)?.groupValues?.getOrNull(1)
-    return when {
-        transaction.captureKind != null || prefix == "扫描" -> tr("扫描")
-        prefix == "导入" -> tr("导入")
-        transaction.source == "BANK_SMS" -> tr("短信")
-        transaction.source == "ALIPAY" || transaction.source == "WECHAT" -> tr("通知")
-        transaction.source == "MANUAL" -> tr("手动")
-        else -> tr("其他来源")
-    }
-}
-
-private val SOURCE_TAG = Regex("^\\[(扫描|导入)]")
-
-private fun transactionSourceLabel(source: String): String = when (source) {
-    "ALIPAY" -> tr("支付宝")
-    "WECHAT" -> tr("微信")
-    "BANK_SMS" -> tr("银行短信")
-    "MANUAL" -> tr("手动")
-    else -> tr("其他来源")
-}
+// LedgerTransactionRow 及配套状态/来源标注已抽离至 LedgerTransactionRow.kt，供主页与截图导入结果页共用。
 
 @Composable
 private fun DuplicateReviewCard(
@@ -1214,21 +1087,34 @@ private fun DuplicateReviewCard(
     onDeleteNew: (TransactionEntity) -> Unit,
 ) {
     val semantic = LocalQingSemanticColors.current
-    Card(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = semantic.warningContainer),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, semantic.warningText.copy(alpha = 0.28f)),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = tr("待确认重复") + "（" + candidates.size + "）",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = semantic.warningText,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = semantic.warningContainer,
+                ) {
+                    Text(
+                        text = "${tr("待确认重复")} · ${candidates.size}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = semantic.warningText,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+            }
             Text(
                 text = tr("这些记录金额和时间相近，但没有足够证据自动合并。请确认每笔是否真实；确认前不计入本机统计。"),
                 style = MaterialTheme.typography.bodySmall,
@@ -1236,43 +1122,98 @@ private fun DuplicateReviewCard(
             )
             candidates.take(if (expanded) candidates.size else 3).forEach { item ->
                 val row = item.candidate
-                Column(Modifier.fillMaxWidth()) {
-                    Text(
-                        text = (if (item.original != null) tr("新记录：") else tr("待确认记录：")) +
-                            transactionSummary(row),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = item.original?.let {
-                            tr("疑似原记录：") + transactionSummary(it)
-                        } ?: tr("原记录不可用（可能来自服务器）"),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = (if (item.original != null) tr("新记录：") else tr("待确认记录：")) +
+                                    transactionSummary(row),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                text = item.original?.let {
+                                    tr("疑似原记录：") + transactionSummary(it)
+                                } ?: tr("原记录不可用（可能来自服务器）"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         val original = item.original
                         if (original != null) {
-                            TextButton(onClick = { onMerge(original, row) }) {
-                                Text(tr("合并为一笔"), fontWeight = FontWeight.SemiBold)
+                            Surface(
+                                onClick = { onMerge(original, row) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(38.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = tr("合并为一笔"),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        maxLines = 1,
+                                    )
+                                }
                             }
                         }
-                        TextButton(onClick = { onKeepBoth(row) }) {
-                            Text(if (item.original != null) tr("保留两笔") else tr("确认不是重复"))
-                        }
-                        TextButton(onClick = { onDeleteNew(row) }) {
-                            Text(
-                                if (item.original != null) tr("删除新记录") else tr("删除此记录"),
-                                color = MaterialTheme.colorScheme.error,
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { onKeepBoth(row) },
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                            ) {
+                                Text(
+                                    text = if (item.original != null) tr("保留两笔") else tr("确认不是重复"),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                )
+                            }
+                            Surface(
+                                onClick = { onDeleteNew(row) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = if (item.original != null) tr("删除新记录") else tr("删除此记录"),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
             if (candidates.size > 3) {
-                TextButton(onClick = onToggleExpanded) {
+                TextButton(
+                    onClick = onToggleExpanded,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     Text(
                         if (expanded) tr("收起")
                         else tr("展开全部") + " ${candidates.size} " + tr("条")

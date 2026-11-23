@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.CalendarMonth
@@ -69,6 +70,9 @@ import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.budget.BudgetStatus
 import com.bookkeeping.app.data.budget.BudgetSummary
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionType
+import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
+import com.bookkeeping.app.ui.screen.stats.StatsPeriod
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
@@ -95,19 +99,27 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
+fun BudgetScreen(
+    onOpenLedger: (StatsLedgerDrilldown) -> Unit = {},
+    viewModel: BudgetViewModel = hiltViewModel(),
+) {
     val budget by viewModel.budget.collectAsState()
     val expenseByCategory by viewModel.expenseByCategory.collectAsState()
     val summary by viewModel.summary.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val previousMonthReference by viewModel.previousMonthExpenseReference.collectAsState()
+    val previousMonthExpenseCents = previousMonthReference
+        .takeIf { it.targetMonth == selectedMonth }?.amountCents ?: 0L
 
     var showEditTotal by remember { mutableStateOf(false) }
+    var suggestedTotalYuan by remember { mutableStateOf<Double?>(null) }
     var showAddCategory by remember { mutableStateOf(false) }
     var showMonthPicker by remember { mutableStateOf(false) }
     var editingCategory by remember { mutableStateOf<TransactionCategory?>(null) }
     var pendingRemoveCategory by remember { mutableStateOf<TransactionCategory?>(null) }
 
     LaunchedEffect(selectedMonth) {
+        suggestedTotalYuan = null
         showEditTotal = false
         showAddCategory = false
         showMonthPicker = false
@@ -153,7 +165,7 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
                     onPrevious = { viewModel.setMonth(BudgetMonth.previousKey(selectedMonth)) },
                     onNext = { viewModel.setMonth(nextMonth(selectedMonth)) },
                     onPickMonth = { showMonthPicker = true },
-                    onAdjust = { showEditTotal = true },
+                    onAdjust = { suggestedTotalYuan = null; showEditTotal = true },
                 )
             }
 
@@ -162,8 +174,26 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
                     summary = summary,
                     isCurrentMonth = isCurrentMonth,
                     isFutureMonth = isFutureMonth,
-                    onSetBudget = { showEditTotal = true },
+                    onSetBudget = { suggestedTotalYuan = null; showEditTotal = true },
                 )
+            }
+
+            if (!hasBudget && previousMonthExpenseCents > 0L) {
+                item(key = "previous_month_budget_reference") {
+                    FilledTonalButton(
+                        onClick = {
+                            suggestedTotalYuan = previousMonthExpenseCents / 100.0
+                            showEditTotal = true
+                        },
+                        shape = RoundedCornerShape(50),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = tr("参考上月支出 %s 填入预算")
+                                .format(formatCny(previousMonthExpenseCents)),
+                        )
+                    }
+                }
             }
 
             if (hasBudget && isCurrentMonth) {
@@ -217,6 +247,19 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
                                     budgetCents = budget.perCategory.getValue(category),
                                     spentCents = expenseByCategory[category] ?: 0L,
                                     onEdit = { editingCategory = category },
+                                    onViewLedger = {
+                                        BudgetMonth.parse(selectedMonth)?.let { month ->
+                                            onOpenLedger(
+                                                StatsLedgerDrilldown(
+                                                    period = StatsPeriod.MONTH,
+                                                    year = month.year,
+                                                    month = month.month,
+                                                    category = category,
+                                                    type = TransactionType.EXPENSE,
+                                                ),
+                                            )
+                                        }
+                                    },
                                     onRemove = { pendingRemoveCategory = category },
                                 )
                                 if (index != rows.lastIndex) {
@@ -266,11 +309,12 @@ fun BudgetScreen(viewModel: BudgetViewModel = hiltViewModel()) {
     if (showEditTotal) {
         EditBudgetDialog(
             title = tr("设置月预算"),
-            initialYuan = budget.monthlyTotalCents / 100.0,
+            initialYuan = suggestedTotalYuan ?: budget.monthlyTotalCents / 100.0,
             pickCategory = false,
             onDismiss = { showEditTotal = false },
             onConfirm = { _, yuan ->
                 viewModel.setMonthlyTotal(yuan)
+                suggestedTotalYuan = null
                 showEditTotal = false
             },
         )
@@ -608,6 +652,7 @@ private fun CategoryBudgetRow(
     budgetCents: Long,
     spentCents: Long,
     onEdit: () -> Unit,
+    onViewLedger: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val ratio = if (budgetCents > 0L) spentCents.toFloat() / budgetCents.toFloat() else 0f
@@ -619,7 +664,7 @@ private fun CategoryBudgetRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onEdit)
+            .clickable(role = Role.Button, onClick = onViewLedger)
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -644,6 +689,14 @@ private fun CategoryBudgetRow(
                     color = QingTextSecondary,
                     softWrap = true,
                     modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            IconButton(onClick = onEdit) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = tr("编辑分类预算"),
+                    tint = QingTextSecondary,
+                    modifier = Modifier.size(18.dp),
                 )
             }
             IconButton(onClick = onRemove) {

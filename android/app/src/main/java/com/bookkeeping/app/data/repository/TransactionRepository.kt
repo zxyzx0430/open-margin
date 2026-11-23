@@ -1365,7 +1365,21 @@ class TransactionRepository @Inject constructor(
             result = TransactionDiagnostics.RESULT_SUCCESS,
             transactionId = transaction.id,
         )
+        transaction.evidenceImageName?.takeIf { it.isNotBlank() }?.let { imageName ->
+            runCatching {
+                if (dao.countActiveByEvidenceImageName(imageName) == 0) {
+                    com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore(context)
+                        .deleteIfPresent(imageName)
+                }
+            }
+        }
         requestSync(diagnosticInput, tombstone)
+    }
+
+    suspend fun clearAllEvidenceImages(): Int {
+        val removed = com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore(context).clearAll()
+        dao.clearAllEvidenceImageNames()
+        return removed
     }
 
     private suspend fun requestSync(

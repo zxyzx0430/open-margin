@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,30 +18,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,9 +48,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +72,15 @@ import com.bookkeeping.app.notification.CategoryClassifier
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.QuickEntryBar
 import com.bookkeeping.app.ui.components.QuickEntryRule
+import com.bookkeeping.app.ui.theme.QingExpense
+import com.bookkeeping.app.ui.theme.QingIncome
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingPrimaryContainer
+import com.bookkeeping.app.ui.theme.QingSurface
+import com.bookkeeping.app.ui.theme.QingSurfaceVariant
+import com.bookkeeping.app.ui.theme.QingText
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 import com.bookkeeping.app.voice.VoiceTransactionParser
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -81,6 +93,20 @@ import java.util.TimeZone
 
 /** 新建账单里账户一栏的常用值；account 本身是自由文本，存进库里的就是这里的中文。 */
 private val ACCOUNT_PRESETS = listOf("微信", "支付宝", "现金", "银行卡")
+
+private val COMMON_EXPENSE_CATEGORIES = listOf(
+    TransactionCategory.FOOD,
+    TransactionCategory.TRANSPORT,
+    TransactionCategory.SHOPPING,
+    TransactionCategory.ENTERTAINMENT,
+)
+
+private val COMMON_INCOME_CATEGORIES = listOf(
+    TransactionCategory.SALARY,
+    TransactionCategory.BONUS,
+    TransactionCategory.INVESTMENT,
+    TransactionCategory.GIFT,
+)
 
 private enum class QuickEntryPreviewField { AMOUNT, CATEGORY, MERCHANT, ACCOUNT }
 
@@ -425,15 +451,159 @@ fun AddTransactionDialog(
         }
     }
 
+    val isExpense = selectedType == TransactionType.EXPENSE
+    val accentColor = if (isExpense) QingExpense else QingIncome
+    val commonBase = if (isExpense) COMMON_EXPENSE_CATEGORIES else COMMON_INCOME_CATEGORIES
+    val topCategories = remember(selectedType, selectedCategory) {
+        if (selectedCategory in commonBase) {
+            commonBase
+        } else {
+            listOf(selectedCategory) + commonBase.take(3)
+        }
+    }
+    val extraCategories = remember(topCategories) {
+        TransactionCategory.entries.filterNot { it in topCategories }
+    }
+
     EntryPanelLayout(
         title = if (initial == null) tr("新建账单") else tr("编辑账单"),
         onDismiss = { if (!saving) onDismiss() },
         canDismiss = !saving,
+        headerTrailing = {
+            TransactionTypeSegmentedPill(
+                selectedType = selectedType,
+                onSelect = { nextType ->
+                    selectedType = nextType
+                    typeTouched = true
+                    if (nextType == TransactionType.EXPENSE && selectedCategory == TransactionCategory.SALARY) {
+                        selectedCategory = TransactionCategory.FOOD
+                        categoryTouched = true
+                        quickEntryPreview = quickEntryPreview?.copy(category = null)
+                    } else if (nextType == TransactionType.INCOME && selectedCategory == TransactionCategory.FOOD) {
+                        selectedCategory = TransactionCategory.SALARY
+                        categoryTouched = true
+                        quickEntryPreview = quickEntryPreview?.copy(category = null)
+                    }
+                },
+            )
+        },
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // 1. Hero 金额区 + 右侧日期胶囊
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    color = QingSurfaceVariant.copy(alpha = 0.55f),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (amountError != null) MaterialTheme.colorScheme.error else QingOutline.copy(alpha = 0.55f),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "¥",
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = accentColor,
+                        )
+                        BasicTextField(
+                            value = amountText,
+                            onValueChange = { raw ->
+                                if (raw.contains('-') || raw.contains('−')) {
+                                    amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
+                                } else {
+                                    val candidate = raw.filter { c -> c.isDigit() || c == '.' }
+                                    if (candidate.hasMoreThanTwoFractionDigits()) {
+                                        amountInputError = tr("金额最多保留两位小数")
+                                    } else {
+                                        amountText = candidate
+                                        amountTouched = true
+                                        quickEntryPreview = quickEntryPreview?.copy(amountText = null)
+                                        amountInputError = null
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.headlineLarge.copy(
+                                fontSize = 34.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = QingText,
+                                fontFeatureSettings = "tnum",
+                            ),
+                            cursorBrush = SolidColor(accentColor),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Decimal,
+                                imeAction = ImeAction.Done,
+                            ),
+                            keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(amountFocusRequester),
+                            decorationBox = { innerTextField ->
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                    if (amountText.isEmpty()) {
+                                        Text(
+                                            text = "0.00",
+                                            fontSize = 34.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = QingTextSecondary.copy(alpha = 0.35f),
+                                            maxLines = 1,
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            },
+                        )
+                        Surface(
+                            onClick = { showDatePicker = true },
+                            shape = RoundedCornerShape(50),
+                            color = QingSurface,
+                            border = BorderStroke(1.dp, QingOutline.copy(alpha = 0.75f)),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CalendarMonth,
+                                    contentDescription = null,
+                                    tint = QingPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = formatCompactDate(timestamp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = QingPrimary,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
+                        }
+                    }
+                }
+                amountError?.let { error ->
+                    Text(
+                        text = error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+            }
+
+            // 2. 一句话快记轻条（保留最详细的单条示例）
             QuickEntryBar(
                 value = quickEntry,
                 onValueChange = { raw ->
@@ -461,264 +631,141 @@ fun AddTransactionDialog(
                 },
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = selectedType == TransactionType.EXPENSE,
-                    modifier = Modifier.height(36.dp),
-                    onClick = {
-                        selectedType = TransactionType.EXPENSE
-                        typeTouched = true
-                        if (selectedCategory == TransactionCategory.SALARY) {
-                            selectedCategory = TransactionCategory.FOOD
-                            categoryTouched = true
-                            quickEntryPreview = quickEntryPreview?.copy(category = null)
-                        }
-                    },
-                    label = { Text(tr("支出"), maxLines = 1, softWrap = false) },
-                )
-                FilterChip(
-                    selected = selectedType == TransactionType.INCOME,
-                    modifier = Modifier.height(36.dp),
-                    onClick = {
-                        selectedType = TransactionType.INCOME
-                        typeTouched = true
-                        if (selectedCategory == TransactionCategory.FOOD) {
-                            selectedCategory = TransactionCategory.SALARY
-                            categoryTouched = true
-                            quickEntryPreview = quickEntryPreview?.copy(category = null)
-                        }
-                    },
-                    label = { Text(tr("收入"), maxLines = 1, softWrap = false) },
-                )
-            }
-
-            // 金额优先；日期按钮保持单行并使用固有宽度。
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { raw ->
-                        if (raw.contains('-') || raw.contains('−')) {
-                            amountInputError = tr("金额不能为负数，请用支出/收入切换方向")
-                        } else {
-                            val candidate = raw.filter { c -> c.isDigit() || c == '.' }
-                            if (candidate.hasMoreThanTwoFractionDigits()) {
-                                amountInputError = tr("金额最多保留两位小数")
-                            } else {
-                                amountText = candidate
-                                amountTouched = true
-                                quickEntryPreview = quickEntryPreview?.copy(amountText = null)
-                                amountInputError = null
-                            }
-                        }
-                    },
-                    label = {
-                        Text(
-                            amountError ?: tr("金额（元）"),
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    textStyle = MaterialTheme.typography.headlineSmall.copy(fontSize = 28.sp),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Decimal,
-                        imeAction = ImeAction.Done,
-                    ),
-                    keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
-                    singleLine = true,
-                    isError = amountError != null,
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 64.dp)
-                        .focusRequester(amountFocusRequester),
-                )
-
-                OutlinedButton(
-                    onClick = { showDatePicker = true },
-                    modifier = Modifier
-                        .widthIn(min = 88.dp, max = 112.dp)
-                        .height(56.dp),
-                    shape = RoundedCornerShape(50),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
+            // 3. 常用分类图标条（4 个常用 +「更多」内联展开全部分类）
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(imageVector = Icons.Outlined.CalendarMonth, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = formatCompactDate(timestamp),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            Box {
-                OutlinedButton(
-                    onClick = { categoryMenuExpanded = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        CategoryIcon(category = selectedCategory, size = 24.dp)
-                        Text(
-                            text = tr(selectedCategory.displayName),
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            softWrap = false,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(tr("分类"), style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                    }
-                }
-                DropdownMenu(
-                    expanded = categoryMenuExpanded,
-                    onDismissRequest = { categoryMenuExpanded = false },
-                    modifier = Modifier.heightIn(max = 320.dp),
-                ) {
-                    TransactionCategory.entries.forEach { cat ->
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                ) {
-                                    CategoryIcon(category = cat, size = 24.dp)
-                                    Text(tr(cat.displayName), maxLines = 1)
-                                }
-                            },
+                    topCategories.forEach { cat ->
+                        CategoryTile(
+                            category = cat,
+                            selected = selectedCategory == cat,
                             onClick = {
                                 selectedCategory = cat
                                 categoryTouched = true
                                 quickEntryPreview = quickEntryPreview?.copy(category = null)
-                                categoryMenuExpanded = false
                             },
+                            modifier = Modifier.weight(1f),
                         )
+                    }
+                    MoreCategoriesTile(
+                        expanded = categoryMenuExpanded,
+                        onClick = { categoryMenuExpanded = !categoryMenuExpanded },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                AnimatedVisibility(visible = categoryMenuExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        extraCategories.chunked(5).forEach { rowCats ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                rowCats.forEach { cat ->
+                                    CategoryTile(
+                                        category = cat,
+                                        selected = selectedCategory == cat,
+                                        onClick = {
+                                            selectedCategory = cat
+                                            categoryTouched = true
+                                            quickEntryPreview = quickEntryPreview?.copy(category = null)
+                                            categoryMenuExpanded = false
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                repeat(5 - rowCats.size) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // 账户 chips 横向滚动，英文界面下最后一个选项仍可完整查看和点击。
+            // 4. 账户柔和胶囊（再点一次已选项即取消，去掉占位的「不填」）
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     text = tr("账户"),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                     softWrap = false,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = QingTextSecondary,
                 )
                 Row(
-                    modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    FilterChip(
-                        selected = account.isBlank(),
-                        modifier = Modifier.height(36.dp),
-                        onClick = {
-                            account = ""
-                            accountTouched = true
-                            quickEntryPreview = quickEntryPreview?.copy(account = null)
-                        },
-                        label = {
-                            Text(
-                                tr("不填"),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                        },
-                    )
                     ACCOUNT_PRESETS.forEach { preset ->
-                        FilterChip(
+                        AccountPill(
+                            label = tr(preset),
                             selected = account == preset,
-                            modifier = Modifier.height(36.dp),
                             onClick = {
-                                account = preset
+                                account = if (account == preset) "" else preset
                                 accountTouched = true
                                 quickEntryPreview = quickEntryPreview?.copy(account = null)
                             },
-                            label = {
-                                Text(
-                                    tr(preset),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                )
-                            },
                         )
                     }
-                    // 编辑自动采集的账单时，常用值之外的自定义账户仍可见并保持选中。
                     val custom = account.trim()
                     if (custom.isNotEmpty() && custom !in ACCOUNT_PRESETS) {
-                        FilterChip(
+                        AccountPill(
+                            label = custom,
                             selected = true,
-                            modifier = Modifier.height(36.dp),
                             onClick = {
                                 account = ""
                                 accountTouched = true
                                 quickEntryPreview = quickEntryPreview?.copy(account = null)
                             },
-                            label = {
-                                Text(
-                                    text = custom,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
                         )
                     }
                 }
             }
 
-            OutlinedTextField(
-                value = merchant,
-                onValueChange = {
-                    merchant = it
-                    merchantTouched = true
-                    quickEntryPreview = quickEntryPreview?.copy(merchant = null)
-                },
-                label = {
-                    Text(
-                        text = tr("商户/对方（可选）"),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                singleLine = true,
+            // 5. 商户 + 备注合并分组卡片
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = note,
-                onValueChange = {
-                    note = it
-                    noteTouched = true
-                },
-                label = { Text(tr("备注（可选）"), maxLines = 1, softWrap = false) },
-                minLines = 1,
-                maxLines = 2,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 48.dp, max = 72.dp),
-            )
+                shape = RoundedCornerShape(16.dp),
+                color = QingSurface,
+                border = BorderStroke(1.dp, QingOutline.copy(alpha = 0.7f)),
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    CompactCardTextField(
+                        value = merchant,
+                        onValueChange = {
+                            merchant = it
+                            merchantTouched = true
+                            quickEntryPreview = quickEntryPreview?.copy(merchant = null)
+                        },
+                        placeholder = tr("商户/对方（可选）"),
+                        singleLine = true,
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        color = QingOutline.copy(alpha = 0.55f),
+                    )
+                    CompactCardTextField(
+                        value = note,
+                        onValueChange = {
+                            note = it
+                            noteTouched = true
+                        },
+                        placeholder = tr("备注（可选）"),
+                        singleLine = false,
+                        maxLines = 2,
+                    )
+                }
+            }
         }
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(14.dp))
         saveError?.let { error ->
             Text(
                 text = error,
@@ -728,34 +775,25 @@ fun AddTransactionDialog(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Button(
+            onClick = requestSave,
+            enabled = !checking && !saving &&
+                (amountValid || (amountText.isBlank() && QuickEntryRule.canSubmit(quickEntry))),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
         ) {
-            TextButton(
-                onClick = { if (!saving) onDismiss() },
-                enabled = !saving,
-            ) {
-                Text(tr("取消"), maxLines = 1)
-            }
-            Button(
-                onClick = requestSave,
-                enabled = !checking && !saving &&
-                    (amountValid || (amountText.isBlank() && QuickEntryRule.canSubmit(quickEntry))),
-                modifier = Modifier
-                    .weight(1f)
-                    .widthIn(min = 96.dp),
-            ) {
-                Text(
-                    when {
-                        checking -> tr("正在检查…")
-                        saving -> tr("正在保存…")
-                        else -> tr("保存")
-                    },
-                    maxLines = 1,
-                )
-            }
+            Text(
+                when {
+                    checking -> tr("正在检查…")
+                    saving -> tr("正在保存…")
+                    else -> tr("保存")
+                },
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
     }
 
@@ -791,27 +829,194 @@ fun AddTransactionDialog(
     }
 
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = localDateToUtc(timestamp),
+        com.bookkeeping.app.ui.components.LedgerDateTimePickerDialog(
+            initialTimestampMs = timestamp,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { pickedMs ->
+                timestamp = pickedMs
+                timestampTouched = true
+                showDatePicker = false
+            },
         )
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        timestamp = applyUtcDate(it, timestamp)
-                        timestampTouched = true
-                    }
-                    showDatePicker = false
-                }) { Text(tr("确定")) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text(tr("取消")) }
-            },
+    }
+}
+
+@Composable
+private fun TransactionTypeSegmentedPill(
+    selectedType: TransactionType,
+    onSelect: (TransactionType) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = QingSurfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier.padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            DatePicker(state = datePickerState)
+            listOf(
+                TransactionType.EXPENSE to tr("支出"),
+                TransactionType.INCOME to tr("收入"),
+            ).forEach { (type, label) ->
+                val selected = selectedType == type
+                val activeColor = if (type == TransactionType.EXPENSE) QingExpense else QingIncome
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { onSelect(type) },
+                    shape = RoundedCornerShape(50),
+                    color = if (selected) QingSurface else Color.Transparent,
+                    shadowElevation = if (selected) 1.dp else 0.dp,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (selected) activeColor else QingTextSecondary,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun CategoryTile(
+    category: TransactionCategory,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) QingPrimaryContainer else QingSurfaceVariant.copy(alpha = 0.45f),
+        border = if (selected) BorderStroke(1.2.dp, QingPrimary) else null,
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            CategoryIcon(category = category, size = 24.dp)
+            Text(
+                text = tr(category.displayName),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected) QingPrimary else QingText,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MoreCategoriesTile(
+    expanded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = QingSurfaceVariant.copy(alpha = 0.45f),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = QingTextSecondary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Text(
+                text = if (expanded) tr("收起") else tr("更多"),
+                style = MaterialTheme.typography.labelSmall,
+                color = QingTextSecondary,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountPill(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (selected) QingPrimaryContainer else QingSurfaceVariant.copy(alpha = 0.55f),
+        border = if (selected) BorderStroke(1.dp, QingPrimary) else null,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) QingPrimary else QingTextSecondary,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+        )
+    }
+}
+
+@Composable
+private fun CompactCardTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    singleLine: Boolean,
+    maxLines: Int = if (singleLine) 1 else 2,
+) {
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = singleLine,
+        maxLines = maxLines,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = QingText),
+        cursorBrush = SolidColor(QingPrimary),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 13.dp),
+        decorationBox = { innerTextField ->
+            Box(contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = placeholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = QingTextSecondary.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                innerTextField()
+            }
+        },
+    )
 }
 
 @Composable

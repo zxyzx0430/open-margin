@@ -151,6 +151,48 @@ class BillImportParserTest {
         assertEquals(1, preview.validRows.size)
     }
 
+    @Test
+    fun parsesOpenMarginExportedCsvRoundTrip() {
+        val csv = """
+            时间,类型,金额（元）,分类,商户,账户,来源,备注
+            2026-11-23 16:43:36,支出,7.00,餐饮,采蝶轩,微信,微信,[扫描] 微信
+            2026-11-22 10:30:00,支出,74.81,其他,"Langbase, Inc.",花呗,支付宝,[自动支付] 支付宝
+            2026-11-22 08:28:54,支出,4.00,其他,,微信,微信,[自动抓取] 微信支付 已支付¥4.00
+            2026-10-11 18:03:34,收入,500.00,转账,,,手动,
+        """.trimIndent() + "\n"
+
+        val preview = BillImportParser.parse(("\uFEFF$csv").toByteArray(Charsets.UTF_8), "清衡账单-20261123.csv")
+        assertEquals(4, preview.validRows.size)
+        assertEquals(0, preview.skippedRows.size)
+        assertEquals(0, preview.errorRows.size)
+
+        val first = preview.validRows[0]
+        assertTrue(first.isOpenMarginExport)
+        assertEquals(BillDirection.EXPENSE, first.direction)
+        assertEquals(BillStatus.SUCCESS, first.status)
+        assertEquals(BillSource.WECHAT, first.source)
+        assertEquals("餐饮", first.sourceCategory)
+        assertEquals("采蝶轩", first.merchant)
+        assertEquals("微信", first.account)
+        assertEquals("微信", first.ledgerSource)
+        assertEquals("[扫描] 微信", first.note)
+
+        val quoted = preview.validRows[1]
+        assertEquals("Langbase, Inc.", quoted.merchant)
+        assertEquals("花呗", quoted.account)
+        assertEquals(BillSource.ALIPAY, quoted.source)
+
+        val emptyMerchant = preview.validRows[2]
+        assertEquals("", emptyMerchant.merchant)
+        assertEquals(400L, emptyMerchant.amountCents)
+
+        val manualIncome = preview.validRows[3]
+        assertEquals(BillDirection.INCOME, manualIncome.direction)
+        assertEquals("", manualIncome.merchant)
+        assertEquals("手动", manualIncome.ledgerSource)
+        assertEquals("转账", manualIncome.sourceCategory)
+    }
+
     private fun buildXlsx(dataRow: Int = 2, timeSerial: String? = null): ByteArray {
         val strings = listOf(
             "交易时间", "交易对方", "金额(元)", "收/支", "当前状态", "交易单号",

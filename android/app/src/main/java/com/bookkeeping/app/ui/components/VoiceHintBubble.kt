@@ -37,7 +37,7 @@ fun VoiceHintBubble(
     val textColor = MaterialTheme.colorScheme.inverseOnSurface
     Column(
         modifier = modifier
-            .widthIn(max = 232.dp)
+            .widthIn(max = 272.dp)
             .clickable(role = Role.Button, onClick = onDismiss),
         horizontalAlignment = Alignment.End,
     ) {
