@@ -37,12 +37,12 @@ fun MonthlySummaryCard(
             .clip(RoundedCornerShape(20.dp))
             .background(QingPrimaryContainer)
             .border(1.dp, QingOutline, RoundedCornerShape(20.dp))
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SummaryMetric(
                 label = tr("支出"),
@@ -83,6 +83,7 @@ private fun SummaryMetric(
         AutoSizeAmountText(
             text = value,
             style = com.bookkeeping.app.ui.theme.Typography.titleMedium,
+            modifier = Modifier.fillMaxWidth(),
             fontWeight = FontWeight.Bold,
             color = color,
             textAlign = TextAlign.Start,

@@ -2,6 +2,10 @@ package com.bookkeeping.app.ui.components
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -53,15 +57,24 @@ fun AutoSizeAmountText(
     textAlign: TextAlign? = null,
 ) {
     val base = if (style.fontSize.isSp) style.fontSize.value else 16f
+    val initialSp = AmountTextSizing.fontSizeSp(base, text.length)
+    var fontSizeSp by remember(text, base) { mutableFloatStateOf(initialSp) }
     Text(
         text = text,
         modifier = modifier,
         color = color,
-        style = style.copy(fontSize = AmountTextSizing.fontSizeSp(base, text.length).sp),
+        style = style.copy(fontSize = fontSizeSp.sp),
         fontWeight = fontWeight,
         textAlign = textAlign,
         maxLines = 1,
         softWrap = false,
         overflow = TextOverflow.Clip,
+        onTextLayout = { result ->
+            if ((result.didOverflowWidth || result.hasVisualOverflow) &&
+                fontSizeSp > AmountTextSizing.MIN_FONT_SIZE_SP
+            ) {
+                fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(AmountTextSizing.MIN_FONT_SIZE_SP)
+            }
+        },
     )
 }

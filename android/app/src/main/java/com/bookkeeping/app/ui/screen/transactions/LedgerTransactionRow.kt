@@ -61,7 +61,6 @@ fun LedgerTransactionRow(
     val type = runCatching { TransactionType.valueOf(transaction.type) }
         .getOrDefault(TransactionType.EXPENSE)
     val semantic = LocalQingSemanticColors.current
-    val status = ledgerTransactionStatusLabel(transaction)
     val sourceTag = ledgerTransactionSourceTag(transaction)
     val bringIntoViewRequester = remember(transaction.id) { BringIntoViewRequester() }
     val highlightAlpha = remember(transaction.id) { Animatable(0f) }
@@ -109,26 +108,13 @@ fun LedgerTransactionRow(
             size = 42.dp,
         )
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = transaction.merchant.ifBlank { tr(category.displayName) },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                status?.let { (label, color) ->
-                    Text(
-                        text = " · " + label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = color,
-                        modifier = Modifier.widthIn(max = 104.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+            Text(
+                text = transaction.merchant.ifBlank { tr(category.displayName) },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -160,24 +146,6 @@ fun LedgerTransactionRow(
             color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
             textAlign = TextAlign.End,
         )
-    }
-}
-
-/** 非默认审核状态才有文案；默认（未核实）返回 null，行内不显示。 */
-@Composable
-internal fun ledgerTransactionStatusLabel(transaction: TransactionEntity): Pair<String, Color>? {
-    val semantic = LocalQingSemanticColors.current
-    return when {
-        transaction.duplicateOfId != null ||
-            transaction.remoteReviewStatus == "possible_duplicate" ->
-            tr("待确认重复") to semantic.warningText
-        transaction.remoteReviewStatus == "excluded" ->
-            tr("不计入") to MaterialTheme.colorScheme.onSurfaceVariant
-        transaction.remoteReviewStatus == "refund" -> tr("退款") to semantic.income
-        transaction.remoteReviewStatus == "transfer" ->
-            tr("转账") to MaterialTheme.colorScheme.onSurfaceVariant
-        transaction.remoteReviewStatus == "confirmed" -> tr("已确认") to semantic.income
-        else -> null
     }
 }
 
