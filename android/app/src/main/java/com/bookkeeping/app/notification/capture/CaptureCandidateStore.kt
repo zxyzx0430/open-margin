@@ -598,6 +598,12 @@ class CaptureCandidateStore internal constructor(
         }.getOrDefault(false)
     }
 
+    /**
+     * Candidate-history genesis is independent of the screenshot fingerprint index.
+     * A corrupt fingerprint-only index must not prevent saving the FIRST review card.
+     * It is still treated as unavailable by lookupImageFingerprint: this check
+     * never declares the fingerprint history clean or deletes its evidence.
+     */
     private fun hasNoCandidateHistoryArtifactsLocked(): Boolean =
         !indexFile.exists() &&
             !File(dir, INDEX_TMP_NAME).exists() &&
@@ -606,12 +612,7 @@ class CaptureCandidateStore internal constructor(
             !candidateHistoryMetadataJournalFile.exists() &&
             !File(dir, CANDIDATE_HISTORY_METADATA_JOURNAL_TMP_NAME).exists() &&
             !legacyCandidateHistoryFile.exists() &&
-            !legacyCandidateHistoryJournalFile.exists() &&
-            !File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists() &&
-            !imageFingerprintFile.exists() &&
-            !imageFingerprintMetadataFile.exists() &&
-            !File(dir, FINGERPRINT_TMP_NAME).exists() &&
-            !File(dir, FINGERPRINT_METADATA_TMP_NAME).exists()
+            !legacyCandidateHistoryJournalFile.exists()
 
     private fun isNewCandidateHistoryLocked(): Boolean =
         hasNoCandidateHistoryArtifactsLocked() &&

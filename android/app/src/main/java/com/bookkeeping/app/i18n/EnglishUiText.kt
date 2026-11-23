@@ -10,6 +10,7 @@ internal object EnglishUiText {
         "截图批量导入" to "Batch screenshot import",
         "无法打开截图导入" to "Could not open screenshot import",
         "采集与同步状态" to "Capture and sync status",
+        "%d 笔" to "%d entries",
         "%d 笔同步冲突待处理" to "%d sync conflicts need attention",
         "通知使用权未开启，自动采集不可用" to "Notification access is off; automatic capture is unavailable",
         "通知采集已授权，系统提醒未开启" to "Capture authorised; system alerts are off",
