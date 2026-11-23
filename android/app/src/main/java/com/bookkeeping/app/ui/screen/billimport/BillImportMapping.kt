@@ -229,6 +229,7 @@ object BillImportMapping {
         transaction: TransactionEntity,
         row: BillImportRow,
     ): TransactionEntity? {
+        if (row.isOpenMarginExport) return null
         if (transaction.syncDeleted) return null
         if (transaction.source == TransactionSource.MANUAL.name) return null
         if (transaction.duplicateOfId != null) return null
@@ -385,6 +386,33 @@ object BillImportMapping {
     fun toTransactionEntity(row: BillImportRow): TransactionEntity? {
         if (row.amountCents <= 0L) return null
         if (row.status !in setOf(BillStatus.SUCCESS, BillStatus.REFUND)) return null
+        if (row.isOpenMarginExport) {
+            val type = when (row.direction) {
+                BillDirection.INCOME -> TransactionType.INCOME
+                BillDirection.EXPENSE, BillDirection.NEUTRAL -> TransactionType.EXPENSE
+            }
+            val source = parseLedgerSource(row.ledgerSource) ?: when (row.source) {
+                BillSource.WECHAT -> TransactionSource.WECHAT
+                BillSource.ALIPAY -> TransactionSource.ALIPAY
+                BillSource.UNKNOWN -> TransactionSource.OTHER
+            }
+            val category = parseLedgerCategory(row.sourceCategory)
+                ?: classificationFor(row).category
+            return TransactionEntity(
+                amountCents = row.amountCents,
+                type = type.name,
+                category = category.name,
+                merchant = row.merchant,
+                note = row.note.orEmpty(),
+                source = source.name,
+                account = row.account?.trim()?.takeIf { it.isNotEmpty() },
+                timestamp = row.occurredAtMs,
+                currency = row.currency,
+                merchantIconKey = MerchantIconCatalog.forMerchant(row.merchant)?.key,
+                remoteReviewStatus = if (category == TransactionCategory.TRANSFER) "transfer" else "unverified",
+                sourceTransactionId = row.orderId?.trim()?.takeIf { it.isNotEmpty() },
+            )
+        }
         val neutral = row.direction == BillDirection.NEUTRAL
         val refund = row.status == BillStatus.REFUND
         val type = when {
@@ -482,5 +510,26 @@ object BillImportMapping {
     private fun isStrongTransferRow(row: BillImportRow): Boolean {
         val text = (row.rawFields + row.merchant + row.paymentMethod.orEmpty()).joinToString(" ")
         return STRONG_TRANSFER_HINTS.any { text.contains(it) }
+    }
+
+    private fun parseLedgerSource(raw: String?): TransactionSource? {
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return null
+        return when (text.uppercase(Locale.ROOT)) {
+            "手动", "MANUAL" -> TransactionSource.MANUAL
+            "支付宝", "ALIPAY" -> TransactionSource.ALIPAY
+            "微信", "WECHAT" -> TransactionSource.WECHAT
+            "银行短信", "BANK_SMS" -> TransactionSource.BANK_SMS
+            "其他来源", "其他", "OTHER" -> TransactionSource.OTHER
+            else -> null
+        }
+    }
+
+    private fun parseLedgerCategory(raw: String?): TransactionCategory? {
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return null
+        return TransactionCategory.entries.firstOrNull { category ->
+            category.displayName == text || category.name.equals(text, ignoreCase = true)
+        }
     }
 }
