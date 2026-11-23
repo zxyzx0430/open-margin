@@ -34,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -69,6 +70,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.merchant.MerchantRules
+import com.bookkeeping.app.data.merchant.otherMerchantGroups
+import com.bookkeeping.app.data.merchant.OtherMerchantGroup
+import com.bookkeeping.app.ui.components.formatCny
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.screen.stats.categoryColor
@@ -82,12 +89,16 @@ import kotlinx.coroutines.launch
  * 底部「清除全部分类记忆」。点任意一行打开编辑面板，右上角「添加」打开新增面板。
  * 页面只读写 DataStore 里的规则表，不动数据库结构、不动同步协议。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MerchantRulesScreen(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
+    val cleanupRows by viewModel.cleanupTransactions.collectAsState()
+    val groups = remember(cleanupRows) { otherMerchantGroups(cleanupRows) }
+    var showCleanup by remember { mutableStateOf(false) }
+    var selectedGroup by remember { mutableStateOf<OtherMerchantGroup?>(null) }
     val rulesByMerchant by viewModel.merchantRules.collectAsState()
     val learningDisabled by viewModel.learningDisabled.collectAsState()
     val recentMerchants by viewModel.recentMerchants.collectAsState()
@@ -128,6 +139,9 @@ fun MerchantRulesScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
+            OutlinedButton(onClick = { showCleanup = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text(tr("批量整理其他分类"))
+            }
             MerchantSearchField(
                 value = query,
                 onValueChange = { query = it },
@@ -187,6 +201,53 @@ fun MerchantRulesScreen(
                 Text(tr("清除全部分类记忆"))
             }
         }
+    }
+
+    if (showCleanup) {
+        AlertDialog(
+            onDismissRequest = { showCleanup = false },
+            title = { Text(tr("批量整理其他分类")) },
+            text = {
+                LazyColumn {
+                    items(groups, key = { it.key }) { group ->
+                        Column(Modifier.fillMaxWidth().clickable { selectedGroup = group }.padding(vertical = 8.dp)) {
+                            Text(group.merchant.ifBlank { tr("未知商户") }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val amounts = group.rows.groupBy { it.currency }.entries.joinToString(" / ") { (currency, rows) ->
+                                if (currency == "CNY") formatCny(rows.sumOf { it.amountCents }) else currency + " " + "%.2f".format(Locale.CHINA, rows.sumOf { it.amountCents } / 100.0)
+                            }
+                            Text(tr("%d 笔").format(group.rows.size) + " · " + amounts + " · " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(group.rows.maxOf { it.timestamp })), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showCleanup = false }) { Text(tr("关闭")) } },
+        )
+    }
+    selectedGroup?.let { group ->
+        var category by remember(group.key) { mutableStateOf<TransactionCategory?>(null) }
+        var rememberRule by remember(group.key) { mutableStateOf(group.singleId == null) }
+        AlertDialog(
+            onDismissRequest = { selectedGroup = null },
+            title = { Text(group.merchant.ifBlank { tr("未知商户") }) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TransactionCategory.entries.filter { it != TransactionCategory.OTHER }.forEach { item ->
+                            LedgerFilterChip(label = tr(item.displayName), selected = category == item, onClick = { category = item })
+                        }
+                    }
+                    if (group.singleId == null) Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = rememberRule, onCheckedChange = { rememberRule = it })
+                        Text(tr("记住该商户规则，后续自动归类"))
+                    }
+                }
+            },
+            confirmButton = { TextButton(enabled = category != null, onClick = {
+                category?.let { viewModel.categorizeOther(group.merchant, group.singleId, it, rememberRule) }
+                selectedGroup = null
+            }) { Text(tr("保存")) } },
+            dismissButton = { TextButton(onClick = { selectedGroup = null }) { Text(tr("取消")) } },
+        )
     }
 
     if (confirmingClear) {

@@ -5,6 +5,9 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "批量整理其他分类" to "Organize other categories",
+        "记住该商户规则，后续自动归类" to "Remember this merchant for future categorization",
+        "同时更新该商户历史记录（共 %d 笔）" to "Also update this merchant’s past entries (%d)",
         "点一下记一笔，双击导截图，长按说话记账" to "Tap to add, double-tap to import screenshots, hold to speak",
         "点一下记一笔 · 双击导截图 · 长按说话记账" to "Tap to add · Double-tap screenshots · Hold to speak",
         "截图批量导入" to "Batch screenshot import",

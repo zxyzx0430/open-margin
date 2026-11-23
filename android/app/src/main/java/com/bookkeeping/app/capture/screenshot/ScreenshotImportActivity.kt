@@ -199,6 +199,11 @@ class ScreenshotImportActivity : ComponentActivity() {
                     BackHandler { selectedTransactionId.value = null }
                     TransactionDetailScreenContent(
                         entry = byId[activeDetailId],
+                        historyTransactions = allTransactions,
+                        onSaveMerchantRuleWithHistory = { merchant, category, update ->
+                            if (update) scope.launch { repository?.categorizeOther(merchant, null, category, true) }
+                            else saveMerchantRule(merchant, category)
+                        },
                         onBack = { selectedTransactionId.value = null },
                         onDeleted = { selectedTransactionId.value = null },
                         onSave = { current, fields -> saveEditedTransaction(current, fields) },

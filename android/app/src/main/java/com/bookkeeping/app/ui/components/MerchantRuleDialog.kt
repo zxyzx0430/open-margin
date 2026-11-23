@@ -2,6 +2,7 @@ package com.bookkeeping.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -34,11 +36,15 @@ fun MerchantRuleDialog(
     onDismiss: () -> Unit,
     onSave: (merchant: String, category: TransactionCategory) -> Unit,
     initialCategory: TransactionCategory? = null,
+    historyCount: ((String) -> Int)? = null,
+    onSaveWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
 ) {
     var merchantName by remember(merchant) { mutableStateOf(merchant) }
     var selectedCategory by remember(merchant, initialCategory) {
         mutableStateOf(initialCategory)
     }
+
+    var updateHistory by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -57,6 +63,12 @@ fun MerchantRuleDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (historyCount != null && onSaveWithHistory != null) {
+                    Row {
+                        Checkbox(checked = updateHistory, onCheckedChange = { updateHistory = it })
+                        Text(tr("同时更新该商户历史记录（共 %d 笔）").format(historyCount(merchantName)))
+                    }
+                }
                 Text(
                     text = tr("选择分类"),
                     style = MaterialTheme.typography.labelLarge,
@@ -82,7 +94,8 @@ fun MerchantRuleDialog(
             TextButton(
                 onClick = {
                     val category = selectedCategory ?: return@TextButton
-                    onSave(merchantName.trim(), category)
+                    if (onSaveWithHistory != null) onSaveWithHistory(merchantName.trim(), category, updateHistory)
+                    else onSave(merchantName.trim(), category)
                 },
                 enabled = merchantName.isNotBlank() && selectedCategory != null,
             ) {
