@@ -3,9 +3,11 @@ package com.bookkeeping.app.ui.components
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import java.util.Locale
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +42,9 @@ internal data class UpdateInstallDialogState(
     val update: GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable,
     val stage: UpdateInstallStage,
     val progress: Int? = null,
+    val downloadedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val bytesPerSecond: Long = 0L,
     val message: String? = null,
 )
 
@@ -88,29 +93,26 @@ class UpdateInstallController internal constructor(
             )
             return
         }
-        val id = UpdateInstallFlow.startDownload(context, update).getOrNull()
-        if (id == null) {
-            dialogState = state.copy(
-                stage = UpdateInstallStage.FAILED,
-                progress = null,
-                message = tr("下载失败，请重试"),
-            )
-            return
-        }
         dialogState = state.copy(
             stage = UpdateInstallStage.DOWNLOADING,
             progress = 0,
+            downloadedBytes = 0L,
+            totalBytes = update.apkSizeBytes,
+            bytesPerSecond = 0L,
             message = null,
         )
         downloadJob?.cancel()
         downloadJob = scope.launch {
-            UpdateInstallFlow.observe(context, id, update).collect { event ->
+            UpdateInstallFlow.streamDownload(context, update).collect { event ->
                 val current = dialogState ?: return@collect
                 if (current.update.apkUrl != update.apkUrl) return@collect
                 dialogState = when (event) {
                     is UpdateInstallFlow.DownloadEvent.Running -> current.copy(
                         stage = UpdateInstallStage.DOWNLOADING,
                         progress = event.percent,
+                        downloadedBytes = event.downloadedBytes,
+                        totalBytes = event.totalBytes,
+                        bytesPerSecond = event.bytesPerSecond,
                         message = null,
                     )
                     UpdateInstallFlow.DownloadEvent.Verifying -> current.copy(
@@ -155,7 +157,8 @@ class UpdateInstallController internal constructor(
     fun Dialog() {
         val state = dialogState ?: return
         val update = state.update
-        val locked = state.stage == UpdateInstallStage.DOWNLOADING ||
+        val locked = state.stage == UpdateInstallStage.VERIFYING
+        val actionBusy = state.stage == UpdateInstallStage.DOWNLOADING ||
             state.stage == UpdateInstallStage.VERIFYING
         AlertDialog(
             onDismissRequest = { if (!locked) close() },
@@ -213,6 +216,30 @@ class UpdateInstallController internal constructor(
                                     drawStopIndicator = {},
                                 )
                             }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                val progressLabel = if (state.downloadedBytes <= 0L) {
+                                    tr("正在连接下载服务器…")
+                                } else {
+                                    formatDownloadedBytes(state.downloadedBytes, state.totalBytes)
+                                }
+                                Text(
+                                    text = progressLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (state.bytesPerSecond > 0L) {
+                                    Text(
+                                        text = formatSpeed(state.bytesPerSecond),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
                         }
                         UpdateInstallStage.VERIFYING -> LinearProgressIndicator(
                             modifier = Modifier
@@ -233,7 +260,7 @@ class UpdateInstallController internal constructor(
             },
             confirmButton = {
                 TextButton(
-                    enabled = !locked,
+                    enabled = !actionBusy,
                     onClick = {
                         when (state.stage) {
                             UpdateInstallStage.READY -> {
@@ -316,4 +343,25 @@ private fun installFailureText(reason: UpdateInstallFlow.Failure): String = when
         tr("安装包签名与当前应用不一致，已删除")
     UpdateInstallFlow.Failure.REJECTED_URL -> tr("更新地址不受信任，已取消下载")
     else -> tr("下载失败，请重试")
+}
+
+private fun formatDownloadedBytes(downloaded: Long, total: Long): String {
+    val mb = 1024.0 * 1024.0
+    val dlMb = String.format(Locale.US, "%.1f", downloaded / mb)
+    return if (total > 0L) {
+        val totalMb = String.format(Locale.US, "%.1f", total / mb)
+        "$dlMb MB / $totalMb MB"
+    } else {
+        "$dlMb MB"
+    }
+}
+
+private fun formatSpeed(bytesPerSecond: Long): String {
+    if (bytesPerSecond <= 0L) return ""
+    val kb = bytesPerSecond / 1024.0
+    return if (kb >= 1024.0) {
+        String.format(Locale.US, "%.1f MB/s", kb / 1024.0)
+    } else {
+        String.format(Locale.US, "%.0f KB/s", kb)
+    }
 }

@@ -1,7 +1,6 @@
 package com.bookkeeping.app.update
 
 import android.app.Activity
-import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -11,29 +10,43 @@ import android.os.Environment
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.isActive
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * Download + install hand-off for a checked GitHub release.
+ * Direct streaming download + install hand-off for a checked release.
  *
- * The system DownloadManager owns the transfer (notification progress, network
- * retry, survives the dialog), the APK lands in the app-specific external
- * Downloads directory (no storage permission), and FileProvider exposes it to
- * the system installer. The UI only talks to this object.
+ * Replaces Android's system DownloadManager (which often stalls in a system queue
+ * for 1–2 minutes on OEM ROMs with 0% progress). Streams directly over HTTP with
+ * Range resume support into the app-specific external Downloads directory,
+ * reports live speed and byte progress, verifies size/SHA-256/signature, and
+ * hands off to the system installer via FileProvider.
  */
 object UpdateInstallFlow {
     const val APK_MIME = "application/vnd.android.package-archive"
 
     private const val AUTHORITY_SUFFIX = ".updates"
-    private const val POLL_INTERVAL_MS = 400L
     private const val PERCENT_MAX = 100
+    private const val BUFFER_BYTES = 64 * 1024
+    private const val PROGRESS_INTERVAL_MS = 350L
+    private const val CONNECT_TIMEOUT_MS = 15_000
+    private const val READ_TIMEOUT_MS = 30_000
 
     sealed interface DownloadEvent {
-        data class Running(val percent: Int?) : DownloadEvent
+        data class Running(
+            val percent: Int?,
+            val downloadedBytes: Long = 0L,
+            val totalBytes: Long = 0L,
+            val bytesPerSecond: Long = 0L,
+        ) : DownloadEvent
+
         data object Verifying : DownloadEvent
         data class Completed(val apk: File) : DownloadEvent
         data class Failed(val reason: Failure) : DownloadEvent
@@ -89,97 +102,180 @@ object UpdateInstallFlow {
         }
     }
 
-    fun startDownload(
-        context: Context,
-        update: GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable,
-    ): Result<Long> {
-        if (!UpdateUrlPolicy.isAllowedAssetUrl(update.apkUrl)) {
-            return Result.failure(IllegalArgumentException("rejected apk url"))
-        }
-        if (update.apkSizeBytes <= 0L) {
-            return Result.failure(IllegalStateException("missing apk size"))
-        }
-        val name = UpdateUrlPolicy.fileNameOf(update.apkUrl)
-            ?: return Result.failure(IllegalArgumentException("rejected apk name"))
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-            ?: return Result.failure(IllegalStateException("download manager unavailable"))
-
-        // DownloadManager refuses to start when the destination already exists.
-        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-            ?: return Result.failure(IllegalStateException("external files dir unavailable"))
-        val target = File(dir, name)
-        if (target.exists() && !target.delete()) {
-            return Result.failure(IllegalStateException("could not replace existing apk"))
-        }
-
-        val appName = runCatching { context.getString(com.bookkeeping.app.R.string.app_name) }
-            .getOrDefault("Open Margin")
-        val request = DownloadManager.Request(Uri.parse(update.apkUrl))
-            .setTitle("$appName ${update.apkTag ?: update.tag}")
-            .setDescription(name)
-            .setMimeType(APK_MIME)
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS, name)
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(false)
-        return runCatching { manager.enqueue(request) }
-    }
-
     /**
-     * Polls DownloadManager: it only broadcasts completion, and the dialog
-     * needs a percentage. Ends after the terminal state, so the caller can
-     * treat the flow as a single download attempt.
+     * Streams the APK directly via HttpURLConnection with HTTP Range resume and
+     * real-time byte/speed progress, then runs size, SHA-256 and signature checks.
      */
-    fun observe(
+    fun streamDownload(
         context: Context,
-        downloadId: Long,
         update: GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable,
     ): Flow<DownloadEvent> = flow {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-        if (manager == null) {
-            emit(DownloadEvent.Failed(Failure.NO_DOWNLOAD_MANAGER))
+        if (!UpdateUrlPolicy.isAllowedAssetUrl(update.apkUrl)) {
+            emit(DownloadEvent.Failed(Failure.REJECTED_URL))
             return@flow
         }
-        while (true) {
-            val status = query(manager, downloadId)
-            if (status == null) {
+        val expectedSize = update.apkSizeBytes
+        if (expectedSize <= 0L) {
+            emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+            return@flow
+        }
+        val name = UpdateUrlPolicy.fileNameOf(update.apkUrl)
+        if (name == null) {
+            emit(DownloadEvent.Failed(Failure.REJECTED_URL))
+            return@flow
+        }
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        if (dir == null || (!dir.exists() && !dir.mkdirs())) {
+            emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+            return@flow
+        }
+
+        val target = File(dir, name)
+        val partFile = File(dir, "$name.part")
+        if (target.exists() && !target.delete()) {
+            emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+            return@flow
+        }
+
+        var existingBytes = if (partFile.isFile) partFile.length() else 0L
+        if (existingBytes >= expectedSize) {
+            runCatching { partFile.delete() }
+            existingBytes = 0L
+        }
+
+        emit(
+            DownloadEvent.Running(
+                percent = ((existingBytes * PERCENT_MAX) / expectedSize).toInt().coerceIn(0, PERCENT_MAX),
+                downloadedBytes = existingBytes,
+                totalBytes = expectedSize,
+                bytesPerSecond = 0L,
+            ),
+        )
+
+        var conn: HttpURLConnection? = null
+        try {
+            conn = (URL(update.apkUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = READ_TIMEOUT_MS
+                instanceFollowRedirects = true
+                setRequestProperty("Accept-Encoding", "identity")
+                if (existingBytes > 0L) {
+                    setRequestProperty("Range", "bytes=$existingBytes-")
+                }
+            }
+            val code = conn.responseCode
+            val resumeAccepted = code == HttpURLConnection.HTTP_PARTIAL && existingBytes > 0L
+            if (code !in 200..299) {
+                if (code == 416) runCatching { partFile.delete() }
                 emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
                 return@flow
             }
-            when (status.state) {
-                DownloadManager.STATUS_SUCCESSFUL -> {
-                    emit(DownloadEvent.Verifying)
-                    val file = apkFile(context, update)
-                    when (ApkIntegrity.verify(file, update.apkSizeBytes, update.apkSha256)) {
-                        ApkCheck.OK -> {
-                            if (file != null &&
-                                ApkSignatureVerifier.matchesInstalled(context, file)
-                            ) {
-                                emit(DownloadEvent.Completed(file))
-                            } else {
-                                file?.let { runCatching { it.delete() } }
-                                emit(DownloadEvent.Failed(Failure.SIGNATURE_MISMATCH))
+
+            if (!resumeAccepted) {
+                existingBytes = 0L
+            }
+            val contentLength = conn.contentLengthLong
+            val totalBytes = when {
+                resumeAccepted && contentLength > 0L -> existingBytes + contentLength
+                !resumeAccepted && contentLength > 0L -> contentLength
+                else -> expectedSize
+            }
+
+            var downloaded = existingBytes
+            var lastEmitMs = System.currentTimeMillis()
+            var windowStartMs = lastEmitMs
+            var windowBytes = 0L
+            var currentSpeedBps = 0L
+            val buffer = ByteArray(BUFFER_BYTES)
+
+            conn.inputStream.use { input ->
+                FileOutputStream(partFile, resumeAccepted).use { output ->
+                    while (currentCoroutineContext().isActive) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        output.write(buffer, 0, read)
+                        downloaded += read
+                        windowBytes += read
+
+                        val now = System.currentTimeMillis()
+                        val elapsed = now - lastEmitMs
+                        if (elapsed >= PROGRESS_INTERVAL_MS) {
+                            val windowElapsedMs = (now - windowStartMs).coerceAtLeast(1L)
+                            currentSpeedBps = (windowBytes * 1000L) / windowElapsedMs
+                            if (windowElapsedMs >= 1500L) {
+                                windowStartMs = now
+                                windowBytes = 0L
                             }
+                            val pct = if (totalBytes > 0L) {
+                                ((downloaded * PERCENT_MAX) / totalBytes).toInt().coerceIn(0, PERCENT_MAX)
+                            } else {
+                                null
+                            }
+                            emit(
+                                DownloadEvent.Running(
+                                    percent = pct,
+                                    downloadedBytes = downloaded,
+                                    totalBytes = totalBytes,
+                                    bytesPerSecond = currentSpeedBps,
+                                ),
+                            )
+                            lastEmitMs = now
                         }
-                        ApkCheck.SIZE_MISMATCH -> {
-                            file?.let { runCatching { it.delete() } }
-                            emit(DownloadEvent.Failed(Failure.SIZE_MISMATCH))
-                        }
-                        ApkCheck.DIGEST_MISMATCH -> {
-                            file?.let { runCatching { it.delete() } }
-                            emit(DownloadEvent.Failed(Failure.DIGEST_MISMATCH))
-                        }
-                        ApkCheck.MISSING -> emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
                     }
-                    return@flow
+                    output.fd.sync()
                 }
-                DownloadManager.STATUS_FAILED -> {
+            }
+
+            if (!currentCoroutineContext().isActive) {
+                return@flow
+            }
+
+            emit(
+                DownloadEvent.Running(
+                    percent = PERCENT_MAX,
+                    downloadedBytes = downloaded,
+                    totalBytes = totalBytes,
+                    bytesPerSecond = currentSpeedBps,
+                ),
+            )
+            emit(DownloadEvent.Verifying)
+
+            if (!partFile.renameTo(target)) {
+                runCatching {
+                    partFile.copyTo(target, overwrite = true)
+                    partFile.delete()
+                }.onFailure {
                     emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
                     return@flow
                 }
-                else -> emit(DownloadEvent.Running(status.percent))
             }
-            delay(POLL_INTERVAL_MS)
+
+            when (ApkIntegrity.verify(target, update.apkSizeBytes, update.apkSha256)) {
+                ApkCheck.OK -> {
+                    if (ApkSignatureVerifier.matchesInstalled(context, target)) {
+                        emit(DownloadEvent.Completed(target))
+                    } else {
+                        runCatching { target.delete() }
+                        emit(DownloadEvent.Failed(Failure.SIGNATURE_MISMATCH))
+                    }
+                }
+                ApkCheck.SIZE_MISMATCH -> {
+                    runCatching { target.delete() }
+                    emit(DownloadEvent.Failed(Failure.SIZE_MISMATCH))
+                }
+                ApkCheck.DIGEST_MISMATCH -> {
+                    runCatching { target.delete() }
+                    emit(DownloadEvent.Failed(Failure.DIGEST_MISMATCH))
+                }
+                ApkCheck.MISSING -> emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+            }
+        } catch (_: Exception) {
+            if (currentCoroutineContext().isActive) {
+                emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+            }
+        } finally {
+            runCatching { conn?.disconnect() }
         }
     }.flowOn(Dispatchers.IO)
 
@@ -215,27 +311,6 @@ object UpdateInstallFlow {
             InstallOutcome.NO_INSTALLER
         } catch (_: SecurityException) {
             InstallOutcome.NO_INSTALLER
-        }
-    }
-
-    private data class DownloadStatus(val state: Int, val percent: Int?)
-
-    private fun query(manager: DownloadManager, id: Long): DownloadStatus? {
-        val cursor = runCatching {
-            manager.query(DownloadManager.Query().setFilterById(id))
-        }.getOrNull() ?: return null
-        cursor.use {
-            if (!it.moveToFirst()) return null
-            val state = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-            val downloaded =
-                it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-            val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-            val percent = if (total > 0L && downloaded >= 0L) {
-                ((downloaded * PERCENT_MAX) / total).toInt().coerceIn(0, PERCENT_MAX)
-            } else {
-                null
-            }
-            return DownloadStatus(state, percent)
         }
     }
 }

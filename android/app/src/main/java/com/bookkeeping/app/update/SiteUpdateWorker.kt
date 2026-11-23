@@ -65,11 +65,8 @@ class SiteUpdateWorker(
             }
         }
 
-        val downloadId = resumeOrStart(context, prefs, manifest, update)
-            ?: return@withContext Result.failure()
-
         val terminal = withTimeoutOrNull(POLL_BUDGET_MS) {
-            UpdateInstallFlow.observe(context, downloadId, update).first { event ->
+            UpdateInstallFlow.streamDownload(context, update).first { event ->
                 event is UpdateInstallFlow.DownloadEvent.Completed ||
                     event is UpdateInstallFlow.DownloadEvent.Failed
             }
@@ -87,21 +84,6 @@ class SiteUpdateWorker(
             }
             else -> Result.retry()
         }
-    }
-
-    private fun resumeOrStart(
-        context: Context,
-        prefs: SiteUpdatePrefs,
-        manifest: SiteUpdatePolicy.SiteUpdateManifest,
-        update: GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable,
-    ): Long? {
-        val existing = prefs.pendingDownloadId()
-        if (existing > 0L && prefs.pendingVersionCode() == manifest.versionCode) {
-            return existing
-        }
-        val started = UpdateInstallFlow.startDownload(context, update).getOrNull() ?: return null
-        prefs.setPendingDownload(started, manifest.versionCode)
-        return started
     }
 
     private fun notifyOnce(

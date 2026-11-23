@@ -192,6 +192,7 @@ internal object EnglishUiText {
         "下载" to "Download",
         "下载中" to "Downloading",
         "下载中…" to "Downloading…",
+        "正在连接下载服务器…" to "Connecting…",
         "正在校验…" to "Verifying…",
         "安装" to "Install",
         "下载失败，请重试" to "Download failed. Try again.",
