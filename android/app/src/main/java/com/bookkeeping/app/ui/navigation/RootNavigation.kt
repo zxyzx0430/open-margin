@@ -315,7 +315,12 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     popEnterTransition = { EnterTransition.None },
                     popExitTransition = { ExitTransition.None },
                 ) {
-                    TransactionDiagnosticsScreen(onBack = { navController.popBackStack() })
+                    TransactionDiagnosticsScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenTransaction = { id ->
+                            navController.navigate(AppRoutes.transactionDetail(id))
+                        },
+                    )
                 }
                 composable(
                     route = AppRoutes.SYNC_SETTINGS,

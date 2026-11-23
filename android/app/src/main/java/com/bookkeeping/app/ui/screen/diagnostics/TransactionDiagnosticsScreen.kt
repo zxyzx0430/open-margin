@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -144,6 +145,13 @@ fun TransactionDiagnosticsScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 singleLine = true,
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.setQuery("") }) {
+                            Icon(Icons.Filled.Close, contentDescription = tr("清空搜索"))
+                        }
+                    }
+                },
                 label = { Text(tr("搜索账单 ID 或日志"), maxLines = 1) },
             )
             Row(
@@ -151,6 +159,11 @@ fun TransactionDiagnosticsScreen(
                     .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                FilterChip(
+                    selected = onlyIssues,
+                    onClick = { onlyIssues = !onlyIssues },
+                    label = { Text(tr("仅失败与警告"), maxLines = 1, softWrap = false) },
+                )
                 FilterChip(
                     selected = state.selectedTransactionId == null,
                     onClick = { viewModel.selectTransaction(null) },
@@ -183,7 +196,7 @@ fun TransactionDiagnosticsScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (state.query.isBlank() && state.selectedTransactionId == null) {
+                        if (state.query.isBlank() && state.selectedTransactionId == null && !onlyIssues) {
                             tr("暂无诊断日志")
                         } else {
                             tr("没有匹配的日志")
@@ -201,6 +214,7 @@ fun TransactionDiagnosticsScreen(
                         AttemptCard(
                             attempt = attempt,
                             expanded = expanded,
+                            onOpenTransaction = onOpenTransaction,
                             onToggle = {
                                 expandedAttempts = if (expanded) {
                                     expandedAttempts - attempt.attemptId
@@ -282,6 +296,7 @@ fun TransactionDiagnosticsScreen(
 private fun AttemptCard(
     attempt: DiagnosticTimeline.Attempt,
     expanded: Boolean,
+    onOpenTransaction: (Long) -> Unit,
     onToggle: () -> Unit,
 ) {
     val clipboard = LocalClipboardManager.current
@@ -321,41 +336,42 @@ private fun AttemptCard(
                 maxLines = 2,
             )
             attempt.transactionId?.let { id ->
-                Text("${tr("账单")} #$id", style = MaterialTheme.typography.bodySmall)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+                    text = tr("查看账单 #%d").format(id),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable { onOpenTransaction(id) },
                 )
-                TextButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(attempt.attemptId))
-                        copied = true
-                    },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        if (copied) tr("已复制") else tr("复制"),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
             }
-            Text(
-                tr("同一次采集的每一步共用，便于把过程串起来"),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
             if (expanded) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${tr("链路 ID")}：${DiagnosticTimeline.shortAttemptId(attempt.attemptId)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(formatFullAttemptTrace(attempt)))
+                            copied = true
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            if (copied) tr("已复制") else tr("复制整条链路"),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                }
                 attempt.steps.forEach { step ->
                     StepRow(step = step, showSummaries = attempt.hasReadableSummaries)
                 }
@@ -366,6 +382,20 @@ private fun AttemptCard(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
+    }
+}
+
+private fun formatFullAttemptTrace(attempt: DiagnosticTimeline.Attempt): String = buildString {
+    appendLine("Attempt: ${attempt.attemptId}")
+    appendLine("Time: ${formatFullTime(attempt.startedAtMs)} (${DiagnosticTimeline.formatDuration(attempt.durationMs)})")
+    appendLine("Entry: ${attempt.entry.name} | Outcome: ${attempt.outcome.name}")
+    attempt.transactionId?.let { appendLine("Transaction: #$it") }
+    attempt.steps.forEach { step ->
+        appendLine("- [${formatStepTime(step.occurredAtMs)}] ${step.stage}/${step.result}: ${step.details}")
+        step.inputSummary?.let { appendLine("  in: $it") }
+        step.outputSummary?.let { appendLine("  out: $it") }
+        step.callSite?.let { appendLine("  at: $it") }
+        step.rawText?.let { appendLine("  raw: $it") }
     }
 }
 
