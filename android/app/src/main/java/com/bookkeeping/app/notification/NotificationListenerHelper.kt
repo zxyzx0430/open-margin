@@ -13,6 +13,13 @@ object NotificationListenerHelper {
     // 检查当前 app 的 NotificationListenerService 是否被授权
     // 实现：读系统 secure setting "enabled_notification_listeners"，看里面有没有我们的包名
     fun isEnabled(context: Context): Boolean {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            val nm = context.getSystemService(android.app.NotificationManager::class.java)
+            val component = ComponentName(context, PaymentNotificationListenerService::class.java)
+            if (nm != null && nm.isNotificationListenerAccessGranted(component)) {
+                return true
+            }
+        }
         val packageName = context.packageName
         val flat = Settings.Secure.getString(
             context.contentResolver,

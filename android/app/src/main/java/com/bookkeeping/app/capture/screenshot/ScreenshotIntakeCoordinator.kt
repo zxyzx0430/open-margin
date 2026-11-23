@@ -87,7 +87,12 @@ class ScreenshotIntakeCoordinator private constructor(
         ledgerWriter = null,
         decodeOverride = null,
         failureNoticeSink = { source, reason ->
-            if (source == IntakeSource.MEDIASTORE) {
+            if (source == IntakeSource.MEDIASTORE &&
+                reason != FailureReason.NOT_TRANSACTION &&
+                reason != FailureReason.UNKNOWN_PAGE &&
+                reason != FailureReason.OCR_EMPTY &&
+                reason != FailureReason.UNREADABLE
+            ) {
                 ScreenshotIntakeFailureNoticeQueue.markPending(ctx, source, reason)
             }
         },

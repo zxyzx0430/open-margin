@@ -40,9 +40,6 @@ object AutomationStatus {
         if (!areNotificationsGranted(context)) add(tr("通知权限"))
         if (!NotificationListenerHelper.isEnabled(context)) add(tr("通知使用权"))
         if (!isPageRecognitionEnabled(context)) add(tr("页面识别服务"))
-        if (AccessibilityCaptureHealth.snapshot(context).state != AccessibilityConnectionState.CONNECTED) {
-            add(tr("无障碍兜底"))
-        }
     }
 
     fun requiredReady(context: Context): Boolean = missingNames(context).isEmpty()

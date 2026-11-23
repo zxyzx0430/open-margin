@@ -248,6 +248,35 @@ class CaptureReviewViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Ignore every currently pending card in one batch; none are deleted and
+     * all remain recoverable from the ignored list.
+     */
+    fun ignoreAllPending() {
+        publish(message = null)
+        viewModelScope.launch {
+            val ignoredCount = withContext(Dispatchers.IO) {
+                var count = 0
+                for (candidate in store.pending()) {
+                    if (store.mark(candidate, CaptureCandidate.STATUS_IGNORED)) {
+                        count++
+                    }
+                }
+                count
+            }
+            val snapshot = withContext(Dispatchers.IO) { store.pending() to store.ignored() }
+            queue.replacePending(snapshot.first)
+            _state.update { it.copy(ignored = snapshot.second, undo = null) }
+            publish(
+                message = if (ignoredCount > 0) {
+                    AppLanguage.tr(context, "已忽略 $ignoredCount 条待确认记录，可在已忽略中找回")
+                } else {
+                    AppLanguage.tr(context, "当前没有可忽略的待确认记录")
+                },
+            )
+        }
+    }
+
     /** Take back the card ignored a moment ago; the ledger was never touched. */
     fun undoIgnore() {
         val offer = _state.value.undo ?: return

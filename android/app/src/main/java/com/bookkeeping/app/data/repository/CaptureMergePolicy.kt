@@ -333,6 +333,57 @@ object CaptureMergePolicy {
         return incomingKey.length > existingKey.length
     }
 
+    /**
+     * 用户在「待确认重复」卡片上显式点击「合并为一笔」：
+     * 保留原记录 id 与时间，吸收新记录独有的商户全称、分类、单号、账户、
+     * 截图采集元数据及去重备注，并把重复新记录软删除。
+     */
+    fun mergePendingDuplicate(
+        original: TransactionEntity,
+        duplicate: TransactionEntity,
+    ): RepairPlan {
+        val enriched = mergeInto(original, duplicate)
+        val origHasMerchant = hasMerchantInfo(original.merchant)
+        val dupHasMerchant = hasMerchantInfo(duplicate.merchant)
+        val chosenMerchant = when {
+            !origHasMerchant && dupHasMerchant -> duplicate.merchant.trim()
+            origHasMerchant && dupHasMerchant &&
+                MerchantRules.normalize(duplicate.merchant).length >
+                MerchantRules.normalize(original.merchant).length -> duplicate.merchant.trim()
+            else -> enriched.merchant
+        }
+        val mergedNote = mergeNotes(original.note, duplicate.note)
+        val keep = enriched.copy(
+            merchant = chosenMerchant,
+            note = mergedNote,
+            duplicateOfId = null,
+            remoteReviewStatus = if (original.remoteReviewStatus == STATUS_POSSIBLE_DUPLICATE ||
+                original.remoteReviewStatus == STATUS_UNVERIFIED
+            ) {
+                "confirmed"
+            } else {
+                original.remoteReviewStatus
+            },
+        )
+        val absorbed = duplicate.copy(
+            syncDeleted = true,
+            duplicateOfId = null,
+        )
+        return RepairPlan(keep = keep, absorbed = absorbed)
+    }
+
+    private fun mergeNotes(primary: String, secondary: String): String {
+        val a = primary.trim()
+        val b = secondary.trim()
+        return when {
+            a.isEmpty() -> b
+            b.isEmpty() -> a
+            a == b || a.contains(b) -> a
+            b.contains(a) -> b
+            else -> "$a · $b".take(200)
+        }
+    }
+
     private fun merchantsRelated(first: String, second: String): Boolean {
         if (first.isEmpty() || second.isEmpty()) return false
         val shorter = if (first.length <= second.length) first else second

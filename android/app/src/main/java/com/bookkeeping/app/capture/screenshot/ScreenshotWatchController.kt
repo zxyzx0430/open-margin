@@ -173,7 +173,14 @@ object ScreenshotWatchController {
         inFlight.add(id)
         scope.launch {
             try {
-                runCatching { ingestNow(context, id, enforceFreshness = true) }
+                val read = runCatching { ingestNow(context, id, enforceFreshness = true) }
+                    .getOrDefault(false)
+                if (read) {
+                    val current = ScreenshotWatchSettings.lastScannedId(context)
+                    if (current == null || id > current) {
+                        ScreenshotWatchSettings.setLastScannedId(context, id)
+                    }
+                }
             } finally {
                 inFlight.remove(id)
             }
@@ -201,7 +208,11 @@ object ScreenshotWatchController {
         // the `_ID` watermark instead and must not be blocked by wall-clock.
         if (enforceFreshness && row.addedAtMs > 0 && row.addedAtMs < startedAtMs - GRACE_MS) return true
         ScreenshotIntakeCoordinator(context).use { coordinator ->
-            coordinator.ingest(contentUri, IntakeSource.MEDIASTORE)
+            val outcome = coordinator.ingest(contentUri, IntakeSource.MEDIASTORE)
+            if (outcome.failure == FailureReason.UNREADABLE) {
+                kotlinx.coroutines.delay(450L)
+                coordinator.ingest(contentUri, IntakeSource.MEDIASTORE)
+            }
         }
         return true
     }

@@ -501,6 +501,7 @@ fun TransactionListScreen(
                             if (!notificationListenerEnabled) {
                                 NotificationListenerHelper.openSettings(context)
                             } else {
+                                NotificationListenerHelper.requestRebind(context)
                                 statusRefresh++
                             }
                         },
@@ -665,6 +666,7 @@ fun TransactionListScreen(
                         candidates = duplicateCandidates,
                         expanded = duplicateListExpanded,
                         onToggleExpanded = { duplicateListExpanded = !duplicateListExpanded },
+                        onMerge = viewModel::mergeDuplicate,
                         onKeepBoth = viewModel::keepBoth,
                         onDeleteNew = { pendingDelete = it },
                     )
@@ -1207,6 +1209,7 @@ private fun DuplicateReviewCard(
     candidates: List<TransactionViewModel.DuplicateCandidate>,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
+    onMerge: (TransactionEntity, TransactionEntity) -> Unit,
     onKeepBoth: (TransactionEntity) -> Unit,
     onDeleteNew: (TransactionEntity) -> Unit,
 ) {
@@ -1250,6 +1253,12 @@ private fun DuplicateReviewCard(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
                     ) {
+                        val original = item.original
+                        if (original != null) {
+                            TextButton(onClick = { onMerge(original, row) }) {
+                                Text(tr("合并为一笔"), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                         TextButton(onClick = { onKeepBoth(row) }) {
                             Text(if (item.original != null) tr("保留两笔") else tr("确认不是重复"))
                         }

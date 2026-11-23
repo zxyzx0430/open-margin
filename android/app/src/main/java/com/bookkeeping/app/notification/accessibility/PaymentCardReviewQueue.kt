@@ -111,17 +111,24 @@ object PaymentCardReviewQueue {
         screenshot: ByteArray? = null,
         reason: String = MULTI_CARD_REASON,
     ): SaveResult {
+        val existingPending = store.pending().toMutableList()
         val saved = mutableListOf<CaptureCandidate>()
         var failed = 0
         var indexFull = 0
         candidates.forEach { candidate ->
+            if (isDuplicatePending(candidate, existingPending)) {
+                return@forEach
+            }
             val pending = candidate.copy(
                 reason = reason.take(80),
                 status = CaptureCandidate.STATUS_PENDING,
                 ledgerWriteAllowed = true,
             )
             when (val result = store.saveWithResult(pending, screenshot)) {
-                is CandidateSaveResult.Saved -> saved += result.candidate
+                is CandidateSaveResult.Saved -> {
+                    saved += result.candidate
+                    existingPending += result.candidate
+                }
                 is CandidateSaveResult.Failed -> {
                     failed++
                     if (result.reason == CandidateSaveFailure.INDEX_FULL) indexFull++
@@ -129,6 +136,40 @@ object PaymentCardReviewQueue {
             }
         }
         return SaveResult(saved = saved, failed = failed, indexFull = indexFull)
+    }
+
+    internal fun isDuplicatePending(
+        candidate: CaptureCandidate,
+        existingPending: List<CaptureCandidate>,
+    ): Boolean {
+        val orderId = candidate.orderId?.trim()?.takeIf { it.isNotEmpty() }
+        return existingPending.any { existing ->
+            val existingOrderId = existing.orderId?.trim()?.takeIf { it.isNotEmpty() }
+            if (orderId != null && existingOrderId != null) {
+                return@any orderId == existingOrderId
+            }
+            if (existing.packageName != candidate.packageName) return@any false
+            if (existing.kind != candidate.kind) return@any false
+            if (existing.amountCents != candidate.amountCents) return@any false
+            if (existing.direction != candidate.direction &&
+                existing.direction != CaptureCandidate.DIRECTION_UNKNOWN &&
+                candidate.direction != CaptureCandidate.DIRECTION_UNKNOWN
+            ) {
+                return@any false
+            }
+            val existingEventTime = existing.eventTimeMs
+            val candidateEventTime = candidate.eventTimeMs
+            if (existingEventTime != null && candidateEventTime != null &&
+                kotlin.math.abs(existingEventTime - candidateEventTime) > 60_000L
+            ) {
+                return@any false
+            }
+            val samePage = existing.pageIdentity == candidate.pageIdentity
+            val sameMerchant = existing.merchantCandidates.firstOrNull() != null &&
+                existing.merchantCandidates.firstOrNull() == candidate.merchantCandidates.firstOrNull()
+            val closeInTime = kotlin.math.abs(existing.capturedAtMs - candidate.capturedAtMs) <= 120_000L
+            samePage || sameMerchant || closeInTime
+        }
     }
 
     const val MULTI_CARD_REASON = "multiple payment cards; confirm each separately"

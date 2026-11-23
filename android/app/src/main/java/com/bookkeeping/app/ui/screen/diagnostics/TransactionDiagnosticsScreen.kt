@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.diagnostics
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -41,25 +45,31 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-
 import com.bookkeeping.app.data.local.entity.TransactionDiagnosticEventEntity
 import com.bookkeeping.app.i18n.EnglishUiText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.screen.settings.SettingsGroupCard
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,12 +78,36 @@ fun TransactionDiagnosticsScreen(
     viewModel: TransactionDiagnosticsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     // The DAO returns newest-first; the timeline wants oldest-first so rows that
     // share a millisecond keep their real insertion order.
     val attempts = remember(state.events) { DiagnosticTimeline.build(state.events.asReversed()) }
     var expandedAttempts by remember { mutableStateOf(emptySet<String>()) }
     var openedNewest by remember { mutableStateOf(false) }
     var confirmClearRawText by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportIncludeRawText by remember { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var pendingSaveContent by remember { mutableStateOf<String?>(null) }
+
+    val saveDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri ->
+        val content = pendingSaveContent
+        pendingSaveContent = null
+        if (uri == null || content == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(content.toByteArray(Charsets.UTF_8))
+                    } ?: error("openOutputStream returned null")
+                }.isSuccess
+            }
+            viewModel.publishNotice(if (saved) "诊断日志已保存" else "保存失败，请重试")
+        }
+    }
     LaunchedEffect(attempts.firstOrNull()?.attemptId) {
         val newest = attempts.firstOrNull()?.attemptId ?: return@LaunchedEffect
         if (!openedNewest) {
@@ -106,6 +140,14 @@ fun TransactionDiagnosticsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = tr("返回"))
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { showExportDialog = true },
+                        enabled = !exporting,
+                    ) {
+                        Text(tr("导出日志"), maxLines = 1, softWrap = false)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -269,6 +311,128 @@ fun TransactionDiagnosticsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { confirmClearRawText = false }) { Text(tr("取消")) }
+            },
+        )
+    }
+
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!exporting) showExportDialog = false },
+            title = { Text(tr("导出诊断排障包")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        tr("包含版本、机型、权限快照、诊断链路及最近崩溃堆栈；仅保存在你选择的位置或发送给指定对象，不会自动上传。"),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !exporting) {
+                                exportIncludeRawText = !exportIncludeRawText
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = exportIncludeRawText,
+                            onCheckedChange = { exportIncludeRawText = it },
+                            enabled = !exporting,
+                        )
+                        Text(
+                            tr("附带原始抓取文本（默认关闭以脱敏）"),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        enabled = !exporting,
+                        onClick = {
+                            exporting = true
+                            scope.launch {
+                                try {
+                                    val report = withContext(Dispatchers.IO) {
+                                        val events = viewModel.loadEventsForExport()
+                                        val meta = DiagnosticExportFormatter.collectMeta(
+                                            context = context,
+                                            selectedTransactionId = state.selectedTransactionId,
+                                            query = state.query,
+                                        )
+                                        DiagnosticExportFormatter.format(
+                                            meta = meta,
+                                            eventsNewestFirst = events,
+                                            includeRawText = exportIncludeRawText,
+                                        )
+                                    }
+                                    pendingSaveContent = report
+                                    showExportDialog = false
+                                    saveDocumentLauncher.launch(DiagnosticExportFormatter.defaultFileName())
+                                } catch (_: Exception) {
+                                    viewModel.publishNotice("导出失败，请重试")
+                                } finally {
+                                    exporting = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text(tr("保存文件"))
+                    }
+                    TextButton(
+                        enabled = !exporting,
+                        onClick = {
+                            exporting = true
+                            scope.launch {
+                                try {
+                                    val fileName = DiagnosticExportFormatter.defaultFileName()
+                                    val shareFile = withContext(Dispatchers.IO) {
+                                        val events = viewModel.loadEventsForExport()
+                                        val meta = DiagnosticExportFormatter.collectMeta(
+                                            context = context,
+                                            selectedTransactionId = state.selectedTransactionId,
+                                            query = state.query,
+                                        )
+                                        val report = DiagnosticExportFormatter.format(
+                                            meta = meta,
+                                            eventsNewestFirst = events,
+                                            includeRawText = exportIncludeRawText,
+                                        )
+                                        val dir = File(context.cacheDir, "diagnostics").apply { mkdirs() }
+                                        File(dir, fileName).apply { writeText(report, Charsets.UTF_8) }
+                                    }
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.updates",
+                                        shareFile,
+                                    )
+                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        putExtra(Intent.EXTRA_SUBJECT, fileName)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    showExportDialog = false
+                                    context.startActivity(Intent.createChooser(sendIntent, tr("分享诊断日志")))
+                                } catch (_: Exception) {
+                                    viewModel.publishNotice("导出失败，请重试")
+                                } finally {
+                                    exporting = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text(tr("分享日志"))
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !exporting,
+                    onClick = { showExportDialog = false },
+                ) {
+                    Text(tr("取消"))
+                }
             },
         )
     }

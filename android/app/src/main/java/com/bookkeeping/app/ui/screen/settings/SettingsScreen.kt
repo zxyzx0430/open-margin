@@ -689,13 +689,14 @@ private fun PermissionStatusGroup(
 ) {
     val accessibilityStatus = when (accessibilityHealth.state) {
         AccessibilityConnectionState.CONNECTED -> tr("已连接")
-        AccessibilityConnectionState.PERMISSION_OFF -> tr("未开启")
         AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> tr("已授权 · 未连接")
+        AccessibilityConnectionState.PERMISSION_OFF ->
+            if (pageRecognitionEnabled) tr("已被页面识别接管") else tr("可选（推荐开启页面识别）")
     }
     val accessibilityTone = when (accessibilityHealth.state) {
         AccessibilityConnectionState.CONNECTED -> StatusTone.POSITIVE
-        AccessibilityConnectionState.PERMISSION_OFF -> StatusTone.ERROR
         AccessibilityConnectionState.AUTHORIZED_NOT_CONNECTED -> StatusTone.WARNING
+        AccessibilityConnectionState.PERMISSION_OFF -> StatusTone.NEUTRAL
     }
     // 副标题只写功能，不再追加「上次断开（原因）」：那是诊断信息，详情在无障碍诊断页。
     val accessibilitySubtitle = tr("转账与红包入账")
@@ -757,7 +758,7 @@ private fun areNotificationsGranted(context: Context): Boolean {
     return NotificationManagerCompat.from(context).areNotificationsEnabled()
 }
 
-private const val AUTOMATION_WIZARD_STEPS = 5
+private const val AUTOMATION_WIZARD_STEPS = 4
 
 private fun runtimePermissionsToRequest(): Array<String> = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -770,7 +771,6 @@ private enum class AutomationWizardStep {
     RUNTIME_PERMISSIONS,
     NOTIFICATION_ACCESS,
     PAGE_RECOGNITION,
-    ACCESSIBILITY_FALLBACK,
     ROM_GUIDANCE,
 }
 
@@ -783,7 +783,6 @@ private fun initialWizardStep(
     !postNotificationsGranted -> AutomationWizardStep.RUNTIME_PERMISSIONS
     !notificationListenerEnabled -> AutomationWizardStep.NOTIFICATION_ACCESS
     !pageRecognitionEnabled -> AutomationWizardStep.PAGE_RECOGNITION
-    !fallbackAccessibilityEnabled -> AutomationWizardStep.ACCESSIBILITY_FALLBACK
     else -> AutomationWizardStep.ROM_GUIDANCE
 }
 
@@ -794,7 +793,6 @@ private fun requiredAutomationReady(
     postNotificationsGranted: Boolean,
 ): Boolean = notificationListenerEnabled &&
     pageRecognitionEnabled &&
-    fallbackAccessibilityEnabled &&
     postNotificationsGranted
 
 private fun wizardProgress(step: AutomationWizardStep): String =
@@ -873,7 +871,7 @@ private fun AutomationSetupPanel(
             stepLabel = wizardProgress(step),
             stepIndex = step.ordinal + 1,
             title = tr("开启通知使用权"),
-            body = tr("在系统页面找到「清衡」并打开通知使用权，然后返回。此开关只能由你在系统设置中手动确认。"),
+            body = tr("系统设置 → 通知（或 应用与通知）→ 通知使用权（或 设备和应用通知）→ 找到当前应用 → 打开允许后返回。此开关只能由你在系统设置中手动确认。"),
             status = if (attempted && !notificationEnabled) {
                 tr("尚未检测到，请确认已开启后重试。")
             } else null,
@@ -895,7 +893,7 @@ private fun AutomationSetupPanel(
             stepLabel = wizardProgress(step),
             stepIndex = step.ordinal + 1,
             title = tr("开启页面识别"),
-            body = tr("在无障碍页面找到「清衡 · 页面识别」并打开，用于识别微信/支付宝支付页面。此开关只能由你在系统设置中手动确认。"),
+            body = tr("系统设置 → 无障碍（或 辅助功能 → 更多已下载的服务）→ 找到「清衡 · 页面识别」→ 打开开关后返回。该服务已覆盖付款、转账、红包、提现和账单识别，只需开启这 1 个服务。"),
             status = if (attempted && !pageRecognitionEnabled) {
                 tr("尚未检测到，请确认已开启后重试。")
             } else null,
@@ -903,7 +901,7 @@ private fun AutomationSetupPanel(
             primaryLabel = if (pageRecognitionEnabled) tr("下一步") else tr("去无障碍设置"),
             onPrimary = {
                 if (pageRecognitionEnabled) {
-                    step = AutomationWizardStep.ACCESSIBILITY_FALLBACK
+                    step = AutomationWizardStep.ROM_GUIDANCE
                     attempted = false
                 } else {
                     attempted = true
@@ -913,41 +911,13 @@ private fun AutomationSetupPanel(
             secondaryLabel = if (attempted && !pageRecognitionEnabled) tr("重新检查") else null,
             onSecondary = onRefresh,
         )
-        AutomationWizardStep.ACCESSIBILITY_FALLBACK -> AutomationStepCard(
-            stepLabel = wizardProgress(step),
-            stepIndex = step.ordinal + 1,
-            title = tr("开启无障碍兜底"),
-            body = if (fallbackAccessibilityAuthorized && !fallbackAccessibilityEnabled) {
-                tr("无障碍已授权，但服务当前未连接。请检查系统服务状态，返回应用后重试。")
-            } else {
-                tr("在无障碍页面找到「清衡」并打开，用于微信转账/红包、支付宝转账入账。此开关只能由你在系统设置中手动确认。")
-            },
-            status = when {
-                !attempted || fallbackAccessibilityEnabled -> null
-                fallbackAccessibilityAuthorized -> tr("已授权 · 未连接")
-                else -> tr("尚未检测到，请确认已开启后重试。")
-            },
-            statusIsError = attempted && !fallbackAccessibilityEnabled,
-            primaryLabel = if (fallbackAccessibilityEnabled) tr("下一步") else tr("去无障碍设置"),
-            onPrimary = {
-                if (fallbackAccessibilityEnabled) {
-                    step = AutomationWizardStep.ROM_GUIDANCE
-                    attempted = false
-                } else {
-                    attempted = true
-                    onOpenAccessibilitySettings()
-                }
-            },
-            secondaryLabel = if (attempted && !fallbackAccessibilityEnabled) tr("重新检查") else null,
-            onSecondary = onRefresh,
-        )
         AutomationWizardStep.ROM_GUIDANCE -> {
             if (requiredReady) {
                 AutomationStepCard(
                     stepLabel = wizardProgress(step),
-            stepIndex = step.ordinal + 1,
+                    stepIndex = step.ordinal + 1,
                     title = tr("自动记账已开启"),
-                    body = tr("通知权限、通知使用权、页面识别和无障碍兜底均已就绪。"),
+                    body = tr("通知权限、通知使用权与页面识别均已就绪（无障碍只需开启「清衡 · 页面识别」这 1 个服务）。"),
                     status = null,
                     statusIsError = false,
                     primaryLabel = tr("完成"),

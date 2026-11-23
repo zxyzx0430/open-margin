@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -74,6 +75,35 @@ fun CaptureReviewDialog(
     // 预览只记「当前打开哪张原图」，不再顺手把列表那张 1/4 缩小的位图传下去：
     // 传输略图等于把模糊放大，用户点开是要看清商户名的。
     var previewState by remember { mutableStateOf(CaptureImagePreviewState()) }
+    var confirmIgnoreAll by remember { mutableStateOf(false) }
+
+    if (confirmIgnoreAll) {
+        AlertDialog(
+            onDismissRequest = { confirmIgnoreAll = false },
+            title = { Text(tr("忽略全部待确认记录")) },
+            text = {
+                Text(
+                    tr("确认将当前 ${state.pending.size} 条待确认记录全部移入「已忽略」吗？之后仍可在「已忽略」列表中找回。"),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmIgnoreAll = false
+                        viewModel.ignoreAllPending()
+                    },
+                ) {
+                    Text(tr("全部忽略"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmIgnoreAll = false }) {
+                    Text(tr("取消"))
+                }
+            },
+        )
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -96,6 +126,11 @@ fun CaptureReviewDialog(
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
+                    if (!state.showingIgnored && state.pending.isNotEmpty()) {
+                        TextButton(onClick = { confirmIgnoreAll = true }) {
+                            Text(tr("全部忽略"))
+                        }
+                    }
                     // 次要入口：忽略过的卡片不删除，都能从这里找回来。
                     TextButton(onClick = { viewModel.showIgnored(!state.showingIgnored) }) {
                         Text(

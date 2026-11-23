@@ -146,8 +146,25 @@ open class PageRecognitionService : AccessibilityService() {
         // refund, and pay-after-use. Only explicitly completed cards may be booked.
         val cards = PaymentCardDetector.fromSnapshot(packageName, snapshot, now)
         if (cards.isNotEmpty()) {
+            val firstIdentity = cards.first().pageIdentity
+            val firstOrderId = cards.firstOrNull { !it.orderId.isNullOrBlank() }?.orderId
+            if (PageIdentityThrottlePolicy.shouldSuppress(
+                    previousIdentity = lastPageIdentity,
+                    previousEventId = lastPageEventId,
+                    previousCapturedAtMs = lastCaptureAtMs,
+                    identity = firstIdentity,
+                    eventId = firstOrderId,
+                    nowMs = now,
+                    windowMs = PAGE_CAPTURE_DEDUP_MS,
+                )
+            ) {
+                return
+            }
             when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store)) {
                 is PaymentCardReviewQueue.Route.HeldForReview -> {
+                    lastPageIdentity = firstIdentity
+                    lastPageEventId = firstOrderId
+                    lastCaptureAtMs = now
                     if (pageRoute.saved.saved.isNotEmpty()) {
                         ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
                     }
@@ -219,10 +236,22 @@ open class PageRecognitionService : AccessibilityService() {
         // for notification-less red packets, refunds, transfers, and withdrawals.
         if (PaymentCardDetector.looksLikePaymentPage(packageName, pageText)) {
             val pageIdentity = PaymentCardDetector.pageIdentity(packageName, pageText)
-            // This text identity may represent two real same-amount payments in
-            // the same displayed minute. OCR has not established an order ID yet,
-            // so persist a reviewable candidate instead of throttling by text.
+            if (PageIdentityThrottlePolicy.shouldSuppress(
+                    previousIdentity = lastPageIdentity,
+                    previousEventId = lastPageEventId,
+                    previousCapturedAtMs = lastCaptureAtMs,
+                    identity = pageIdentity,
+                    eventId = null,
+                    nowMs = now,
+                    windowMs = PAGE_CAPTURE_DEDUP_MS,
+                )
+            ) {
+                return
+            }
             if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
+            lastPageIdentity = pageIdentity
+            lastPageEventId = null
+            lastCaptureAtMs = now
             capturing.set(true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 captureScreenshotForOcr(
@@ -774,12 +803,23 @@ open class PageRecognitionService : AccessibilityService() {
                             // Hard gate: preview-only or auto-disabled passes keep the
                             // candidate in the local inbox for manual review and must
                             // not touch the ledger at all.
-                            store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                            val alreadyPending = PaymentCardReviewQueue.isDuplicatePending(
+                                stored,
+                                store.pending().filter { it.candidateId != stored.candidateId },
+                            )
+                            store.mark(
+                                stored,
+                                if (alreadyPending) CaptureCandidate.STATUS_IGNORED else CaptureCandidate.STATUS_PENDING,
+                            )
                             repository.recordDiagnostic(
                                 attemptId = input.attemptId,
                                 stage = TransactionDiagnostics.STAGE_DEDUP,
                                 result = TransactionDiagnostics.RESULT_WARNING,
-                                details = "Capture held for review; auto booking disabled",
+                                details = if (alreadyPending) {
+                                    "Duplicate pending capture ignored"
+                                } else {
+                                    "Capture held for review; auto booking disabled"
+                                },
                             )
                             return@forEachIndexed
                         }

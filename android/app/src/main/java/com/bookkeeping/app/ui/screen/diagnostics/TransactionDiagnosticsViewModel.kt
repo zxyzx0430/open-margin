@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -126,6 +127,21 @@ class TransactionDiagnosticsViewModel @Inject constructor(
         _state.value = _state.value.copy(rawTextNotice = null)
     }
 
+    suspend fun loadEventsForExport(limit: Int = EXPORT_EVENT_LIMIT): List<TransactionDiagnosticEventEntity> {
+        val current = _state.value
+        return dao.observeEvents(
+            cutoffMs = TransactionDiagnosticRetention.cutoffMs(System.currentTimeMillis()),
+            transactionId = current.selectedTransactionId,
+            query = current.query.trim(),
+            limit = limit,
+            offset = 0,
+        ).first()
+    }
+
+    fun publishNotice(message: String) {
+        _state.value = _state.value.copy(rawTextNotice = message)
+    }
+
     private fun reload() {
         eventJob?.cancel()
         val request = _state.value
@@ -174,6 +190,7 @@ class TransactionDiagnosticsViewModel @Inject constructor(
     companion object {
         private const val PAGE_SIZE = 100
         private const val MAX_BILL_FILTERS = 200
+        private const val EXPORT_EVENT_LIMIT = 1000
     }
 }
 

@@ -1092,6 +1092,40 @@ class TransactionRepository @Inject constructor(
         update(transaction.copy(duplicateOfId = null, remoteReviewStatus = "confirmed"))
     }
 
+    /**
+     * 用户在「待确认重复」卡片点击「合并为一笔」：单事务合并保留原记录并软删除重复记录。
+     */
+    suspend fun mergeDuplicate(
+        original: TransactionEntity,
+        duplicate: TransactionEntity,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+    ) {
+        val now = System.currentTimeMillis()
+        val plan = CaptureMergePolicy.mergePendingDuplicate(original, duplicate)
+        val keep = plan.keep.copy(
+            syncDirty = true,
+            syncModifiedMs = now,
+            syncMutationId = UUID.randomUUID().toString(),
+        )
+        val absorbed = plan.absorbed.copy(
+            syncDirty = true,
+            syncModifiedMs = now,
+            syncMutationId = UUID.randomUUID().toString(),
+        )
+        val callSite = diagnosticInput.callSite ?: "TransactionRepository.mergeDuplicate"
+        dao.importBatch(emptyList(), listOf(keep, absorbed))
+        diagnostics.record(
+            attemptId = diagnosticInput.attemptId,
+            stage = TransactionDiagnostics.STAGE_EDIT,
+            result = TransactionDiagnostics.RESULT_SUCCESS,
+            details = "Merged duplicate #${absorbed.id} into #${keep.id}",
+            transactionId = keep.id,
+            callSite = callSite,
+            outputSummary = "已将 #${absorbed.id} 合并到 #${keep.id}",
+        )
+        requestSync(diagnosticInput, keep)
+    }
+
     suspend fun update(
         transaction: TransactionEntity,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),

@@ -532,6 +532,10 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch { repository.keepBoth(entity) }
     }
 
+    fun mergeDuplicate(original: TransactionEntity, duplicate: TransactionEntity) {
+        viewModelScope.launch { repository.mergeDuplicate(original, duplicate) }
+    }
+
     private fun periodRange(period: PeriodState): Pair<Long, Long>? = when (period.time) {
         LedgerTimeFilter.MONTH -> BudgetMonth.range(period.month)
         LedgerTimeFilter.YEAR -> {

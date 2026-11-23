@@ -3,4 +3,5 @@
      for the downloaded update APK. Nothing else on the device is shareable. -->
 <paths>
     <external-files-path name="updates" path="Download/" />
+    <cache-path name="diagnostics" path="diagnostics/" />
 </paths>

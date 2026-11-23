@@ -142,7 +142,7 @@ object PaymentCardDetector {
         "等待对方确认", "待对方确认", "待确认收款", "请收钱", "待领取", "未领取", "未确认",
     )
     private val TRANSFER_SETTLED = listOf(
-        "已收钱", "已收款", "已存入", "已入账", "对方已收钱", "已被收钱", "转账成功",
+        "已收钱", "已收款", "已存入", "已入账", "对方已收钱", "已被收钱", "已被接收", "转账成功",
         "交易成功", "已到账", "收款成功",
     )
     private val PAYMENT_MARKERS = listOf(
@@ -279,6 +279,7 @@ object PaymentCardDetector {
      */
     fun looksLikePaymentPage(packageName: String, text: String): Boolean {
         if (!isSupported(packageName)) return false
+        if (isBillListPage(text)) return false
         // Some WeChat Pay history/detail pages render the amount and status in a
         // WebView/canvas and expose only sparse chrome nodes. These anchors are
         // specific enough to justify one local screenshot + OCR attempt.
@@ -318,6 +319,8 @@ object PaymentCardDetector {
             )
         }.distinctBy { "${it.text}|${it.top}|${it.left}" }
         if (lines.isEmpty()) return emptyList()
+        val pageText = lines.joinToString(" ") { it.text }
+        if (isBillListPage(pageText)) return emptyList()
         val screenHeight = lines.maxOf { it.bottom }.coerceAtLeast(1)
         return fromLines(
             packageName = packageName,
@@ -369,7 +372,7 @@ object PaymentCardDetector {
         } else {
             groupCardsByText(visible)
         }
-        return groups.flatMap { group ->
+        val raw = groups.flatMap { group ->
             val plausibleAmounts = group.filterNot { isNoisyAmountLine(it.text, PaymentCardKind.PAYMENT) }
                 .mapNotNull { parseAmount(it.text)?.takeIf { amount -> amount > 0L } }
             if (!geometriesUsable && plausibleAmounts.size > 1) {
@@ -385,6 +388,35 @@ object PaymentCardDetector {
                     if (!geometriesUsable) parsed?.copy(reviewRequired = true) else parsed,
                 )
             }
+        }
+        return consolidateTransferBubblePairs(raw, pageText)
+    }
+
+    /**
+     * In WeChat chat screens, a single accepted transfer renders two bubbles
+     * with the same amount: the original transfer bubble ("已被接收"/"已收钱")
+     * and the receipt bubble ("已收款"). Without consolidation, the first is
+     * classified as EXPENSE and the second as INCOME, booking both -X and +X.
+     */
+    private fun consolidateTransferBubblePairs(
+        detections: List<PaymentCardDetection>,
+        pageText: String,
+    ): List<PaymentCardDetection> {
+        val incomeTransferAmounts = detections
+            .filter {
+                it.kind == PaymentCardKind.TRANSFER &&
+                    it.direction == PaymentDirection.INCOME &&
+                    it.amountCents > 0L
+            }
+            .map { it.amountCents }
+            .toSet()
+        if (incomeTransferAmounts.isEmpty()) return detections
+        val hasExplicitOutgoing = containsAny(pageText, "你发起", "你向", "你已转账", "对方已收钱")
+        if (hasExplicitOutgoing) return detections
+        return detections.filterNot { card ->
+            card.kind == PaymentCardKind.TRANSFER &&
+                card.direction != PaymentDirection.INCOME &&
+                card.amountCents in incomeTransferAmounts
         }
     }
 
@@ -574,6 +606,19 @@ object PaymentCardDetector {
             )
             PaymentCardKind.BILL -> false
         }
+    }
+
+    private fun isBillListPage(text: String): Boolean {
+        val isDetailOrVoucherPage = containsAny(
+            text,
+            "账单详情", "交易详情", "订单详情", "交易单号", "商户单号", "商户订单号",
+            "微信支付凭证", "扣费凭证", "支付成功", "付款成功", "退款到账通知", "切换到发消息",
+        )
+        if (isDetailOrVoucherPage) return false
+        return containsAny(
+            text,
+            "全部账单", "收支明细", "账单统计", "查找交易", "本月统计", "记账日报", "月账单", "收支统计",
+        ) || (text.contains("账单") && containsAny(text, "本月支出", "本月收入", "本月已支出", "点击查看昨日收支", "日报设置"))
     }
 
     private fun isSummaryGroup(joined: String): Boolean {
@@ -782,8 +827,14 @@ object PaymentCardDetector {
     }
 
     private fun classifyTransfer(joined: String): Classification {
+        val strongIncoming = containsAny(
+            joined,
+            "收到转账", "转账给你", "转给你", "已收款", "你已收款", "已存入零钱", "收款成功",
+        )
         val direction = when {
+            strongIncoming -> PaymentDirection.INCOME
             OUTGOING_TRANSFER.any { joined.contains(it) } ||
+                joined.contains("已被接收") ||
                 Regex("""转账给(?!你)""").containsMatchIn(joined) -> PaymentDirection.EXPENSE
             INCOMING_TRANSFER.any { joined.contains(it) } -> PaymentDirection.INCOME
             joined.contains("收入") || joined.contains("入账") -> PaymentDirection.INCOME
