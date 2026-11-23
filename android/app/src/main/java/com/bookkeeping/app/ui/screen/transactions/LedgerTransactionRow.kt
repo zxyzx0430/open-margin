@@ -54,6 +54,8 @@ fun LedgerTransactionRow(
     highlightedTransactionId: Long? = null,
     onScrollTargetReached: (Long) -> Unit = {},
     onHighlightFinished: (Long) -> Unit = {},
+    extraNote: String? = null,
+    statusBadge: Pair<String, StatusTone>? = null,
     onClick: () -> Unit,
 ) {
     val category = runCatching { TransactionCategory.valueOf(transaction.category) }
@@ -107,7 +109,10 @@ fun LedgerTransactionRow(
             category = category,
             size = 42.dp,
         )
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             Text(
                 text = transaction.merchant.ifBlank { tr(category.displayName) },
                 style = MaterialTheme.typography.titleMedium,
@@ -136,6 +141,27 @@ fun LedgerTransactionRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+            if (!extraNote.isNullOrBlank() || statusBadge != null) {
+                Row(
+                    modifier = Modifier.padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    statusBadge?.let { (label, tone) ->
+                        SoftBadge(text = label, tone = tone)
+                    }
+                    extraNote?.takeIf { it.isNotBlank() }?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                    }
+                }
             }
         }
         AutoSizeAmountText(

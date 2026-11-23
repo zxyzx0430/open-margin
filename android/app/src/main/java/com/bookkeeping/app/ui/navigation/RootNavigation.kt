@@ -287,6 +287,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                             }
                         },
                         onOpenTransaction = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
+                        onOpenOtherCleanup = { navController.navigate(AppRoutes.MERCHANT_RULES_CLEANUP) },
                     )
                 }
                 // 账单页仍可打开独立导入页；设置页入口在本页弹出导入 / 导出面板。
@@ -365,8 +366,21 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         },
                     )
                 }
-                composable(AppRoutes.MERCHANT_RULES) {
-                    MerchantRulesScreen(onBack = { navController.popBackStack() })
+                composable(
+                    route = AppRoutes.MERCHANT_RULES_ROUTE,
+                    arguments = listOf(
+                        navArgument(AppRoutes.MERCHANT_RULES_CLEANUP_ARG) {
+                            type = NavType.BoolType
+                            defaultValue = false
+                        },
+                    ),
+                ) { backStackEntry ->
+                    val openCleanup = backStackEntry.arguments
+                        ?.getBoolean(AppRoutes.MERCHANT_RULES_CLEANUP_ARG) == true
+                    MerchantRulesScreen(
+                        onBack = { navController.popBackStack() },
+                        initialOpenCleanup = openCleanup,
+                    )
                 }
                 composable(
                     route = BottomNavItem.Settings.route,

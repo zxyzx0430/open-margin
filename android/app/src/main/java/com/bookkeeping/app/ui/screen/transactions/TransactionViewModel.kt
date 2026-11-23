@@ -496,9 +496,12 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
-    fun saveMerchantRule(merchant: String, category: TransactionCategory) {
-        if (merchant.isBlank()) return
-        viewModelScope.launch { settings.rememberMerchantCategory(merchant, category) }
+    fun saveMerchantRule(merchant: String, category: TransactionCategory, updateHistory: Boolean = false) {
+        if (com.bookkeeping.app.data.merchant.isCleanupSingletonMerchant(merchant)) return
+        viewModelScope.launch {
+            if (updateHistory) repository.categorizeOther(merchant, null, category, true)
+            else settings.rememberMerchantCategory(merchant, category)
+        }
     }
 
     fun updateCategory(entity: TransactionEntity, category: TransactionCategory) {

@@ -95,10 +95,13 @@ fun TransactionDetailScreen(
     transactionViewModel: TransactionViewModel = hiltViewModel(),
 ) {
     val transaction by detailViewModel.transaction.collectAsState()
+    val allTransactions by transactionViewModel.allTransactions.collectAsState()
     TransactionDetailScreenContent(
         entry = transaction,
         onBack = onBack,
         onDeleted = onDeleted,
+        historyTransactions = allTransactions,
+        onSaveMerchantRuleWithHistory = { merchant, category, update -> transactionViewModel.saveMerchantRule(merchant, category, update) },
         onSave = { current, fields -> transactionViewModel.saveTransaction(current, fields) },
         onToggleExclude = { current ->
             transactionViewModel.setReviewStatus(
@@ -131,6 +134,8 @@ fun TransactionDetailScreenContent(
     onDelete: (TransactionEntity) -> Unit,
     onConfirmEventTime: (TransactionEntity) -> Unit,
     onUpdateEventTime: (TransactionEntity, Long) -> Unit,
+    historyTransactions: List<TransactionEntity> = emptyList(),
+    onSaveMerchantRuleWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
@@ -216,6 +221,13 @@ fun TransactionDetailScreenContent(
     if (addingRule && entry != null) {
         MerchantRuleDialog(
             merchant = entry.merchant,
+            historyCount = if (onSaveMerchantRuleWithHistory == null) null else { name ->
+                historyTransactions.count { com.bookkeeping.app.data.merchant.matchesOtherMerchant(it, name) }
+            },
+            onSaveWithHistory = onSaveMerchantRuleWithHistory?.let { save -> { name, category, update ->
+                save(name, category, update)
+                addingRule = false
+            } },
             initialCategory = runCatching { TransactionCategory.valueOf(entry.category) }.getOrNull(),
             onDismiss = { addingRule = false },
             onSave = { merchant, category ->

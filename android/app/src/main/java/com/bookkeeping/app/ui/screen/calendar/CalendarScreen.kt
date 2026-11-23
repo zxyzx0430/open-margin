@@ -99,8 +99,10 @@ import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.CalendarDateText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
+import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
+import com.bookkeeping.app.ui.screen.transactions.LedgerTransactionRow
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import java.math.BigInteger
 import java.text.SimpleDateFormat
@@ -1634,70 +1636,31 @@ private fun CalendarTransactionRow(transaction: TransactionEntity, onClick: () -
         else -> null
     }
     val includedInStats = type?.let { StatsTransactionPolicy.matches(transaction, it) } == true
-    val excludedReason = if (includedInStats) {
+    val excludedBadge = if (includedInStats) {
         null
     } else {
         when {
-            transaction.remoteReviewStatus == "refund" -> tr("退款")
+            transaction.remoteReviewStatus == "refund" -> tr("退款") to StatusTone.WARNING
             transaction.remoteReviewStatus == "possible_duplicate" ||
-                transaction.duplicateOfId != null -> tr("待确认重复")
+                transaction.duplicateOfId != null -> tr("待确认重复") to StatusTone.WARNING
             transaction.remoteReviewStatus == "transfer" ||
-                (expense && transaction.category == "TRANSFER") -> tr("转账")
-            else -> tr("不计入")
+                (expense && transaction.category == "TRANSFER") -> tr("转账") to StatusTone.NEUTRAL
+            else -> tr("不计入") to StatusTone.NEUTRAL
         }
     }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(transaction.timestamp)),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = transaction.merchant.ifBlank { tr("未知商户") },
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = transaction.note,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            excludedReason?.let { reason ->
-                Text(
-                    text = reason,
-                    modifier = Modifier
-                        .padding(top = 2.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 5.dp, vertical = 1.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Text(
-            text = (if (expense) "−" else "+") + formatCny(transaction.amountCents),
-            style = MaterialTheme.typography.titleSmall,
-            color = if (expense) {
-                LocalQingSemanticColors.current.expenseText
-            } else {
-                LocalQingSemanticColors.current.income
-            },
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val note = remember(transaction.note) { calendarUserNote(transaction.note).takeIf { it.isNotBlank() } }
+    LedgerTransactionRow(
+        transaction = transaction,
+        timeText = timeFormat.format(Date(transaction.timestamp)),
+        extraNote = note,
+        statusBadge = excludedBadge,
+        onClick = onClick,
+    )
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 4.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
+    )
 }
 
 private fun dayAt(

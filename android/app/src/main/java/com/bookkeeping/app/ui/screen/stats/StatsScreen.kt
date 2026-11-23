@@ -51,6 +51,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -116,6 +117,7 @@ import kotlin.math.abs
 fun StatsScreen(
     onOpenLedger: (StatsLedgerDrilldown) -> Unit = {},
     onOpenTransaction: (Long) -> Unit = {},
+    onOpenOtherCleanup: () -> Unit = {},
     viewModel: StatsViewModel = hiltViewModel(),
 ) {
     val stats by viewModel.categoryStats.collectAsState()
@@ -320,6 +322,14 @@ fun StatsScreen(
             transactions = periodTransactions,
             onDismiss = { selectedCategory = null },
             onOpenLedger = { onOpenLedger(ledgerDrilldown(category = category)) },
+            onOpenOtherCleanup = if (category == TransactionCategory.OTHER) {
+                {
+                    onOpenOtherCleanup()
+                    selectedCategory = null
+                }
+            } else {
+                null
+            },
             onOpenTransaction = { id ->
                 // 先导航、再关面板：导航是同一帧完成的（详情路由无转场动画），
                 // 面板跟着统计页一起离开组合，中间不会露出「面板已关、详情还没来」
@@ -1098,6 +1108,7 @@ private fun CategoryDetailDialog(
     transactions: List<TransactionEntity>,
     onDismiss: () -> Unit,
     onOpenLedger: () -> Unit,
+    onOpenOtherCleanup: (() -> Unit)? = null,
     onOpenTransaction: (Long) -> Unit,
 ) {
     val rows = remember(transactions, category, type) {
@@ -1183,13 +1194,52 @@ private fun CategoryDetailDialog(
                         )
                     }
                 }
-                Button(
-                    onClick = onOpenLedger,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp),
-                ) {
-                    Text(tr("在账单中查看"))
+                if (onOpenOtherCleanup != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onOpenOtherCleanup,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, QingOutline),
+                        ) {
+                            Text(
+                                text = tr("批量整理其他分类"),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Button(
+                            onClick = onOpenLedger,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 46.dp),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text(
+                                text = tr("在账单中查看"),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onOpenLedger,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp)
+                            .heightIn(min = 46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(tr("在账单中查看"))
+                    }
                 }
                 if (rows.isEmpty()) {
                     Box(

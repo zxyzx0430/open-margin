@@ -8,6 +8,7 @@ import com.bookkeeping.app.billexport.BillExport
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.notification.KeepAliveService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,6 +30,7 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val prefs: SettingsPreferences,
     private val transactionDao: TransactionDao,
+    private val repository: TransactionRepository,
 ) : ViewModel() {
 
     val keepAliveEnabled: StateFlow<Boolean> = prefs.observeKeepAliveEnabled()
@@ -55,6 +57,21 @@ class SettingsViewModel @Inject constructor(
             _recentMerchants.value = runCatching {
                 transactionDao.recentMerchants(RECENT_MERCHANT_LIMIT)
             }.getOrDefault(emptyList())
+        }
+    }
+
+    val cleanupTransactions = repository.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun categorizeOther(
+        merchant: String,
+        singleId: Long?,
+        category: TransactionCategory,
+        remember: Boolean,
+        onComplete: (Int) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val updated = repository.categorizeOther(merchant, singleId, category, remember)
+            onComplete(updated)
         }
     }
 
