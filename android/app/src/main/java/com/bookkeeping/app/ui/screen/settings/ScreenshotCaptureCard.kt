@@ -9,7 +9,10 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -95,7 +98,7 @@ internal fun ScreenshotCaptureCard() {
     SettingsGroupCard {
         when (state) {
             ScreenshotWatchController.State.UNSUPPORTED -> SettingsStatusRow(
-                icon = Icons.Filled.Share,
+                icon = Icons.Filled.PhotoCamera,
                 title = tr("自动识别新截图"),
                 subtitle = subtitle,
                 statusText = tr("不可用"),
@@ -103,7 +106,7 @@ internal fun ScreenshotCaptureCard() {
             )
 
             ScreenshotWatchController.State.PERMISSION_MISSING -> SettingsActionRow(
-                icon = Icons.Filled.Share,
+                icon = Icons.Filled.PhotoCamera,
                 title = tr("自动识别新截图"),
                 subtitle = subtitle,
                 trailing = tr("打开系统设置"),
@@ -111,7 +114,7 @@ internal fun ScreenshotCaptureCard() {
             )
 
             ScreenshotWatchController.State.PERMISSION_PARTIAL -> SettingsActionRow(
-                icon = Icons.Filled.Share,
+                icon = Icons.Filled.PhotoCamera,
                 title = tr("自动识别新截图"),
                 subtitle = subtitle,
                 trailing = tr("授权全部照片"),
@@ -120,7 +123,7 @@ internal fun ScreenshotCaptureCard() {
 
             ScreenshotWatchController.State.OFF,
             ScreenshotWatchController.State.ACTIVE -> SettingsSwitchRow(
-                icon = Icons.Filled.Share,
+                icon = Icons.Filled.PhotoCamera,
                 title = tr("自动识别新截图"),
                 subtitle = subtitle,
                 checked = state == ScreenshotWatchController.State.ACTIVE,
@@ -137,7 +140,7 @@ internal fun ScreenshotCaptureCard() {
         }
         SettingsRowDivider()
         SettingsActionRow(
-            icon = Icons.Filled.Share,
+            icon = Icons.Filled.PhotoLibrary,
             title = tr("从相册选截图"),
             subtitle = tr("支持批量导入微信 / 支付宝交易截图，单次最多 10 张"),
             onClick = {
@@ -149,7 +152,7 @@ internal fun ScreenshotCaptureCard() {
         }
         SettingsRowDivider()
         SettingsActionRow(
-            icon = Icons.Filled.Share,
+            icon = Icons.Filled.Folder,
             title = tr("扫描原图保留"),
             subtitle = if (retentionMode == ReceiptEvidenceSettings.RetentionMode.FOREVER) {
                 tr("永久保留")
@@ -173,7 +176,7 @@ internal fun ScreenshotCaptureCard() {
         var confirmingClearEvidence by remember { mutableStateOf(false) }
         SettingsRowDivider()
         SettingsActionRow(
-            icon = Icons.Filled.Share,
+            icon = Icons.Filled.Delete,
             title = tr("清理扫描原图缓存"),
             subtitle = if (evidenceBytes > 0L) {
                 tr("当前约 %s · 仅清理本地归档原图，不影响账单记录")

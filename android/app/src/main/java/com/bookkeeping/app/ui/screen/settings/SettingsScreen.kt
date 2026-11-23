@@ -57,6 +57,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -112,6 +113,10 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Sms
@@ -143,7 +148,7 @@ fun SettingsScreen(
     onReplayOnboarding: () -> Unit = {},
     openAutomationSetup: Boolean = false,
     onAutomationOpened: () -> Unit = {},
-    // 账单页横幅的「查看」：滚到「关于与更新」卡片。
+    // 账单页横幅的「查看」：滚到最后的「关于与更新」卡片。
     focusUpdateCard: Boolean = false,
     onUpdateCardFocused: () -> Unit = {},
 ) {
@@ -200,13 +205,12 @@ fun SettingsScreen(
     var exportFeedback by remember { mutableStateOf<String?>(null) }
     var exportInProgress by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
+    var permissionsExpanded by rememberSaveable { mutableStateOf(false) }
     val settingsListState = rememberLazyListState()
 
     LaunchedEffect(focusUpdateCard) {
         if (focusUpdateCard) {
-            // The about card is the third item from the end (section header,
-            // card, then the ROM header/card). Deriving the index from the
-            // current list avoids a hard-coded position drifting.
+            // 关于与更新卡片是列表最后一项，分组重排也不会影响目标位置。
             delay(200)
             var total = settingsListState.layoutInfo.totalItemsCount
             var attempts = 0
@@ -215,7 +219,7 @@ fun SettingsScreen(
                 total = settingsListState.layoutInfo.totalItemsCount
                 attempts++
             }
-            val target = if (total >= 3) total - 3 else 0
+            val target = (total - 1).coerceAtLeast(0)
             runCatching { settingsListState.animateScrollToItem(target) }
             onUpdateCardFocused()
         }
@@ -323,42 +327,83 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item { SectionHeader(tr("权限与运行状态")) }
-            item {
-                PermissionStatusGroup(
-                    postNotificationsGranted = postNotificationsGranted,
-                    notificationEnabled = notificationEnabled,
-                    pageRecognitionEnabled = pageRecognitionEnabled,
-                    smsGranted = smsGranted,
-                    accessibilityHealth = accessibilityHealth,
-                    onOpenSystemNotifications = { openAppNotificationSettings(context) },
-                    onOpenNotificationSettings = {
-                        NotificationListenerHelper.openSettings(context)
-                    },
-                    onOpenPageRecognitionSettings = {
-                        runCatching {
-                            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                        }
-                    },
-                    onOpenAccessibilityDetails = { detailDialog = "accessibility" },
-                    onOpenSmsSettings = { openAppDetailsSettings(context) },
-                )
+            item(key = "status_overview") {
+                val needsAttention = !notificationEnabled || pendingConflicts > 0
+                val overviewSubtitle = when {
+                    pendingConflicts > 0 -> tr("%d 笔同步冲突待处理").format(pendingConflicts)
+                    !notificationEnabled -> tr("通知使用权未开启，自动采集不可用")
+                    !postNotificationsGranted -> tr("通知采集已授权，系统提醒未开启")
+                    else -> tr("通知采集权限已就绪")
+                }
+                SettingsGroupCard {
+                    SettingsStatusRow(
+                        icon = if (needsAttention) Icons.Filled.Warning else Icons.Filled.Notifications,
+                        title = tr("采集与同步状态"),
+                        subtitle = overviewSubtitle,
+                        statusText = if (needsAttention) tr("待处理") else tr("已就绪"),
+                        tone = if (needsAttention) StatusTone.WARNING else StatusTone.POSITIVE,
+                        onClick = { permissionsExpanded = !permissionsExpanded },
+                    )
+                    if (pendingConflicts > 0) {
+                        SettingsRowDivider()
+                        SettingsStatusRow(
+                            icon = Icons.Filled.Warning,
+                            title = tr("同步冲突"),
+                            subtitle = tr("逐笔核对后继续同步"),
+                            statusText = tr("%d 笔").format(pendingConflicts),
+                            tone = StatusTone.WARNING,
+                            onClick = onOpenPendingConflicts,
+                        )
+                    }
+                    if (permissionsExpanded) {
+                        SettingsRowDivider()
+                        PermissionStatusGroup(
+                            postNotificationsGranted = postNotificationsGranted,
+                            notificationEnabled = notificationEnabled,
+                            pageRecognitionEnabled = pageRecognitionEnabled,
+                            smsGranted = smsGranted,
+                            accessibilityHealth = accessibilityHealth,
+                            onOpenSystemNotifications = { openAppNotificationSettings(context) },
+                            onOpenNotificationSettings = {
+                                NotificationListenerHelper.openSettings(context)
+                            },
+                            onOpenPageRecognitionSettings = {
+                                runCatching {
+                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                                }
+                            },
+                            onOpenAccessibilityDetails = { detailDialog = "accessibility" },
+                            onOpenSmsSettings = { openAppDetailsSettings(context) },
+                        )
+                    }
+                }
             }
-            item { SectionHeader(tr("截图记账")) }
-            item { ScreenshotCaptureCard() }
 
+            item { SectionHeader(tr("记账与采集")) }
+            item { ScreenshotCaptureCard() }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
                         icon = Icons.Filled.Notifications,
-                        title = tr("自动记账设置"),
-                        subtitle = tr("通知、页面识别与无障碍回退的开启向导"),
+                        title = tr("自动记账向导"),
+                        subtitle = tr("通知、页面识别和无障碍配置"),
                         onClick = { detailDialog = "automation" },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Store,
+                        title = tr("商户分类记忆"),
+                        subtitle = if (merchantRules.isEmpty()) {
+                            tr("修改分类即记住")
+                        } else {
+                            merchantRules.size.toString() + " " + tr("个商户")
+                        },
+                        onClick = onOpenMerchantRules,
                     )
                 }
             }
 
-            item { SectionHeader(tr("同步")) }
+            item { SectionHeader(tr("数据与同步")) }
             item {
                 SyncOverviewGroup(
                     enabled = syncEnabled,
@@ -371,8 +416,6 @@ fun SettingsScreen(
                     onOpenPendingConflicts = onOpenPendingConflicts,
                 )
             }
-
-            item { SectionHeader(tr("账单导入")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -386,7 +429,7 @@ fun SettingsScreen(
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
-                        icon = Icons.Filled.Info,
+                        icon = Icons.Filled.HelpOutline,
                         title = tr("微信 / 支付宝导出账单教程"),
                         subtitle = tr("两分钟导出 CSV"),
                         onClick = { showExportGuide = true },
@@ -394,35 +437,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("自动分类")) }
-            item {
-                SettingsGroupCard {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Sync,
-                        title = tr("商户分类记忆"),
-                        subtitle = if (merchantRules.isEmpty()) {
-                            tr("修改分类即记住")
-                        } else {
-                            merchantRules.size.toString() + " " + tr("个商户")
-                        },
-                        onClick = onOpenMerchantRules,
-                    )
-                }
-            }
-
-            item { SectionHeader(tr("诊断日志")) }
-            item {
-                SettingsGroupCard {
-                    SettingsActionRow(
-                        icon = Icons.Filled.Info,
-                        title = tr("账单诊断日志"),
-                        subtitle = tr("本机保存 7 天"),
-                        onClick = onOpenTransactionDiagnostics,
-                    )
-                }
-            }
-
-            item { SectionHeader(tr("提醒与语言")) }
+            item { SectionHeader(tr("偏好设置")) }
             item {
                 SettingsGroupCard {
                     SettingsSwitchRow(
@@ -442,7 +457,7 @@ fun SettingsScreen(
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
-                        icon = Icons.Filled.Sync,
+                        icon = Icons.Filled.Cloud,
                         title = tr("常驻状态详情"),
                         subtitle = tr("连接状态与通知排查"),
                         onClick = { detailDialog = "keepAlive" },
@@ -451,33 +466,36 @@ fun SettingsScreen(
             }
             item { LanguageCard() }
 
+            item { SectionHeader(tr("诊断与关于")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
-                        icon = Icons.Filled.Info,
-                        title = tr("重看引导"),
-                        subtitle = tr("再次查看清衡的主要功能"),
-                        onClick = onReplayOnboarding,
+                        icon = Icons.Filled.BugReport,
+                        title = tr("账单诊断日志"),
+                        subtitle = tr("本机保存 7 天"),
+                        onClick = onOpenTransactionDiagnostics,
                     )
-                }
-            }
-
-            item { SectionHeader(tr("关于与更新")) }
-            item { AboutUpdateCard(
-                onOpenAbout = { detailDialog = "about" },
-                onOpenFeedback = { detailDialog = "feedback" },
-            ) }
-
-            item { SectionHeader(tr("国产 ROM 后台白名单")) }
-            item {
-                SettingsGroupCard {
+                    SettingsRowDivider()
                     SettingsActionRow(
                         icon = Icons.Filled.Warning,
                         title = tr("后台运行设置"),
                         subtitle = tr("自启动与省电策略"),
                         onClick = { detailDialog = "rom" },
                     )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.HelpOutline,
+                        title = tr("重看引导"),
+                        subtitle = tr("再次查看清衡的主要功能"),
+                        onClick = onReplayOnboarding,
+                    )
                 }
+            }
+            item(key = "about_update") {
+                AboutUpdateCard(
+                    onOpenAbout = { detailDialog = "about" },
+                    onOpenFeedback = { detailDialog = "feedback" },
+                )
             }
 
         }
@@ -699,7 +717,7 @@ private fun PermissionStatusGroup(
     }
     // 副标题只写功能，不再追加「上次断开（原因）」：那是诊断信息，详情在无障碍诊断页。
     val accessibilitySubtitle = tr("转账与红包入账")
-    SettingsGroupCard {
+    Column {
         SettingsStatusRow(
             icon = Icons.Filled.Notifications,
             title = tr("系统通知"),

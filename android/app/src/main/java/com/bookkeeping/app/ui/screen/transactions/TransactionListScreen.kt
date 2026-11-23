@@ -109,6 +109,7 @@ import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.VoiceFab
+import com.bookkeeping.app.capture.screenshot.ScreenshotImportActivity
 import com.bookkeeping.app.ui.components.VoiceHintBubble
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.formatCny
@@ -404,6 +405,16 @@ fun TransactionListScreen(
                             addDialogDiagnosticAttemptId = null
                             showAddDialog = true
                         },
+                        onDoubleTap = {
+                            dismissVoiceHint()
+                            runCatching {
+                                context.startActivity(ScreenshotImportActivity.intent(context))
+                            }.onFailure {
+                                android.widget.Toast.makeText(
+                                    context, tr("无法打开截图导入"), android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
                         // 达到长按阈值：立刻打开面板并开始录音（不等松手）。
                         onLongPressStart = {
                             dismissVoiceHint()
@@ -418,7 +429,7 @@ fun TransactionListScreen(
                     )
                     if (showVoiceHint) {
                         VoiceHintBubble(
-                            text = tr("长按开始说话，点停止结束"),
+                            text = tr("点一下记一笔 · 双击导截图 · 长按说话记账"),
                             onDismiss = dismissVoiceHint,
                         )
                     }

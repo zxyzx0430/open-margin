@@ -8,6 +8,7 @@ import com.bookkeeping.app.data.budget.BudgetPreferences
 import com.bookkeeping.app.data.budget.BudgetSettings
 import com.bookkeeping.app.data.budget.BudgetSummary
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -56,14 +57,7 @@ class BudgetViewModel @Inject constructor(
         .flatMapLatest { month ->
             val (start, end) = BudgetMonth.range(month)
             transactionRepository.observeBetween(start, end).map { txs ->
-                txs.filter {
-                    it.type == TransactionType.EXPENSE.name && it.currency == "CNY" &&
-                        it.duplicateOfId == null &&
-                        it.remoteReviewStatus !in setOf(
-                            "excluded", "transfer", "refund", "possible_duplicate",
-                        ) &&
-                        it.category != "TRANSFER"
-                }
+                txs.filter { it.countsAsBudgetExpense() }
                     .groupBy {
                         runCatching { TransactionCategory.valueOf(it.category) }
                             .getOrDefault(TransactionCategory.OTHER)
@@ -72,6 +66,23 @@ class BudgetViewModel @Inject constructor(
             }.onEach { _expenseMonthLoaded.value = month }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** 上一月有效的 CNY 支出，只作为建议值；月份切换时不展示旧月缓存。 */
+    val previousMonthExpenseReference: StateFlow<PreviousMonthExpenseReference> = _selectedMonth
+        .flatMapLatest { month ->
+            val (start, end) = BudgetMonth.range(BudgetMonth.previousKey(month))
+            transactionRepository.observeBetween(start, end).map { txs ->
+                PreviousMonthExpenseReference(
+                    targetMonth = month,
+                    amountCents = txs.filter { it.countsAsBudgetExpense() }.sumOf { it.amountCents },
+                )
+            }
+        }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            PreviousMonthExpenseReference("", 0L),
+        )
 
     val totalExpenseCents: StateFlow<Long> = expenseByCategory
         .map { it.values.sum() }
@@ -133,3 +144,13 @@ class BudgetViewModel @Inject constructor(
         const val MAX_CATEGORY_BUDGET_YUAN = 1_000_000.0
     }
 }
+
+data class PreviousMonthExpenseReference(val targetMonth: String, val amountCents: Long)
+
+/** 与本月预算支出合计使用同一套排除规则，避免参考预算偏大。 */
+private fun TransactionEntity.countsAsBudgetExpense(): Boolean =
+    type == TransactionType.EXPENSE.name &&
+        currency == "CNY" &&
+        duplicateOfId == null &&
+        remoteReviewStatus !in setOf("excluded", "transfer", "refund", "possible_duplicate") &&
+        category != "TRANSFER"

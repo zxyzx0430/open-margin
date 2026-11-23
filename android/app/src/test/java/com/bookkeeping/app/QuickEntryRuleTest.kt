@@ -26,9 +26,27 @@ class QuickEntryRuleTest {
     }
 
     @Test
-    fun voiceTriggersAtOneSecondAndNotBefore() {
+    fun voiceTriggersAt750msAndNotBefore() {
         assertFalse(QuickEntryRule.isLongEnough(749L))
         assertTrue(QuickEntryRule.isLongEnough(750L))
+    }
+
+    @Test
+    fun visualFeedbackStartsAfter100msButVoiceStillStartsAt750ms() {
+        assertEquals(0f, QuickEntryRule.visualRingProgress(99L), 0.0001f)
+        assertEquals(0f, QuickEntryRule.visualRingProgress(100L), 0.0001f)
+        assertTrue(QuickEntryRule.visualRingProgress(250L) > 0f)
+        assertEquals(1f, QuickEntryRule.visualRingProgress(750L), 0.0001f)
+        assertTrue(QuickEntryRule.isLongEnough(750L))
+    }
+
+    @Test
+    fun secondTapNeeds280msAndNearbyPosition() {
+        assertTrue(QuickEntryRule.isSecondTap(1000, 1280, 7f, 15f))
+        assertFalse(QuickEntryRule.isSecondTap(1000, 1281, 7f, 15f))
+        assertFalse(QuickEntryRule.isSecondTap(1000, 1080, 16f, 15f))
+        assertFalse(QuickEntryRule.isSecondTap(1000, 999, 7f, 15f))
+        assertFalse(QuickEntryRule.isSecondTap(-1, 1080, 7f, 15f))
     }
 
     @Test

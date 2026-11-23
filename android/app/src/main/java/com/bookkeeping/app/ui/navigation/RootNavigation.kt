@@ -353,7 +353,18 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 composable(
                     route = BottomNavItem.Budget.route,
                     popEnterTransition = { EnterTransition.None },
-                ) { BudgetScreen() }
+                ) {
+                    BudgetScreen(
+                        onOpenLedger = { drilldown ->
+                            pendingLedgerDrilldown = drilldown
+                            navController.navigate(BottomNavItem.Transactions.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                    )
+                }
                 composable(AppRoutes.MERCHANT_RULES) {
                     MerchantRulesScreen(onBack = { navController.popBackStack() })
                 }
