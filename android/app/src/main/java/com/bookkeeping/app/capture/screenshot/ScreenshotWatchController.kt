@@ -12,7 +12,6 @@ import android.os.Looper
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,18 +34,10 @@ object ScreenshotWatchController {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var observer: ContentObserver? = null
-    @Volatile private var startedAtMs = 0L
 
     /** Only one fallback scan at a time; the next trigger calls it again. */
     private val catchingUp = AtomicBoolean(false)
-
-    /**
-     * Ids the observer path is ingesting right now. The fallback scan still
-     * advances its watermark past them (the observer owns them) but must not
-     * OCR the same image twice, which would also write a "repeat image"
-     * warning into the diagnostics of every screenshot.
-     */
-    private val inFlight: MutableSet<Long> = ConcurrentHashMap.newKeySet<Long>()
+    private val catchUpAgain = AtomicBoolean(false)
 
     fun state(context: Context): State {
         val state = ScreenshotWatchPermissionPolicy.state(
@@ -67,14 +58,11 @@ object ScreenshotWatchController {
             return
         }
         if (observer != null) return
-        startedAtMs = System.currentTimeMillis()
         val handler = Handler(Looper.getMainLooper())
         val contentObserver = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
-                // 有的 ROM 只回调集合 URI（uri == null）：那条通知里没有 _ID，
-                // 兜底扫描就是唯一能认出这张新截图的路径。
-                if (uri != null) handleCandidate(appContext, uri)
-                // 顺手补一遍落下的 _ID：这次回调能到，不代表上一次回调也到过。
+                // Some ROMs only report a collection URI. A single sequential
+                // catch-up avoids observer/worker races and OCRing the same id twice.
                 catchUp(appContext)
             }
         }
@@ -117,12 +105,20 @@ object ScreenshotWatchController {
     fun catchUp(context: Context) {
         val appContext = context.applicationContext
         if (state(appContext) != State.ACTIVE) return
-        if (!catchingUp.compareAndSet(false, true)) return
+        if (!catchingUp.compareAndSet(false, true)) {
+            catchUpAgain.set(true)
+            return
+        }
         scope.launch {
             try {
-                runCatching { scanMissed(appContext) }
+                do {
+                    catchUpAgain.set(false)
+                    runCatching { scanMissed(appContext) }
+                } while (catchUpAgain.getAndSet(false))
             } finally {
                 catchingUp.set(false)
+                // Catch the race between the last scan and clearing catchingUp.
+                if (catchUpAgain.getAndSet(false)) catchUp(appContext)
             }
         }
     }
@@ -152,23 +148,20 @@ object ScreenshotWatchController {
         var skipped = 0
         var unreadableRetries = 0
         var unreadRows = 0
+        var watermark = lastScannedId
         for (id in ids) {
-            // 观察者正在处理这一张：它归观察者，水位照常推进，但不重复 OCR。
-            if (id in inFlight) {
-                ScreenshotWatchSettings.setLastScannedId(context, id)
-                skipped++
-                continue
-            }
             // 只有真的读到这一行才推进水位；读不到（相册行还没落盘）就留着下次再试，
             // 后面的 _ID 照常前进，不会因为一张坏行把整个监听卡死。
-            val result = runCatching { ingestNow(context, id, enforceFreshness = false) }
+            val result = runCatching { ingestNow(context, id) }
                 .getOrElse { IngestAttemptResult(read = false, disposition = "error", detail = it.javaClass.simpleName) }
             if (result.read) {
-                ScreenshotWatchSettings.setLastScannedId(context, id)
+                watermark = watermarkAfterMediaRow(watermark, id, result.read)
+                ScreenshotWatchSettings.setLastScannedId(context, watermark)
                 if (result.ingested) scanned++ else skipped++
                 if (result.retriedUnreadable) unreadableRetries++
             } else {
                 unreadRows++
+                break // preserve contiguous watermark until pending row is complete
             }
         }
         ServiceHealthLog.record(
@@ -178,32 +171,6 @@ object ScreenshotWatchController {
             summary = "相册补扫 $lastScannedId->$maxId: scanned=$scanned, skipped=$skipped, retry=$unreadableRetries",
             detail = if (unreadRows > 0) "unread=$unreadRows" else null,
         )
-    }
-
-    private fun handleCandidate(context: Context, uri: Uri) {
-        val id = runCatching { ContentUris.parseId(uri) }.getOrNull() ?: return
-        inFlight.add(id)
-        scope.launch {
-            try {
-                val result = runCatching { ingestNow(context, id, enforceFreshness = true) }
-                    .getOrElse { IngestAttemptResult(read = false, disposition = "error", detail = it.javaClass.simpleName) }
-                if (result.read) {
-                    val current = ScreenshotWatchSettings.lastScannedId(context)
-                    if (current == null || id > current) {
-                        ScreenshotWatchSettings.setLastScannedId(context, id)
-                    }
-                }
-                ServiceHealthLog.record(
-                    context = context,
-                    channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
-                    event = ServiceHealthLog.EVENT_CANDIDATE_INTAKE,
-                    summary = "相册新图 id=$id: ${result.disposition}",
-                    detail = result.detail,
-                )
-            } finally {
-                inFlight.remove(id)
-            }
-        }
     }
 
     private data class IngestAttemptResult(
@@ -223,10 +190,13 @@ object ScreenshotWatchController {
      * "did not import" was a decision and not a missing row; the fallback scan
      * only advances its watermark on a read row.
      */
-    private suspend fun ingestNow(context: Context, id: Long, enforceFreshness: Boolean): IngestAttemptResult {
+    private suspend fun ingestNow(context: Context, id: Long): IngestAttemptResult {
         val contentUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
         val row = readRow(context, contentUri)
             ?: return IngestAttemptResult(read = false, disposition = "row_missing")
+        if (!isMediaRowReady(row.isPending)) {
+            return IngestAttemptResult(read = false, disposition = "pending")
+        }
         if (!looksLikeScreenshot(row.name, row.relativePath)) {
             return IngestAttemptResult(read = true, disposition = "skipped_non_screenshot")
         }
@@ -234,12 +204,6 @@ object ScreenshotWatchController {
         // 否则「未同步」会被当成商户名生成一张假候选。
         if (isOwnAppScreenshot(row.name, context.packageName)) {
             return IngestAttemptResult(read = true, disposition = "skipped_own_app")
-        }
-        // Only the observer path uses the time gate; a delayed callback for a
-        // stale row must not be imported retroactively. The fallback scan has
-        // the `_ID` watermark instead and must not be blocked by wall-clock.
-        if (enforceFreshness && row.addedAtMs > 0 && row.addedAtMs < startedAtMs - GRACE_MS) {
-            return IngestAttemptResult(read = true, disposition = "skipped_stale")
         }
         var retried = false
         val finalOutcome = ScreenshotIntakeCoordinator(context).use { coordinator ->
@@ -270,23 +234,22 @@ object ScreenshotWatchController {
     private data class ImageRow(
         val name: String?,
         val relativePath: String?,
-        val addedAtMs: Long,
+        val isPending: Int,
     )
 
     private fun readRow(context: Context, uri: Uri): ImageRow? {
         val projection = mutableListOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.DATE_ADDED,
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             projection += MediaStore.Images.Media.RELATIVE_PATH
+            projection += MediaStore.Images.Media.IS_PENDING
         }
         return runCatching {
-            context.contentResolver.query(uri, projection.toTypedArray(), null, null, null)?.use {
+            context.contentResolver.query(includePending(uri), projection.toTypedArray(), null, null, null)?.use {
                 if (!it.moveToFirst()) return@use null
                 val nameIndex = it.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
-                val dateIndex = it.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
                 val pathIndex = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     it.getColumnIndex(MediaStore.Images.Media.RELATIVE_PATH)
                 } else {
@@ -295,13 +258,20 @@ object ScreenshotWatchController {
                 ImageRow(
                     name = if (nameIndex >= 0) it.getString(nameIndex) else null,
                     relativePath = if (pathIndex >= 0) it.getString(pathIndex) else null,
-                    addedAtMs = if (dateIndex >= 0) it.getLong(dateIndex) * 1000 else 0L,
+                    isPending = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        it.getColumnIndex(MediaStore.Images.Media.IS_PENDING)
+                            .takeIf { index -> index >= 0 }?.let { index -> it.getInt(index) } ?: 0
+                    } else 0,
                 )
             }
         }.getOrNull()
     }
 
     /** Highest image `_ID` currently in MediaStore, or null when the query fails. */
+    @Suppress("DEPRECATION")
+    private fun includePending(uri: Uri): Uri =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) MediaStore.setIncludePending(uri) else uri
+
     private fun maxImageId(context: Context): Long? = runCatching {
         context.contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -315,7 +285,7 @@ object ScreenshotWatchController {
     /** Ids above the watermark, oldest first; capped so one scan stays bounded. */
     private fun imageIdsAfter(context: Context, lastScannedId: Long): List<Long> = runCatching {
         context.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            includePending(MediaStore.Images.Media.EXTERNAL_CONTENT_URI),
             arrayOf(MediaStore.Images.Media._ID),
             "${MediaStore.Images.Media._ID} > ?",
             arrayOf(lastScannedId.toString()),
@@ -330,7 +300,8 @@ object ScreenshotWatchController {
     /** Folder or file name must say "screenshot"; plain camera photos are skipped. */
     fun looksLikeScreenshot(name: String?, relativePath: String?): Boolean {
         val haystack = "${name.orEmpty()} ${relativePath.orEmpty()}".lowercase()
-        return SCREENSHOT_HINTS.any(haystack::contains)
+        return SCREENSHOT_HINTS.any(haystack::contains) ||
+            name.orEmpty().startsWith("SVID_", ignoreCase = true)
     }
 
     private fun permission(context: Context): ScreenshotWatchPermissionPolicy.Access {
@@ -361,7 +332,6 @@ object ScreenshotWatchController {
     }
 
     private val SCREENSHOT_HINTS = listOf("screenshot", "screen_shot", "screencap", "截图", "屏幕截图")
-    private const val GRACE_MS = 30_000L
     /** Reading more than this from a burst is pointless: one scan imports five. */
     private const val MAX_QUERY_ROWS = 64
 }
@@ -371,6 +341,12 @@ object ScreenshotWatchController {
  * baseline watermark, so this cap is about bursts, not about the album.
  */
 internal const val MAX_CATCH_UP_IMAGES = 5
+
+/** Pending images are not readable and must never advance the watermark. */
+internal fun isMediaRowReady(isPending: Int): Boolean = isPending != 1
+
+internal fun watermarkAfterMediaRow(previous: Long, rowId: Long, read: Boolean): Long =
+    if (read && rowId > previous) rowId else previous
 
 /** The applicationId prefix shared by the Play, GitHub and `.sync2` builds. */
 private const val OWN_PACKAGE_PREFIX = "com.bookkeeping.app"

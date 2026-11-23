@@ -56,6 +56,8 @@ class UpdateInstallActivity : Activity() {
             }
             UpdateInstallFlow.InstallOutcome.NO_INSTALLER ->
                 toast("没有找到系统安装程序，请用文件管理器打开下载的 APK")
+            UpdateInstallFlow.InstallOutcome.NO_SPACE ->
+                toast("存储空间不足，请清理空间后重新安装")
         }
         finish()
     }

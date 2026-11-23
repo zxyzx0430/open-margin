@@ -8,6 +8,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.StatFs
+import android.os.SystemClock
+import com.bookkeeping.app.rom.RomSettingsLauncher
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
@@ -46,12 +49,27 @@ object UpdateInstallFlow {
         SIZE_MISMATCH,
         DIGEST_MISMATCH,
         SIGNATURE_MISMATCH,
+        NO_SPACE,
+        DOWNLOAD_STALLED,
     }
+
+    class InsufficientStorageException : IllegalStateException("not enough space for APK")
 
     enum class InstallOutcome {
         OPENED_INSTALLER,
         NEEDS_PERMISSION,
         NO_INSTALLER,
+        NO_SPACE,
+    }
+
+    private const val INSTALL_RESERVE_BYTES = 64L * 1024L * 1024L
+    private const val STALLED_DOWNLOAD_MS = 5L * 60L * 1000L
+
+    private fun hasSpace(directory: File?, apkBytes: Long): Boolean {
+        if (directory == null || apkBytes <= 0L) return false
+        val available = runCatching { StatFs(directory.absolutePath).availableBytes }.getOrNull()
+            ?: return true // Do not block downloads on a broken OEM StatFs.
+        return available >= apkBytes + maxOf(apkBytes, INSTALL_RESERVE_BYTES)
     }
 
     /** App-private location: no WRITE_EXTERNAL_STORAGE, no public Downloads folder. */
@@ -107,6 +125,9 @@ object UpdateInstallFlow {
         // DownloadManager refuses to start when the destination already exists.
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?: return Result.failure(IllegalStateException("external files dir unavailable"))
+        if (!hasSpace(dir, update.apkSizeBytes)) {
+            return Result.failure(InsufficientStorageException())
+        }
         val target = File(dir, name)
         if (target.exists() && !target.delete()) {
             return Result.failure(IllegalStateException("could not replace existing apk"))
@@ -140,10 +161,23 @@ object UpdateInstallFlow {
             emit(DownloadEvent.Failed(Failure.NO_DOWNLOAD_MANAGER))
             return@flow
         }
+        var lastProgressAt = SystemClock.elapsedRealtime()
+        var maxDownloadedBytes = -1L
         while (true) {
             val status = query(manager, downloadId)
             if (status == null) {
                 emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+                return@flow
+            }
+            val nowElapsed = SystemClock.elapsedRealtime()
+            if (status.downloadedBytes > maxDownloadedBytes) {
+                maxDownloadedBytes = status.downloadedBytes
+                lastProgressAt = nowElapsed
+            } else if (status.state != DownloadManager.STATUS_SUCCESSFUL &&
+                status.state != DownloadManager.STATUS_FAILED &&
+                nowElapsed - lastProgressAt >= STALLED_DOWNLOAD_MS
+            ) {
+                emit(DownloadEvent.Failed(Failure.DOWNLOAD_STALLED))
                 return@flow
             }
             when (status.state) {
@@ -174,7 +208,9 @@ object UpdateInstallFlow {
                     return@flow
                 }
                 DownloadManager.STATUS_FAILED -> {
-                    emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+                    emit(DownloadEvent.Failed(if (status.reason == DownloadManager.ERROR_INSUFFICIENT_SPACE) {
+                        Failure.NO_SPACE
+                    } else Failure.DOWNLOAD_FAILED))
                     return@flow
                 }
                 else -> emit(DownloadEvent.Running(status.percent))
@@ -195,10 +231,13 @@ object UpdateInstallFlow {
             Uri.parse("package:" + context.packageName),
         )
         if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { context.startActivity(intent) }.isSuccess
+        return runCatching { context.startActivity(intent) }.isSuccess ||
+            RomSettingsLauncher.openAppDetails(context)
     }
 
     fun openInstaller(context: Context, apk: File): InstallOutcome {
+        if (!apk.isFile) return InstallOutcome.NO_INSTALLER
+        if (!hasSpace(apk.parentFile, apk.length())) return InstallOutcome.NO_SPACE
         if (!hasInstallPermission(context)) return InstallOutcome.NEEDS_PERMISSION
         val uri = runCatching {
             FileProvider.getUriForFile(context, context.packageName + AUTHORITY_SUFFIX, apk)
@@ -218,7 +257,9 @@ object UpdateInstallFlow {
         }
     }
 
-    private data class DownloadStatus(val state: Int, val percent: Int?)
+    private data class DownloadStatus(
+        val state: Int, val percent: Int?, val downloadedBytes: Long, val reason: Int,
+    )
 
     private fun query(manager: DownloadManager, id: Long): DownloadStatus? {
         val cursor = runCatching {
@@ -235,7 +276,8 @@ object UpdateInstallFlow {
             } else {
                 null
             }
-            return DownloadStatus(state, percent)
+            val reason = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+            return DownloadStatus(state, percent, downloaded, reason)
         }
     }
 }

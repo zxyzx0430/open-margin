@@ -42,6 +42,8 @@ import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.CaptureHealthSnapshot
 import com.bookkeeping.app.notification.CaptureUptime
 import com.bookkeeping.app.notification.KeepAliveService
+import com.bookkeeping.app.rom.RomSettingsKind
+import com.bookkeeping.app.rom.RomSettingsLauncher
 import com.bookkeeping.app.ui.components.StatusDot
 import com.bookkeeping.app.ui.components.StatusTone
 import kotlinx.coroutines.Dispatchers
@@ -228,6 +230,7 @@ private fun ConnectionStatusBlock(
 /** 折叠排障：默认收起，点开后三条短句，不再写整段说明。 */
 @Composable
 private fun KeepAliveTroubleshooting() {
+    val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -256,6 +259,12 @@ private fun KeepAliveTroubleshooting() {
                 HelpBullet(tr("允许「常驻 / 持续通知」"))
                 HelpBullet(tr("小米 / Redmi / POCO：应用信息 → 通知 → 永久通知"))
                 HelpBullet(tr("开启自启动，电池策略设为「无限制」"))
+                FilledTonalButton(
+                    onClick = { RomSettingsLauncher.open(context, RomSettingsKind.AUTOSTART) },
+                ) { Text(tr("打开自启动管理")) }
+                FilledTonalButton(
+                    onClick = { RomSettingsLauncher.open(context, RomSettingsKind.BATTERY) },
+                ) { Text(tr("打开后台耗电设置")) }
             }
         }
     }

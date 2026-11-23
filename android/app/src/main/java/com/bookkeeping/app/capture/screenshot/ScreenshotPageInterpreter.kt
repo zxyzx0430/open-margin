@@ -39,6 +39,22 @@ object ScreenshotPageInterpreter {
     const val PAGE_LIST = "BILL_LIST"
     const val PAGE_UNKNOWN = "UNKNOWN"
 
+    /**
+     * File names are unreliable on ColorOS, HarmonyOS and OriginOS.
+     * Recognize the app shell by two independent UI clues, not a payment word.
+     */
+    internal fun isOwnAppPageText(lines: List<String>): Boolean {
+        val full = lines.joinToString(" ").lowercase()
+        val appName = full.contains("清衡") || full.contains("open margin")
+        val chrome = listOf(
+            "自动记账向导", "记账与采集", "数据与同步", "账单诊断日志",
+            "商户分类记忆", "常驻运行状态", "待核对", "记一笔",
+            "同步冲突", "偏好设置",
+        )
+        val found = chrome.count { full.contains(it) }
+        return (appName && found >= 1) || found >= 3
+    }
+
     private val WECHAT_MARKERS = listOf(
         "微信支付", "微信", "零钱", "转账给", "收款方", "付款给", "当前状态", "支付分",
     )
@@ -222,6 +238,15 @@ object ScreenshotPageInterpreter {
                 transactionLike = false,
                 drafts = emptyList(),
                 reason = "no text recognised",
+            )
+        }
+        if (isOwnAppPageText(ordered.map { it.text })) {
+            return ScreenshotPageEvidence(
+                platform = CaptureCandidate.PLATFORM_UNKNOWN,
+                pageType = PAGE_UNKNOWN,
+                transactionLike = false,
+                drafts = emptyList(),
+                reason = "own app chrome, not a payment page",
             )
         }
         // Footer statistics, promo banners and phone status-bar chrome belong to the shell, not to the transaction.
