@@ -201,8 +201,12 @@ class ScreenshotImportActivity : ComponentActivity() {
                         entry = byId[activeDetailId],
                         historyTransactions = allTransactions,
                         onSaveMerchantRuleWithHistory = { merchant, category, update ->
-                            if (update) scope.launch { repository?.categorizeOther(merchant, null, category, true) }
-                            else saveMerchantRule(merchant, category)
+                            val repo = repository
+                            if (update && repo != null) {
+                                scope.launch { repo.categorizeOther(merchant, null, category, true) }
+                            } else {
+                                saveMerchantRule(merchant, category)
+                            }
                         },
                         onBack = { selectedTransactionId.value = null },
                         onDeleted = { selectedTransactionId.value = null },
@@ -588,7 +592,7 @@ class ScreenshotImportActivity : ComponentActivity() {
     }
 
     private fun saveMerchantRule(merchant: String, category: TransactionCategory) {
-        if (merchant.isBlank()) return
+        if (com.bookkeeping.app.data.merchant.isCleanupSingletonMerchant(merchant)) return
         scope.launch { settings.rememberMerchantCategory(merchant, category) }
     }
 

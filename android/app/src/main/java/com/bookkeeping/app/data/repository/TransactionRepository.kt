@@ -13,6 +13,7 @@ import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.merchant.MerchantRules
+import com.bookkeeping.app.data.merchant.isCleanupSingletonMerchant
 import com.bookkeeping.app.data.merchant.matchesOtherMerchant
 import com.bookkeeping.app.data.merchant.markCategorized
 import com.bookkeeping.app.data.local.entity.TransactionCategory
@@ -134,16 +135,41 @@ class TransactionRepository @Inject constructor(
 
     fun observeAll(): Flow<List<TransactionEntity>> = dao.observeAll()
 
-    suspend fun categorizeOther(merchant: String, singleId: Long?, category: TransactionCategory, remember: Boolean) {
-        database.withTransaction {
-            val now = System.currentTimeMillis()
-            val updates = dao.currentOther().filter { category != TransactionCategory.OTHER && matchesOtherMerchant(it, merchant, singleId) }.map {
-                markCategorized(it, category.name, now, UUID.randomUUID().toString())
+    suspend fun categorizeOther(
+        merchant: String,
+        singleId: Long?,
+        category: TransactionCategory,
+        remember: Boolean,
+    ): Int {
+        val updates = if (category == TransactionCategory.OTHER) {
+            emptyList()
+        } else {
+            database.withTransaction {
+                val now = System.currentTimeMillis()
+                val matched = dao.currentOther()
+                    .filter { matchesOtherMerchant(it, merchant, singleId) }
+                    .map { markCategorized(it, category.name, now, UUID.randomUUID().toString()) }
+                if (matched.isNotEmpty()) dao.updateAll(matched)
+                matched
             }
-            if (updates.isNotEmpty()) dao.updateAll(updates)
         }
-        // DataStore is a separate persistence system and cannot join the Room transaction.
-        if (remember && MerchantRules.normalize(merchant).isNotBlank()) settings.rememberMerchantCategory(merchant, category)
+        // DataStore is a separate persistence system and cannot join the Room transaction;
+        // run post-commit rule persistence and sync trigger non-cancellably after commit.
+        withContext(NonCancellable) {
+            if (remember && !isCleanupSingletonMerchant(merchant)) {
+                settings.rememberMerchantCategory(merchant, category)
+            }
+            if (updates.isNotEmpty()) {
+                requestSyncForTransactions(
+                    updates.map {
+                        TransactionDiagnosticInput(
+                            callSite = "TransactionRepository.categorizeOther",
+                        ) to it
+                    },
+                )
+            }
+        }
+        return updates.size
     }
 
     fun observeDuplicateCandidates(): Flow<List<TransactionEntity>> =

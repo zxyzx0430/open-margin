@@ -578,6 +578,16 @@ class EnglishUiTextTest {
             "请先输入商户名" to "Enter a merchant name first",
             "请选择分类" to "Select a category",
             "改为编辑" to "Edit it instead",
+            "批量整理其他分类" to "Organize other categories",
+            "记住该商户规则，后续自动归类" to "Remember this merchant for future categorization",
+            "同时更新该商户历史记录（共 %d 笔）" to "Also update this merchant’s past entries (%d)",
+            "保存后，该商户的新记录将自动归类" to "Future entries from this merchant will use this category automatically",
+            "请输入具体商户名，占位名称不能保存为规则" to "Enter a specific merchant name; placeholder names cannot be saved as rules",
+            "已整理 %d 笔记录" to "Updated %d entries",
+            "当前没有待整理的「其他」记录" to "No uncategorized “Other” entries right now",
+            "共 %d 个商户 · %d 笔待整理" to "%d merchants · %d entries to organize",
+            "全部「其他」记录已整理完成" to "All “Other” entries are organized",
+            "单笔处理" to "Single entry",
         )
         expected.forEach { (source, translated) ->
             assertTrue("Missing English UI label: $source", EnglishUiText.hasTranslation(source))

@@ -62,8 +62,17 @@ class SettingsViewModel @Inject constructor(
 
     val cleanupTransactions = repository.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun categorizeOther(merchant: String, singleId: Long?, category: TransactionCategory, remember: Boolean) {
-        viewModelScope.launch { repository.categorizeOther(merchant, singleId, category, remember) }
+    fun categorizeOther(
+        merchant: String,
+        singleId: Long?,
+        category: TransactionCategory,
+        remember: Boolean,
+        onComplete: (Int) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val updated = repository.categorizeOther(merchant, singleId, category, remember)
+            onComplete(updated)
+        }
     }
 
     fun clearMerchantRules() {

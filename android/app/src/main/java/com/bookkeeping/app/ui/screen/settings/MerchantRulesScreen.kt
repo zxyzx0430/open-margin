@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,12 +30,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -48,6 +49,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +60,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,9 +72,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.merchant.MerchantRules
 import com.bookkeeping.app.data.merchant.otherMerchantGroups
 import com.bookkeeping.app.data.merchant.OtherMerchantGroup
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
+import com.bookkeeping.app.ui.components.CategoryIcon
+import com.bookkeeping.app.ui.components.MerchantAvatar
+import com.bookkeeping.app.ui.components.SoftBadge
+import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -93,11 +102,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun MerchantRulesScreen(
     onBack: () -> Unit,
+    initialOpenCleanup: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val cleanupRows by viewModel.cleanupTransactions.collectAsState()
     val groups = remember(cleanupRows) { otherMerchantGroups(cleanupRows) }
-    var showCleanup by remember { mutableStateOf(false) }
+    val totalOtherCount = remember(groups) { groups.sumOf { it.rows.size } }
+    var showCleanup by rememberSaveable(initialOpenCleanup) { mutableStateOf(initialOpenCleanup) }
     var selectedGroup by remember { mutableStateOf<OtherMerchantGroup?>(null) }
     val rulesByMerchant by viewModel.merchantRules.collectAsState()
     val learningDisabled by viewModel.learningDisabled.collectAsState()
@@ -139,9 +150,12 @@ fun MerchantRulesScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
         ) {
-            OutlinedButton(onClick = { showCleanup = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Text(tr("批量整理其他分类"))
-            }
+            OtherCleanupEntryCard(
+                groupCount = groups.size,
+                transactionCount = totalOtherCount,
+                onClick = { showCleanup = true },
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+            )
             MerchantSearchField(
                 value = query,
                 onValueChange = { query = it },
@@ -204,49 +218,26 @@ fun MerchantRulesScreen(
     }
 
     if (showCleanup) {
-        AlertDialog(
-            onDismissRequest = { showCleanup = false },
-            title = { Text(tr("批量整理其他分类")) },
-            text = {
-                LazyColumn {
-                    items(groups, key = { it.key }) { group ->
-                        Column(Modifier.fillMaxWidth().clickable { selectedGroup = group }.padding(vertical = 8.dp)) {
-                            Text(group.merchant.ifBlank { tr("未知商户") }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            val amounts = group.rows.groupBy { it.currency }.entries.joinToString(" / ") { (currency, rows) ->
-                                if (currency == "CNY") formatCny(rows.sumOf { it.amountCents }) else currency + " " + "%.2f".format(Locale.CHINA, rows.sumOf { it.amountCents } / 100.0)
-                            }
-                            Text(tr("%d 笔").format(group.rows.size) + " · " + amounts + " · " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(group.rows.maxOf { it.timestamp })), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showCleanup = false }) { Text(tr("关闭")) } },
+        OtherCategoryCleanupSheet(
+            groups = groups,
+            totalCount = totalOtherCount,
+            onDismiss = { showCleanup = false },
+            onSelectGroup = { selectedGroup = it },
         )
     }
     selectedGroup?.let { group ->
-        var category by remember(group.key) { mutableStateOf<TransactionCategory?>(null) }
-        var rememberRule by remember(group.key) { mutableStateOf(group.singleId == null) }
-        AlertDialog(
-            onDismissRequest = { selectedGroup = null },
-            title = { Text(group.merchant.ifBlank { tr("未知商户") }) },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TransactionCategory.entries.filter { it != TransactionCategory.OTHER }.forEach { item ->
-                            LedgerFilterChip(label = tr(item.displayName), selected = category == item, onClick = { category = item })
-                        }
-                    }
-                    if (group.singleId == null) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = rememberRule, onCheckedChange = { rememberRule = it })
-                        Text(tr("记住该商户规则，后续自动归类"))
-                    }
+        OtherGroupCategorizeSheet(
+            group = group,
+            onDismiss = { selectedGroup = null },
+            onSave = { category, rememberRule ->
+                viewModel.categorizeOther(group.merchant, group.singleId, category, rememberRule) { updated ->
+                    notify(
+                        if (updated > 0) tr("已整理 %d 笔记录").format(updated)
+                        else tr("已保存"),
+                    )
                 }
-            },
-            confirmButton = { TextButton(enabled = category != null, onClick = {
-                category?.let { viewModel.categorizeOther(group.merchant, group.singleId, it, rememberRule) }
                 selectedGroup = null
-            }) { Text(tr("保存")) } },
-            dismissButton = { TextButton(onClick = { selectedGroup = null }) { Text(tr("取消")) } },
+            },
         )
     }
 
@@ -327,6 +318,398 @@ fun MerchantRulesScreen(
         )
     }
 }
+
+@Composable
+private fun OtherCleanupEntryCard(
+    groupCount: Int,
+    transactionCount: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable(role = Role.Button, onClick = onClick),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            CategoryIcon(category = TransactionCategory.OTHER, size = 38.dp)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = tr("批量整理其他分类"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (transactionCount == 0) {
+                        tr("当前没有待整理的「其他」记录")
+                    } else {
+                        tr("共 %d 个商户 · %d 笔待整理").format(groupCount, transactionCount)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (transactionCount > 0) {
+                SoftBadge(
+                    text = tr("%d 笔").format(transactionCount),
+                    tone = StatusTone.WARNING,
+                )
+            }
+            Icon(
+                imageVector = Icons.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun OtherCategoryCleanupSheet(
+    groups: List<OtherMerchantGroup>,
+    totalCount: Int,
+    onDismiss: () -> Unit,
+    onSelectGroup: (OtherMerchantGroup) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = tr("批量整理其他分类"),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (groups.isEmpty()) {
+                            tr("当前没有待整理的「其他」记录")
+                        } else {
+                            tr("共 %d 个商户 · %d 笔待整理").format(groups.size, totalCount)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = tr("关闭"),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (groups.isEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        CategoryIcon(category = TransactionCategory.OTHER, size = 44.dp)
+                        Text(
+                            text = tr("全部「其他」记录已整理完成"),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 460.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(groups, key = { it.key }) { group ->
+                        val lead = group.rows.maxByOrNull { it.timestamp } ?: group.rows.first()
+                        val amountText = formatOtherGroupAmounts(group.rows)
+                        val timeText = timeFormat.format(Date(lead.timestamp))
+                        val shape = RoundedCornerShape(16.dp)
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(shape)
+                                .clickable(role = Role.Button) { onSelectGroup(group) },
+                            shape = shape,
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                MerchantAvatar(
+                                    merchant = group.merchant,
+                                    merchantIconKey = lead.merchantIconKey,
+                                    merchantIconPath = lead.merchantIconPath,
+                                    category = TransactionCategory.OTHER,
+                                    size = 40.dp,
+                                )
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(
+                                            text = group.merchant.ifBlank { tr("未知商户") },
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        SoftBadge(
+                                            text = tr("%d 笔").format(group.rows.size),
+                                            tone = StatusTone.NEUTRAL,
+                                        )
+                                    }
+                                    Text(
+                                        text = if (group.singleId != null) {
+                                            timeText + " · " + tr("单笔处理")
+                                        } else {
+                                            timeText
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                AutoSizeAmountText(
+                                    text = amountText,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.widthIn(min = 72.dp, max = 116.dp),
+                                )
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun OtherGroupCategorizeSheet(
+    group: OtherMerchantGroup,
+    onDismiss: () -> Unit,
+    onSave: (TransactionCategory, Boolean) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var category by remember(group.key) { mutableStateOf<TransactionCategory?>(null) }
+    var rememberRule by remember(group.key) { mutableStateOf(group.singleId == null) }
+    val lead = remember(group) { group.rows.maxByOrNull { it.timestamp } ?: group.rows.first() }
+    val amountText = remember(group) { formatOtherGroupAmounts(group.rows) }
+    val timeText = remember(group) {
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(lead.timestamp))
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                MerchantAvatar(
+                    merchant = group.merchant,
+                    merchantIconKey = lead.merchantIconKey,
+                    merchantIconPath = lead.merchantIconPath,
+                    category = TransactionCategory.OTHER,
+                    size = 42.dp,
+                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = group.merchant.ifBlank { tr("未知商户") },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = tr("%d 笔").format(group.rows.size) + " · " + amountText + " · " + timeText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = tr("关闭"),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Text(
+                text = tr("选择分类"),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TransactionCategory.entries
+                    .filter { it != TransactionCategory.OTHER }
+                    .forEach { item ->
+                        LedgerFilterChip(
+                            label = tr(item.displayName),
+                            selected = category == item,
+                            onClick = { category = item },
+                        )
+                    }
+            }
+
+            if (group.singleId == null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .toggleable(
+                            value = rememberRule,
+                            role = Role.Switch,
+                            onValueChange = { rememberRule = it },
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = tr("记住该商户规则，后续自动归类"),
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    }
+                    Switch(checked = rememberRule, onCheckedChange = null)
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Text(tr("取消"))
+                }
+                Button(
+                    onClick = {
+                        val selected = category ?: return@Button
+                        onSave(selected, rememberRule)
+                    },
+                    enabled = category != null,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(tr("保存"))
+                }
+            }
+        }
+    }
+}
+
+private fun formatOtherGroupAmounts(rows: List<TransactionEntity>): String =
+    rows.groupBy { it.currency }.entries.joinToString(" / ") { (currency, items) ->
+        val sum = items.sumOf { it.amountCents }
+        if (currency == "CNY") formatCny(sum)
+        else currency + " " + "%.2f".format(Locale.CHINA, sum / 100.0)
+    }
 
 @Composable
 private fun MerchantRulesHeader(

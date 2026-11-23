@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -100,14 +99,10 @@ import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.CalendarDateText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
-import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
-import com.bookkeeping.app.data.local.entity.TransactionCategory
-import com.bookkeeping.app.ui.screen.transactions.ledgerTransactionSourceTag
-import com.bookkeeping.app.ui.screen.transactions.ledgerTransactionSourceLabel
-import com.bookkeeping.app.ui.screen.transactions.transactionSubtitle
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
+import com.bookkeeping.app.ui.screen.transactions.LedgerTransactionRow
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import java.math.BigInteger
 import java.text.SimpleDateFormat
@@ -1641,64 +1636,31 @@ private fun CalendarTransactionRow(transaction: TransactionEntity, onClick: () -
         else -> null
     }
     val includedInStats = type?.let { StatsTransactionPolicy.matches(transaction, it) } == true
-    val excludedReason = if (includedInStats) {
+    val excludedBadge = if (includedInStats) {
         null
     } else {
         when {
-            transaction.remoteReviewStatus == "refund" -> tr("退款")
+            transaction.remoteReviewStatus == "refund" -> tr("退款") to StatusTone.WARNING
             transaction.remoteReviewStatus == "possible_duplicate" ||
-                transaction.duplicateOfId != null -> tr("待确认重复")
+                transaction.duplicateOfId != null -> tr("待确认重复") to StatusTone.WARNING
             transaction.remoteReviewStatus == "transfer" ||
-                (expense && transaction.category == "TRANSFER") -> tr("转账")
-            else -> tr("不计入")
+                (expense && transaction.category == "TRANSFER") -> tr("转账") to StatusTone.NEUTRAL
+            else -> tr("不计入") to StatusTone.NEUTRAL
         }
     }
-    val category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
-    val note = calendarUserNote(transaction.note)
-    val amount = if (transaction.currency == "CNY") formatCny(transaction.amountCents)
-        else transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = transaction.merchant.ifBlank { tr(category.displayName) },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                SoftBadge(text = ledgerTransactionSourceTag(transaction), tone = StatusTone.NEUTRAL)
-                Text(
-                    text = transactionSubtitle(tr(category.displayName), ledgerTransactionSourceLabel(transaction.source), transaction.account,
-                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(transaction.timestamp))),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (note.isNotBlank()) Text(note, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            excludedReason?.let { reason ->
-                Text(reason, modifier = Modifier.padding(top = 2.dp).clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 5.dp, vertical = 1.dp),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        AutoSizeAmountText(
-            text = (if (expense) "−" else "+") + amount,
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.widthIn(min = 80.dp),
-            color = if (expense) LocalQingSemanticColors.current.expenseText else LocalQingSemanticColors.current.income,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = androidx.compose.ui.text.style.TextAlign.End,
-        )
-    }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val note = remember(transaction.note) { calendarUserNote(transaction.note).takeIf { it.isNotBlank() } }
+    LedgerTransactionRow(
+        transaction = transaction,
+        timeText = timeFormat.format(Date(transaction.timestamp)),
+        extraNote = note,
+        statusBadge = excludedBadge,
+        onClick = onClick,
+    )
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = 4.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
+    )
 }
 
 private fun dayAt(
