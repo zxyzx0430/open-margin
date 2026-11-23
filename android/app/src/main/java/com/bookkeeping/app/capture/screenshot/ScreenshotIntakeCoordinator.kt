@@ -122,6 +122,7 @@ class ScreenshotIntakeCoordinator private constructor(
         val repeatImage: Boolean = false,
         val autoBookAllowed: Boolean = true,
         val confirmationCandidates: List<CaptureCandidate> = emptyList(),
+        val bookedTransactionIds: List<Long> = emptyList(),
     ) {
         val handled: Int get() = booked + pending + waiting + linked
     }
@@ -524,15 +525,19 @@ class ScreenshotIntakeCoordinator private constructor(
                         return@forEach
                     }
                     insertLedger?.let { writer ->
-                        val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
+                        val merchant = stored.merchantCandidates.firstOrNull().orEmpty()
+                        val evidenceImageName = context?.let {
+                            ReceiptEvidenceStore(it).archiveFromPath(stored.screenshotPath)
+                        }
                         val entity = CaptureReviewMapping.toTransactionEntity(
-                            candidate = candidate,
+                            candidate = stored,
                             merchant = merchant,
                             category = CaptureReviewMapping.classificationFor(
-                                candidate = candidate,
+                                candidate = stored,
                                 merchant = merchant,
                                 contextText = merchant,
                             ).category,
+                            evidenceImageName = evidenceImageName,
                         )
                         // Keep the ledger write inside this chain: same attempt id
                         // so the log reads capture → parse → dedup → save as one run.
@@ -694,6 +699,7 @@ class ScreenshotIntakeCoordinator private constructor(
             superseded = superseded,
             autoBookAllowed = allowAuto && !previewOnly,
             confirmationCandidates = confirmationCandidates,
+            bookedTransactionIds = bookedIds.toList(),
         )
     }
 
@@ -711,10 +717,14 @@ class ScreenshotIntakeCoordinator private constructor(
             merchant = merchant,
             contextText = merchant,
         ).category
+        val evidenceImageName = context?.let {
+            ReceiptEvidenceStore(it).archiveFromPath(current.screenshotPath)
+        }
         val entity = CaptureReviewMapping.toTransactionEntity(
             candidate = current,
             merchant = merchant,
             category = category,
+            evidenceImageName = evidenceImageName,
         )
         val attemptId = current.diagnosticAttemptId ?: TransactionDiagnostics.newAttemptId()
         val result = try {

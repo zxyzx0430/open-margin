@@ -102,6 +102,7 @@ object CaptureReviewMapping {
         candidate: CaptureCandidate,
         merchant: String,
         category: TransactionCategory,
+        evidenceImageName: String? = null,
     ): TransactionEntity {
         val source = candidate.transactionSource
             ?.let { runCatching { TransactionSource.valueOf(it) }.getOrNull() }
@@ -188,6 +189,7 @@ object CaptureReviewMapping {
             captureConfidence = candidate.confidence,
             captureKind = candidate.kind,
             captureObservedAtMs = candidate.capturedAtMs,
+            evidenceImageName = evidenceImageName,
             eventTimeNeedsConfirmation = candidate.eventTimeNeedsConfirmation,
         )
     }

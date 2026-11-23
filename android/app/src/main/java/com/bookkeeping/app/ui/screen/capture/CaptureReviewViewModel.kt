@@ -148,10 +148,13 @@ class CaptureReviewViewModel @Inject constructor(
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
+                    val evidenceImageName = com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore(context)
+                        .archiveFromPath(resolved.screenshotPath)
                     val entity = CaptureReviewMapping.toTransactionEntity(
                         candidate = resolved,
                         merchant = merchant,
                         category = category,
+                        evidenceImageName = evidenceImageName,
                     )
                     repository.insertIfNotDuplicate(
                         entity,

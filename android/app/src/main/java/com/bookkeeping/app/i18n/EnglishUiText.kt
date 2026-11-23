@@ -1504,6 +1504,37 @@ internal object EnglishUiText {
             "The exact order ID is already recorded for this payment platform; notification replay skipped",
         "同一张截图里有金额、商户相同的记录，请核对是否重复" to
             "This screenshot has records with the same amount and merchant; check whether they are duplicates",
+        "时间为截图时间，建议核对" to "Captured from screenshot time; please verify",
+        "确认" to "Confirm",
+        "修改" to "Edit",
+        "切换" to "Switch",
+        "扫描原图" to "Original screenshot",
+        "点击查看原图" to "Tap to view full screenshot",
+        "查看原图" to "View screenshot",
+        "单次最多导入 %d 张截图，已自动选取前 %d 张" to
+            "Up to %d screenshots per batch; selected the first %d",
+        "第 %d 张：%s" to "Image %d: %s",
+        "待你确认" to "Needs confirmation",
+        "本次已记入账本" to "Recorded in this batch",
+        "已记 %d 笔" to "%d recorded",
+        "待确认 %d 笔" to "%d pending",
+        "跳过或未识别 %d 项" to "%d skipped or unrecognized",
+        "先确认待办，点下方账单卡片可查看原图或修改" to
+            "Confirm pending items first; tap any recorded card below to view screenshot or edit",
+        "点击下方账单卡片可查看扫描原图、修改时间或分类" to
+            "Tap any recorded card below to view screenshot, edit time, or change category",
+        "未记入说明（%d）" to "Not recorded (%d)",
+        "支持批量导入微信 / 支付宝交易截图，单次最多 10 张" to
+            "Batch import WeChat / Alipay payment screenshots, up to 10 at once",
+        "选择截图" to "Choose screenshots",
+        "正在识别第 %d / %d 张截图" to "Recognizing screenshot %d of %d",
+        "继续导入" to "Import more",
+        "扫描原图保留" to "Receipt screenshot retention",
+        "90 天（上限 100MB）" to "90 days (100 MB cap)",
+        "永久保留" to "Keep forever",
+        "清理扫描原图缓存" to "Clear archived screenshots",
+        "仅清理本地归档原图，不影响账单记录" to "Deletes local archived images only; ledger rows stay intact",
+        "已清理 %d 张本地原图" to "Cleared %d archived screenshots",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(

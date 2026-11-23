@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,9 +16,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,12 +39,17 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
@@ -54,17 +68,21 @@ import com.bookkeeping.app.ui.components.MerchantRuleDialog
 import com.bookkeeping.app.ui.components.StatusChip
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
+import com.bookkeeping.app.ui.screen.capture.CaptureImagePreview
+import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * 账单详情：所有行内动作集中到这里，整页不滚动。
+ * 账单详情：所有行内动作集中到这里。
  *
- * 版面自上而下：头部（返回 / 标题 / 同步胶囊）→ 金额主视觉卡 → 字段卡 → 备注卡
- * （可选）→ 审核状态卡（可选）→ 固定底部动作区。删掉了「服务器同步」「本地改动」
- * 两行大段文字，同步状态只留头部胶囊。
+ * 版面自上而下：头部（返回 / 标题 / 同步胶囊）→ 金额主视觉卡 → 字段卡（含「发生时间」
+ * 内嵌淡琥珀待确认条）→ 备注卡（可选）→ 扫描原图缩略图条（可选）→ 审核状态卡（可选）
+ * → 固定底部动作区。内容区保留 verticalScroll 兜底，小屏或卡片较多时不会截断。
  */
 @Composable
 fun TransactionDetailScreen(
@@ -74,7 +92,39 @@ fun TransactionDetailScreen(
     transactionViewModel: TransactionViewModel = hiltViewModel(),
 ) {
     val transaction by detailViewModel.transaction.collectAsState()
-    val entry = transaction
+    TransactionDetailScreenContent(
+        entry = transaction,
+        onBack = onBack,
+        onDeleted = onDeleted,
+        onSave = { current, fields -> transactionViewModel.saveTransaction(current, fields) },
+        onToggleExclude = { current ->
+            transactionViewModel.setReviewStatus(
+                current,
+                if (current.remoteReviewStatus == "excluded") "unverified" else "excluded",
+            )
+        },
+        onSaveMerchantRule = { merchant, category ->
+            transactionViewModel.saveMerchantRule(merchant, category)
+        },
+        onDelete = { current -> transactionViewModel.delete(current) },
+        onConfirmEventTime = { current -> transactionViewModel.confirmEventTime(current) },
+    )
+}
+
+/**
+ * 无 Hilt 依赖的账单详情页本体，供主页导航与截图导入结果页共同复用。
+ */
+@Composable
+fun TransactionDetailScreenContent(
+    entry: TransactionEntity?,
+    onBack: () -> Unit,
+    onDeleted: () -> Unit,
+    onSave: (TransactionEntity, TransactionEditFields) -> Unit,
+    onToggleExclude: (TransactionEntity) -> Unit,
+    onSaveMerchantRule: (String, TransactionCategory) -> Unit,
+    onDelete: (TransactionEntity) -> Unit,
+    onConfirmEventTime: (TransactionEntity) -> Unit,
+) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
     // 真被删掉的记录 300ms 后照样给出提示。
@@ -90,6 +140,7 @@ fun TransactionDetailScreen(
     var editing by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
+    var previewEvidencePath by remember { mutableStateOf<String?>(null) }
 
     if (editing && entry != null) {
         // 全屏编辑页替换详情页；保存/取消都回到这里，删除复用同一个二次确认。
@@ -98,7 +149,7 @@ fun TransactionDetailScreen(
             onCancel = { editing = false },
             onDelete = { confirmingDelete = true },
             onSave = { fields ->
-                transactionViewModel.saveTransaction(entry, fields)
+                onSave(entry, fields)
                 editing = false
             },
         )
@@ -116,12 +167,7 @@ fun TransactionDetailScreen(
                     DetailActionBar(
                         showExclude = entry.remoteReviewStatus != "refund",
                         excluded = entry.remoteReviewStatus == "excluded",
-                        onToggleExclude = {
-                            transactionViewModel.setReviewStatus(
-                                entry,
-                                if (entry.remoteReviewStatus == "excluded") "unverified" else "excluded",
-                            )
-                        },
+                        onToggleExclude = { onToggleExclude(entry) },
                         onAddRule = { addingRule = true },
                         onEdit = { editing = true },
                         onDelete = { confirmingDelete = true },
@@ -148,6 +194,9 @@ fun TransactionDetailScreen(
             } else {
                 DetailContent(
                     entry = entry,
+                    onEditTime = { editing = true },
+                    onConfirmEventTime = { onConfirmEventTime(entry) },
+                    onPreviewEvidence = { path -> previewEvidencePath = path },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
@@ -162,7 +211,7 @@ fun TransactionDetailScreen(
             initialCategory = runCatching { TransactionCategory.valueOf(entry.category) }.getOrNull(),
             onDismiss = { addingRule = false },
             onSave = { merchant, category ->
-                transactionViewModel.saveMerchantRule(merchant, category)
+                onSaveMerchantRule(merchant, category)
                 addingRule = false
             },
         )
@@ -172,11 +221,18 @@ fun TransactionDetailScreen(
         DeleteTransactionDialog(
             onDismiss = { confirmingDelete = false },
             onConfirm = {
-                transactionViewModel.delete(current)
+                onDelete(current)
                 confirmingDelete = false
                 editing = false
                 onDeleted()
             },
+        )
+    }
+
+    previewEvidencePath?.let { path ->
+        CaptureImagePreview(
+            path = path,
+            onDismiss = { previewEvidencePath = null },
         )
     }
 }
@@ -232,14 +288,23 @@ private fun DetailHeader(
 @Composable
 private fun DetailContent(
     entry: TransactionEntity,
+    onEditTime: () -> Unit,
+    onConfirmEventTime: () -> Unit,
+    onPreviewEvidence: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val category = runCatching { TransactionCategory.valueOf(entry.category) }
         .getOrDefault(TransactionCategory.OTHER)
     val review = transactionReviewChip(entry)
+    val evidencePath = remember(entry.id, entry.evidenceImageName) {
+        ReceiptEvidenceStore(context).readablePath(entry.evidenceImageName)
+    }
 
     Column(
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         AmountHero(entry = entry, category = category)
@@ -252,20 +317,18 @@ private fun DetailContent(
                 add(tr("来源") to transactionSourceLabel(entry.source))
                 add(tr("发生时间") to transactionTime(entry.timestamp))
             },
+            showTimeNeedsConfirmation = entry.eventTimeNeedsConfirmation,
+            onConfirmEventTime = onConfirmEventTime,
+            onEditTime = onEditTime,
         )
-        if (entry.eventTimeNeedsConfirmation) {
-            Text(
-                text = tr("时间待确认"),
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            )
-        }
         if (entry.note.isNotBlank()) {
             NoteCard(note = entry.note)
+        }
+        if (evidencePath != null) {
+            EvidenceImageCard(
+                path = evidencePath,
+                onClick = { onPreviewEvidence(evidencePath) },
+            )
         }
         review?.let { (label, tone) ->
             ReviewCard(label = label, tone = tone)
@@ -331,9 +394,21 @@ private fun AmountHero(
     }
 }
 
-/** 字段卡：label 左、值右，44dp 行高，行间 1dp 分隔线（左缩进 16dp）。 */
+/**
+ * 字段卡：label 左、值右，44dp 行高，行间 1dp 分隔线。
+ *
+ * 当发生时间来自截图时间（[showTimeNeedsConfirmation]）时，在同一张卡片内的
+ * 「发生时间」行下方嵌一条淡琥珀提示条，并给出「确认」与「修改」两个轻量入口，
+ * 不再在卡片外悬浮突兀的粉红方块。
+ */
 @Composable
-private fun FieldCard(rows: List<Pair<String, String>>) {
+private fun FieldCard(
+    rows: List<Pair<String, String>>,
+    showTimeNeedsConfirmation: Boolean,
+    onConfirmEventTime: () -> Unit,
+    onEditTime: () -> Unit,
+) {
+    val semantic = LocalQingSemanticColors.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -341,6 +416,7 @@ private fun FieldCard(rows: List<Pair<String, String>>) {
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp)) {
             rows.forEachIndexed { index, (label, value) ->
+                val isTimeRow = index == rows.lastIndex && showTimeNeedsConfirmation
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -356,21 +432,153 @@ private fun FieldCard(rows: List<Pair<String, String>>) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    Text(
-                        text = value,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.weight(1.5f),
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (isTimeRow) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(semantic.warningText),
+                            )
+                        }
+                        Text(
+                            text = value,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
                 if (index != rows.lastIndex) {
-                    // 卡片自带 16dp 内边距，分隔线因此与 label 左对齐；不再二次缩进。
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
+            if (showTimeNeedsConfirmation) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp, bottom = 12.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(semantic.warningContainer)
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = semantic.warningText,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = tr("时间为截图时间，建议核对"),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = semantic.warningText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = tr("确认"),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = semantic.warningText,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(role = Role.Button, onClick = onConfirmEventTime)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    )
+                    Text(
+                        text = tr("修改"),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(role = Role.Button, onClick = onEditTime)
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 扫描原图紧凑横条卡：左侧 48dp 圆角缩略图 + 标题/副文案 + 右箭头，点开进全屏缩放预览。 */
+@Composable
+private fun EvidenceImageCard(
+    path: String,
+    onClick: () -> Unit,
+) {
+    val thumbnail by produceState<ImageBitmap?>(initialValue = null, path) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val options = BitmapFactory.Options().apply { inSampleSize = 4 }
+                BitmapFactory.decodeFile(path, options)?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(role = Role.Button, onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val image = thumbnail
+            if (image != null) {
+                Image(
+                    bitmap = image,
+                    contentDescription = tr("扫描原图"),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = tr("扫描原图"),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = tr("点击查看原图"),
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
@@ -430,11 +638,6 @@ private fun ReviewCard(label: String, tone: StatusTone) {
 
 /**
  * 底部动作区：两行按钮共用一套栅格。
- *
- * 所有按钮同高 [ACTION_BUTTON_HEIGHT]、同圆角 [ACTION_BUTTON_SHAPE]，行内间距
- * [ACTION_BUTTON_GAP]，行间 [ACTION_ROW_GAP]，整块左右各 16dp、顶部一条 1dp 分隔线、
- * 底部再留 [ACTION_BOTTOM_GAP] 给系统手势区。第一行两个等价按钮各占一半，第二行
- * 「编辑」占 2/3、「删除」占 1/3，位置严格对齐，不再出现一行缩进、一行贴边。
  */
 @Composable
 private fun DetailActionBar(
@@ -494,31 +697,15 @@ private fun DetailActionBar(
     }
 }
 
-/** 底部动作区三种按钮样式，尺寸/圆角/字重由 [ActionButton] 统一兜住。 */
 private enum class ActionButtonStyle { TONAL, PRIMARY, DANGER_OUTLINED }
 
-/** 所有底部按钮同高。 */
 private val ACTION_BUTTON_HEIGHT = 46.dp
-
-/** 所有底部按钮同圆角。 */
 private val ACTION_BUTTON_SHAPE = RoundedCornerShape(12.dp)
-
-/** 同一行内两个按钮的间距。 */
 private val ACTION_BUTTON_GAP = 12.dp
-
-/** 两行按钮之间、分隔线与按钮之间的间距。 */
 private val ACTION_ROW_GAP = 10.dp
-
-/** 按钮底部与系统手势区之间的留白。 */
 private val ACTION_BOTTOM_GAP = 12.dp
-
-/** 超过这个字数就把字号降一档，保证一行放得下；再长就占两行，不省略。 */
 private const val ACTION_LABEL_LONG_THRESHOLD = 8
 
-/**
- * 动作按钮：不用 Material 的 Button 家族，是因为它们会把 46dp 撑到 48dp 的最小交互尺寸，
- * 两行高度就对不上了。这里用固定尺寸的 Box 自己保证高度与圆角完全一致。
- */
 @Composable
 private fun ActionButton(
     text: String,
@@ -526,7 +713,6 @@ private fun ActionButton(
     style: ActionButtonStyle,
     modifier: Modifier = Modifier,
 ) {
-    // 统一 15sp Medium；文案确实长（英文按钮常见）才降到 14sp，中文 6 个字仍是一行。
     val fontSize = if (text.length > ACTION_LABEL_LONG_THRESHOLD) 14.sp else 15.sp
     val container = when (style) {
         ActionButtonStyle.TONAL -> MaterialTheme.colorScheme.surfaceVariant
@@ -561,7 +747,6 @@ private fun ActionButton(
             lineHeight = (fontSize.value + 4).sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
-            // 不换行、不缩字号、不省略：太长就占两行，多出来的字绝不吞掉。
             maxLines = 2,
             softWrap = true,
             overflow = TextOverflow.Visible,

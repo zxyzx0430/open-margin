@@ -55,11 +55,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionSource
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.tr
+import com.bookkeeping.app.ui.screen.capture.CaptureImagePreview
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -113,6 +116,11 @@ fun TransactionEditScreen(
     var reviewStatusTouched by remember(initial.id) { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val evidenceImagePath = remember(initial.id, initial.evidenceImageName) {
+        ReceiptEvidenceStore(context).readablePath(initial.evidenceImageName)
+    }
+    var previewingEvidence by remember(initial.id) { mutableStateOf(false) }
 
     // possible_duplicate 由抓取流程自动标记，不在下拉框里；用户没动过就原样保留。
     val reviewStatus = if (reviewStatusTouched || storedReviewStatus in
@@ -157,6 +165,13 @@ fun TransactionEditScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = tr("返回"),
                         )
+                    }
+                },
+                actions = {
+                    if (evidenceImagePath != null) {
+                        TextButton(onClick = { previewingEvidence = true }) {
+                            Text(tr("查看原图"))
+                        }
                     }
                 },
             )
@@ -421,6 +436,13 @@ fun TransactionEditScreen(
             dismissButton = {
                 TextButton(onClick = { showTimePicker = false }) { Text(tr("取消")) }
             },
+        )
+    }
+
+    if (previewingEvidence && evidenceImagePath != null) {
+        CaptureImagePreview(
+            path = evidenceImagePath,
+            onDismiss = { previewingEvidence = false },
         )
     }
 }

@@ -20,6 +20,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import android.widget.Toast
+import com.bookkeeping.app.capture.screenshot.ReceiptEvidenceSettings
+import com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore
 import com.bookkeeping.app.capture.screenshot.ScreenshotImportActivity
 import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
 import com.bookkeeping.app.capture.screenshot.ScreenshotWatchSettings
@@ -130,9 +133,46 @@ internal fun ScreenshotCaptureCard() {
         SettingsActionRow(
             icon = Icons.Filled.Share,
             title = tr("从相册选截图"),
-            subtitle = tr("识别微信 / 支付宝交易截图"),
+            subtitle = tr("支持批量导入微信 / 支付宝交易截图，单次最多 10 张"),
             onClick = {
                 runCatching { context.startActivity(ScreenshotImportActivity.intent(context)) }
+            },
+        )
+        var retentionMode by remember {
+            mutableStateOf(ReceiptEvidenceSettings.retentionMode(context))
+        }
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.Share,
+            title = tr("扫描原图保留"),
+            subtitle = if (retentionMode == ReceiptEvidenceSettings.RetentionMode.FOREVER) {
+                tr("永久保留")
+            } else {
+                tr("90 天（上限 100MB）")
+            },
+            trailing = tr("切换"),
+            onClick = {
+                val next = if (retentionMode == ReceiptEvidenceSettings.RetentionMode.FOREVER) {
+                    ReceiptEvidenceSettings.RetentionMode.NINETY_DAYS
+                } else {
+                    ReceiptEvidenceSettings.RetentionMode.FOREVER
+                }
+                ReceiptEvidenceSettings.setRetentionMode(context, next)
+                retentionMode = next
+            },
+        )
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.Share,
+            title = tr("清理扫描原图缓存"),
+            subtitle = tr("仅清理本地归档原图，不影响账单记录"),
+            onClick = {
+                val removed = ReceiptEvidenceStore(context).clearAll()
+                Toast.makeText(
+                    context,
+                    tr("已清理 %d 张本地原图").format(removed),
+                    Toast.LENGTH_SHORT,
+                ).show()
             },
         )
     }

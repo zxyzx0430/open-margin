@@ -3,17 +3,18 @@ package com.bookkeeping.app.capture.screenshot
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 
 /**
- * Review state for one screenshot import.
+ * Review state for one screenshot import session (single or batch up to 10 images).
  *
- * One screenshot can hold several transactions, so the import screen lists every
- * candidate at once and the user scrolls through them, instead of being asked one
- * transaction at a time. The state is immutable: every edit returns a new
- * snapshot, which keeps Compose recomposition trivial and lets the rules
- * (idempotency, what counts as done, which rows may reach the ledger) be tested
- * without Android or Compose.
+ * Tracks three buckets cleanly:
+ * - [rows]: candidates awaiting user confirmation (and their settled transitions);
+ * - [bookedTransactionIds]: Room transaction IDs recorded in this session (both AUTO_BOOK
+ *   and user-confirmed rows), rendered with the same card as the ledger home screen;
+ * - [notices]: non-booked explanations (duplicates, non-transaction images, failures).
  */
 data class ScreenshotImportReviewState(
     val rows: List<Row> = emptyList(),
+    val bookedTransactionIds: List<Long> = emptyList(),
+    val notices: List<String> = emptyList(),
 ) {
 
     enum class Status {
@@ -39,9 +40,15 @@ data class ScreenshotImportReviewState(
     val pending: List<CaptureCandidate>
         get() = rows.filter { it.status == Status.PENDING }.map { it.candidate }
 
+    val pendingRows: List<Row>
+        get() = rows.filter { it.status == Status.PENDING || it.status == Status.SAVING }
+
     val pendingCount: Int get() = rows.count { it.status == Status.PENDING }
     val savedCount: Int get() = rows.count { it.status == Status.SAVED }
     val skippedCount: Int get() = rows.count { it.status == Status.SKIPPED }
+
+    val hasAnyContent: Boolean
+        get() = rows.isNotEmpty() || bookedTransactionIds.isNotEmpty() || notices.isNotEmpty()
 
     /**
      * True once every row reached a final state. An import with no candidates is
@@ -70,13 +77,32 @@ data class ScreenshotImportReviewState(
         return if (added.isEmpty()) this else copy(rows = rows + added)
     }
 
+    /** Appends newly booked transaction IDs while preserving order and uniqueness. */
+    fun withBookedTransactions(ids: List<Long>): ScreenshotImportReviewState {
+        val known = bookedTransactionIds.toMutableSet()
+        val added = ids.filter { it > 0L && known.add(it) }
+        return if (added.isEmpty()) this else copy(bookedTransactionIds = bookedTransactionIds + added)
+    }
+
+    /** Appends a non-booked notice (duplicate / unrecognized / error) for the collapsible section. */
+    fun withNotice(notice: String): ScreenshotImportReviewState {
+        val clean = notice.trim()
+        return if (clean.isEmpty()) this else copy(notices = notices + clean)
+    }
+
     /** PENDING -> SAVING. Anything else is a no-op, so a double tap cannot book twice. */
     fun begin(candidateId: String): ScreenshotImportReviewState =
         transition(candidateId, from = setOf(Status.PENDING), to = Status.SAVING)
 
     /** SAVING -> SAVED. Only a claimed row can be saved, and only once. */
-    fun save(candidateId: String): ScreenshotImportReviewState =
-        transition(candidateId, from = setOf(Status.SAVING), to = Status.SAVED)
+    fun save(candidateId: String, transactionId: Long? = null): ScreenshotImportReviewState {
+        val next = transition(candidateId, from = setOf(Status.SAVING), to = Status.SAVED)
+        return if (next !== this && transactionId != null && transactionId > 0L) {
+            next.withBookedTransactions(listOf(transactionId))
+        } else {
+            next
+        }
+    }
 
     /** PENDING/SAVING -> SKIPPED. Ignoring never writes the ledger. */
     fun skip(candidateId: String): ScreenshotImportReviewState =
