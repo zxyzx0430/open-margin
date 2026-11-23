@@ -7,8 +7,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.StatFs
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import com.bookkeeping.app.rom.RomSettingsLauncher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
@@ -38,6 +40,7 @@ object UpdateInstallFlow {
     private const val PROGRESS_INTERVAL_MS = 350L
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 30_000
+    private const val INSTALL_RESERVE_BYTES = 64L * 1024L * 1024L
 
     sealed interface DownloadEvent {
         data class Running(
@@ -59,12 +62,23 @@ object UpdateInstallFlow {
         SIZE_MISMATCH,
         DIGEST_MISMATCH,
         SIGNATURE_MISMATCH,
+        NO_SPACE,
     }
+
+    class InsufficientStorageException : IllegalStateException("not enough space for APK")
 
     enum class InstallOutcome {
         OPENED_INSTALLER,
         NEEDS_PERMISSION,
         NO_INSTALLER,
+        NO_SPACE,
+    }
+
+    private fun hasSpace(directory: File?, apkBytes: Long): Boolean {
+        if (directory == null || apkBytes <= 0L) return false
+        val available = runCatching { StatFs(directory.absolutePath).availableBytes }.getOrNull()
+            ?: return true // Do not block downloads on a broken OEM StatFs.
+        return available >= apkBytes + maxOf(apkBytes, INSTALL_RESERVE_BYTES)
     }
 
     /** App-private location: no WRITE_EXTERNAL_STORAGE, no public Downloads folder. */
@@ -127,6 +141,11 @@ object UpdateInstallFlow {
         val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
         if (dir == null || (!dir.exists() && !dir.mkdirs())) {
             emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+            return@flow
+        }
+
+        if (!hasSpace(dir, expectedSize)) {
+            emit(DownloadEvent.Failed(Failure.NO_SPACE))
             return@flow
         }
 
@@ -291,10 +310,13 @@ object UpdateInstallFlow {
             Uri.parse("package:" + context.packageName),
         )
         if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return runCatching { context.startActivity(intent) }.isSuccess
+        return runCatching { context.startActivity(intent) }.isSuccess ||
+            RomSettingsLauncher.openAppDetails(context)
     }
 
     fun openInstaller(context: Context, apk: File): InstallOutcome {
+        if (!apk.isFile) return InstallOutcome.NO_INSTALLER
+        if (!hasSpace(apk.parentFile, apk.length())) return InstallOutcome.NO_SPACE
         if (!hasInstallPermission(context)) return InstallOutcome.NEEDS_PERMISSION
         val uri = runCatching {
             FileProvider.getUriForFile(context, context.packageName + AUTHORITY_SUFFIX, apk)

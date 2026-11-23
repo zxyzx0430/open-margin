@@ -9,6 +9,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.DiagnosticSummary
 import com.bookkeeping.app.data.diagnostics.ServiceHealthLog
@@ -128,6 +129,9 @@ class PaymentNotificationListenerService : NotificationListenerService() {
 
     private fun handleNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName ?: return
+        if (packageName == "com.tencent.mm" || packageName == "com.eg.android.AlipayGphone") {
+            ScreenshotWatchController.catchUp(applicationContext)
+        }
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
 

@@ -14,6 +14,7 @@ import com.bookkeeping.app.notification.CaptureHealth
 import com.bookkeeping.app.notification.NotificationListenerHelper
 import com.bookkeeping.app.notification.SmsPermissionHelper
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureHealth
+import com.bookkeeping.app.rom.DeviceRomDetector
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.sync.TransactionSyncWorker
@@ -41,6 +42,13 @@ internal data class DiagnosticExportContext(
     val serviceHealthEntries: List<ServiceHealthEntry> = emptyList(),
     val pendingCandidates: List<CaptureCandidate> = emptyList(),
     val ledgerPossibleDuplicateCount: Int = 0,
+    val romManufacturer: String = "",
+    val romBrand: String = "",
+    val romFamily: String = "",
+    val romVersion: String = "",
+    val captureStrategy: String = "",
+    val notificationReconnect24h: Int = 0,
+    val screenshotThrottled24h: Boolean = false,
 )
 
 internal object DiagnosticExportFormatter {
@@ -74,6 +82,15 @@ internal object DiagnosticExportFormatter {
             appendLine("设备系统: ${meta.deviceInfo}")
             if (meta.romDisplay.isNotBlank()) {
                 appendLine("ROM 构建标识 (Build.DISPLAY): ${meta.romDisplay}")
+            }
+            if (meta.romFamily.isNotBlank()) {
+                appendLine("Build.MANUFACTURER: " + meta.romManufacturer)
+                appendLine("Build.BRAND: " + meta.romBrand)
+                appendLine("ROM 家族: " + meta.romFamily)
+                appendLine("ROM 版本: " + meta.romVersion)
+                appendLine("当前采集策略: " + meta.captureStrategy)
+                appendLine("通知监听最近24h重连请求次数: " + meta.notificationReconnect24h)
+                appendLine("最近24h是否触发过限频: " + if (meta.screenshotThrottled24h) "是" else "否")
             }
             appendLine("电池优化白名单: ${meta.batteryOptimizationStatus}")
             appendLine("相册截图监听: ${meta.albumWatcherSummary}")
@@ -280,6 +297,19 @@ internal object DiagnosticExportFormatter {
         }.getOrDefault("读取失败")
 
         val serviceHealthEntries = ServiceHealthLog.entries(appContext)
+        val romProfile = DeviceRomDetector.current()
+        val nowMs = System.currentTimeMillis()
+        val recent = serviceHealthEntries.filter {
+            it.occurredAtMs in (nowMs - ServiceHealthLog.DAY_MS)..nowMs
+        }
+        val reconnect24h = recent.count {
+            it.channel == ServiceHealthLog.CHANNEL_NOTIFICATION &&
+                it.event == ServiceHealthLog.EVENT_REBIND_REQUESTED
+        }
+        val throttled24h = recent.any {
+            it.channel == ServiceHealthLog.CHANNEL_ACCESSIBILITY &&
+                it.event == ServiceHealthLog.EVENT_THROTTLED
+        }
         val pendingCandidates = runCatching { CaptureCandidateStore(appContext).pending() }.getOrDefault(emptyList())
         val crashReport = runCatching {
             File(appContext.filesDir, "crash-last.txt").takeIf { it.isFile }?.readText()
@@ -303,6 +333,13 @@ internal object DiagnosticExportFormatter {
             serviceHealthEntries = serviceHealthEntries,
             pendingCandidates = pendingCandidates,
             ledgerPossibleDuplicateCount = ledgerPossibleDuplicateCount,
+            romManufacturer = Build.MANUFACTURER.orEmpty(),
+            romBrand = Build.BRAND.orEmpty(),
+            romFamily = romProfile.family.name,
+            romVersion = romProfile.version,
+            captureStrategy = romProfile.captureStrategy,
+            notificationReconnect24h = reconnect24h,
+            screenshotThrottled24h = throttled24h,
         )
     }
 }

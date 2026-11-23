@@ -126,6 +126,9 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.bookkeeping.app.notification.NotificationListenerHelper
+import com.bookkeeping.app.rom.DeviceRomDetector
+import com.bookkeeping.app.rom.RomSettingsKind
+import com.bookkeeping.app.rom.RomSettingsLauncher
 import com.bookkeeping.app.notification.SmsPermissionHelper
 import com.bookkeeping.app.sync.SyncResultCode
 import com.bookkeeping.app.sync.TransactionSyncWorker
@@ -935,7 +938,8 @@ private fun AutomationSetupPanel(
                 else -> null
             },
         )
-        AutomationWizardStep.NOTIFICATION_ACCESS -> AutomationStepCard(
+        AutomationWizardStep.NOTIFICATION_ACCESS -> {
+            AutomationStepCard(
             stepLabel = wizardProgress(step),
             stepIndex = step.ordinal + 1,
             title = tr("开启通知使用权"),
@@ -957,7 +961,10 @@ private fun AutomationSetupPanel(
             secondaryLabel = if (attempted && !notificationEnabled) tr("重新检查") else null,
             onSecondary = onRefresh,
         )
-        AutomationWizardStep.PAGE_RECOGNITION -> AutomationStepCard(
+            RestrictedSettingsHint()
+        }
+        AutomationWizardStep.PAGE_RECOGNITION -> {
+            AutomationStepCard(
             stepLabel = wizardProgress(step),
             stepIndex = step.ordinal + 1,
             title = tr("开启页面识别"),
@@ -979,6 +986,8 @@ private fun AutomationSetupPanel(
             secondaryLabel = if (attempted && !pageRecognitionEnabled) tr("重新检查") else null,
             onSecondary = onRefresh,
         )
+            RestrictedSettingsHint()
+        }
         AutomationWizardStep.ROM_GUIDANCE -> {
             if (requiredReady) {
                 AutomationStepCard(
@@ -1022,6 +1031,35 @@ private fun AutomationSetupPanel(
             )
             TextButton(onClick = onOpenRomGuide) {
                 Text(tr("查看 ROM 后台设置（可选）"))
+            }
+        }
+    }
+}
+
+/**
+ * Android 13+ sideloaded official builds may have a disabled toggle until
+ * the user explicitly opts in from App info. We never bypass that approval.
+ */
+@Composable
+private fun RestrictedSettingsHint() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    val context = LocalContext.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(tr("权限开关灰显或提示受限制？"), style = MaterialTheme.typography.titleSmall)
+            Text(tr("① 打开本应用信息，点右上角菜单。"),
+                style = MaterialTheme.typography.bodySmall)
+            Text(tr("② 选择「允许受限制的设置」，返回重新开启通知使用权或页面识别。"),
+                style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { RomSettingsLauncher.openAppDetails(context) }) {
+                Text(tr("打开本应用信息"))
             }
         }
     }
@@ -1408,10 +1446,30 @@ private fun formatHealthTime(timestampMs: Long): String =
 
 @Composable
 private fun RomGuideCard() {
+    val context = LocalContext.current
+    val profile = remember { DeviceRomDetector.current() }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Text(
+            text = tr("当前系统：") + profile.family.name + " · " + profile.version,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FilledTonalButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { RomSettingsLauncher.open(context, RomSettingsKind.AUTOSTART) },
+        ) { Text(tr("打开自启动管理")) }
+        FilledTonalButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { RomSettingsLauncher.open(context, RomSettingsKind.BATTERY) },
+        ) { Text(tr("打开后台耗电设置")) }
+        Text(
+            text = tr("所有机型都建议开启页面识别。若系统屏蔽部分支付页面事件，请同时开启通知使用权和新截图自动识别补偿。"),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        RestrictedSettingsHint()
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),

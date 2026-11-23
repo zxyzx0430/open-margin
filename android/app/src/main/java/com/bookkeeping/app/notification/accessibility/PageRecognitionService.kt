@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import com.bookkeeping.app.BuildConfig
+import com.bookkeeping.app.rom.DeviceRomDetector
 import com.bookkeeping.app.capture.success.PaymentPage
 import com.bookkeeping.app.capture.success.PaymentPageDetector as SuccessPageDetector
 import com.bookkeeping.app.capture.screenshot.ScreenshotReviewNotifier
@@ -88,6 +89,7 @@ open class PageRecognitionService : AccessibilityService() {
                 channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
                 event = ServiceHealthLog.EVENT_CONNECTED,
                 summary = "页面识别服务已连接",
+                detail = DeviceRomDetector.current().captureStrategy,
             )
             if (BuildConfig.DEBUG) Log.d(TAG, "PageRecognitionService connected")
         } catch (failure: Exception) {
@@ -607,6 +609,7 @@ open class PageRecognitionService : AccessibilityService() {
                         }
 
                         override fun onFailure(errorCode: Int) {
+                            recordScreenshotFallback(errorCode)
                             scope.launch {
                                 repository.recordDiagnostic(
                                     attemptId = attemptId,
@@ -724,6 +727,7 @@ open class PageRecognitionService : AccessibilityService() {
                         }
 
                         override fun onFailure(errorCode: Int) {
+                            recordScreenshotFallback(errorCode)
                             scope.launch {
                                 repository.recordDiagnostic(
                                     attemptId = attemptId,
@@ -758,6 +762,16 @@ open class PageRecognitionService : AccessibilityService() {
                 )
             }
         }
+    }
+
+    private fun recordScreenshotFallback(errorCode: Int) {
+        ServiceHealthLog.record(
+            context = applicationContext,
+            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+            event = ServiceHealthLog.EVENT_OCR_FALLBACK,
+            summary = "页面识别截屏受系统限制；建议同时开启新截图自动识别",
+            detail = "error=$errorCode, rom=" + DeviceRomDetector.current().family.name,
+        )
     }
 
     @android.annotation.SuppressLint("NewApi")
@@ -1044,6 +1058,7 @@ open class PageRecognitionService : AccessibilityService() {
                     }
 
                     override fun onFailure(errorCode: Int) {
+                        recordScreenshotFallback(errorCode)
                         saveCandidate(
                             candidate.copy(reason = "screenshot error $errorCode"),
                             null,

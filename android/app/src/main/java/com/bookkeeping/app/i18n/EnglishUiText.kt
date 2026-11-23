@@ -5,6 +5,17 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "当前系统：" to "Current system: ",
+        "打开自启动管理" to "Open auto-start settings",
+        "打开后台耗电设置" to "Open background battery settings",
+        "所有机型都建议开启页面识别。若系统屏蔽部分支付页面事件，请同时开启通知使用权和新截图自动识别补偿。" to "Enable page recognition on every device. If the system filters some payment-page events, also turn on notification access and automatic screenshot recognition.",
+        "权限开关灰显或提示受限制？" to "Is the permission toggle greyed out or restricted?",
+        "① 打开本应用信息，点右上角菜单。" to "1. Open this app's info page and tap the top-right menu.",
+        "② 选择「允许受限制的设置」，返回重新开启通知使用权或页面识别。" to "2. Choose Allow restricted settings, then return to enable notification access or page recognition.",
+        "打开本应用信息" to "Open app info",
+        "存储空间不足，请清理空间后重新下载" to "Not enough storage. Free up space and download again.",
+        "存储空间不足，请清理空间后重新安装" to "Not enough storage. Free up space before installing.",
+        "下载长时间无进度，请检查后台下载权限后重试" to "Download stalled. Check background download permissions and try again.",
         "批量整理其他分类" to "Organize other categories",
         "记住该商户规则，后续自动归类" to "Remember this merchant for future categorization",
         "同时更新该商户历史记录（共 %d 笔）" to "Also update this merchant’s past entries (%d)",

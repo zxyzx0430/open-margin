@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.bookkeeping.app.i18n.AppLanguage
+import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +41,9 @@ class KeepAliveService : Service() {
                 intent?.action == Intent.ACTION_SCREEN_OFF
             ) {
                 refreshStatus(this@KeepAliveService)
+            }
+            if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                ScreenshotWatchController.catchUp(applicationContext)
             }
         }
     }
@@ -113,6 +117,7 @@ class KeepAliveService : Service() {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
         runCatching {
             ContextCompat.registerReceiver(
