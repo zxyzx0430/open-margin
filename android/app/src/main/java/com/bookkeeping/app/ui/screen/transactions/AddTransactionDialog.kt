@@ -862,7 +862,9 @@ private fun TransactionTypeSegmentedPill(
                 val selected = selectedType == type
                 val activeColor = if (type == TransactionType.EXPENSE) QingExpense else QingIncome
                 Surface(
-                    onClick = { onSelect(type) },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable { onSelect(type) },
                     shape = RoundedCornerShape(50),
                     color = if (selected) QingSurface else Color.Transparent,
                     shadowElevation = if (selected) 1.dp else 0.dp,
@@ -874,7 +876,7 @@ private fun TransactionTypeSegmentedPill(
                         color = if (selected) activeColor else QingTextSecondary,
                         maxLines = 1,
                         softWrap = false,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
                     )
                 }
             }

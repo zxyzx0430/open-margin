@@ -583,26 +583,73 @@ fun SettingsScreen(
     }
 
     if (showExportGuide) {
-        AlertDialog(
-            onDismissRequest = { showExportGuide = false },
-            title = { Text(tr("导出微信 / 支付宝账单")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("微信"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我 → 服务 → 钱包 → 账单 → 右上角「…」→「下载账单」→「用于个人对账」→ 选时间范围 → 接收方式选「微信」，文件直接发到微信支付服务号，无需邮箱、无需解压；也可以选邮箱。"))
-                    Text(tr("支付宝"), style = MaterialTheme.typography.titleSmall)
-                    Text(tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」→ 选时间范围与交易类型 → 接收方式选「支付宝」，文件直接发到支付宝消息；也可以选邮箱。"))
+        SettingsDetailDialog(
+            title = tr("导出微信 / 支付宝账单"),
+            onDismiss = { showExportGuide = false },
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
-                        tr("导入时选择下载到的账单文件（CSV / XLSX）即可。"),
+                        text = tr("微信"),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = tr("我 → 服务 → 钱包 → 账单 → 右上角「…」→「下载账单」→「用于个人对账」→ 选时间范围 → 接收方式选「微信」，文件直接发到微信支付服务号，无需邮箱、无需解压；也可以选邮箱。"),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showExportGuide = false }) { Text(tr("知道了")) }
-            },
-        )
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = tr("支付宝"),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = tr("我的 → 账单 → 右上角「…」→「开具交易流水证明」→「用于个人对账」→ 选时间范围与交易类型 → 接收方式选「支付宝」，文件直接发到支付宝消息；也可以选邮箱。"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Text(
+                text = tr("导入时选择下载到的账单文件（CSV / XLSX）即可。"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = { showExportGuide = false },
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+            ) {
+                Text(
+                    text = tr("知道了"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
     }
 }
 
@@ -1020,66 +1067,93 @@ private fun AutomationStepCard(
     secondaryLabel: String? = null,
     onSecondary: (() -> Unit)? = null,
 ) {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = stepLabel,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Text(
+                    text = stepLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
             LinearProgressIndicator(
                 progress = { (stepIndex / AUTOMATION_WIZARD_STEPS.toFloat()).coerceIn(0f, 1f) },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
+                    .weight(1f)
+                    .height(6.dp),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 drawStopIndicator = {},
             )
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (status != null) {
+                    Text(
+                        text = status,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (statusIsError) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Button(
+            onClick = onPrimary,
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+        ) {
             Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
+                text = primaryLabel,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            Text(
-                text = body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (status != null) {
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (statusIsError) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Button(
-                onClick = onPrimary,
+        }
+        val secondaryAction = onSecondary
+        if (secondaryLabel != null && secondaryAction != null) {
+            TextButton(
+                onClick = secondaryAction,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(primaryLabel)
-            }
-            val secondaryAction = onSecondary
-            if (secondaryLabel != null && secondaryAction != null) {
-                TextButton(onClick = secondaryAction) {
-                    Text(secondaryLabel)
-                }
+                Text(secondaryLabel)
             }
         }
     }
 }
 
 @Composable
-private fun SettingsDetailDialog(
+internal fun SettingsDetailDialog(
     title: String,
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
@@ -1098,9 +1172,9 @@ private fun SettingsDetailDialog(
         ) {
             Column(
                 modifier = Modifier
-                    .heightIn(max = 560.dp)
+                    .heightIn(max = 620.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1118,7 +1192,6 @@ private fun SettingsDetailDialog(
                         )
                     }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 content()
             }
         }
@@ -1362,70 +1435,85 @@ private fun formatHealthTime(timestampMs: Long): String =
 
 @Composable
 private fun RomGuideCard() {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = tr("为什么需要？"),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = tr("小米、华为、OPPO、vivo 等国产 ROM 默认会激进省电，把不常用的 app 进程彻底杀掉，") +
-                       tr("导致支付通知到达时本应用没法被系统拉起，漏抓账单。") +
-                       tr("需要手动把本应用加进各家的「允许后台运行」/「自启动」白名单。"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
-            )
-
-            RomEntry(
-                brand = tr("小米 / Redmi"),
-                path = tr("设置 → 应用设置 → 应用管理 → 找到本应用 → 「自启动」打开 +「省电策略」选「无限制」"),
-            )
-            RomEntry(
-                brand = tr("华为 / 荣耀"),
-                path = tr("设置 → 应用 → 应用启动管理 → 找到本应用 → 关闭「自动管理」→ 手动管理三项全开"),
-            )
-            RomEntry(
-                brand = tr("OPPO / 一加 / realme"),
-                path = tr("设置 → 电池 → 应用耗电管理 → 找到本应用 → 允许后台运行 + 允许关联启动"),
-            )
-            RomEntry(
-                brand = "vivo / iQOO",
-                path = tr("设置 → 电池 → 后台应用管理 → 找到本应用 → 允许后台运行"),
-            )
-            RomEntry(
-                brand = tr("三星"),
-                path = tr("设置 → 设备维护 → 电池 → 未受监视应用 → 添加本应用"),
-            )
-            RomEntry(
-                brand = tr("原生 Android (Pixel)"),
-                path = tr("一般不用动。如有问题：设置 → 电池 → 电池优化 → 本应用 → 不优化"),
-            )
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = tr("为什么需要？"),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    text = tr("小米、华为、OPPO、vivo 等国产 ROM 默认会激进省电，把不常用的 app 进程彻底杀掉，") +
+                           tr("导致支付通知到达时本应用没法被系统拉起，漏抓账单。") +
+                           tr("需要手动把本应用加进各家的「允许后台运行」/「自启动」白名单。"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
+
+        RomEntry(
+            brand = tr("小米 / Redmi"),
+            path = tr("设置 → 应用设置 → 应用管理 → 找到本应用 → 「自启动」打开 +「省电策略」选「无限制」"),
+        )
+        RomEntry(
+            brand = tr("华为 / 荣耀"),
+            path = tr("设置 → 应用 → 应用启动管理 → 找到本应用 → 关闭「自动管理」→ 手动管理三项全开"),
+        )
+        RomEntry(
+            brand = tr("OPPO / 一加 / realme"),
+            path = tr("设置 → 电池 → 应用耗电管理 → 找到本应用 → 允许后台运行 + 允许关联启动"),
+        )
+        RomEntry(
+            brand = "vivo / iQOO",
+            path = tr("设置 → 电池 → 后台应用管理 → 找到本应用 → 允许后台运行"),
+        )
+        RomEntry(
+            brand = tr("三星"),
+            path = tr("设置 → 设备维护 → 电池 → 未受监视应用 → 添加本应用"),
+        )
+        RomEntry(
+            brand = tr("原生 Android (Pixel)"),
+            path = tr("一般不用动。如有问题：设置 → 电池 → 电池优化 → 本应用 → 不优化"),
+        )
     }
 }
 
 @Composable
 private fun RomEntry(brand: String, path: String) {
-    Column(modifier = Modifier.padding(vertical = 6.dp)) {
-        Text(
-            text = brand,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = path,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = brand,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = path,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
     }
 }
 
