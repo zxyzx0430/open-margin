@@ -266,18 +266,26 @@ class ScreenshotBillListAutoBookTest {
         assertTrue(result.decisions.none { it.action == Action.AUTO_BOOK })
     }
 
-    // ---- kinds that always need the user, even on a list row ----
+    // ---- transfer rows still ask; settled refund / red packet / withdrawal rows auto-book ----
 
     @Test
-    fun `refund transfer red packet and withdrawal rows still ask`() {
-        val specials = listOf(
+    fun `transfer bill list row still asks while refund red packet and withdrawal rows auto book`() {
+        val transferBlocks = listOf(blockAt("微信支付", 20, 10, 160)) +
+            row("祐迎迎生鲜超市(岭南店)", "¥ 8.00", 100) +
+            row("转账给 张三", "¥ 6.00", 360, payment = "使用零钱支付")
+        val transferResult = plan(transferBlocks)
+        val transfer = transferResult.decisions.single { it.draft.amountCents != 800L }
+        assertNotEquals("transfer must not be auto booked from list", Action.AUTO_BOOK, transfer.action)
+        assertEquals("transfer must be confirmed", Action.ASK_USER, transfer.action)
+        assertTrue("transfer is still a settled row", transfer.draft.settledBillRow)
+        assertEquals(setOf(800L), transferResult.bookings.mapNotNull { it.draft.amountCents }.toSet())
+
+        val autoBookableSpecials = listOf(
             "退款" to "¥ 5.00",
-            "转账给 张三" to "¥ 6.00",
             "微信红包" to "¥ 7.00",
             "提现到中国银行储蓄卡" to "¥ 9.00",
         )
-
-        specials.forEach { (label, amount) ->
+        autoBookableSpecials.forEach { (label, amount) ->
             val blocks = listOf(blockAt("微信支付", 20, 10, 160)) +
                 row("祐迎迎生鲜超市(岭南店)", "¥ 8.00", 100) +
                 row(label, amount, 360, payment = "使用零钱支付")
@@ -285,14 +293,9 @@ class ScreenshotBillListAutoBookTest {
             val result = plan(blocks)
             val special = result.decisions.single { it.draft.amountCents != 800L }
 
-            assertNotEquals("$label must not be auto booked", Action.AUTO_BOOK, special.action)
-            assertEquals("$label must be confirmed", Action.ASK_USER, special.action)
+            assertEquals("$label should auto book as a settled row", Action.AUTO_BOOK, special.action)
             assertTrue("$label is still a settled row", special.draft.settledBillRow)
-            assertEquals(
-                "$label must not reach the ledger",
-                setOf(800L),
-                result.bookings.mapNotNull { it.draft.amountCents }.toSet(),
-            )
+            assertEquals(2, result.bookings.size)
         }
     }
 

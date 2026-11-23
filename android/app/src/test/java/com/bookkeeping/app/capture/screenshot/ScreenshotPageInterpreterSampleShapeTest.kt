@@ -228,11 +228,9 @@ class ScreenshotPageInterpreterSampleShapeTest {
         val result = plan(blocks)
         assertEquals(1, result.decisions.size)
         assertTrue(result.decisions.none { it.draft.amountCents == 400L })
-        // A landed refund is real money, but it is not ordinary income: it is
-        // only written after the user confirms.
-        assertEquals(Action.ASK_USER, result.decisions.single().action)
-        assertTrue(result.bookings.isEmpty())
-        assertEquals(1, result.needsConfirmation.size)
+        assertEquals(Action.AUTO_BOOK, result.decisions.single().action)
+        assertEquals(1, result.bookings.size)
+        assertTrue(result.needsConfirmation.isEmpty())
     }
 
     @Test

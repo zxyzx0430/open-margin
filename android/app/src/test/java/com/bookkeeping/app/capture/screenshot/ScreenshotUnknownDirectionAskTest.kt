@@ -204,7 +204,7 @@ class ScreenshotUnknownDirectionAskTest {
     }
 
     @Test
-    fun `refund red packet and withdrawal still ask before booking`() {
+    fun `completed refund red packet and withdrawal auto book when direction is explicit`() {
         val redPacket = listOf(
             block("微信红包", 10),
             block("¥8.88", 40),
@@ -229,8 +229,8 @@ class ScreenshotUnknownDirectionAskTest {
 
         listOf(redPacket, withdrawal, refund).forEach { page ->
             val plan = plan(page)
-            assertEquals(Action.ASK_USER, plan.decisions.single().action)
-            assertTrue(plan.bookings.isEmpty())
+            assertEquals(Action.AUTO_BOOK, plan.decisions.single().action)
+            assertEquals(1, plan.bookings.size)
         }
     }
 

@@ -51,28 +51,25 @@ fun QuickEntryBar(
     }
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = fieldModifier
                 .fillMaxWidth()
-                .height(116.dp)
                 .semantics { contentDescription = tr("一句话记账") },
             label = null,
-            minLines = 4,
-            maxLines = 4,
+            minLines = 2,
+            maxLines = 2,
             textStyle = MaterialTheme.typography.bodyMedium,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             placeholder = {
                 Text(
-                    text = tr("比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐") +
-                        "\n" + tr("昨天 星巴克 32 支付宝") +
-                        "\n" + tr("工资 8000 银行卡 收入"),
+                    text = tr("比如：11月16日中午12点在麦当劳花了36块5，餐饮，微信支付，备注加班餐"),
                     style = MaterialTheme.typography.bodySmall,
                     color = QingTextSecondary,
-                    maxLines = 4,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             },
@@ -80,21 +77,12 @@ fun QuickEntryBar(
             keyboardActions = KeyboardActions(onDone = { submit() }),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = QingSurface,
-                unfocusedContainerColor = QingSurface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                 focusedBorderColor = QingPrimary,
-                unfocusedBorderColor = QingOutline,
+                unfocusedBorderColor = QingOutline.copy(alpha = 0.65f),
                 cursorColor = QingPrimary,
             ),
         )
-        if (value.isBlank()) {
-            Text(
-                text = tr("可以说：金额 · 时间 · 商户 · 分类 · 账户 · 收入或支出"),
-                style = MaterialTheme.typography.bodySmall,
-                color = QingTextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
         previewContent()
         if (warning != null) {
             Text(
