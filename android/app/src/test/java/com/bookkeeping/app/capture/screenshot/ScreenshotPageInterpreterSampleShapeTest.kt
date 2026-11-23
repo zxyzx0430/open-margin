@@ -343,9 +343,9 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(CaptureCandidate.KIND_PAYMENT, payment.draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, payment.draft.direction)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, payment.draft.completionStatus)
-        assertEquals(Action.ASK_USER, refund.action)
+        assertEquals(Action.AUTO_BOOK, refund.action)
         assertEquals(Action.AUTO_BOOK, payment.action)
-        assertEquals(listOf(1800L), result.bookings.map { it.draft.amountCents })
+        assertEquals(listOf(185L, 1800L), result.bookings.map { it.draft.amountCents })
     }
 
     @Test
@@ -366,8 +366,8 @@ class ScreenshotPageInterpreterSampleShapeTest {
         assertEquals(185L, refund.draft.amountCents)
         assertEquals(CaptureCandidate.KIND_REFUND, refund.draft.kind)
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, refund.draft.completionStatus)
-        assertEquals(Action.ASK_USER, refund.action)
-        assertEquals(listOf(185L), result.needsConfirmation.map { it.draft.amountCents })
+        assertEquals(Action.AUTO_BOOK, refund.action)
+        assertEquals(listOf(185L), result.bookings.map { it.draft.amountCents })
     }
 
     @Test

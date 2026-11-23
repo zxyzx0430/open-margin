@@ -91,9 +91,11 @@ fun CaptureReviewDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = tr("待确认扫描结果"),
+                        text = tr("待确认"),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.weight(1f),
                     )
                     // 次要入口：忽略过的卡片不删除，都能从这里找回来。

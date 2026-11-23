@@ -83,12 +83,13 @@ class ScreenshotReviewReasonTest {
     }
 
     @Test
-    fun `refund still needs manual confirmation`() {
+    fun `refund no longer shows unconditional manual confirmation reason`() {
         val detail = ScreenshotReviewNotifier.candidateDetails(
             candidate(kind = CaptureCandidate.KIND_REFUND),
         )
 
-        assertTrue(detail.contains("这类交易需要人工确认"))
+        assertFalse(detail.contains("这类交易需要人工确认"))
+        assertTrue(detail.contains("请核对截图识别结果"))
     }
 
     @Test
