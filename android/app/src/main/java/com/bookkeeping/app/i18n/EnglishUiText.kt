@@ -1555,7 +1555,6 @@ internal object EnglishUiText {
         "已忽略这笔候选" to "Candidate ignored",
         "撤销失败，请稍后重试" to "Could not undo; please try again",
         "本次没有新记入账单，可在下方查看原因" to "No new transactions recorded; see details below",
-        "查看大图" to "View full image",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(
