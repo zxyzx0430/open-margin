@@ -182,7 +182,9 @@ object ScreenshotWatchController {
 
     private fun handleCandidate(context: Context, uri: Uri) {
         val id = runCatching { ContentUris.parseId(uri) }.getOrNull() ?: return
-        inFlight.add(id)
+        val scanned = ScreenshotWatchSettings.lastScannedId(context)
+        if (scanned != null && id <= scanned) return
+        if (!inFlight.add(id)) return
         scope.launch {
             try {
                 val result = runCatching { ingestNow(context, id, enforceFreshness = true) }
@@ -193,13 +195,15 @@ object ScreenshotWatchController {
                         ScreenshotWatchSettings.setLastScannedId(context, id)
                     }
                 }
-                ServiceHealthLog.record(
-                    context = context,
-                    channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
-                    event = ServiceHealthLog.EVENT_CANDIDATE_INTAKE,
-                    summary = "相册新图 id=$id: ${result.disposition}",
-                    detail = result.detail,
-                )
+                if (result.read || result.disposition != "row_missing") {
+                    ServiceHealthLog.record(
+                        context = context,
+                        channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
+                        event = ServiceHealthLog.EVENT_CANDIDATE_INTAKE,
+                        summary = "相册新图 id=$id: ${result.disposition}",
+                        detail = result.detail,
+                    )
+                }
             } finally {
                 inFlight.remove(id)
             }
@@ -281,10 +285,18 @@ object ScreenshotWatchController {
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             projection += MediaStore.Images.Media.RELATIVE_PATH
+            projection += MediaStore.MediaColumns.IS_PENDING
         }
         return runCatching {
             context.contentResolver.query(uri, projection.toTypedArray(), null, null, null)?.use {
                 if (!it.moveToFirst()) return@use null
+                val pendingIndex = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    it.getColumnIndex(MediaStore.MediaColumns.IS_PENDING)
+                } else {
+                    -1
+                }
+                // File still being flushed by the OEM screenshot service: wait for pending=0 callback.
+                if (pendingIndex >= 0 && it.getInt(pendingIndex) != 0) return@use null
                 val nameIndex = it.getColumnIndex(MediaStore.Images.Media.DISPLAY_NAME)
                 val dateIndex = it.getColumnIndex(MediaStore.Images.Media.DATE_ADDED)
                 val pathIndex = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

@@ -85,9 +85,11 @@ class TransactionSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                 if (blocker != null) {
                     return finish(prefs, SyncResultCode.BLOCKED, blocker, Result.failure())
                 }
+                val fallbackMessage = prefs.getString("last_result", null)
+                    ?: "无法验证服务器账本身份，将自动重试"
                 return finish(
                     prefs, SyncResultCode.RETRY,
-                    "无法验证服务器账本身份，将自动重试", Result.retry()
+                    fallbackMessage, Result.retry()
                 )
             }
             val auditCode = auditLegacyAmounts(db, prefs, base, token, installation)

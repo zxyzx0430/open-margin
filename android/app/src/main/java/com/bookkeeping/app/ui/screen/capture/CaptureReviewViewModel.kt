@@ -42,6 +42,8 @@ class CaptureReviewViewModel @Inject constructor(
         val pending: List<CaptureCandidate> = emptyList(),
         /** Ignored cards the user can bring back into review. */
         val ignored: List<CaptureCandidate> = emptyList(),
+        /** True after the user clicks × on the ignored-only home banner. */
+        val ignoredBannerDismissed: Boolean = false,
         /** The dialog body shows the ignored list instead of the pending list. */
         val showingIgnored: Boolean = false,
         /** A full-list reload is running; per-card writes use [busyIds]. */
@@ -65,12 +67,20 @@ class CaptureReviewViewModel @Inject constructor(
     )
 
     private val store = CaptureCandidateStore(context)
+    private val bannerPrefs = context.getSharedPreferences("capture_review_banner", Context.MODE_PRIVATE)
     private val queue = CaptureReviewQueue()
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(
+        UiState(ignoredBannerDismissed = bannerPrefs.getBoolean("ignored_banner_dismissed", false)),
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     init {
         refresh()
+    }
+
+    fun dismissIgnoredBanner() {
+        bannerPrefs.edit().putBoolean("ignored_banner_dismissed", true).apply()
+        _state.update { it.copy(ignoredBannerDismissed = true) }
     }
 
     fun refresh() {
@@ -84,10 +94,18 @@ class CaptureReviewViewModel @Inject constructor(
                     intakeFailureNotice = ScreenshotIntakeFailureNoticeQueue.pending(context),
                 )
             }
+            if (snapshot.ignored.isEmpty() && bannerPrefs.getBoolean("ignored_banner_dismissed", false)) {
+                bannerPrefs.edit().putBoolean("ignored_banner_dismissed", false).apply()
+            }
             queue.replacePending(snapshot.pending)
             _state.update {
                 it.copy(
                     ignored = snapshot.ignored,
+                    ignoredBannerDismissed = if (snapshot.ignored.isEmpty()) {
+                        false
+                    } else {
+                        bannerPrefs.getBoolean("ignored_banner_dismissed", false)
+                    },
                     storageWarningKinds = snapshot.storageWarningKinds,
                     intakeFailureNotice = snapshot.intakeFailureNotice,
                 )

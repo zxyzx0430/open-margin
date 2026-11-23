@@ -83,6 +83,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.bookkeeping.app.billexport.BillExport
+import com.bookkeeping.app.ui.components.rememberUpdateInstallController
 import com.bookkeeping.app.ui.screen.billimport.BillImportExportSheet
 import com.bookkeeping.app.ui.screen.billimport.BillImportViewModel
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
@@ -1569,8 +1570,7 @@ private fun AboutUpdateCard(
     var result by remember {
         mutableStateOf<GitHubReleaseUpdateChecker.CheckResult?>(null)
     }
-    var installDialog by remember { mutableStateOf<InstallDialogState?>(null) }
-    var downloadJob by remember { mutableStateOf<Job?>(null) }
+    val updateInstall = rememberUpdateInstallController()
 
     // The site manifest is the primary channel; the GitHub check remains the
     // fallback when zxyzx.me is unreachable.
@@ -1589,92 +1589,6 @@ private fun AboutUpdateCard(
         if (!officialBuild) return@LaunchedEffect
         siteUpdate = withContext(Dispatchers.IO) {
             SiteUpdateCoordinator.refreshIfDue(context)
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { downloadJob?.cancel() }
-    }
-
-    val closeDialog = {
-        downloadJob?.cancel()
-        installDialog = null
-    }
-
-    val startDownload: (InstallDialogState) -> Unit = { state ->
-        val update = state.update
-        if (!UpdateInstallFlow.hasInstallPermission(context)) {
-            // Android 8+: the per-app switch must be granted by the user in
-            // system settings. Never fail silently on a missing permission.
-            val opened = UpdateInstallFlow.openInstallPermissionSettings(context)
-            installDialog = state.copy(
-                stage = InstallStage.PROMPT,
-                progress = null,
-                message = if (opened) {
-                    tr("请允许「安装未知应用」，返回后再点「下载」")
-                } else {
-                    tr("无法打开安装权限设置，请在系统设置中允许本应用安装未知应用")
-                },
-            )
-        } else {
-            val started = UpdateInstallFlow.startDownload(context, update)
-            val id = started.getOrNull()
-            if (id == null) {
-                installDialog = state.copy(
-                    stage = InstallStage.FAILED,
-                    progress = null,
-                    message = tr("下载失败，请重试"),
-                )
-            } else {
-                installDialog = state.copy(
-                    stage = InstallStage.DOWNLOADING,
-                    progress = 0,
-                    message = null,
-                )
-                downloadJob?.cancel()
-                downloadJob = scope.launch {
-                    UpdateInstallFlow.observe(context, id, update).collect { event ->
-                        val current = installDialog ?: return@collect
-                        if (current.update.apkUrl != update.apkUrl) return@collect
-                        installDialog = when (event) {
-                            is UpdateInstallFlow.DownloadEvent.Running -> current.copy(
-                                stage = InstallStage.DOWNLOADING,
-                                progress = event.percent,
-                                message = null,
-                            )
-                            UpdateInstallFlow.DownloadEvent.Verifying -> current.copy(
-                                stage = InstallStage.VERIFYING,
-                                progress = null,
-                                message = null,
-                            )
-                            is UpdateInstallFlow.DownloadEvent.Completed -> {
-                                val ready = current.copy(
-                                    stage = InstallStage.READY,
-                                    progress = 100,
-                                    message = null,
-                                )
-                                when (UpdateInstallFlow.openInstaller(context, event.apk)) {
-                                    UpdateInstallFlow.InstallOutcome.OPENED_INSTALLER -> null
-                                    UpdateInstallFlow.InstallOutcome.NEEDS_PERMISSION -> {
-                                        UpdateInstallFlow.openInstallPermissionSettings(context)
-                                        ready.copy(
-                                            message = tr("请允许「安装未知应用」，返回后点「安装」"),
-                                        )
-                                    }
-                                    UpdateInstallFlow.InstallOutcome.NO_INSTALLER -> ready.copy(
-                                        message = tr("没有找到系统安装程序，请用文件管理器打开下载的 APK"),
-                                    )
-                                }
-                            }
-                            is UpdateInstallFlow.DownloadEvent.Failed -> current.copy(
-                                stage = InstallStage.FAILED,
-                                progress = null,
-                                message = installFailureText(event.reason),
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -1754,22 +1668,7 @@ private fun AboutUpdateCard(
                     }
                     TextButton(
                         enabled = !checking,
-                        onClick = {
-                            scope.launch {
-                                val check = update.asCheckResult()
-                                val verified = withContext(Dispatchers.IO) {
-                                    UpdateInstallFlow.verifiedDownload(context, check)
-                                }
-                                installDialog = InstallDialogState(
-                                    update = check,
-                                    stage = if (verified != null) {
-                                        InstallStage.READY
-                                    } else {
-                                        InstallStage.PROMPT
-                                    },
-                                )
-                            }
-                        },
+                        onClick = { updateInstall.open(update.asCheckResult()) },
                     ) {
                         Text(tr("下载"), maxLines = 1, softWrap = false)
                     }
@@ -1787,7 +1686,7 @@ private fun AboutUpdateCard(
                 onClick = {
                     checking = true
                     result = null
-                    installDialog = null
+                    updateInstall.close()
                     scope.launch {
                         var siteFound: SiteUpdatePolicy.SiteUpdateManifest? = null
                         val checked: GitHubReleaseUpdateChecker.CheckResult? =
@@ -1828,32 +1727,11 @@ private fun AboutUpdateCard(
                             checked.apkUrl != null
                         ) {
                             if (officialBuild) {
-                                val verified = withContext(Dispatchers.IO) {
-                                    UpdateInstallFlow.verifiedDownload(context, checked)
-                                }
-                                installDialog = InstallDialogState(
-                                    update = checked,
-                                    stage = if (verified != null) {
-                                        InstallStage.READY
-                                    } else {
-                                        InstallStage.PROMPT
-                                    },
-                                )
+                                updateInstall.open(checked)
                             }
                         } else if (siteFound != null && officialBuild) {
                             val found = siteFound ?: return@launch
-                            val check = found.asCheckResult()
-                            val verified = withContext(Dispatchers.IO) {
-                                UpdateInstallFlow.verifiedDownload(context, check)
-                            }
-                            installDialog = InstallDialogState(
-                                update = check,
-                                stage = if (verified != null) {
-                                    InstallStage.READY
-                                } else {
-                                    InstallStage.PROMPT
-                                },
-                            )
+                            updateInstall.open(found.asCheckResult())
                         }
                     }
                 },
@@ -1933,21 +1811,7 @@ private fun AboutUpdateCard(
                             )
                             TextButton(
                                 enabled = officialBuild && !checking,
-                                onClick = {
-                                    scope.launch {
-                                        val verified = withContext(Dispatchers.IO) {
-                                            UpdateInstallFlow.verifiedDownload(context, state)
-                                        }
-                                        installDialog = InstallDialogState(
-                                            update = state,
-                                            stage = if (verified != null) {
-                                                InstallStage.READY
-                                            } else {
-                                                InstallStage.PROMPT
-                                            },
-                                        )
-                                    }
-                                },
+                                onClick = { updateInstall.open(state) },
                             ) {
                                 Text(
                                     text = tr("下载"),
@@ -1970,165 +1834,5 @@ private fun AboutUpdateCard(
         }
     }
 
-    installDialog?.let { state ->
-        val update = state.update
-        val locked = state.stage == InstallStage.DOWNLOADING ||
-            state.stage == InstallStage.VERIFYING
-        AlertDialog(
-            onDismissRequest = { if (!locked) closeDialog() },
-            properties = DialogProperties(
-                dismissOnBackPress = !locked,
-                dismissOnClickOutside = !locked,
-            ),
-            title = {
-                Text(tr("发现新版本") + " " + (update.apkTag ?: update.tag))
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        tr("版本") + "：" + (update.apkTag ?: update.tag),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    UpdatePresentation.formatSize(update.apkSizeBytes)?.let { size ->
-                        Text(
-                            tr("APK 大小") + "：" + size,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                    UpdatePresentation.formatDate(update.publishedAt)?.let { date ->
-                        Text(
-                            tr("发布日期") + "：" + date,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                    if (update.notes.isNotEmpty()) {
-                        update.notes.forEach { line ->
-                            Text(
-                                text = "· " + line,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    when (state.stage) {
-                        InstallStage.DOWNLOADING -> {
-                            val percent = state.progress
-                            if (percent == null) {
-                                LinearProgressIndicator(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp)
-                                        .height(4.dp),
-                                )
-                            } else {
-                                LinearProgressIndicator(
-                                    progress = { percent / 100f },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp)
-                                        .height(4.dp),
-                                    drawStopIndicator = {},
-                                )
-                            }
-                        }
-                        InstallStage.VERIFYING -> LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp)
-                                .height(4.dp),
-                        )
-                        else -> Unit
-                    }
-                    state.message?.let { message ->
-                        Text(
-                            text = message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !locked,
-                    onClick = {
-                        when (state.stage) {
-                            InstallStage.READY -> {
-                                val apk = UpdateInstallFlow.apkFile(context, update)
-                                if (apk == null) {
-                                    installDialog = state.copy(
-                                        message = tr("没有找到已下载的安装包，请重新下载"),
-                                    )
-                                } else {
-                                    when (UpdateInstallFlow.openInstaller(context, apk)) {
-                                        UpdateInstallFlow.InstallOutcome.OPENED_INSTALLER ->
-                                            closeDialog()
-                                        UpdateInstallFlow.InstallOutcome.NEEDS_PERMISSION -> {
-                                            UpdateInstallFlow.openInstallPermissionSettings(context)
-                                            installDialog = state.copy(
-                                                message = tr(
-                                                    "请允许「安装未知应用」，返回后点「安装」",
-                                                ),
-                                            )
-                                        }
-                                        UpdateInstallFlow.InstallOutcome.NO_INSTALLER ->
-                                            installDialog = state.copy(
-                                                message = tr(
-                                                    "没有找到系统安装程序，请用文件管理器打开下载的 APK",
-                                                ),
-                                            )
-                                    }
-                                }
-                            }
-                            else -> startDownload(state)
-                        }
-                    },
-                ) {
-                    Text(
-                        text = installConfirmLabel(state),
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            },
-            dismissButton = {
-                if (!locked) {
-                    TextButton(onClick = closeDialog) {
-                        Text(tr("取消"))
-                    }
-                }
-            },
-        )
-    }
-}
-
-private enum class InstallStage { PROMPT, DOWNLOADING, VERIFYING, READY, FAILED }
-
-private data class InstallDialogState(
-    val update: GitHubReleaseUpdateChecker.CheckResult.UpdateAvailable,
-    val stage: InstallStage,
-    val progress: Int? = null,
-    val message: String? = null,
-)
-
-private fun installConfirmLabel(state: InstallDialogState): String = when (state.stage) {
-    InstallStage.PROMPT -> tr("下载")
-    InstallStage.DOWNLOADING -> {
-        val percent = state.progress
-        if (percent == null) tr("下载中…") else tr("下载中") + " " + percent + "%"
-    }
-    InstallStage.VERIFYING -> tr("正在校验…")
-    InstallStage.READY -> tr("安装")
-    InstallStage.FAILED -> tr("重试")
-}
-
-private fun installFailureText(reason: UpdateInstallFlow.Failure): String = when (reason) {
-    UpdateInstallFlow.Failure.SIZE_MISMATCH,
-    UpdateInstallFlow.Failure.DIGEST_MISMATCH,
-    -> tr("下载文件校验失败，已删除，请重试")
-    UpdateInstallFlow.Failure.SIGNATURE_MISMATCH ->
-        tr("安装包签名与当前应用不一致，已删除")
-    UpdateInstallFlow.Failure.REJECTED_URL -> tr("更新地址不受信任，已取消下载")
-    else -> tr("下载失败，请重试")
+    updateInstall.Dialog()
 }

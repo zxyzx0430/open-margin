@@ -1,9 +1,14 @@
 package com.bookkeeping.app.notification.accessibility
 
+import com.bookkeeping.app.capture.screenshot.ScreenshotPageInterpreter
+import com.bookkeeping.app.capture.screenshot.TextBlock
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import java.nio.file.Files
+import java.util.TimeZone
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UserFeedbackRegressionTest {
@@ -128,5 +133,53 @@ class UserFeedbackRegressionTest {
         assertEquals(1, detections.size)
         assertEquals(3200L, detections.single().amountCents)
         assertEquals(PaymentDirection.EXPENSE, detections.single().direction)
+    }
+
+    @Test
+    fun `same-day chat transfer pair with HH_mm clock consolidates to single income`() {
+        val zone = TimeZone.getTimeZone("Asia/Shanghai")
+        val blocks = listOf(
+            TextBlock("20:21", left = 40, top = 20, right = 140, bottom = 60),
+            TextBlock("马奕轩", left = 160, top = 90, right = 340, bottom = 140),
+            TextBlock("20:21", left = 480, top = 500, right = 600, bottom = 535),
+            TextBlock("¥0.02", left = 120, top = 620, right = 300, bottom = 670),
+            TextBlock("已被接收", left = 120, top = 680, right = 300, bottom = 720),
+            TextBlock("转账", left = 120, top = 730, right = 220, bottom = 760),
+            TextBlock("¥0.02", left = 680, top = 860, right = 860, bottom = 910),
+            TextBlock("已收款", left = 680, top = 920, right = 860, bottom = 960),
+            TextBlock("转账", left = 680, top = 970, right = 780, bottom = 1000),
+        )
+
+        val evidence = ScreenshotPageInterpreter.interpret(blocks, now, zone)
+
+        assertTrue(evidence.transactionLike)
+        assertEquals(1, evidence.drafts.size)
+        val draft = evidence.drafts.single()
+        assertEquals(2L, draft.amountCents)
+        assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, draft.direction)
+        assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+        assertEquals(listOf("马奕轩"), draft.merchantCandidates)
+    }
+
+    @Test
+    fun `own app screenshot from OEM without package name in filename is ignored`() {
+        val zone = TimeZone.getTimeZone("Asia/Shanghai")
+        val blocks = listOf(
+            TextBlock("清衡", left = 60, top = 90, right = 200, bottom = 140),
+            TextBlock("同步未开启", left = 400, top = 90, right = 620, bottom = 140),
+            TextBlock("已忽略的截图·131", left = 60, top = 200, right = 420, bottom = 240),
+            TextBlock("收入", left = 60, top = 300, right = 180, bottom = 340),
+            TextBlock("支出", left = 360, top = 300, right = 480, bottom = 340),
+            TextBlock("结余", left = 660, top = 300, right = 780, bottom = 340),
+            TextBlock("¥2,253.55", left = 660, top = 350, right = 920, bottom = 400),
+            TextBlock("微信转账", left = 120, top = 700, right = 320, bottom = 740),
+            TextBlock("-¥0.01", left = 720, top = 700, right = 900, bottom = 740),
+        )
+
+        val evidence = ScreenshotPageInterpreter.interpret(blocks, now, zone)
+
+        assertFalse(evidence.transactionLike)
+        assertTrue(evidence.drafts.isEmpty())
     }
 }

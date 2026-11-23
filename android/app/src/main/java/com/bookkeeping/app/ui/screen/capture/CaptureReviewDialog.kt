@@ -2,13 +2,16 @@ package com.bookkeeping.app.ui.screen.capture
 
 import android.graphics.BitmapFactory
 import android.os.SystemClock
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -19,15 +22,20 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -49,6 +57,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -58,7 +67,19 @@ import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.LedgerFilterChip
+import com.bookkeeping.app.ui.theme.QingErrorContainer
+import com.bookkeeping.app.ui.theme.QingExpense
 import com.bookkeeping.app.ui.theme.QingIncome
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingPrimaryContainer
+import com.bookkeeping.app.ui.theme.QingPrimaryDeep
+import com.bookkeeping.app.ui.theme.QingSurface
+import com.bookkeeping.app.ui.theme.QingSurfaceVariant
+import com.bookkeeping.app.ui.theme.QingText
+import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.ui.theme.QingWarning
+import com.bookkeeping.app.ui.theme.QingWarningContainer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -113,44 +134,101 @@ fun CaptureReviewDialog(
                 .fillMaxWidth(0.94f)
                 .fillMaxHeight(0.88f),
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.background,
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Row 1: unobstructed title + close button so "全部忽略" never crowds "待确认".
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
                         text = if (state.showingIgnored) tr("已忽略的截图") else tr("待确认"),
-                        style = if (state.showingIgnored) {
-                            MaterialTheme.typography.titleMedium
-                        } else {
-                            MaterialTheme.typography.titleLarge
-                        },
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = QingText,
                         maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.weight(1f),
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    if (!state.showingIgnored && state.pending.isNotEmpty()) {
-                        TextButton(onClick = { confirmIgnoreAll = true }) {
-                            Text(tr("全部忽略"))
+                    val activeCount = if (state.showingIgnored) state.ignored.size else state.pending.size
+                    if (activeCount > 0) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (state.showingIgnored) QingSurfaceVariant else QingWarningContainer,
+                        ) {
+                            Text(
+                                text = tr("%d 笔").format(activeCount),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (state.showingIgnored) QingTextSecondary else QingWarning,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+                            )
                         }
                     }
-                    // 次要入口：忽略过的卡片可在此恢复或彻底删除。
-                    TextButton(onClick = { viewModel.showIgnored(!state.showingIgnored) }) {
-                        Text(
-                            if (state.showingIgnored) {
-                                tr("返回待确认")
-                            } else if (state.ignored.isEmpty()) {
-                                tr("已忽略的截图")
-                            } else {
-                                tr("已忽略的截图") + " (${state.ignored.size})"
-                            },
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = tr("关闭"),
+                            tint = QingTextSecondary,
                         )
                     }
-                    TextButton(onClick = onDismiss) { Text(tr("关闭")) }
                 }
+                // Row 2: clean segmented view switcher + right-aligned bulk action.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ReviewTabChip(
+                            label = if (state.pending.isEmpty()) tr("待确认") else tr("待确认 (%d)").format(state.pending.size),
+                            selected = !state.showingIgnored,
+                            onClick = { viewModel.showIgnored(false) },
+                        )
+                        ReviewTabChip(
+                            label = if (state.ignored.isEmpty()) tr("已忽略") else tr("已忽略 (%d)").format(state.ignored.size),
+                            selected = state.showingIgnored,
+                            onClick = { viewModel.showIgnored(true) },
+                        )
+                    }
+                    if (!state.showingIgnored && state.pending.isNotEmpty()) {
+                        TextButton(
+                            onClick = { confirmIgnoreAll = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                text = tr("全部忽略"),
+                                color = QingTextSecondary,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                    } else if (state.showingIgnored && state.ignored.isNotEmpty()) {
+                        TextButton(
+                            onClick = { viewModel.clearAllIgnored() },
+                            enabled = !state.restoring,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                text = tr("清空"),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = QingOutline)
                 Text(
                     text = if (state.showingIgnored) {
                         tr("恢复后回到待确认，由你重新确认后才写入账本。")
@@ -158,14 +236,22 @@ fun CaptureReviewDialog(
                         tr("扫描只在本机保存结构化字段和截图，确认后才会写入账本。")
                     },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = QingTextSecondary,
                 )
                 state.message?.let { message ->
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = QingPrimaryContainer,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = QingPrimaryDeep,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
                 state.undo?.let { offer ->
                     CaptureUndoRow(
@@ -183,32 +269,24 @@ fun CaptureReviewDialog(
                 }
                 if (state.showingIgnored) {
                     if (state.ignored.isEmpty()) {
-                        Text(
-                            text = tr("没有被忽略的截图"),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                text = tr("截图保留 7 天，过期或被清理后无法找回。"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.weight(1f),
+                                text = tr("没有被忽略的截图"),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = QingTextSecondary,
                             )
-                            TextButton(
-                                onClick = { viewModel.clearAllIgnored() },
-                                enabled = !state.restoring,
-                            ) {
-                                Text(
-                                    text = tr("清空"),
-                                    color = MaterialTheme.colorScheme.error,
-                                )
-                            }
                         }
+                    } else {
+                        Text(
+                            text = tr("截图保留 7 天，过期或被清理后无法找回。"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = QingTextSecondary,
+                        )
                         LazyColumn(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -232,11 +310,18 @@ fun CaptureReviewDialog(
                         }
                     }
                 } else if (state.pending.isEmpty()) {
-                    Text(
-                        text = tr("没有待确认扫描结果"),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = tr("没有待确认扫描结果"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = QingTextSecondary,
+                        )
+                    }
                 } else {
                     LazyColumn(
                         modifier = Modifier.weight(1f),
@@ -324,61 +409,70 @@ private fun CaptureCandidateCard(
         }
     }
 
+    val hasWarningNotice = likelyDuplicateNoticeText(candidate) != null ||
+        CaptureReviewMapping.screenshotUnavailableNotice(candidate) != null ||
+        candidate.eventTimeNeedsConfirmation ||
+        !candidate.ledgerWriteAllowed
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (hasWarningNotice) QingWarning.copy(alpha = 0.35f) else QingOutline,
         ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            val image = thumbnail
-            if (image != null) {
-                // 有原图路径才给点击 + 放大镜：否则点开也是同一张 64dp 的图。
-                val previewable = canPreviewCaptureImage(
-                    screenshotPath = candidate.screenshotPath,
-                    hasThumbnail = true,
-                )
-                Box {
-                    Image(
-                        bitmap = image,
-                        contentDescription = tr("扫描截图"),
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable(enabled = previewable) { onOpenPreview() },
-                    )
-                    if (previewable) {
-                        // 右下角放大镜：缩略图太小，不给提示用户不知道能点。
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.82f)),
-                            contentAlignment = Alignment.Center,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = QingSurfaceVariant,
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.ZoomIn,
-                                contentDescription = tr("查看大图"),
-                                tint = Color.Black.copy(alpha = 0.75f),
-                                modifier = Modifier.size(16.dp),
+                            Text(
+                                text = tr(
+                                    when (candidate.confidenceTier) {
+                                        CaptureCandidate.TIER_HIGH -> "高置信度"
+                                        CaptureCandidate.TIER_LOW -> "低置信度"
+                                        else -> "需要确认"
+                                    },
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = QingTextSecondary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             )
                         }
+                        if (candidate.eventTimeNeedsConfirmation) {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = QingWarningContainer,
+                            ) {
+                                Text(
+                                    text = tr("时间待确认"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = QingWarning,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
                     }
-                }
-            } else {
-                CategoryIcon(category = category, size = 64.dp)
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     val amountCents = candidate.amountCents
                     Text(
                         text = if (amountCents == null) {
@@ -390,138 +484,227 @@ private fun CaptureCandidateCard(
                                 else -> "−¥"
                             }) + "%.2f".format(Locale.CHINA, amountCents / 100.0)
                         },
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
                         color = when {
-                            !showSign -> MaterialTheme.colorScheme.onSurface
+                            !showSign -> QingText
                             income -> QingIncome
-                            else -> MaterialTheme.colorScheme.error
+                            else -> QingExpense
                         },
-                        modifier = Modifier.weight(1f),
                     )
-                    Text(
-                        text = tr(
-                            when (candidate.confidenceTier) {
-                                CaptureCandidate.TIER_HIGH -> "高置信度"
-                                CaptureCandidate.TIER_LOW -> "低置信度"
-                                else -> "需要确认"
-                            },
-                        ),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // 跨通道弱证据命中的候选仍可记入账本，这里只说明为什么要他核对、和哪一笔像。
-                LikelyDuplicateNotice(candidate)
-                CaptureReviewMapping.screenshotUnavailableNotice(candidate)?.let { warning ->
-                    Text(
-                        text = warning,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                if (needsDirection) {
-                    if (directionChoice == null) {
-                        Text(
-                            text = tr("请先选择收支方向"),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CaptureReviewDirection.directions.forEach { option ->
-                            LedgerFilterChip(
-                                label = if (option == CaptureCandidate.DIRECTION_INCOME) {
-                                    tr("收入")
-                                } else {
-                                    tr("支出")
-                                },
-                                selected = directionChoice == option,
-                                onClick = { directionChoice = option },
-                            )
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = merchant,
-                    onValueChange = { merchant = it },
-                    label = { Text(tr("商户")) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (candidate.merchantCandidates.size > 1) {
-                    Text(
-                        text = tr("候选：") + candidate.merchantCandidates.joinToString(" / "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (candidate.eventTimeNeedsConfirmation) {
-                    Text(
-                        text = tr("时间待确认"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.tertiary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                if (!candidate.ledgerWriteAllowed) {
-                    Text(
-                        text = tr("仅预览，不能记入账本"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
                             .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs)) +
                             (candidate.orderId?.let { " · " + tr("单号") + " " + it } ?: ""),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
+                        color = QingTextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                val image = thumbnail
+                if (image != null) {
+                    // 有原图路径才给点击 + 放大镜：否则点开也是同一张 56dp 的图。
+                    val previewable = canPreviewCaptureImage(
+                        screenshotPath = candidate.screenshotPath,
+                        hasThumbnail = true,
                     )
                     Box {
-                        TextButton(onClick = { categoryMenu = true }) {
-                            Text(tr(category.displayName))
-                        }
-                        DropdownMenu(
-                            expanded = categoryMenu,
-                            onDismissRequest = { categoryMenu = false },
-                            modifier = Modifier.heightIn(max = 320.dp),
-                        ) {
-                            TransactionCategory.entries.forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(tr(option.displayName)) },
-                                    onClick = {
-                                        category = option
-                                        categoryMenu = false
-                                    },
+                        Image(
+                            bitmap = image,
+                            contentDescription = tr("扫描截图"),
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(enabled = previewable) { onOpenPreview() },
+                        )
+                        if (previewable) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.88f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomIn,
+                                    contentDescription = tr("查看大图"),
+                                    tint = Color.Black.copy(alpha = 0.78f),
+                                    modifier = Modifier.size(14.dp),
                                 )
                             }
                         }
                     }
+                } else {
+                    CategoryIcon(category = category, size = 48.dp)
                 }
+            }
+            // 跨通道弱证据命中的候选仍可记入账本，这里只说明为什么要他核对、和哪一笔像。
+            LikelyDuplicateNotice(candidate)
+            CaptureReviewMapping.screenshotUnavailableNotice(candidate)?.let { warning ->
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = QingErrorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = warning,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            }
+            if (!candidate.ledgerWriteAllowed) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = QingErrorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = tr("仅预览，不能记入账本"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            }
+            if (needsDirection) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    TextButton(onClick = onIgnore, enabled = !busy) {
-                        // “忽略”听起来像扔掉；这张卡片其实还能从“已忽略的截图”找回。
-                        Text(tr("不记这笔"))
+                    if (directionChoice == null) {
+                        Text(
+                            text = tr("请先选择收支方向"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = QingWarning,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
-                    Button(
-                        onClick = { onApprove(merchant, category, directionChoice) },
-                        enabled = !busy &&
-                            CaptureReviewDirection.canConfirm(candidate, directionChoice),
-                    ) {
-                        Text(tr("记入账本"))
+                    CaptureReviewDirection.directions.forEach { option ->
+                        LedgerFilterChip(
+                            label = if (option == CaptureCandidate.DIRECTION_INCOME) {
+                                tr("收入")
+                            } else {
+                                tr("支出")
+                            },
+                            selected = directionChoice == option,
+                            onClick = { directionChoice = option },
+                        )
                     }
                 }
             }
+            OutlinedTextField(
+                value = merchant,
+                onValueChange = { merchant = it },
+                label = { Text(tr("商户")) },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (candidate.merchantCandidates.size > 1) {
+                Text(
+                    text = tr("候选：") + candidate.merchantCandidates.joinToString(" / "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = QingTextSecondary,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = QingSurfaceVariant,
+                        border = BorderStroke(1.dp, QingOutline),
+                        modifier = Modifier.clickable { categoryMenu = true },
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            CategoryIcon(category = category, size = 20.dp)
+                            Text(
+                                text = tr(category.displayName),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = QingText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Icon(
+                                imageVector = Icons.Filled.ArrowDropDown,
+                                contentDescription = null,
+                                tint = QingTextSecondary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = categoryMenu,
+                        onDismissRequest = { categoryMenu = false },
+                        modifier = Modifier.heightIn(max = 320.dp),
+                    ) {
+                        TransactionCategory.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(tr(option.displayName)) },
+                                onClick = {
+                                    category = option
+                                    categoryMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                TextButton(onClick = onIgnore, enabled = !busy) {
+                    // “忽略”听起来像扔掉；这张卡片其实还能从“已忽略的截图”找回。
+                    Text(tr("不记这笔"), color = QingTextSecondary)
+                }
+                Button(
+                    onClick = { onApprove(merchant, category, directionChoice) },
+                    enabled = !busy &&
+                        CaptureReviewDirection.canConfirm(candidate, directionChoice),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = QingPrimary),
+                ) {
+                    Text(tr("记入账本"))
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ReviewTabChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) QingPrimaryContainer else QingSurfaceVariant,
+        border = BorderStroke(1.dp, if (selected) QingPrimary else QingOutline),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (selected) QingPrimaryDeep else QingTextSecondary,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        )
     }
 }
 

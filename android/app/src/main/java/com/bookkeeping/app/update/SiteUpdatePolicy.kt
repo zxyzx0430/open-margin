@@ -21,8 +21,8 @@ object SiteUpdatePolicy {
     const val TEST_PACKAGE = "com.bookkeeping.app.sync3"
     private const val LEGACY_TEST_PACKAGE = "com.bookkeeping.app.sync2"
 
-    /** At most one silent check per day when the ledger page is opened. */
-    const val CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L
+    /** Minimum cooldown between silent checks on cold start / foreground resume. */
+    const val CHECK_INTERVAL_MS = 5L * 60L * 1000L
 
     private const val APK_PREFIX = "https://zxyzx.me/open-margin/installer/"
     private const val MAX_NOTES = 5
@@ -38,7 +38,12 @@ object SiteUpdatePolicy {
     )
 
     /** What the ledger banner needs; the debug preview can supply it directly. */
-    data class BannerState(val versionCode: Int, val versionName: String)
+    data class BannerState(
+        val versionCode: Int,
+        val versionName: String,
+        val summaryNote: String? = null,
+        val isPreview: Boolean = false,
+    )
 
     fun isOfficialPackage(packageName: String?): Boolean = packageName == OFFICIAL_PACKAGE
 
@@ -139,8 +144,10 @@ object SiteUpdatePolicy {
         installedVersionCode: Int,
         dismissedVersionCode: Int,
         bannerEnabled: Boolean,
+        snoozedInSession: Boolean = false,
     ): Boolean =
         bannerEnabled &&
+            !snoozedInSession &&
             manifestVersionCode > installedVersionCode &&
             manifestVersionCode > dismissedVersionCode
 
@@ -153,6 +160,8 @@ object SiteUpdatePolicy {
         BannerState(
             versionCode = if (currentVersionCode == Int.MAX_VALUE) currentVersionCode else currentVersionCode + 1,
             versionName = nextMinorVersion(currentVersionName),
+            summaryNote = "示例更新摘要：点击「立即更新」可在测试环境预览入口",
+            isPreview = true,
         )
 
     fun nextMinorVersion(versionName: String): String {

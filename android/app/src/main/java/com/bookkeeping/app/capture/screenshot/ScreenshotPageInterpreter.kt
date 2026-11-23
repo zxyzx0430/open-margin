@@ -227,6 +227,15 @@ object ScreenshotPageInterpreter {
         // Footer statistics, promo banners and phone status-bar chrome belong to the shell, not to the transaction.
         val content = stripStatusBarChrome(ordered).filterNot { isNoiseLine(it.text) }
         val allText = content.joinToString("\n") { it.text }
+        if (isOwnAppUiPage(allText)) {
+            return ScreenshotPageEvidence(
+                platform = CaptureCandidate.PLATFORM_UNKNOWN,
+                pageType = PAGE_UNKNOWN,
+                transactionLike = false,
+                drafts = emptyList(),
+                reason = "own app screenshot",
+            )
+        }
         if (allText.contains("零钱明细") &&
             content.any { WALLET_LEDGER_AMOUNT_REGEX.matchEntire(it.text.trim()) != null }
         ) {
@@ -1338,30 +1347,34 @@ object ScreenshotPageInterpreter {
         val amounts = bubbleSegments.mapNotNull { seg -> seg.firstNotNullOfOrNull { amountOf(it.text) } }.distinct()
         val amount = amounts.singleOrNull() ?: return null
 
-        // Contact name sits near the top below status-bar clock and above the first chat timestamp.
-        val firstTsIdx = content.indexOfFirst { b ->
+        // Transfer timestamp sits immediately above the first transfer bubble, before any later voice message timestamp.
+        val firstBubbleAmount = bubbleSegments.first().first { amountOf(it.text) != null }
+        val firstAmountIdx = content.indexOf(firstBubbleAmount).takeIf { it >= 0 } ?: return null
+        val aboveFirstBubble = content.subList(0, firstAmountIdx)
+        val timeBlocks = aboveFirstBubble.filter { isTimeOrDateLine(it.text) }
+        // Same-day chats only show HH:mm (TIME_ONLY_REGEX); prefer explicit date/time lines first,
+        // and fall back to the chat's HH:mm divider while still rejecting headerless stacked fixtures.
+        val transferTimeBlock = timeBlocks.lastOrNull { !TIME_ONLY_REGEX.matches(it.text.trim()) }
+            ?: timeBlocks.lastOrNull()
+            ?: return null
+        val transferTimeIdx = content.indexOf(transferTimeBlock)
+        val firstNonTimeOnlyIdx = content.indexOfFirst { b ->
             val t = b.text.trim()
             !TIME_ONLY_REGEX.matches(t) && isTimeOrDateLine(t)
         }
-        val contact = if (firstTsIdx > 0) {
-            content.subList(0, firstTsIdx).firstOrNull { b ->
-                val t = b.text.trim()
-                !TIME_ONLY_REGEX.matches(t) &&
-                    !STATUS_BAR_BACK_BADGE_REGEX.matches(t) &&
-                    !t.matches(Regex("\\d+")) &&
-                    t.length in 1..24 &&
-                    !t.contains("转账")
-            }?.text?.trim()
-        } else {
-            null
+        val headerCandidates = when {
+            firstNonTimeOnlyIdx > 0 -> content.subList(0, firstNonTimeOnlyIdx)
+            timeBlocks.size >= 2 -> {
+                val firstIdx = content.indexOf(timeBlocks.first())
+                val nextIdx = content.indexOf(timeBlocks[1])
+                if (firstIdx in 0 until nextIdx) content.subList(firstIdx + 1, nextIdx) else emptyList()
+            }
+            transferTimeIdx > 0 -> content.subList(0, transferTimeIdx)
+            else -> emptyList()
         }
-        // Transfer timestamp sits immediately above the first transfer bubble, before any later voice message timestamp.
-        val firstBubbleAmount = bubbleSegments.first().first { amountOf(it.text) != null }
-        val transferTimeBlock = content
-            .filter { b -> b.top <= firstBubbleAmount.top && isTimeOrDateLine(b.text) && !TIME_ONLY_REGEX.matches(b.text.trim()) }
-            .lastOrNull()
-        val eventTimeMs = transferTimeBlock?.let { eventTimeOf(it.text, capturedAtMs, timeZone) }
-        if (contact == null || transferTimeBlock == null) return null
+        val contact = headerCandidates.firstOrNull { isPlausibleChatContact(it.text) }?.text?.trim()
+            ?: aboveFirstBubble.firstOrNull { isPlausibleChatContact(it.text) }?.text?.trim()
+        val eventTimeMs = eventTimeOf(transferTimeBlock.text, capturedAtMs, timeZone)
 
         val draft = TransactionDraft(
             index = 0,
@@ -1385,6 +1398,39 @@ object ScreenshotPageInterpreter {
             drafts = listOf(draft),
             reason = "parsed",
         )
+    }
+
+    private fun isPlausibleChatContact(raw: String): Boolean {
+        val t = raw.trim()
+        if (t.length !in 1..24) return false
+        if (isTimeOrDateLine(t) || TIME_ONLY_REGEX.matches(t)) return false
+        if (STATUS_BAR_BACK_BADGE_REGEX.matches(t) || t.matches(Regex("\\d+"))) return false
+        if (amountOf(t) != null) return false
+        if (t.contains("转账") || t.contains("5G") || t.contains("Wi-Fi", ignoreCase = true)) return false
+        if (t.all { it.code < 128 && !it.isLetterOrDigit() }) return false
+        return true
+    }
+
+    /**
+     * Reject screenshots of 清衡 / Open Margin's own UI on OEMs (e.g. realme/ColorOS)
+     * whose filenames carry no package name; otherwise "微信转账" rows inside the ledger
+     * list get re-parsed as new payment candidates.
+     */
+    private fun isOwnAppUiPage(allText: String): Boolean {
+        val hasAppBrand = allText.contains("清衡")
+        val hasHomeChrome = allText.contains("全部账单") ||
+            allText.contains("已忽略的截图") ||
+            allText.contains("待确认扫描结果") ||
+            allText.contains("搜索商户、备注或精确金额") ||
+            allText.contains("同步未开启") ||
+            allText.contains("同步正常") ||
+            allText.contains("同步异常") ||
+            (allText.contains("结余") && allText.contains("支出") && allText.contains("收入"))
+        if (hasAppBrand && hasHomeChrome) return true
+        return allText.contains("已忽略的截图") ||
+            allText.contains("待确认扫描结果") ||
+            allText.contains("搜索商户、备注或精确金额") ||
+            (allText.contains("时间待确认") && (allText.contains("同步未开启") || allText.contains("未计入")))
     }
 
     /** Parse WeChat `零钱明细` wallet ledger list rows (signed amounts without `¥`, `零钱余额...` ignored). */

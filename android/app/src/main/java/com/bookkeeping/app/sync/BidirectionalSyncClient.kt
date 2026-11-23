@@ -98,8 +98,19 @@ internal class BidirectionalSyncClient(
     /** Guard every upload, including legacy v1 uploads and rounding repairs. */
     fun verifyServerIdentity():Boolean {
         val cursor=prefs.getLong("last_pull_revision",0L)
-        val response=request("GET","changes?since=$cursor&limit=1") ?: return false
-        if(response.first!=200)return false
+        val response=request("GET","changes?since=$cursor&limit=1") ?: run {
+            prefs.edit().putString("last_result","同步服务器连接超时或不可达，将自动重试").commit()
+            return false
+        }
+        if(response.first!=200) {
+            val detail = when (response.first) {
+                401, 403 -> "同步授权校验失败（HTTP ${response.first}），请检查同步口令"
+                in 500..599 -> "同步服务器暂不可用（HTTP ${response.first}），将自动重试"
+                else -> "同步校验异常（HTTP ${response.first}），将自动重试"
+            }
+            prefs.edit().putString("last_result", detail).commit()
+            return false
+        }
         return validateServerIdentity(response.second,cursor)
     }
 

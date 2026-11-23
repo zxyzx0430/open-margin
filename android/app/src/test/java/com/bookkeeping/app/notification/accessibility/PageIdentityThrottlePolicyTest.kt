@@ -207,4 +207,42 @@ class PageIdentityThrottlePolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `screenshot burst cooldown skips sub-3s repeat on same window and page`() {
+        val identity = "wechat:transfer:1"
+        assertTrue(
+            ScreenshotBurstCooldownPolicy.shouldSkip(
+                previousWindowId = 42,
+                previousIdentity = identity,
+                previousAttemptAtMs = 10_000L,
+                windowId = 42,
+                identity = identity,
+                nowMs = 10_133L,
+                cooldownMs = 3_000L,
+            ),
+        )
+        assertFalse(
+            ScreenshotBurstCooldownPolicy.shouldSkip(
+                previousWindowId = 42,
+                previousIdentity = identity,
+                previousAttemptAtMs = 10_000L,
+                windowId = 43,
+                identity = identity,
+                nowMs = 10_133L,
+                cooldownMs = 3_000L,
+            ),
+        )
+        assertFalse(
+            ScreenshotBurstCooldownPolicy.shouldSkip(
+                previousWindowId = 42,
+                previousIdentity = identity,
+                previousAttemptAtMs = 10_000L,
+                windowId = 42,
+                identity = identity,
+                nowMs = 13_500L,
+                cooldownMs = 3_000L,
+            ),
+        )
+    }
 }

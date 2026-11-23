@@ -123,6 +123,7 @@ import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.stats.StatsPeriod
 import com.bookkeeping.app.ui.components.SiteUpdateBanner
+import com.bookkeeping.app.ui.components.rememberUpdateInstallController
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimary
@@ -130,6 +131,7 @@ import com.bookkeeping.app.ui.theme.QingSurface
 import com.bookkeeping.app.ui.theme.QingTextSecondary
 import com.bookkeeping.app.update.SiteUpdateCoordinator
 import com.bookkeeping.app.update.SiteUpdatePolicy
+import com.bookkeeping.app.update.asCheckResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -213,6 +215,7 @@ fun TransactionListScreen(
         mutableStateOf<SiteUpdatePolicy.BannerState?>(null)
     }
     var updateBannerRefresh by remember { mutableIntStateOf(0) }
+    val updateInstall = rememberUpdateInstallController()
     val listState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -285,7 +288,7 @@ fun TransactionListScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // 进入账单页静默检查：距上次超过 24 小时才联网，不转圈、不阻塞 UI。
+    // 冷启动或切回前台时静默检查更新：5 分钟短防抖，不转圈、不阻塞 UI。
     // 测试包不联网，只按「预览更新提醒」开关渲染样例横幅。
     LaunchedEffect(updateBannerRefresh, context) {
         val packageName = context.packageName
@@ -574,8 +577,28 @@ fun TransactionListScreen(
                     val banner = siteUpdateBanner ?: return@item
                     SiteUpdateBanner(
                         versionName = banner.versionName,
-                        onView = onOpenUpdateSettings,
-                        onDismiss = {
+                        summaryNote = banner.summaryNote,
+                        onUpdateNow = {
+                            if (banner.isPreview || !SiteUpdatePolicy.canAutoDownload(context.packageName)) {
+                                onOpenUpdateSettings()
+                            } else {
+                                scope.launch {
+                                    val manifest = withContext(Dispatchers.IO) {
+                                        SiteUpdateCoordinator.cachedManifest(context)
+                                    }
+                                    if (manifest != null) {
+                                        updateInstall.open(manifest.asCheckResult())
+                                    } else {
+                                        onOpenUpdateSettings()
+                                    }
+                                }
+                            }
+                        },
+                        onRemindLater = {
+                            SiteUpdateCoordinator.remindLater(banner.versionCode)
+                            siteUpdateBanner = null
+                        },
+                        onDismissForever = {
                             SiteUpdateCoordinator.dismissBanner(context, banner.versionCode)
                             siteUpdateBanner = null
                         },
@@ -583,8 +606,10 @@ fun TransactionListScreen(
                 }
             }
 
-            if (captureReview.pending.isNotEmpty() || captureReview.ignored.isNotEmpty() ||
-                captureReview.storageWarningKinds.isNotEmpty() || captureReview.intakeFailureNotice != null
+            if (captureReview.pending.isNotEmpty() ||
+                (captureReview.ignored.isNotEmpty() && !captureReview.ignoredBannerDismissed) ||
+                captureReview.storageWarningKinds.isNotEmpty() ||
+                captureReview.intakeFailureNotice != null
             ) {
                 item(key = "capture_review") {
                     CaptureReviewCard(
@@ -596,6 +621,7 @@ fun TransactionListScreen(
                             captureReviewViewModel.refresh()
                             showCaptureReview = true
                         },
+                        onDismissIgnored = captureReviewViewModel::dismissIgnoredBanner,
                         onAcknowledgeStorageWarning = captureReviewViewModel::acknowledgeStorageWarning,
                         onAcknowledgeIntakeFailure = captureReviewViewModel::acknowledgeIntakeFailureNotice,
                     )
@@ -804,6 +830,8 @@ fun TransactionListScreen(
             },
         )
     }
+
+    updateInstall.Dialog()
 
     if (showCaptureReview) {
         CaptureReviewDialog(

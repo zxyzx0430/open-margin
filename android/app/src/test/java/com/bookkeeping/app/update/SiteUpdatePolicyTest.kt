@@ -155,23 +155,32 @@ class SiteUpdatePolicyTest {
     }
 
     @Test
-    fun checkIsDueEveryTwentyFourHours() {
-        val hour = 60L * 60L * 1000L
+    fun checkIsDueEveryFiveMinutes() {
+        val minute = 60L * 1000L
         assertTrue(SiteUpdatePolicy.isCheckDue(0L, 1_000L))
-        assertFalse(SiteUpdatePolicy.isCheckDue(1_000L, 1_000L + 23 * hour))
-        assertTrue(SiteUpdatePolicy.isCheckDue(1_000L, 1_000L + 24 * hour))
+        assertFalse(SiteUpdatePolicy.isCheckDue(1_000L, 1_000L + 4 * minute))
+        assertTrue(SiteUpdatePolicy.isCheckDue(1_000L, 1_000L + 5 * minute))
         // Clock rollback must not freeze the check forever.
         assertTrue(SiteUpdatePolicy.isCheckDue(10_000L, 5_000L))
     }
 
     @Test
-    fun dismissedVersionNeverRemindsButHigherVersionDoes() {
+    fun dismissedOrSnoozedVersionFollowsPolicy() {
         assertTrue(
             SiteUpdatePolicy.shouldShowBanner(
                 manifestVersionCode = 43,
                 installedVersionCode = 42,
                 dismissedVersionCode = 0,
                 bannerEnabled = true,
+            )
+        )
+        assertFalse(
+            SiteUpdatePolicy.shouldShowBanner(
+                manifestVersionCode = 43,
+                installedVersionCode = 42,
+                dismissedVersionCode = 0,
+                bannerEnabled = true,
+                snoozedInSession = true,
             )
         )
         assertFalse(

@@ -67,6 +67,9 @@ open class PageRecognitionService : AccessibilityService() {
     private var lastPageIdentity: String? = null
     private var lastPageEventId: String? = null
     private var lastCaptureAtMs: Long = 0L
+    private var lastScreenshotWindowId: Int = 0
+    private var lastScreenshotPageIdentity: String? = null
+    private var lastScreenshotAttemptAtMs: Long = 0L
     private var lastWindowActivity: String? = null
     private var lastWindowPackage: String? = null
     private val recentCaptureKeys = mutableMapOf<String, Long>()
@@ -126,6 +129,9 @@ open class PageRecognitionService : AccessibilityService() {
             lastPageIdentity = null
             lastPageEventId = null
             lastCaptureAtMs = 0L
+            lastScreenshotWindowId = 0
+            lastScreenshotPageIdentity = null
+            lastScreenshotAttemptAtMs = 0L
         }
 
         val now = System.currentTimeMillis()
@@ -236,8 +242,19 @@ open class PageRecognitionService : AccessibilityService() {
                         return
                     }
                     if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
+                    if (isScreenshotBurstCooldown(snapshot.root.windowId, pageIdentity, now)) {
+                        ServiceHealthLog.record(
+                            context = applicationContext,
+                            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                            event = ServiceHealthLog.EVENT_THROTTLED,
+                            summary = "同窗口短时截屏冷却中已跳过",
+                            detail = pageIdentity,
+                        )
+                        return
+                    }
                     capturing.set(true)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        recordScreenshotAttempt(snapshot.root.windowId, pageIdentity, now)
                         captureScreenshotForCandidates(
                             candidates,
                             allowStrictAuto,
@@ -296,11 +313,22 @@ open class PageRecognitionService : AccessibilityService() {
                 return
             }
             if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
+            if (isScreenshotBurstCooldown(snapshot.root.windowId, pageIdentity, now)) {
+                ServiceHealthLog.record(
+                    context = applicationContext,
+                    channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                    event = ServiceHealthLog.EVENT_THROTTLED,
+                    summary = "同窗口短时截屏冷却中已跳过",
+                    detail = pageIdentity,
+                )
+                return
+            }
             lastPageIdentity = pageIdentity
             lastPageEventId = null
             lastCaptureAtMs = now
             capturing.set(true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                recordScreenshotAttempt(snapshot.root.windowId, pageIdentity, now)
                 ServiceHealthLog.record(
                     context = applicationContext,
                     channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
@@ -351,6 +379,16 @@ open class PageRecognitionService : AccessibilityService() {
             return
         }
         if (!windowStillCurrent(root, packageName, snapshot.root.windowId)) return
+        if (isScreenshotBurstCooldown(snapshot.root.windowId, detection.pageIdentity, now)) {
+            ServiceHealthLog.record(
+                context = applicationContext,
+                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                event = ServiceHealthLog.EVENT_THROTTLED,
+                summary = "同窗口短时截屏冷却中已跳过",
+                detail = detection.pageIdentity,
+            )
+            return
+        }
         val amount = detection.amountCents ?: return
         val candidate = CaptureCandidate(
             packageName = packageName,
@@ -367,6 +405,7 @@ open class PageRecognitionService : AccessibilityService() {
         )
         capturing.set(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            recordScreenshotAttempt(snapshot.root.windowId, detection.pageIdentity, now)
             captureScreenshotForCandidates(
                 listOf(candidate),
                 allowStrictAuto,
@@ -800,6 +839,17 @@ open class PageRecognitionService : AccessibilityService() {
                             result = TransactionDiagnostics.RESULT_SUCCESS,
                             details = "Payment page parsed",
                         )
+                        if (screenshot == null &&
+                            PaymentCardReviewQueue.isDuplicatePending(candidate, store.pending())
+                        ) {
+                            repository.recordDiagnostic(
+                                attemptId = input.attemptId,
+                                stage = TransactionDiagnostics.STAGE_DEDUP,
+                                result = TransactionDiagnostics.RESULT_WARNING,
+                                details = "Duplicate pending capture ignored",
+                            )
+                            return@forEachIndexed
+                        }
                         val saveResult = store.saveWithResult(
                             candidate.copy(diagnosticAttemptId = input.attemptId),
                             screenshot,
@@ -829,13 +879,27 @@ open class PageRecognitionService : AccessibilityService() {
                         }
                         if (firstStored == null) firstStored = stored
                         if (PageCaptureScreenshotPolicy.isUnavailable(stored, screenshot)) {
-                            repository.recordDiagnostic(
-                                attemptId = input.attemptId,
-                                stage = TransactionDiagnostics.STAGE_SAVE,
-                                result = TransactionDiagnostics.RESULT_FAILURE,
-                                details = "Screenshot evidence unavailable; candidate kept for review",
+                            val alreadyPending = PaymentCardReviewQueue.isDuplicatePending(
+                                stored,
+                                store.pending().filter { it.candidateId != stored.candidateId },
                             )
-                            store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                            if (alreadyPending) {
+                                store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+                                repository.recordDiagnostic(
+                                    attemptId = input.attemptId,
+                                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                                    result = TransactionDiagnostics.RESULT_WARNING,
+                                    details = "Duplicate pending capture ignored",
+                                )
+                            } else {
+                                repository.recordDiagnostic(
+                                    attemptId = input.attemptId,
+                                    stage = TransactionDiagnostics.STAGE_SAVE,
+                                    result = TransactionDiagnostics.RESULT_FAILURE,
+                                    details = "Screenshot evidence unavailable; candidate kept for review",
+                                )
+                                store.mark(stored, CaptureCandidate.STATUS_PENDING)
+                            }
                             return@forEachIndexed
                         }
                         val now = System.currentTimeMillis()
@@ -1061,6 +1125,30 @@ open class PageRecognitionService : AccessibilityService() {
         }
     }
 
+    private fun isScreenshotBurstCooldown(
+        windowId: Int,
+        identity: String,
+        nowMs: Long,
+    ): Boolean = ScreenshotBurstCooldownPolicy.shouldSkip(
+        previousWindowId = lastScreenshotWindowId,
+        previousIdentity = lastScreenshotPageIdentity,
+        previousAttemptAtMs = lastScreenshotAttemptAtMs,
+        windowId = windowId,
+        identity = identity,
+        nowMs = nowMs,
+        cooldownMs = SCREENSHOT_BURST_COOLDOWN_MS,
+    )
+
+    private fun recordScreenshotAttempt(
+        windowId: Int,
+        identity: String,
+        nowMs: Long,
+    ) {
+        lastScreenshotWindowId = windowId
+        lastScreenshotPageIdentity = identity
+        lastScreenshotAttemptAtMs = nowMs
+    }
+
     private fun advancePageThrottle(stored: CaptureCandidate?) {
         if (stored == null) return
         val current = PageCaptureThrottleState(
@@ -1152,6 +1240,7 @@ open class PageRecognitionService : AccessibilityService() {
     companion object {
         private const val TAG = "BkPageRecognition"
         private const val PAGE_CAPTURE_DEDUP_MS = 5 * 60_000L
+        private const val SCREENSHOT_BURST_COOLDOWN_MS = 3_000L
         private const val CAPTURE_KEY_TTL_MS = 10 * 60_000L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
         private const val PAGE_RECOGNITION_CLASS =
@@ -1246,6 +1335,28 @@ object PageIdentityThrottlePolicy {
         return previousIdentity == identity &&
             previousEventId?.trim() == stableEventId &&
             nowMs - previousCapturedAtMs < windowMs
+    }
+}
+
+/**
+ * Hardware screenshot calls have a system-enforced interval (~1s). Suppressing
+ * sub-3s accessibility content bursts on the same window + page identity stops
+ * back-to-back `ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT` failures without
+ * suppressing distinct payment screens.
+ */
+object ScreenshotBurstCooldownPolicy {
+    fun shouldSkip(
+        previousWindowId: Int,
+        previousIdentity: String?,
+        previousAttemptAtMs: Long,
+        windowId: Int,
+        identity: String,
+        nowMs: Long,
+        cooldownMs: Long,
+    ): Boolean {
+        if (windowId == 0 || previousWindowId != windowId) return false
+        if (previousIdentity != identity) return false
+        return nowMs >= previousAttemptAtMs && nowMs - previousAttemptAtMs < cooldownMs
     }
 }
 
