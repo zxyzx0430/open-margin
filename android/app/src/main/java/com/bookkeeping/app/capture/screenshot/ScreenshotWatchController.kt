@@ -113,8 +113,8 @@ object ScreenshotWatchController {
             try {
                 do {
                     catchUpAgain.set(false)
-                    runCatching { scanMissed(appContext) }
-                } while (catchUpAgain.getAndSet(false))
+                    val hasMore = runCatching { scanMissed(appContext) }.getOrDefault(false)
+                } while (hasMore || catchUpAgain.getAndSet(false))
             } finally {
                 catchingUp.set(false)
                 // Catch the race between the last scan and clearing catchingUp.
@@ -123,9 +123,9 @@ object ScreenshotWatchController {
         }
     }
 
-    private suspend fun scanMissed(context: Context) {
+    private suspend fun scanMissed(context: Context): Boolean {
         val stored = ScreenshotWatchSettings.lastScannedId(context)
-        val maxId = maxImageId(context) ?: return
+        val maxId = maxImageId(context) ?: return false
         if (stored == null) {
             val initial = resolveBaselineId(null, maxId)
             ScreenshotWatchSettings.setLastScannedId(context, initial)
@@ -135,13 +135,14 @@ object ScreenshotWatchController {
                 event = ServiceHealthLog.EVENT_SCAN_MISSED,
                 summary = "初始化相册监听水位: baseline=$initial",
             )
-            return
+            return false
         }
         val lastScannedId = resolveBaselineId(stored, maxId)
         if (lastScannedId != stored) ScreenshotWatchSettings.setLastScannedId(context, lastScannedId)
+        val allAfter = imageIdsAfter(context, lastScannedId)
         val ids = nextIdsToScan(
             lastScannedId = lastScannedId,
-            availableIds = imageIdsAfter(context, lastScannedId),
+            availableIds = allAfter,
             limit = MAX_CATCH_UP_IMAGES,
         )
         var scanned = 0
@@ -171,37 +172,9 @@ object ScreenshotWatchController {
             summary = "相册补扫 $lastScannedId->$maxId: scanned=$scanned, skipped=$skipped, retry=$unreadableRetries",
             detail = if (unreadRows > 0) "unread=$unreadRows" else null,
         )
+        return allAfter.size > ids.size && unreadRows == 0
     }
 
-    private fun handleCandidate(context: Context, uri: Uri) {
-        val id = runCatching { ContentUris.parseId(uri) }.getOrNull() ?: return
-        val scanned = ScreenshotWatchSettings.lastScannedId(context)
-        if (scanned != null && id <= scanned) return
-        if (!inFlight.add(id)) return
-        scope.launch {
-            try {
-                val result = runCatching { ingestNow(context, id, enforceFreshness = true) }
-                    .getOrElse { IngestAttemptResult(read = false, disposition = "error", detail = it.javaClass.simpleName) }
-                if (result.read) {
-                    val current = ScreenshotWatchSettings.lastScannedId(context)
-                    if (current == null || id > current) {
-                        ScreenshotWatchSettings.setLastScannedId(context, id)
-                    }
-                }
-                if (result.read || result.disposition != "row_missing") {
-                    ServiceHealthLog.record(
-                        context = context,
-                        channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
-                        event = ServiceHealthLog.EVENT_CANDIDATE_INTAKE,
-                        summary = "相册新图 id=$id: ${result.disposition}",
-                        detail = result.detail,
-                    )
-                }
-            } finally {
-                inFlight.remove(id)
-            }
-        }
-    }
     private data class IngestAttemptResult(
         val read: Boolean,
         val ingested: Boolean = false,
