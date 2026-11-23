@@ -439,6 +439,41 @@ class CaptureCandidateStore internal constructor(
         }
     }
 
+    /** Permanently remove a single ignored candidate and its unreferenced screenshot file. */
+    fun deleteIgnored(candidateId: String): Boolean = synchronized(lock) {
+        if (!dir.exists()) return false
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return false
+        val latest = readLatestCandidatesStrict() ?: return false
+        val target = latest.lastOrNull {
+            it.candidateId == candidateId && it.status == CaptureCandidate.STATUS_IGNORED
+        } ?: return false
+        val remaining = latest.filterNot { it.candidateId == target.candidateId }
+        runCatching {
+            check(writeCandidateIndexLocked(remaining))
+            deleteScreenshotIfUnreferenced(target.screenshotPath, remaining)
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Permanently remove all ignored candidates and their unreferenced screenshot files. */
+    fun clearIgnored(): Int = synchronized(lock) {
+        if (!dir.exists()) return 0
+        if (!recoverLegacyCandidateHistoryJournalLocked() ||
+            !recoverCandidateHistoryMetadataJournalLocked()
+        ) return 0
+        val latest = readLatestCandidatesStrict() ?: return 0
+        val removed = latest.filter { it.status == CaptureCandidate.STATUS_IGNORED }
+        if (removed.isEmpty()) return 0
+        val remaining = latest.filterNot { it.status == CaptureCandidate.STATUS_IGNORED }
+        runCatching {
+            check(writeCandidateIndexLocked(remaining))
+            removed.forEach { deleteScreenshotIfUnreferenced(it.screenshotPath, remaining) }
+            removed.size
+        }.getOrDefault(0)
+    }
+
     fun clear() {
         synchronized(lock) { dir.deleteRecursively() }
     }

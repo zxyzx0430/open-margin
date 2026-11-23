@@ -91,14 +91,18 @@ fun CaptureReviewDialog(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = tr("待确认"),
-                        style = MaterialTheme.typography.titleLarge,
+                        text = if (state.showingIgnored) tr("已忽略的截图") else tr("待确认"),
+                        style = if (state.showingIgnored) {
+                            MaterialTheme.typography.titleMedium
+                        } else {
+                            MaterialTheme.typography.titleLarge
+                        },
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         softWrap = false,
                         modifier = Modifier.weight(1f),
                     )
-                    // 次要入口：忽略过的卡片不删除，都能从这里找回来。
+                    // 次要入口：忽略过的卡片可在此恢复或彻底删除。
                     TextButton(onClick = { viewModel.showIgnored(!state.showingIgnored) }) {
                         Text(
                             if (state.showingIgnored) {
@@ -150,11 +154,26 @@ fun CaptureReviewDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        Text(
-                            text = tr("截图保留 7 天，过期或被清理后无法找回。"),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = tr("截图保留 7 天，过期或被清理后无法找回。"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                onClick = { viewModel.clearAllIgnored() },
+                                enabled = !state.restoring,
+                            ) {
+                                Text(
+                                    text = tr("清空"),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
                         LazyColumn(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -164,6 +183,15 @@ fun CaptureReviewDialog(
                                     candidate = candidate,
                                     restoring = state.restoring,
                                     onRestore = { viewModel.restoreIgnored(candidate) },
+                                    onDelete = { viewModel.deleteIgnored(candidate) },
+                                    onOpenPreview = candidate.screenshotPath?.let { path ->
+                                        {
+                                            previewState = previewState.onThumbnailTapped(
+                                                screenshotPath = path,
+                                                hasThumbnail = true,
+                                            )
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -558,12 +586,14 @@ private fun CaptureUndoRow(
     }
 }
 
-/** “已忽略的截图”里的一行：只有“恢复为待确认”，没有直接入账的入口。 */
+/** “已忽略的截图”里的一行：可恢复为待确认或彻底删除，不提供直接入账入口。 */
 @Composable
 private fun IgnoredCandidateRow(
     candidate: CaptureCandidate,
     restoring: Boolean,
     onRestore: () -> Unit,
+    onDelete: () -> Unit,
+    onOpenPreview: (() -> Unit)? = null,
 ) {
     val thumbnail by produceState<ImageBitmap?>(initialValue = null, candidate.screenshotPath) {
         value = candidate.screenshotPath?.let { path ->
@@ -580,53 +610,73 @@ private fun IgnoredCandidateRow(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
         ),
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            val image = thumbnail
-            if (image != null) {
-                Image(
-                    bitmap = image,
-                    contentDescription = tr("扫描截图"),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp)),
-                )
-            } else {
-                CategoryIcon(
-                    category = CaptureReviewMapping.defaultCategory(candidate),
-                    size = 48.dp,
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = captureAmountLabel(candidate),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
-                if (merchant.isNotBlank()) {
-                    Text(
-                        text = merchant,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
+                val image = thumbnail
+                if (image != null) {
+                    Image(
+                        bitmap = image,
+                        contentDescription = tr("扫描截图"),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .then(
+                                if (onOpenPreview != null) Modifier.clickable(onClick = onOpenPreview)
+                                else Modifier,
+                            ),
+                    )
+                } else {
+                    CategoryIcon(
+                        category = CaptureReviewMapping.defaultCategory(candidate),
+                        size = 48.dp,
                     )
                 }
-                Text(
-                    text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
-                        .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = captureAmountLabel(candidate),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    val merchant = candidate.merchantCandidates.firstOrNull().orEmpty()
+                    if (merchant.isNotBlank()) {
+                        Text(
+                            text = merchant,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
+                    }
+                    Text(
+                        text = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
+                            .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            TextButton(onClick = onRestore, enabled = !restoring) {
-                Text(tr("恢复为待确认"))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDelete, enabled = !restoring) {
+                    Text(
+                        text = tr("删除"),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                TextButton(onClick = onRestore, enabled = !restoring) {
+                    Text(tr("恢复为待确认"))
+                }
             }
         }
     }
