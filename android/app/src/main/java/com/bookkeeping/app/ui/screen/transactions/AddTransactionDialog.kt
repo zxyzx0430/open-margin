@@ -791,26 +791,15 @@ fun AddTransactionDialog(
     }
 
     if (showDatePicker) {
-        val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = localDateToUtc(timestamp),
+        com.bookkeeping.app.ui.components.LedgerDateTimePickerDialog(
+            initialTimestampMs = timestamp,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { pickedMs ->
+                timestamp = pickedMs
+                timestampTouched = true
+                showDatePicker = false
+            },
         )
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let {
-                        timestamp = applyUtcDate(it, timestamp)
-                        timestampTouched = true
-                    }
-                    showDatePicker = false
-                }) { Text(tr("确定")) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) { Text(tr("取消")) }
-            },
-        ) {
-            DatePicker(state = datePickerState)
-        }
     }
 }
 

@@ -69,6 +69,8 @@ enum class DateTimePickerTab { DATE, TIME }
 fun LedgerDateTimePickerDialog(
     initialTimestampMs: Long,
     initialTab: DateTimePickerTab = DateTimePickerTab.DATE,
+    dateOnly: Boolean = false,
+    allowFuture: Boolean = false,
     onDismiss: () -> Unit,
     onConfirm: (Long) -> Unit,
 ) {
@@ -82,7 +84,9 @@ fun LedgerDateTimePickerDialog(
     var displayMonth by remember(initialTimestampMs) { mutableIntStateOf(initialCal.get(Calendar.MONTH) + 1) }
     var selectedHour by remember(initialTimestampMs) { mutableIntStateOf(initialCal.get(Calendar.HOUR_OF_DAY)) }
     var selectedMinute by remember(initialTimestampMs) { mutableIntStateOf(initialCal.get(Calendar.MINUTE)) }
-    var activeTab by remember(initialTimestampMs, initialTab) { mutableStateOf(initialTab) }
+    var activeTab by remember(initialTimestampMs, initialTab, dateOnly) {
+        mutableStateOf(if (dateOnly) DateTimePickerTab.DATE else initialTab)
+    }
 
     val candidateTimestampMs = remember(
         selectedYear, selectedMonth, selectedDay, selectedHour, selectedMinute,
@@ -93,10 +97,14 @@ fun LedgerDateTimePickerDialog(
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
     }
-    val timeError = TransactionEditRules.timestampError(
-        candidateTimestampMs,
-        System.currentTimeMillis(),
-    )
+    val timeError = if (allowFuture || dateOnly) {
+        null
+    } else {
+        TransactionEditRules.timestampError(
+            candidateTimestampMs,
+            System.currentTimeMillis(),
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -123,21 +131,30 @@ fun LedgerDateTimePickerDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = tr("选择发生时间"),
+                            text = if (dateOnly) tr("选择日期") else tr("选择发生时间"),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "%04d-%02d-%02d  %02d:%02d".format(
-                                Locale.CHINA,
-                                selectedYear,
-                                selectedMonth,
-                                selectedDay,
-                                selectedHour,
-                                selectedMinute,
-                            ),
+                            text = if (dateOnly) {
+                                "%04d-%02d-%02d".format(
+                                    Locale.CHINA,
+                                    selectedYear,
+                                    selectedMonth,
+                                    selectedDay,
+                                )
+                            } else {
+                                "%04d-%02d-%02d  %02d:%02d".format(
+                                    Locale.CHINA,
+                                    selectedYear,
+                                    selectedMonth,
+                                    selectedDay,
+                                    selectedHour,
+                                    selectedMinute,
+                                )
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.primary,
@@ -169,27 +186,29 @@ fun LedgerDateTimePickerDialog(
                     }
                 }
 
-                // 日期 / 时间双段切换
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    PickerSegmentTab(
-                        label = tr("日期"),
-                        selected = activeTab == DateTimePickerTab.DATE,
-                        onClick = { activeTab = DateTimePickerTab.DATE },
-                        modifier = Modifier.weight(1f),
-                    )
-                    PickerSegmentTab(
-                        label = tr("时间"),
-                        selected = activeTab == DateTimePickerTab.TIME,
-                        onClick = { activeTab = DateTimePickerTab.TIME },
-                        modifier = Modifier.weight(1f),
-                    )
+                // 日期 / 时间双段切换（纯日期模式隐藏）
+                if (!dateOnly) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        PickerSegmentTab(
+                            label = tr("日期"),
+                            selected = activeTab == DateTimePickerTab.DATE,
+                            onClick = { activeTab = DateTimePickerTab.DATE },
+                            modifier = Modifier.weight(1f),
+                        )
+                        PickerSegmentTab(
+                            label = tr("时间"),
+                            selected = activeTab == DateTimePickerTab.TIME,
+                            onClick = { activeTab = DateTimePickerTab.TIME },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
 
                 when (activeTab) {
@@ -529,18 +548,10 @@ private fun CompactTimeSelector(
             }
         }
 
-        // 常用分钟快捷点选
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.End,
         ) {
-            listOf(0, 15, 30, 45).forEach { m ->
-                QuickDayPill(
-                    label = ":%02d".format(Locale.CHINA, m),
-                    onClick = { onSelectMinute(m) },
-                )
-            }
-            Spacer(Modifier.weight(1f))
             QuickDayPill(
                 label = tr("现在"),
                 onClick = {

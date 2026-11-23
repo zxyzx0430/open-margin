@@ -1536,6 +1536,7 @@ internal object EnglishUiText {
         "仅清理本地归档原图，不影响账单记录" to "Deletes local archived images only; ledger rows stay intact",
         "已清理 %d 张本地原图" to "Cleared %d archived screenshots",
         "选择发生时间" to "Select transaction time",
+        "选择日期" to "Select date",
         "今天" to "Today",
         "昨天" to "Yesterday",
         "上个月" to "Previous month",

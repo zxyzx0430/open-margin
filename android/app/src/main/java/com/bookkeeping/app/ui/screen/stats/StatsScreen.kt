@@ -284,40 +284,28 @@ fun StatsScreen(
     }
 
     if (showDayPicker) {
-        val initialUtc = remember(selectedDate) {
-            Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        val initialLocalMs = remember(selectedDate) {
+            Calendar.getInstance().apply {
                 clear()
-                set(selectedDate.year, selectedDate.month - 1, selectedDate.day)
+                set(selectedDate.year, selectedDate.month - 1, selectedDate.day, 12, 0, 0)
             }.timeInMillis
         }
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialUtc)
-        DatePickerDialog(
-            onDismissRequest = { showDayPicker = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        datePickerState.selectedDateMillis?.let { millis ->
-                            val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
-                                timeInMillis = millis
-                            }
-                            viewModel.setDate(
-                                StatsDate(
-                                    year = calendar.get(Calendar.YEAR),
-                                    month = calendar.get(Calendar.MONTH) + 1,
-                                    day = calendar.get(Calendar.DAY_OF_MONTH),
-                                ),
-                            )
-                        }
-                        showDayPicker = false
-                    },
-                ) { Text(tr("确定")) }
+        com.bookkeeping.app.ui.components.LedgerDateTimePickerDialog(
+            initialTimestampMs = initialLocalMs,
+            dateOnly = true,
+            onDismiss = { showDayPicker = false },
+            onConfirm = { pickedMs ->
+                val calendar = Calendar.getInstance().apply { timeInMillis = pickedMs }
+                viewModel.setDate(
+                    StatsDate(
+                        year = calendar.get(Calendar.YEAR),
+                        month = calendar.get(Calendar.MONTH) + 1,
+                        day = calendar.get(Calendar.DAY_OF_MONTH),
+                    ),
+                )
+                showDayPicker = false
             },
-            dismissButton = {
-                TextButton(onClick = { showDayPicker = false }) { Text(tr("取消")) }
-            },
-        ) {
-            DatePicker(state = datePickerState)
-        }
+        )
     }
 
     selectedCategory?.let { category ->
