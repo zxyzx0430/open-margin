@@ -1428,28 +1428,3 @@ private fun initialCategory(candidate: CaptureCandidate): TransactionCategory = 
         }
     else -> CaptureReviewMapping.defaultCategory(candidate)
 }
-ier) {
-        CaptureCandidate.TIER_HIGH -> "高置信度"
-        CaptureCandidate.TIER_LOW -> "低置信度"
-        else -> "需要确认"
-    },
-)
-
-private fun timeLabel(candidate: CaptureCandidate): String {
-    val time = SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
-        .format(Date(candidate.eventTimeMs ?: candidate.capturedAtMs))
-    val order = candidate.orderId?.let { " · " + tr("单号") + " " + it }.orEmpty()
-    return time + order
-}
-
-private fun initialCategory(candidate: CaptureCandidate): TransactionCategory = when (candidate.kind) {
-    CaptureCandidate.KIND_TRANSFER,
-    CaptureCandidate.KIND_WITHDRAWAL -> TransactionCategory.TRANSFER
-    CaptureCandidate.KIND_RED_PACKET ->
-        if (candidate.direction == CaptureCandidate.DIRECTION_INCOME) {
-            TransactionCategory.GIFT
-        } else {
-            TransactionCategory.TRANSFER
-        }
-    else -> CaptureReviewMapping.defaultCategory(candidate)
-}
