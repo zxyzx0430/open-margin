@@ -179,6 +179,7 @@ class P0FeatureRegressionTest {
                 stage = TransactionDiagnostics.STAGE_DEDUP,
                 result = TransactionDiagnostics.RESULT_WARNING,
                 details = "Recent platform order ID suppressed",
+                transactionId = null,
                 callSite = "PageRecognitionService.processCandidates",
             ),
             // Attempt 3: Screenshot intake held for review despite RESULT_SUCCESS on save step
@@ -189,6 +190,7 @@ class P0FeatureRegressionTest {
                 stage = TransactionDiagnostics.STAGE_SAVE,
                 result = TransactionDiagnostics.RESULT_SUCCESS,
                 details = "Screenshot intake applied",
+                transactionId = null,
                 callSite = "ScreenshotIntakeCoordinator.ingest",
                 outputSummary = "入账 0 · 待确认 1 · 等待 0 · 跳过 0",
             ),
@@ -200,6 +202,7 @@ class P0FeatureRegressionTest {
                 stage = TransactionDiagnostics.STAGE_PARSE,
                 result = TransactionDiagnostics.RESULT_WARNING,
                 details = "Notification did not parse as a completed bill",
+                transactionId = null,
                 callSite = "PaymentNotificationListenerService.onNotificationPosted",
             ),
         )
