@@ -136,6 +136,7 @@ fun StatsScreen(
     var showMonthPicker by remember { mutableStateOf(false) }
     var showDayPicker by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<TransactionCategory?>(null) }
+    var selectedTrendDay by remember(selectedMonth, viewingType, period) { mutableStateOf<Int?>(null) }
 
     fun ledgerDrilldown(
         category: TransactionCategory? = null,
@@ -255,7 +256,7 @@ fun StatsScreen(
                             dailyAverageCents = dailyAverage,
                             monthKey = selectedMonth,
                             onOpenLedger = { day ->
-                                onOpenLedger(ledgerDrilldown(day = day))
+                                selectedTrendDay = day
                             },
                         )
                     }
@@ -325,6 +326,20 @@ fun StatsScreen(
                 // 的统计页帧。返回时统计页重新组合，面板状态已丢，不会自己弹回来。
                 onOpenTransaction(id)
                 selectedCategory = null
+            },
+        )
+    }
+
+    selectedTrendDay?.let { day ->
+        DayDetailDialog(
+            month = selectedMonth,
+            day = day,
+            type = viewingType,
+            transactions = periodTransactions,
+            onDismiss = { selectedTrendDay = null },
+            onOpenTransaction = { id ->
+                onOpenTransaction(id)
+                selectedTrendDay = null
             },
         )
     }
@@ -1198,6 +1213,158 @@ private fun CategoryDetailDialog(
                                 type = type,
                                 onClick = { onOpenTransaction(transaction.id) },
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayDetailDialog(
+    month: String,
+    day: Int,
+    type: TransactionType,
+    transactions: List<TransactionEntity>,
+    onDismiss: () -> Unit,
+    onOpenTransaction: (Long) -> Unit,
+) {
+    val rows = remember(transactions, day, type) {
+        val calendar = Calendar.getInstance()
+        transactions
+            .filter {
+                calendar.timeInMillis = it.timestamp
+                calendar.get(Calendar.DAY_OF_MONTH) == day &&
+                    it.type == type.name &&
+                    it.currency == "CNY" &&
+                    it.duplicateOfId == null &&
+                    it.remoteReviewStatus !in setOf(
+                        "excluded", "possible_duplicate", "duplicate",
+                    )
+            }
+            .sortedByDescending { it.timestamp }
+    }
+    val total = rows.sumOf { it.amountCents }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = dayLabel(month, day),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "${rows.size} ${tr("笔")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = QingTextSecondary,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = tr("关闭"))
+                    }
+                }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = QingSurface),
+                    border = BorderStroke(1.dp, QingOutline),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (type == TransactionType.INCOME) tr("收入") else tr("支出"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = QingTextSecondary,
+                        )
+                        Text(
+                            text = formatCny(total),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
+                        )
+                    }
+                }
+                if (rows.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(tr("暂无记录"), color = QingTextSecondary)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .padding(top = 8.dp),
+                    ) {
+                        items(rows, key = { it.id }) { transaction ->
+                            val category = remember(transaction.category) {
+                                runCatching { TransactionCategory.valueOf(transaction.category) }
+                                    .getOrDefault(TransactionCategory.OTHER)
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 56.dp)
+                                    .clickable(
+                                        role = Role.Button,
+                                        onClickLabel = tr("查看账单详情"),
+                                        onClick = { onOpenTransaction(transaction.id) },
+                                    )
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                CategoryIcon(category = category, size = 32.dp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = transaction.merchant.ifBlank { tr("未知商户") },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val sub = listOfNotNull(
+                                        tr(category.displayName),
+                                        SimpleDateFormat("HH:mm", Locale.CHINA)
+                                            .format(Date(transaction.timestamp)),
+                                        transaction.note.takeIf { it.isNotBlank() },
+                                    ).joinToString(" · ")
+                                    Text(
+                                        text = sub,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = QingTextSecondary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Text(
+                                    text = (if (type == TransactionType.EXPENSE) "−" else "+") +
+                                        formatCny(transaction.amountCents),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (type == TransactionType.EXPENSE) QingExpense else QingIncome,
+                                )
+                            }
                         }
                     }
                 }

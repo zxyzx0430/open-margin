@@ -598,12 +598,27 @@ fun TransactionListScreen(
             }
 
             item(key = "period") {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = periodLabel,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
                     )
+                    if (activeDrilldown != null || exactDateFilter != null) {
+                        TextButton(
+                            onClick = {
+                                activeDrilldown = null
+                                exactDateFilter = null
+                                viewModel.clearFilters()
+                            },
+                        ) {
+                            Text(tr("全部账单"))
+                        }
+                    }
                 }
             }
 
