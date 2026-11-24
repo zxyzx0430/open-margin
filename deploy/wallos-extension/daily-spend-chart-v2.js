@@ -157,7 +157,7 @@
   const chart = new ApexCharts(host, {
     chart: {
       type: "bar", height: 248, parentHeightOffset: 0, background: "transparent",
-      foreColor: color("--text-muted", "#6b7280"),
+      foreColor: color("--text-muted", "#5E605F"),
       animations: {enabled: false}, toolbar: {show: false}, zoom: {enabled: false},
       selection: {enabled: false}
       // A single host click handler resolves date from geometry BEFORE scrolling.
@@ -165,10 +165,10 @@
     },
     series: [{name: "人民币实际支出", data: entries.map(p => p.cents / 100)}],
     plotOptions: {bar: {horizontal: false, columnWidth: "64%", borderRadius: 3}},
-    colors: [color("--main-color", "#4777e7")],
+    colors: [color("--main-color", "#24705C")],
     theme: {mode: mode()},
     dataLabels: {enabled: false},
-    grid: {borderColor: color("--box-border-color", "#e1e5e9"), strokeDashArray: 3,
+    grid: {borderColor: color("--box-border-color", "#E2E5E2"), strokeDashArray: 3,
       xaxis: {lines: {show: false}}, padding: {left: 2, right: 6, top: 9, bottom: 0}},
     xaxis: {
       type: "category", categories: entries.map(p => String(Number(p.day.slice(-2)))),
@@ -200,7 +200,7 @@
   });
   new MutationObserver(() => {
     chart.updateOptions({theme: {mode: mode()},
-      colors: [color("--main-color", "#4777e7")],
+      colors: [color("--main-color", "#24705C")],
       chart: {foreColor: color("--text-muted", "#6b7280")}}, false, false)
       .then(() => paintSelection());
   }).observe(document.body, {attributes: true, attributeFilter: ["class"]});

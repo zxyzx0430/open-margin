@@ -14,10 +14,16 @@ def source(name):
 
 class UnifiedWebStructureTest(unittest.TestCase):
     def test_global_assets_and_theme(self):
-        self.assertIn('class="om-ui <?= $theme ?>', source("header.php"))
-        self.assertIn("ui-unified.css", source("header.php"))
-        self.assertIn("ui-unified.js", source("header.php"))
+        header = source("header.php")
+        css = source("ui-unified.css")
+        self.assertIn('class="om-ui <?= $theme ?>', header)
+        self.assertIn("om-top-nav", header)
+        self.assertIn("ui-unified.css", header)
+        self.assertIn("ui-unified.js", header)
         self.assertIn("COPY ui-unified.js", source("Dockerfile"))
+        self.assertIn("--om-primary: #24705C", css)
+        self.assertIn("--om-bg: #F6F5F4", css)
+        self.assertIn("body.om-ui.dark", css)
 
     def test_seven_page_routing(self):
         script = source("ui-unified.js")
@@ -62,7 +68,7 @@ class UnifiedWebStructureTest(unittest.TestCase):
         css = source("ui-unified.css")
         self.assertIn('id="ledger-live"', ledger)
         self.assertIn("交易流水", ledger)
-        self.assertIn("nth-of-type(5){order:1}", css)
+        self.assertIn("nth-of-type(5) { order: 1; }", css)
         self.assertNotIn("按月实时汇总已同步交易。Wallos 订阅计划", ledger)
 
     def test_settings_grouping_and_no_stale_payment_count(self):
@@ -74,12 +80,12 @@ class UnifiedWebStructureTest(unittest.TestCase):
         self.assertIn("#upcomingpaymentslimit", js)
         self.assertIn("group.remove()", js)
 
-    def test_home_carousel_not_regressed(self):
+    def test_home_workspace_not_regressed(self):
         index = source("index.php")
-        self.assertIn("dashboard-carousel.js", index)
-        self.assertIn("om-carousel-track", index)
+        common = source("finance-unified-common.php")
+        self.assertIn("om-home-workspace", common)
+        self.assertIn("om-payment-list", index)
         self.assertIn("['current' => [], 'future' => []]", index)
-        self.assertIn("CLONES = 4", source("dashboard-carousel.js"))
 
     def test_about_explicit_upstream_attribution(self):
         about = source("about.php")
@@ -91,14 +97,13 @@ class UnifiedWebStructureTest(unittest.TestCase):
         self.assertIn("MIT", about)
         self.assertIn('translate("credits"', about)
 
-    def test_upstream_page_width_restored(self):
+    def test_unified_page_width(self):
         css = source("ui-unified.css")
-        self.assertNotIn("max-width:1240px", css)
-        self.assertIn("upstream .contain max-width:970px", css)
+        self.assertIn("max-width: 1160px;", css)
 
     def test_responsive_and_non_destructive(self):
         css = source("ui-unified.css")
-        self.assertIn("@media(max-width:480px)", css)
+        self.assertIn("@media (max-width: 480px)", css)
         self.assertIn("prefers-reduced-motion", css)
 
 

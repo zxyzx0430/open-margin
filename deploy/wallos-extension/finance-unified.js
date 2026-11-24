@@ -377,7 +377,7 @@
       chart:{type:"bar",height:214,toolbar:{show:false},
         animations:{enabled:false},selection:{enabled:false},zoom:{enabled:false}},
       series:[{name:"实际支出",data:series.map(numeric)}],
-      colors:[getComputedStyle(root).getPropertyValue("--main-color").trim()||"#4777e7"],
+      colors:[getComputedStyle(root).getPropertyValue("--main-color").trim()||"#24705C"],
       plotOptions:{bar:{columnWidth:"62%",borderRadius:3}},
       dataLabels:{enabled:false},
       xaxis:{categories:series.map(d=>d.date.slice(-2)+"日"),
@@ -388,7 +388,7 @@
         }}},
       yaxis:{min:0,labels:{formatter:v=>"¥"+Math.round(v)}},
       tooltip:{enabled:false},
-      grid:{borderColor:getComputedStyle(root).getPropertyValue("--box-border-color").trim()||"#dde3eb"}
+      grid:{borderColor:getComputedStyle(root).getPropertyValue("--box-border-color").trim()||"#E2E5E2"}
     });
     state.get(root).chart=chart;
     chart.render().then(()=>{

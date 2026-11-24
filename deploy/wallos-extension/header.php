@@ -141,38 +141,7 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
     <?= htmlspecialchars($customCss, ENT_QUOTES, 'UTF-8') ?>
   </style>
   <?php
-  if (isset($settings['customColors'])) {
-    ?>
-    <style id="custom_theme_colors">
-      :root {
-        <?php if (isset($settings['customColors']['main_color']) && !empty($settings['customColors']['main_color'])): ?>
-          --main-color:
-            <?= $settings['customColors']['main_color'] ?>
-          ;
-          --main-color-rgb:
-            <?= hex2rgb($settings['customColors']['main_color']) ?>
-          ;
-        <?php endif; ?>
-        <?php if (isset($settings['customColors']['accent_color']) && !empty($settings['customColors']['accent_color'])): ?>
-          --accent-color:
-            <?= $settings['customColors']['accent_color'] ?>
-          ;
-          --accent-color-rgb:
-            <?= hex2rgb($settings['customColors']['accent_color']) ?>
-          ;
-        <?php endif; ?>
-        <?php if (isset($settings['customColors']['hover_color']) && !empty($settings['customColors']['hover_color'])): ?>
-          --hover-color:
-            <?= $settings['customColors']['hover_color'] ?>
-          ;
-          --hover-color-rgb:
-            <?= hex2rgb($settings['customColors']['hover_color']) ?>
-          ;
-        <?php endif; ?>
-      }
-    </style>
-    <?php
-  }
+  // Lock Open Margin Forest Green brand tokens instead of Wallos custom blue/multi-color overrides.
   ?>
   <script type="text/javascript" src="scripts/i18n/<?= $lang ?>.js?<?= $version ?>"></script>
   <script type="text/javascript" src="scripts/i18n/getlang.js?<?= $version ?>"></script>
@@ -189,42 +158,61 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
   <script defer src="ui-unified.js?v=<?=filemtime(dirname(__DIR__).'/ui-unified.js')?>"></script>
 </head>
 
+<?php
+$page = basename($_SERVER['PHP_SELF']);
+$dashboardClass = $page === 'index.php' ? 'active' : '';
+$subscriptionsClass = $page === 'subscriptions.php' ? 'active' : '';
+$expensesClass = $page === 'expenses.php' ? 'active' : '';
+$calendarClass = $page === 'calendar.php' ? 'active' : '';
+$statsClass = $page === 'stats.php' ? 'active' : '';
+$settingsClass = $page === 'settings.php' ? 'active' : '';
+$profileClass = $page === 'profile.php' ? 'active' : '';
+?>
+
 <body class="om-ui <?= $theme ?> <?= $languages[$lang]['dir'] ?> <?= $mobileNavigation ?>">
-  <header>
-    <div class="contain">
+  <header class="om-header">
+    <div class="contain om-header-inner">
       <div class="logo">
         <a href=".">
           <div class="logo-image" title="清衡 · Open Margin">
             <span class="margin-brand" aria-label="清衡 · Open Margin">
+              <span class="margin-brand-dot" aria-hidden="true"></span>
               <span class="margin-brand-cn">清衡</span>
               <span class="margin-brand-en">OPEN MARGIN</span>
             </span>
           </div>
         </a>
       </div>
-      <nav>
+      <nav class="om-top-nav" aria-label="主导航">
+        <a href="." class="om-top-link <?= $dashboardClass ?>">概览</a>
+        <a href="expenses.php" class="om-top-link <?= $expensesClass ?>">日常账单</a>
+        <a href="subscriptions.php" class="om-top-link <?= $subscriptionsClass ?>">订阅管理</a>
+        <a href="calendar.php" class="om-top-link <?= $calendarClass ?>">日历</a>
+        <a href="stats.php" class="om-top-link <?= $statsClass ?>">统计分析</a>
+      </nav>
+      <nav class="om-user-nav">
         <div class="dropdown">
           <button class="dropbtn" onClick="toggleDropdown()">
             <img src="<?= htmlspecialchars($userData['avatar'], ENT_QUOTES, 'UTF-8') ?>" alt="me" id="avatar">
             <span id="user" class="mobileNavigationHideOnMobile"><?= $userData['username'] ?></span>
           </button>
           <div class="dropdown-content">
-            <a href="." class="mobileNavigationHideOnMobile">
+            <a href="." class="mobileNavigationShowOnMobile">
               <?php include "images/siteicons/svg/mobile-menu/home.php"; ?>
               <?= translate('dashboard', $i18n) ?></a>
-            <a href="subscriptions.php" class="mobileNavigationHideOnMobile">
+            <a href="subscriptions.php" class="mobileNavigationShowOnMobile">
               <?php include "images/siteicons/svg/mobile-menu/subscriptions.php"; ?>
               <?= translate('subscriptions', $i18n) ?></a>
-            <a href="expenses.php" class="mobileNavigationHideOnMobile">
+            <a href="expenses.php" class="mobileNavigationShowOnMobile">
               <?php include "images/siteicons/svg/mobile-menu/expenses.php"; ?>
               日常消费</a>
-            <a href="calendar.php" class="mobileNavigationHideOnMobile">
+            <a href="calendar.php">
                 <?php include "images/siteicons/svg/mobile-menu/calendar.php"; ?>
                 <?= translate('calendar', $i18n) ?></a>
-            <a href="stats.php" class="mobileNavigationHideOnMobile">
+            <a href="stats.php" class="mobileNavigationShowOnMobile">
               <?php include "images/siteicons/svg/mobile-menu/statistics.php"; ?>
               <?= translate('stats', $i18n) ?></a>
-            <a href="settings.php" class="mobileNavigationHideOnMobile">
+            <a href="settings.php">
               <?php include "images/siteicons/svg/mobile-menu/settings.php"; ?>
               <?= translate('settings', $i18n) ?></a>
             <a href="profile.php">
@@ -259,17 +247,6 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
   </header>
 
   <?php
-  // find out which page is being viewed
-  $page = basename($_SERVER['PHP_SELF']);
-  $dashboardClass = $page === 'index.php' ? 'active' : '';
-  $subscriptionsClass = $page === 'subscriptions.php' ? 'active' : '';
-  $calendarClass = $page === 'calendar.php' ? 'active' : '';
-  $statsClass = $page === 'stats.php' ? 'active' : '';
-  $settingsClass = $page === 'settings.php' ? 'active' : '';
-  $profileClass = $page === 'profile.php' ? 'active' : '';
-  ?>
-
-  <?php
   if ($settings['mobile_nav'] == 1) {
     ?>
     <nav class="mobile-nav">
@@ -281,7 +258,7 @@ $mobileNavigation = $settings['mobile_nav'] ? "mobile-navigation" : "";
           <?php include "images/siteicons/svg/mobile-menu/subscriptions.php"; ?>
           <?= translate('subscriptions', $i18n) ?>
         </a>
-        <a href="expenses.php" class="nav-link <?= $page === 'expenses.php' ? 'active' : '' ?>" title="日常消费">
+        <a href="expenses.php" class="nav-link <?= $expensesClass ?>" title="日常消费">
           <i class="fa-solid fa-wallet"></i> 日常消费
         </a>
         <a href="stats.php" class="nav-link <?= $statsClass ?>" title="<?= translate('stats', $i18n) ?>">

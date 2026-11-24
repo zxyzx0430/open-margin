@@ -1,150 +1,632 @@
-/* 清衡 · Open Margin / Common visual language across Wallos and Finance pages. */
-.om-ui{
-  --om-surface:var(--box-background-color,#fff);
-  --om-border:var(--box-border-color,#e1e6ef);
-  --om-ink:var(--text-color,#1c2637);
-  --om-secondary:var(--text-muted,#68758a);
-  --om-primary:var(--main-color,#426de5);
-  --om-radius:14px;
-  --om-gap:14px;
-}
-.om-ui :where(.contain){box-sizing:border-box}
-/* Retain upstream .contain max-width:970px and its exact horizontal margins. */
-.om-ui :where(.om-page-title){font-size:clamp(23px,2.4vw,29px);line-height:1.25;font-weight:700;letter-spacing:-.03em;color:var(--om-ink);margin:26px 0 18px}
-.om-ui :where(.om-page-title + .split-header){margin-top:0}
-.om-ui :where(.stats-section,.account-section){margin-block:18px 22px}
-.om-ui :where(.stats-section > h2,.account-section > header h2,.finance-native-heading h2){font-size:19px;line-height:1.35;font-weight:650;letter-spacing:-.015em;margin-bottom:14px}
-.om-ui :where(.stats-section .statistics){display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.om-ui :where(.stats-section .statistics > .statistic){
-  min-width:0;max-width:none;width:auto;margin:0;padding:17px 16px;
-  border:1px solid var(--om-border);border-radius:var(--om-radius);
-  background:var(--om-surface);box-shadow:0 1px 3px #16243a08;
-  display:flex;flex-direction:column;gap:8px;align-items:flex-start;text-align:left;
-}
-.om-ui :where(.statistics > .statistic > span){font-size:clamp(18px,2vw,24px);line-height:1.25;font-weight:700;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
-.om-ui :where(.statistics > .statistic .title){font-size:12px;line-height:1.4;color:var(--om-secondary);font-weight:500}
-.om-ui :where(.statistics > .statistic .subtitle){font-size:12px;color:var(--om-secondary)}
-.om-ui :where(.account-section,.stats-section > .graphs .graph){border-radius:var(--om-radius)}
-.om-ui :where(.graphs){gap:14px}
-.om-ui :where(.stats-section .graph){min-width:0;border-radius:var(--om-radius);overflow:hidden}
-.om-ui :where(button,.button,input,select,textarea){font-family:inherit}
-.om-ui :where(button,.button,input,select,textarea):focus-visible{outline:2px solid var(--om-primary);outline-offset:2px}
-.om-ui :where(.button.secondary-button){border-radius:9px}
-.om-ui :where(.om-section-heading h2,.om-section-heading h3){letter-spacing:-.02em}
-.om-ui :where(.om-compact-heading){display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:16px 0}
-.om-ui :where(.om-divider){height:1px;background:var(--om-border);margin:16px 0}
-.om-ui .finance-native .finance-native-heading{padding-bottom:5px}
-.om-ui .finance-native .finance-chart-section{padding:16px}
-.om-ui .finance-native .finance-budget{padding:13px 16px}
-.om-ui .finance-native .finance-metric{border-radius:var(--om-radius);min-height:95px}
-.om-ui .finance-native .finance-metric-grid{gap:12px}
-.om-ui .finance-native .finance-hint{margin-block:7px;font-size:12px}
-.om-ui .finance-native .finance-tabbar{margin-block:16px}
-.om-ui .finance-native .finance-tab{border-radius:9px;min-width:105px}
-.om-ui [hidden]{display:none!important}
-/* The original long statistics report now belongs to the Subscription Analysis tab only. */
-.om-ui .om-stat-page .finance-native-heading h2{display:none}
-.om-ui .om-stat-page .finance-native-heading{justify-content:flex-end}
-.om-ui .om-stat-extra{border-top:1px solid var(--om-border);margin-top:18px;padding-top:4px}
-.om-ui .om-stat-extra .om-native-duplicated{display:none!important}
-.om-ui .om-stat-extra .split-header{margin:10px 0 18px}
-.om-ui .om-stat-extra .split-header h2{font-size:17px}
-.om-ui .om-stat-extra .stats-section{margin-block:16px 26px}
-.om-ui .om-stat-extra .stats-section > h2{font-size:17px}
-.om-ui .om-stat-extra .statistics{grid-template-columns:repeat(4,minmax(0,1fr))}
-/* Expenses: put the ledger workflow ahead of supplementary charts and categories. */
-.om-ui .wallos-ledger #ledger-live{display:flex;flex-direction:column;gap:0}
-.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(1){order:0}
-.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(5){order:1}
-.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(2){order:2}
-.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(3){order:3}
-.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(4){order:4}
-.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(1) .statistic:nth-child(n+5){display:none}
-.om-ui .wallos-ledger .stats-section > h2{margin-bottom:12px}
-.om-ui .wallos-ledger .ledger-heading{margin:15px 0}
-.om-ui .wallos-ledger .ledger-heading h1{font-size:27px}
-.om-ui .wallos-ledger .ledger-live-state{margin:8px 0 13px}
-.om-ui .wallos-ledger .ledger-chart-controls>span{display:none}
-.om-ui .wallos-ledger .ledger-category-list .dashboard-subscriptions-list{
-  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));min-width:0;gap:10px
-}
-.om-ui .wallos-ledger .ledger-category-list .subscription-item.thin{width:auto;height:auto;min-height:90px}
-.om-ui .wallos-ledger .ledger-search-form{margin:9px 0 15px}
-.om-ui .wallos-ledger .ledger-entry{margin-bottom:9px}
-.om-ui .wallos-ledger .ledger-entry .subscription{border-radius:var(--om-radius)}
-.om-ui .wallos-ledger .ledger-chart-shell{border-radius:var(--om-radius)}
-/* Calendar: month navigation owns the page header, not a separate Finance headline. */
-.om-ui .om-calendar-page{display:flex;flex-direction:column}
-.om-ui .om-calendar-page>.split-header{order:0;margin:6px 0 12px}
-.om-ui .om-calendar-page>.finance-native{order:1;padding:0 0 6px}
-.om-ui .om-calendar-page>.om-calendar-main{order:2}
-.om-ui .om-calendar-page>.over-budget{order:3}
-.om-ui .om-calendar-page.om-finance-ready>.calendar-monthly-stats{display:none!important}
-.om-ui .om-calendar-page .finance-native-heading,.om-ui .om-calendar-page .finance-hint{display:none!important}
-.om-ui .om-calendar-page .finance-metric-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin:4px 0 14px}
-.om-ui .om-calendar-page .calendar-title h2{font-size:22px;font-weight:700;margin:0}
-.om-ui .om-calendar-page .split-header .calendar-title{display:flex;align-items:center;gap:12px}
-.om-ui .om-calendar-page .calendar-cell{min-width:0}
-.om-ui .om-calendar-page .finance-calendar-amount{font-weight:600}
-.om-ui .om-calendar-page .finance-metric{min-height:80px;padding:12px 14px}
-/* Settings: actual navigation sections instead of a giant vertical form. */
-.om-ui .om-settings-tabs{display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding:5px;margin:0 0 18px;border-bottom:1px solid var(--om-border)}
-.om-ui .om-settings-tab{appearance:none;border:1px solid transparent;background:transparent;color:var(--om-secondary);
-  border-radius:9px;padding:10px 15px;font-size:14px;font-weight:600;cursor:pointer}
-.om-ui .om-settings-tab[aria-selected="true"]{background:color-mix(in srgb,var(--om-primary) 10%,var(--om-surface));border-color:color-mix(in srgb,var(--om-primary) 24%,var(--om-border));color:var(--om-primary)}
-.om-ui .om-settings-panel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:16px}
-.om-ui .om-settings-panel>.account-section{box-sizing:border-box;margin:0;min-width:0;padding:18px 19px;border:1px solid var(--om-border);
-  border-radius:var(--om-radius);background:var(--om-surface);box-shadow:none}
-.om-ui .om-settings-panel>.account-section.om-settings-wide{grid-column:1/-1}
-.om-ui .om-settings-panel>.account-section>header{margin-bottom:12px}
-.om-ui .om-settings-panel>.account-section>header h2{font-size:17px;margin:0}
-.om-ui .om-settings-panel>.account-section :where(.form-group-inline){max-width:100%}
-.om-ui .om-settings-panel>.account-section :where(input,select){max-width:100%}
-.om-ui .om-settings-panel>.account-section:has(#notifications),
-.om-ui .om-settings-panel>.account-section:has(#categories){grid-column:auto}
-.om-ui .om-profile-page .account-section{border:1px solid var(--om-border);border-radius:var(--om-radius);padding:18px}
-.om-ui .om-profile-page .account-section>header h2{font-size:18px}
-/* Subscriptions: same treatment of filters, cards and consistent page title. */
-.om-ui .om-subscriptions-page #main-actions{margin-top:0;margin-bottom:18px}
-.om-ui .om-subscriptions-page .subscriptions.grid-view{gap:13px}
-.om-ui .om-subscriptions-page .subscription-container{min-width:0}
-.om-ui .om-subscriptions-page .subscription{border-radius:var(--om-radius)}
-.om-ui .om-subscriptions-page :where(.button,.view-toggle-button){border-radius:9px}
-.om-ui .om-about-page>.account-section{margin-block:16px}
-.om-ui .om-about-page .credits-list{border-radius:var(--om-radius)}
-.om-ui .om-about-page .om-integration-intro{padding:21px;border:1px solid var(--om-border);border-radius:var(--om-radius)}
-.om-ui .om-about-page .om-integration-intro>header h2{margin:0 0 12px}
-.om-ui .om-about-page .om-origin-lead{margin:0 0 18px;color:var(--om-secondary);font-size:14px;line-height:1.75}
-.om-ui .om-about-page .om-origin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-bottom:17px}
-.om-ui .om-about-page .om-origin-card{min-width:0;padding:17px 18px;background:var(--om-surface);
-  border:1px solid var(--om-border);border-radius:12px;display:flex;flex-direction:column;gap:11px}
-.om-ui .om-about-page .om-origin-card-title{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
-.om-ui .om-about-page .om-origin-card h3{font-size:18px;font-weight:650;margin:0}
-.om-ui .om-about-page .om-origin-card-title span{font-size:12px;color:var(--om-secondary)}
-.om-ui .om-about-page .om-origin-card p,.om-ui .om-about-page .om-origin-added p{font-size:13px;line-height:1.75;margin:0;color:var(--om-secondary)}
-.om-ui .om-about-page .om-origin-card-meta{display:flex;flex-direction:column;gap:4px;margin-top:auto;font-size:12px;color:var(--om-secondary);overflow-wrap:anywhere}
-.om-ui .om-about-page .om-integration-intro a{color:var(--om-primary);font-weight:600;font-size:13px}
-.om-ui .om-about-page .om-origin-added{padding-top:17px;border-top:1px solid var(--om-border);display:flex;flex-direction:column;gap:10px}
-.om-ui .om-about-page .om-origin-added h3{font-size:16px;margin:0;font-weight:650}
-@media(max-width:720px){.om-ui .om-about-page .om-origin-grid{grid-template-columns:1fr}}
+/* 清衡 · Open Margin Unified Design System (Web)
+ * Aligns 1:1 with Android Material 3 Forest Green (#24705C) & Warm Alabaster (#F6F5F4).
+ * Overrides Wallos default blue/slate colors and removes patchwork CSS conflicts.
+ */
 
-/* Responsive grid, form controls, and common hierarchy. */
-@media(max-width:1050px){
-  .om-ui .om-settings-panel{grid-template-columns:1fr}
-  .om-ui .stats-section .statistics{grid-template-columns:repeat(3,minmax(0,1fr))}
+:root,
+body.om-ui {
+  /* Brand & Semantic Tokens (Light Mode Default) */
+  --om-primary: #24705C;
+  --om-primary-deep: #0E5336;
+  --om-primary-container: #E8F5EE;
+  --om-mint: #97E0B9;
+  --om-mint-soft: #DCF0E7;
+
+  --om-bg: #F6F5F4;
+  --om-surface: #FFFFFF;
+  --om-surface-low: #F7F8F7;
+  --om-surface-variant: #F0F2F0;
+  --om-ink: #151918;
+  --om-secondary: #5E605F;
+  --om-border: #E2E5E2;
+  --om-field-border: #C4CCC7;
+
+  --om-expense: #B23A3A;
+  --om-expense-bg: #FDECEC;
+  --om-income: #1F7A55;
+  --om-income-bg: #E8F5EE;
+  --om-warning: #8A5A12;
+  --om-warning-bg: #FFF4DE;
+
+  --om-radius: 16px;
+  --om-radius-sm: 10px;
+  --om-radius-pill: 999px;
+  --om-gap: 16px;
+  --om-shadow: 0 1px 3px rgba(14, 83, 54, 0.04), 0 1px 2px rgba(21, 25, 24, 0.03);
+  --om-shadow-hover: 0 6px 18px rgba(14, 83, 54, 0.08);
+
+  /* Authoritative Bridge to Wallos Native Variables */
+  --main-color: var(--om-primary) !important;
+  --main-color-rgb: 36, 112, 92 !important;
+  --accent-color: var(--om-primary-deep) !important;
+  --accent-color-rgb: 14, 83, 54 !important;
+  --hover-color: var(--om-primary-deep) !important;
+  --hover-color-rgb: 14, 83, 54 !important;
+  --background-color: var(--om-bg) !important;
+  --box-background-color: var(--om-surface) !important;
+  --box-border-color: var(--om-border) !important;
+  --text-color: var(--om-ink) !important;
+  --text-muted: var(--om-secondary) !important;
+  --input-background-color: var(--om-surface) !important;
+  --input-border-color: var(--om-field-border) !important;
 }
-@media(max-width:780px){
+
+/* Dark Mode: Explicit dark class OR automatic when OS prefers dark */
+body.om-ui.dark {
+  --om-primary: #8FD9BC;
+  --om-primary-deep: #5CB896;
+  --om-primary-container: #1B332A;
+  --om-mint: #5CB896;
+  --om-mint-soft: #1F3B30;
+
+  --om-bg: #101412;
+  --om-surface: #18201D;
+  --om-surface-low: #141A17;
+  --om-surface-variant: #25302B;
+  --om-ink: #E8F0EB;
+  --om-secondary: #A9BDB3;
+  --om-border: #2C3A34;
+  --om-field-border: #4A5C54;
+
+  --om-expense: #FF8A80;
+  --om-expense-bg: #4A1A18;
+  --om-income: #8FD9BC;
+  --om-income-bg: #1B332A;
+  --om-warning: #F0C36A;
+  --om-warning-bg: #4A3510;
+  --om-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+
+  --main-color-rgb: 143, 217, 188 !important;
+  --accent-color-rgb: 92, 184, 150 !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  body.om-ui.automatic {
+    --om-primary: #8FD9BC;
+    --om-primary-deep: #5CB896;
+    --om-primary-container: #1B332A;
+    --om-mint: #5CB896;
+    --om-mint-soft: #1F3B30;
+
+    --om-bg: #101412;
+    --om-surface: #18201D;
+    --om-surface-low: #141A17;
+    --om-surface-variant: #25302B;
+    --om-ink: #E8F0EB;
+    --om-secondary: #A9BDB3;
+    --om-border: #2C3A34;
+    --om-field-border: #4A5C54;
+
+    --om-expense: #FF8A80;
+    --om-expense-bg: #4A1A18;
+    --om-income: #8FD9BC;
+    --om-income-bg: #1B332A;
+    --om-warning: #F0C36A;
+    --om-warning-bg: #4A3510;
+    --om-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+
+    --main-color-rgb: 143, 217, 188 !important;
+    --accent-color-rgb: 92, 184, 150 !important;
+  }
+}
+
+/* Global Typography & Base Layout */
+body.om-ui {
+  background-color: var(--om-bg);
+  color: var(--om-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.om-ui .contain {
+  box-sizing: border-box;
+  max-width: 1160px;
+}
+
+.om-ui [hidden] { display: none !important; }
+
+/* Persistent Top Header & Navigation */
+.om-ui header.om-header {
+  background: var(--om-surface);
+  border-bottom: 1px solid var(--om-border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 0;
+}
+
+.om-ui .om-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 62px;
+  padding-inline: 18px;
+}
+
+.om-ui .logo-image {
+  display: flex;
+  align-items: center;
+}
+
+.om-ui .margin-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.om-ui .margin-brand-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--om-primary);
+  align-self: center;
+}
+
+.om-ui .margin-brand-cn {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--om-ink);
+  letter-spacing: -0.02em;
+}
+
+.om-ui .margin-brand-en {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--om-primary);
+}
+
+.om-ui .om-top-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  margin-left: 16px;
+}
+
+.om-ui .om-top-link {
+  padding: 7px 14px;
+  border-radius: var(--om-radius-pill);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--om-secondary);
+  text-decoration: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.om-ui .om-top-link:hover {
+  background: var(--om-surface-variant);
+  color: var(--om-ink);
+}
+
+.om-ui .om-top-link.active {
+  background: var(--om-primary-container);
+  color: var(--om-primary-deep);
+  font-weight: 650;
+}
+
+body.om-ui.dark .om-top-link.active {
+  color: var(--om-primary);
+}
+
+.om-ui .om-user-nav .dropbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 6px;
+  border-radius: var(--om-radius-pill);
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-low);
+  color: var(--om-ink);
+}
+
+.om-ui .om-user-nav .dropbtn:hover {
+  border-color: var(--om-primary);
+}
+
+.om-ui .om-user-nav .dropdown-content {
+  border-radius: var(--om-radius-sm);
+  border: 1px solid var(--om-border);
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow-hover);
+  padding: 6px;
+}
+
+.om-ui .om-user-nav .dropdown-content a {
+  border-radius: 7px;
+  font-size: 13px;
+}
+
+@media (max-width: 820px) {
+  .om-ui .om-top-nav {
+    display: none;
+  }
+}
+
+/* Unified Headings & Typography */
+.om-ui :where(.om-page-title) {
+  font-size: clamp(22px, 2.4vw, 28px);
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--om-ink);
+  margin: 24px 0 18px;
+}
+
+.om-ui :where(.om-page-title + .split-header) {
+  margin-top: 0;
+}
+
+.om-ui :where(.stats-section, .account-section) {
+  margin-block: 18px 24px;
+}
+
+.om-ui :where(.stats-section > h2, .account-section > header h2, .finance-native-heading h2) {
+  font-size: 18px;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--om-ink);
+  margin-bottom: 14px;
+}
+
+/* Unified Buttons & Form Controls */
+.om-ui :where(button, .button, input, select, textarea) {
+  font-family: inherit;
+}
+
+.om-ui :where(button, .button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--om-primary);
+  outline-offset: 2px;
+}
+
+.om-ui :where(.button, input[type="submit"]) {
+  border-radius: var(--om-radius-sm);
+  background-color: var(--om-primary);
+  color: #FFFFFF;
+  font-weight: 600;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.om-ui :where(.button, input[type="submit"]):hover {
+  background-color: var(--om-primary-deep);
+}
+
+.om-ui :where(.button.secondary-button) {
+  border-radius: var(--om-radius-sm);
+  background: var(--om-surface);
+  color: var(--om-ink);
+  border: 1px solid var(--om-border);
+}
+
+.om-ui :where(.button.secondary-button):hover {
+  border-color: var(--om-primary);
+  background: var(--om-surface-low);
+}
+
+.om-ui :where(input[type="text"], input[type="number"], input[type="password"], input[type="email"], input[type="date"], input[type="search"], select, textarea) {
+  border-radius: var(--om-radius-sm);
+  border-color: var(--om-field-border);
+  background: var(--om-surface);
+  color: var(--om-ink);
+}
+
+/* Unified Cards & Metric Grids */
+.om-ui :where(.stats-section .statistics) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.om-ui :where(.stats-section .statistics > .statistic) {
+  min-width: 0;
+  max-width: none;
+  width: auto;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius);
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.om-ui :where(.statistics > .statistic > span) {
+  font-size: clamp(19px, 2vw, 24px);
+  line-height: 1.25;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  color: var(--om-ink);
+}
+
+.om-ui :where(.statistics > .statistic .title) {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--om-secondary);
+  font-weight: 500;
+}
+
+.om-ui :where(.statistics > .statistic .subtitle) {
+  font-size: 12px;
+  color: var(--om-secondary);
+}
+
+.om-ui :where(.account-section, .stats-section > .graphs .graph, .stats-section .graph) {
+  border-radius: var(--om-radius);
+  border-color: var(--om-border);
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow);
+}
+
+.om-ui :where(.graphs) {
+  gap: 16px;
+}
+
+/* Finance Native Components (Unified Forest Green) */
+.om-ui .finance-native {
+  padding: 18px 0 24px;
+}
+
+.om-ui .finance-native .finance-native-heading {
+  padding-bottom: 6px;
+}
+
+.om-ui .finance-native .finance-chart-section,
+.om-ui .finance-native .finance-budget,
+.om-ui .finance-native .finance-comparison {
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius);
+  box-shadow: var(--om-shadow);
+}
+
+.om-ui .finance-native .finance-metric {
+  border-radius: var(--om-radius);
+  border: 1px solid var(--om-border);
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow);
+  min-height: 98px;
+  padding: 18px;
+}
+
+.om-ui .finance-native .finance-metric-grid {
+  gap: 14px;
+}
+
+.om-ui .finance-native .finance-tabbar {
+  display: inline-flex;
+  background: var(--om-surface-variant);
+  padding: 4px;
+  border-radius: var(--om-radius-pill);
+  gap: 4px;
+  margin-block: 16px;
+  border: 1px solid var(--om-border);
+}
+
+.om-ui .finance-native .finance-tab {
+  border: 0;
+  background: transparent;
+  color: var(--om-secondary);
+  border-radius: var(--om-radius-pill);
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: auto;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.om-ui .finance-native .finance-tab.is-current {
+  background: var(--om-primary);
+  color: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(14, 83, 54, 0.25);
+}
+
+body.om-ui.dark .finance-native .finance-tab.is-current {
+  color: #0E231B;
+}
+
+/* Stats Page */
+.om-ui .om-stat-page .finance-native-heading h2 { display: none; }
+.om-ui .om-stat-page .finance-native-heading { justify-content: flex-end; }
+.om-ui .om-stat-extra { border-top: 1px solid var(--om-border); margin-top: 20px; padding-top: 10px; }
+.om-ui .om-stat-extra .om-native-duplicated { display: none !important; }
+.om-ui .om-stat-extra .split-header { margin: 12px 0 18px; }
+.om-ui .om-stat-extra .split-header h2 { font-size: 18px; }
+.om-ui .om-stat-extra .stats-section { margin-block: 16px 26px; }
+.om-ui .om-stat-extra .stats-section > h2 { font-size: 18px; }
+.om-ui .om-stat-extra .statistics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* Expenses Page */
+.om-ui .wallos-ledger #ledger-live { display: flex; flex-direction: column; gap: 0; }
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(1) { order: 0; }
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(5) { order: 1; }
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(2) { order: 2; }
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(3) { order: 3; }
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(4) { order: 4; }
+.om-ui .wallos-ledger #ledger-live > section.stats-section:nth-of-type(1) .statistic:nth-child(n+5) { display: none; }
+.om-ui .wallos-ledger .stats-section > h2 { margin-bottom: 12px; }
+.om-ui .wallos-ledger .ledger-heading { margin: 16px 0; }
+.om-ui .wallos-ledger .ledger-heading h1 { font-size: 27px; }
+.om-ui .wallos-ledger .ledger-live-state { margin: 8px 0 14px; }
+.om-ui .wallos-ledger .ledger-chart-controls > span { display: none; }
+.om-ui .wallos-ledger .ledger-category-list .dashboard-subscriptions-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+  gap: 12px;
+}
+.om-ui .wallos-ledger .ledger-category-list .subscription-item.thin {
+  width: auto;
+  height: auto;
+  min-height: 92px;
+  border-radius: var(--om-radius-sm);
+}
+.om-ui .wallos-ledger .ledger-search-form { margin: 10px 0 16px; }
+.om-ui .wallos-ledger .ledger-entry { margin-bottom: 10px; }
+.om-ui .wallos-ledger .ledger-entry .subscription,
+.om-ui .wallos-ledger .ledger-chart-shell {
+  border-radius: var(--om-radius);
+  border-color: var(--om-border);
+}
+
+/* Calendar Page */
+.om-ui .om-calendar-page { display: flex; flex-direction: column; }
+.om-ui .om-calendar-page > .split-header { order: 0; margin: 10px 0 14px; }
+.om-ui .om-calendar-page > .finance-native { order: 1; padding: 0 0 8px; }
+.om-ui .om-calendar-page > .om-calendar-main { order: 2; }
+.om-ui .om-calendar-page > .over-budget { order: 3; }
+.om-ui .om-calendar-page.om-finance-ready > .calendar-monthly-stats { display: none !important; }
+.om-ui .om-calendar-page .finance-native-heading,
+.om-ui .om-calendar-page .finance-hint { display: none !important; }
+.om-ui .om-calendar-page .finance-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 4px 0 16px; }
+.om-ui .om-calendar-page .calendar-title h2 { font-size: 22px; font-weight: 700; margin: 0; }
+.om-ui .om-calendar-page .split-header .calendar-title { display: flex; align-items: center; gap: 12px; }
+.om-ui .om-calendar-page .calendar-cell { min-width: 0; }
+.om-ui .om-calendar-page .finance-calendar-amount { font-weight: 600; color: var(--om-primary); }
+.om-ui .om-calendar-page .finance-metric { min-height: 82px; padding: 14px 16px; }
+
+/* Settings & Profile */
+.om-ui .om-settings-tabs {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  margin: 0 0 20px;
+  border-bottom: 1px solid var(--om-border);
+}
+
+.om-ui .om-settings-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--om-secondary);
+  border-radius: var(--om-radius-pill);
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.om-ui .om-settings-tab[aria-selected="true"] {
+  background: var(--om-primary-container);
+  color: var(--om-primary-deep);
+}
+
+body.om-ui.dark .om-settings-tab[aria-selected="true"] {
+  color: var(--om-primary);
+}
+
+.om-ui .om-settings-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.om-ui .om-settings-panel > .account-section {
+  box-sizing: border-box;
+  margin: 0;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius);
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow);
+}
+
+.om-ui .om-settings-panel > .account-section.om-settings-wide { grid-column: 1 / -1; }
+.om-ui .om-settings-panel > .account-section > header { margin-bottom: 14px; }
+.om-ui .om-settings-panel > .account-section > header h2 { font-size: 17px; margin: 0; }
+.om-ui .om-settings-panel > .account-section :where(.form-group-inline) { max-width: 100%; }
+.om-ui .om-settings-panel > .account-section :where(input, select) { max-width: 100%; }
+.om-ui .om-settings-panel > .account-section:has(#notifications),
+.om-ui .om-settings-panel > .account-section:has(#categories) { grid-column: auto; }
+
+.om-ui .om-profile-page .account-section {
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius);
+  padding: 20px;
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow);
+}
+
+.om-ui .om-profile-page .account-section > header h2 { font-size: 18px; }
+
+/* Subscriptions Page */
+.om-ui .om-subscriptions-page #main-actions { margin-top: 0; margin-bottom: 18px; }
+.om-ui .om-subscriptions-page .subscriptions.grid-view { gap: 14px; }
+.om-ui .om-subscriptions-page .subscription-container { min-width: 0; }
+.om-ui .om-subscriptions-page .subscription {
+  border-radius: var(--om-radius);
+  border-color: var(--om-border);
+  box-shadow: var(--om-shadow);
+}
+.om-ui .om-subscriptions-page :where(.button, .view-toggle-button) { border-radius: var(--om-radius-sm); }
+
+/* About Page */
+.om-ui .om-about-page > .account-section { margin-block: 16px; }
+.om-ui .om-about-page .credits-list { border-radius: var(--om-radius); }
+.om-ui .om-about-page .om-integration-intro { padding: 22px; border: 1px solid var(--om-border); border-radius: var(--om-radius); background: var(--om-surface); box-shadow: var(--om-shadow); }
+.om-ui .om-about-page .om-integration-intro > header h2 { margin: 0 0 12px; }
+.om-ui .om-about-page .om-origin-lead { margin: 0 0 18px; color: var(--om-secondary); font-size: 14px; line-height: 1.75; }
+.om-ui .om-about-page .om-origin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.om-ui .om-about-page .om-origin-card {
+  min-width: 0; padding: 18px; background: var(--om-surface-low);
+  border: 1px solid var(--om-border); border-radius: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.om-ui .om-about-page .om-origin-card-title { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.om-ui .om-about-page .om-origin-card h3 { font-size: 17px; font-weight: 650; margin: 0; }
+.om-ui .om-about-page .om-origin-card-title span { font-size: 12px; color: var(--om-secondary); }
+.om-ui .om-about-page .om-origin-card p,
+.om-ui .om-about-page .om-origin-added p { font-size: 13px; line-height: 1.75; margin: 0; color: var(--om-secondary); }
+.om-ui .om-about-page .om-origin-card-meta { display: flex; flex-direction: column; gap: 4px; margin-top: auto; font-size: 12px; color: var(--om-secondary); overflow-wrap: anywhere; }
+.om-ui .om-about-page .om-integration-intro a { color: var(--om-primary); font-weight: 600; font-size: 13px; }
+.om-ui .om-about-page .om-origin-added { padding-top: 18px; border-top: 1px solid var(--om-border); display: flex; flex-direction: column; gap: 10px; }
+.om-ui .om-about-page .om-origin-added h3 { font-size: 16px; margin: 0; font-weight: 650; }
+@media (max-width: 720px) { .om-ui .om-about-page .om-origin-grid { grid-template-columns: 1fr; } }
+
+/* Mobile Bottom Nav Polish */
+.om-ui .mobile-nav {
+  background: var(--om-surface);
+  border-top: 1px solid var(--om-border);
+}
+.om-ui .mobile-nav .nav-link.active {
+  color: var(--om-primary);
+  font-weight: 600;
+}
+
+/* Responsive Breakpoints */
+@media (max-width: 1050px) {
+  .om-ui .om-settings-panel { grid-template-columns: 1fr; }
+  .om-ui .stats-section .statistics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 780px) {
   .om-ui .stats-section .statistics,
-  .om-ui .om-stat-extra .statistics{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .om-ui .wallos-ledger .ledger-category-list .dashboard-subscriptions-list{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .om-ui .om-calendar-page .finance-metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .om-ui .om-settings-tab{flex:1;padding:10px 8px}
+  .om-ui .om-stat-extra .statistics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .om-ui .wallos-ledger .ledger-category-list .dashboard-subscriptions-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .om-ui .om-calendar-page .finance-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .om-ui .om-settings-tab { flex: 1; padding: 10px 8px; }
 }
-@media(max-width:480px){
-  .om-ui .om-page-title{margin:17px 0 12px;font-size:23px}
-  .om-ui .stats-section .statistics>.statistic{padding:13px 11px}
-  .om-ui .om-settings-panel>.account-section{padding:14px 12px}
-  .om-ui .om-calendar-page .calendar-title h2{font-size:18px}
-  .om-ui .wallos-ledger .ledger-heading h1{font-size:23px}
+
+@media (max-width: 480px) {
+  .om-ui .om-page-title { margin: 18px 0 12px; font-size: 22px; }
+  .om-ui .stats-section .statistics > .statistic { padding: 14px 12px; }
+  .om-ui .om-settings-panel > .account-section { padding: 14px 12px; }
+  .om-ui .om-calendar-page .calendar-title h2 { font-size: 18px; }
+  .om-ui .wallos-ledger .ledger-heading h1 { font-size: 22px; }
 }
-@media(prefers-reduced-motion:reduce){.om-ui *{scroll-behavior:auto!important}}
+
+@media (prefers-reduced-motion: reduce) {
+  .om-ui * { scroll-behavior: auto !important; transition: none !important; }
+}

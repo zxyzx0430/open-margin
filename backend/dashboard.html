@@ -1,23 +1,36 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>个人财务中心</title>
+<title>清衡 · 个人财务中心</title>
 <style>
-:root{color-scheme:light;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,"Noto Sans SC",sans-serif;color:#17223b;background:#f3f6fa}
-*{box-sizing:border-box}body{max-width:1150px;margin:0 auto;padding:18px}header{display:flex;align-items:center;justify-content:space-between;gap:12px}
-h1{font-size:1.55rem;margin:12px 0}h2{font-size:1.12rem;margin:0 0 12px}h3{font-size:1rem;margin:12px 0}
-small,.muted{color:#627086}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}
-.card{background:white;border:1px solid #e2e9f3;border-radius:14px;padding:18px;margin:12px 0;box-shadow:0 1px 3px #0c26420b}
-button{background:#1258ce;color:white;padding:9px 12px;border:0;border-radius:8px;cursor:pointer}
-button.gray{background:#eff3f9;color:#1e3154}input,select{border:1px solid #cbd6e3;border-radius:8px;padding:9px;width:100%;font-size:0.95rem}
-label{display:block;font-size:.83rem;color:#586880;margin:10px 0 4px}
+:root{
+  color-scheme:light dark;
+  --om-bg:#F6F5F4;--om-surface:#FFFFFF;--om-surface-low:#F7F8F7;--om-ink:#151918;--om-muted:#5E605F;--om-border:#E2E5E2;
+  --om-primary:#24705C;--om-primary-deep:#0E5336;--om-primary-container:#E8F5EE;--om-warn-bg:#FFF4DE;--om-warn-ink:#8A5A12;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Noto Sans SC",sans-serif;
+  color:var(--om-ink);background:var(--om-bg);
+}
+@media(prefers-color-scheme:dark){
+  :root{
+    --om-bg:#101412;--om-surface:#18201D;--om-surface-low:#141A17;--om-ink:#E8F0EB;--om-muted:#A9BDB3;--om-border:#2C3A34;
+    --om-primary:#8FD9BC;--om-primary-deep:#5CB896;--om-primary-container:#1B332A;--om-warn-bg:#4A3510;--om-warn-ink:#F0C36A;
+  }
+}
+*{box-sizing:border-box}body{max-width:1160px;margin:0 auto;padding:20px;background:var(--om-bg);color:var(--om-ink)}header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:1.55rem;margin:12px 0;display:flex;align-items:center;gap:10px}h2{font-size:1.12rem;margin:0 0 12px}h3{font-size:1rem;margin:12px 0}
+small,.muted{color:var(--om-muted)}.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}
+.card{background:var(--om-surface);border:1px solid var(--om-border);border-radius:16px;padding:20px;margin:14px 0;box-shadow:0 1px 3px rgba(14,83,54,0.04)}
+button{background:var(--om-primary);color:white;padding:9px 14px;border:0;border-radius:10px;cursor:pointer;font-weight:600}
+button:hover{background:var(--om-primary-deep)}
+button.gray{background:var(--om-surface-low);color:var(--om-ink);border:1px solid var(--om-border)}input,select{border:1px solid var(--om-border);background:var(--om-surface);color:var(--om-ink);border-radius:10px;padding:9px;width:100%;font-size:0.95rem}
+label{display:block;font-size:.83rem;color:var(--om-muted);margin:10px 0 4px}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}.row>*{flex:1;min-width:145px}
-table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{border-bottom:1px solid #edf0f5;padding:10px 6px;text-align:left}th{color:#627086;font-weight:600}
-.scroller{overflow:auto}.pill{border-radius:15px;background:#e8f1ff;color:#1258ce;padding:4px 8px;white-space:nowrap}
-.warning{border:1px solid #f3d991;background:#fff9e8;padding:12px;border-radius:10px;font-size:.88rem;color:#6d5305}
-.event-time-pending{display:inline-block;margin-left:5px;padding:2px 6px;border-radius:5px;background:#fff3cd;color:#795b00;font-size:.78em;white-space:nowrap}
-#message{white-space:pre-wrap} .hide{display:none} .num{font-variant-numeric:tabular-nums;font-weight:700;font-size:1.2rem}
+table{width:100%;border-collapse:collapse;font-size:.9rem}td,th{border-bottom:1px solid var(--om-border);padding:10px 6px;text-align:left}th{color:var(--om-muted);font-weight:600}
+.scroller{overflow:auto}.pill{border-radius:999px;background:var(--om-primary-container);color:var(--om-primary-deep);padding:4px 10px;font-size:.75rem;font-weight:600;white-space:nowrap}
+.warning{border:1px solid transparent;background:var(--om-warn-bg);padding:12px 16px;border-radius:12px;font-size:.88rem;color:var(--om-warn-ink)}
+.event-time-pending{display:inline-block;margin-left:5px;padding:2px 6px;border-radius:6px;background:var(--om-warn-bg);color:var(--om-warn-ink);font-size:.78em;white-space:nowrap}
+#message{white-space:pre-wrap} .hide{display:none} .num{font-variant-numeric:tabular-nums;font-weight:700;font-size:1.25rem}
 </style></head><body>
-<header><div><h1>个人消费流水 <span class="pill">V1 RC · 自托管</span></h1><small>实际交易与预计订阅分开统计 · 以本地记录为准</small></div><button class="gray" onclick="lock()">退出登录</button></header>
+<header><div><h1>清衡 · 个人消费流水 <span class="pill">自托管</span></h1><small>实际交易与预计订阅分开统计 · 以本地记录为准</small></div><button class="gray" onclick="lock()">退出登录</button></header>
 <div class="warning">通知采集可能漏记、重复；这不是银行官方账单。订阅管理请使用 Wallos，消费流水在这里查看。</div>
 <section id="login" class="card"><h2>使用 Wallos 账号登录</h2>
 <form id="signInForm"><div class="row"><div><label>用户名</label><input id="username" autocomplete="username" required placeholder="Wallos 用户名"></div>

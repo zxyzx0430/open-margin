@@ -163,22 +163,13 @@ $financeMonthKey=finance_active_month();
                 $groupTitle = $groupKey === 'current' ? '本月' : '未来';
             ?>
             <div class="om-payment-group">
-                <div class="om-payment-group-heading">
-                    <h3><?= $groupTitle ?></h3>
-                    <div class="om-carousel-controls" data-om-carousel-controls hidden>
-                        <span class="om-carousel-position" data-om-carousel-position aria-live="polite"></span>
-                        <button type="button" class="om-carousel-arrow" data-om-prev aria-label="<?= $groupTitle ?>付款：上一项">‹</button>
-                        <button type="button" class="om-carousel-arrow" data-om-next aria-label="<?= $groupTitle ?>付款：下一项">›</button>
-                    </div>
-                </div>
-                <div class="om-payment-carousel" data-om-carousel aria-label="<?= $groupTitle ?>付款" data-total="<?= count($groupItems) ?>">
-                  <div class="om-carousel-viewport" data-om-carousel-viewport role="region" aria-roledescription="轮播" aria-label="<?= $groupTitle ?>付款项目">
-                    <div class="om-payment-grid om-carousel-track" data-om-carousel-track>
+                <h3><?= $groupTitle ?></h3>
+                <div class="om-payment-list">
                     <?php foreach ($groupItems as $subscription):
                         $due = (string)$subscription['next_payment'];
                         $dueStamp = strtotime($due);
                         $overdue = $due < date('Y-m-d');
-                        $dueText = $dueStamp === false ? $due : date('Y年n月j日', $dueStamp);
+                        $dueText = $dueStamp === false ? $due : date('n月j日', $dueStamp);
                         $currencyId = (int)$subscription['currency_id'];
                         $currencyCode = $currencies[$currencyId]['code'] ?? 'CNY';
                         $priceText = formatPrice((float)$subscription['price'], $currencyCode, $currencies);
@@ -194,23 +185,25 @@ $financeMonthKey=finance_active_month();
                         $method = trim((string)($subscription['payment_method_name'] ?? ''));
                         if ($method === 'Credit Card') $method = '银行卡';
                         if ($method === 'WeChat') $method = '微信支付';
-                        if ($method === 'AliPay') $method = '支付宝';
+                        if ($method === 'AliPay' || $method === '花呗' || $method === 'Huabei') $method = '支付宝';
                         if ($method === '未指定（待确认）') $method = '未指定';
                     ?>
                     <button type="button" class="om-payment-card"
                         onclick="showSubscriptionDetails(event, <?= (int)$subscription['id'] ?>)"
                         data-id="<?= (int)$subscription['id'] ?>">
-                        <span class="om-payment-card-top">
-                            <span class="om-payment-date"><?= htmlspecialchars($dueText, ENT_QUOTES, 'UTF-8') ?></span>
-                            <?php if ($overdue): ?><em class="om-due-late">已逾期</em><?php endif; ?>
-                        </span>
-                        <strong class="om-payment-name"><?= htmlspecialchars((string)$subscription['name'], ENT_QUOTES, 'UTF-8') ?></strong>
-                        <strong class="om-payment-amount"><?= htmlspecialchars($priceText, ENT_QUOTES, 'UTF-8') ?></strong>
-                        <span class="om-payment-meta"><?= htmlspecialchars($cycleText, ENT_QUOTES, 'UTF-8') ?><?= $method !== '' ? ' · '.htmlspecialchars($method, ENT_QUOTES, 'UTF-8') : '' ?></span>
+                        <div class="om-payment-main">
+                            <strong class="om-payment-name"><?= htmlspecialchars((string)$subscription['name'], ENT_QUOTES, 'UTF-8') ?></strong>
+                            <span class="om-payment-meta"><?= htmlspecialchars($cycleText, ENT_QUOTES, 'UTF-8') ?><?= $method !== '' ? ' · '.htmlspecialchars($method, ENT_QUOTES, 'UTF-8') : '' ?></span>
+                        </div>
+                        <div class="om-payment-right">
+                            <strong class="om-payment-amount"><?= htmlspecialchars($priceText, ENT_QUOTES, 'UTF-8') ?></strong>
+                            <span class="om-payment-date">
+                                <?php if ($overdue): ?><em class="om-due-late">逾期</em> <?php endif; ?>
+                                <?= htmlspecialchars($dueText, ENT_QUOTES, 'UTF-8') ?>
+                            </span>
+                        </div>
                     </button>
                     <?php endforeach; ?>
-                    </div>
-                  </div>
                 </div>
             </div>
             <?php endforeach; ?>
@@ -329,7 +322,6 @@ require_once 'includes/subscription_details_popup.php';
 
 <script src="scripts/libs/apexcharts.min.js"></script>
 <script src="finance-unified.js?v=<?=filemtime(__DIR__."/finance-unified.js")?>"></script>
-<script src="dashboard-carousel.js?v=<?=filemtime(__DIR__."/dashboard-carousel.js")?>" defer></script>
 <?php
 require_once 'includes/footer.php';
 ?>

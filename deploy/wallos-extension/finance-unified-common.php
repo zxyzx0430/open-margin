@@ -289,16 +289,17 @@ function finance_render_panel(string $view,array $model,string $dashboardPayment
           </form>
           </details>
         </div>
-        <?php if($view==='dashboard' && $dashboardPaymentsHtml!=='') echo $dashboardPaymentsHtml; ?>
         <?php if($view==='stats'): ?>
         <div class="finance-comparison"><strong>与上月对比</strong>
           <span>本月实际支出 <b data-finance-value="expense_cents"><?= $expense ?></b> · <span data-finance-comparison-label><?=ledger_escape($model['comparison_label'])?></span> <b data-finance-value="previous_same_period_expense_cents"><?=finance_money($model['previous_same_period_expense_cents'])?></b></span>
           <small>进行中月份按同一日数对比，已结束月份对比完整月份；金额均不含已排除交易。</small>
         </div>
         <?php endif; ?>
+        <?php if($view==='dashboard' && $dashboardPaymentsHtml!==''): ?><div class="om-home-workspace"><?php endif; ?>
         <div class="finance-chart-section"><div class="finance-line">
           <strong>消费趋势</strong><div class="finance-switch"><button type="button" data-finance-range="7">7 天</button><button type="button" class="is-current" data-finance-range="30">整月</button></div>
         </div><div class="finance-chart" role="group" aria-label="人民币实际消费每日金额柱状图与日期选择"></div></div>
+        <?php if($view==='dashboard' && $dashboardPaymentsHtml!=='') { echo $dashboardPaymentsHtml; echo '</div>'; } ?>
       </div>
       <?php endif; ?>
       <?php if($view==='stats'): ?>
