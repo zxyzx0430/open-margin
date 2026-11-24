@@ -2,6 +2,8 @@ package com.bookkeeping.app.ui.screen.diagnostics
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import com.bookkeeping.app.BuildConfig
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -144,6 +146,8 @@ fun TransactionDiagnosticsScreen(
     var exportIncludeRawText by remember { mutableStateOf(true) }
     var exportAll by remember { mutableStateOf(false) }
     var exporting by remember { mutableStateOf(false) }
+    var feedbackDescription by remember { mutableStateOf("") }
+    var feedbackContact by remember { mutableStateOf("") }
     var pendingSaveContent by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -222,10 +226,10 @@ fun TransactionDiagnosticsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                tr("记录每笔账从采集到入库经过的每一步，含原始正文。仅保存在本机，最长 7 天。"),
+                tr("记录每笔账从采集到入库经过的每一步，仅保存在本机最长 7 天；遇到问题可点右上角「导出日志」直接发给开发者排查。"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
@@ -310,10 +314,20 @@ fun TransactionDiagnosticsScreen(
                     val hasFilter = state.query.isNotBlank() ||
                         state.channelFilter != DiagnosticChannelFilter.ALL ||
                         state.outcomeFilter != DiagnosticOutcomeFilter.ALL
-                    Text(
-                        if (!hasFilter) tr("暂无诊断日志") else tr("没有匹配的日志"),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            if (!hasFilter) tr("暂无诊断日志") else tr("没有匹配的日志"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (state.hasMore && !state.loading) {
+                            TextButton(onClick = viewModel::loadMore) {
+                                Text(tr("加载更多"))
+                            }
+                        }
+                    }
                 }
                 else -> LazyColumn(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -472,6 +486,89 @@ fun TransactionDiagnosticsScreen(
                     }
                 }
                 Spacer(modifier = Modifier.height(2.dp))
+                OutlinedTextField(
+                    value = feedbackDescription,
+                    onValueChange = { feedbackDescription = it.take(2000) },
+                    label = { Text(tr("问题描述（可选）")) },
+                    placeholder = { Text(tr("例如：微信支付后出现两笔待确认")) },
+                    minLines = 2,
+                    maxLines = 3,
+                    enabled = !exporting,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                OutlinedTextField(
+                    value = feedbackContact,
+                    onValueChange = { feedbackContact = it.take(200) },
+                    label = { Text(tr("称呼或联系方式（可选）")) },
+                    singleLine = true,
+                    enabled = !exporting,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                Button(
+                    enabled = !exporting,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    onClick = {
+                        exporting = true
+                        scope.launch {
+                            try {
+                                val fileName = DiagnosticExportFormatter.defaultFileName()
+                                val uploadResult = withContext(Dispatchers.IO) {
+                                    val events = viewModel.loadEventsForExport(exportAll = exportAll)
+                                    val ledgerDupCount = viewModel.countLedgerPossibleDuplicates()
+                                    val meta = DiagnosticExportFormatter.collectMeta(
+                                        context = context,
+                                        selectedTransactionId = null,
+                                        query = if (exportAll) "" else state.query,
+                                        channelFilter = if (exportAll) DiagnosticChannelFilter.ALL else state.channelFilter,
+                                        outcomeFilter = if (exportAll) DiagnosticOutcomeFilter.ALL else state.outcomeFilter,
+                                        exportAll = exportAll,
+                                        ledgerPossibleDuplicateCount = ledgerDupCount,
+                                    )
+                                    val report = DiagnosticExportFormatter.format(
+                                        meta = meta,
+                                        eventsNewestFirst = events,
+                                        includeRawText = exportIncludeRawText,
+                                    )
+                                    val deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+                                    val androidVersion = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+                                    DiagnosticFeedbackUploader.upload(
+                                        logText = report,
+                                        description = feedbackDescription,
+                                        contact = feedbackContact,
+                                        appVersion = BuildConfig.VERSION_NAME,
+                                        versionCode = BuildConfig.VERSION_CODE,
+                                        deviceModel = deviceModel,
+                                        androidVersion = androidVersion,
+                                        fileName = fileName,
+                                    )
+                                }
+                                if (uploadResult.ok) {
+                                    feedbackDescription = ""
+                                    showExportDialog = false
+                                    val idSuffix = uploadResult.feedbackId?.let { "（编号 $it）" }.orEmpty()
+                                    viewModel.publishNotice("已发送给开发者$idSuffix")
+                                } else {
+                                    viewModel.publishNotice("发送失败，请检查网络或改用本地分享")
+                                }
+                            } catch (_: Exception) {
+                                viewModel.publishNotice("发送失败，请检查网络或改用本地分享")
+                            } finally {
+                                exporting = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(
+                        if (exporting) tr("发送中…") else tr("直接发送给开发者"),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -517,7 +614,7 @@ fun TransactionDiagnosticsScreen(
                     ) {
                         Text(tr("保存到文件"), maxLines = 1, softWrap = false)
                     }
-                    Button(
+                    OutlinedButton(
                         enabled = !exporting,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
@@ -569,7 +666,7 @@ fun TransactionDiagnosticsScreen(
                             }
                         },
                     ) {
-                        Text(tr("分享给开发者"), maxLines = 1, softWrap = false)
+                        Text(tr("本地分享"), maxLines = 1, softWrap = false)
                     }
                 }
             }

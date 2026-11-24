@@ -103,6 +103,14 @@ internal fun OnboardingWelcome(
                          else "点击首页右上角的导入图标",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (english) "Spotted a capture or duplicate issue?"
+                         else "遇到漏记、重复或识别异常？",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (english) "Open Settings → Diagnostic Logs and tap Export to send logs directly to the developer."
+                         else "在「设置 → 账单诊断日志」点击导出，可直接附带问题描述发给开发者排查。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.height(4.dp))
             }
             Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp)) {

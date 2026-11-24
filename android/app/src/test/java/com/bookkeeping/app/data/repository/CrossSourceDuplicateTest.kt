@@ -467,8 +467,8 @@ class CrossSourceDuplicateTest {
     // 跨通道对称去重：页面先记下后，同订单号的通知再到达时同样能命中。
     @Test
     fun `late notification after page capture with same order id matches symmetrically`() {
-        val existing = ledgerRow(fromScreenshot = true)
-        val incoming = ledgerRow(id = 0, fromScreenshot = false)
+        val existing = ledgerRow(fromScreenshot = true, orderId = "wx-4200001")
+        val incoming = ledgerRow(id = 0, fromScreenshot = false, orderId = "wx-4200001")
         val match = CrossSourceDuplicatePolicy.findMatch(
             listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
         )

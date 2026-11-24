@@ -76,12 +76,28 @@ class TransactionDiagnosticsViewModel @Inject constructor(
 
     fun setChannelFilter(filter: DiagnosticChannelFilter) {
         if (_state.value.channelFilter == filter) return
-        _state.value = _state.value.copy(channelFilter = filter)
+        val current = _state.value
+        val needsWiderWindow = (filter != DiagnosticChannelFilter.ALL ||
+            current.outcomeFilter != DiagnosticOutcomeFilter.ALL) &&
+            current.limit < FILTERED_EVENT_LIMIT
+        _state.value = current.copy(
+            channelFilter = filter,
+            limit = if (needsWiderWindow) FILTERED_EVENT_LIMIT else current.limit,
+        )
+        if (needsWiderWindow) reload()
     }
 
     fun setOutcomeFilter(filter: DiagnosticOutcomeFilter) {
         if (_state.value.outcomeFilter == filter) return
-        _state.value = _state.value.copy(outcomeFilter = filter)
+        val current = _state.value
+        val needsWiderWindow = (filter != DiagnosticOutcomeFilter.ALL ||
+            current.channelFilter != DiagnosticChannelFilter.ALL) &&
+            current.limit < FILTERED_EVENT_LIMIT
+        _state.value = current.copy(
+            outcomeFilter = filter,
+            limit = if (needsWiderWindow) FILTERED_EVENT_LIMIT else current.limit,
+        )
+        if (needsWiderWindow) reload()
     }
 
     fun loadMore() {
@@ -198,6 +214,7 @@ class TransactionDiagnosticsViewModel @Inject constructor(
 
     companion object {
         private const val PAGE_SIZE = 100
+        private const val FILTERED_EVENT_LIMIT = 1000
         private const val EXPORT_EVENT_LIMIT = 1000
     }
 }
