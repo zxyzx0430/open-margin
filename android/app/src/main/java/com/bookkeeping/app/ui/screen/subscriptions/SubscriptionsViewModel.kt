@@ -49,6 +49,12 @@ class SubscriptionsViewModel @Inject constructor(
     private val _selectedFilter = MutableStateFlow(SubscriptionFilter.ALL)
     val selectedFilter: StateFlow<SubscriptionFilter> = _selectedFilter
 
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            subscriptionRepository.advanceOverdueAutoRenew()
+        }
+    }
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
 

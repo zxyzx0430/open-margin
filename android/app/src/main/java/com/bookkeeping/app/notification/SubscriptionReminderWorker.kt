@@ -33,7 +33,8 @@ class SubscriptionReminderWorker(
         val nowMs = System.currentTimeMillis()
         val timeZone = TimeZone.getDefault()
         val db = BookkeepingDatabase.build(applicationContext)
-        val dao = db.subscriptionDao()
+        try {
+            val dao = db.subscriptionDao()
 
         // Advance overdue auto-renew subscriptions so schedules remain current.
         val todayStartMs = SubscriptionProjection.startOfDayMs(nowMs, timeZone)
@@ -110,6 +111,9 @@ class SubscriptionReminderWorker(
         }
 
         Result.success()
+        } finally {
+            db.close()
+        }
     }
 
     companion object {

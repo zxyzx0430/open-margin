@@ -848,6 +848,7 @@ fun CalendarScreen(
                 editingSubscription = sub
             },
             onDeactivate = { viewModel.deactivate(sub.id) },
+            onDelete = { viewModel.softDeleteSubscription(sub.id) },
         )
     }
 
