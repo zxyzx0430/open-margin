@@ -182,10 +182,10 @@ internal object DiagnosticExportFormatter {
 
             // 异常与待排查速览（置顶，方便开发者前 30 行直接定位问题）
             val highlights = attempts.filter { attempt ->
-                val hasFailure = attempt.outcome == DiagnosticAttemptOutcome.FAILURE
+                val hasFailure = attempt.outcome == DiagnosticTimeline.Outcome.FAILURE
                 val hasConflict = attempt.steps.any { it.details.contains("conflict", ignoreCase = true) }
                 val hasFingerprintWarn = attempt.steps.any { it.details.contains("fingerprint", ignoreCase = true) }
-                val skippedWithDigit = attempt.outcome == DiagnosticAttemptOutcome.WARNING &&
+                val skippedWithDigit = attempt.outcome == DiagnosticTimeline.Outcome.WARNING &&
                     attempt.steps.any { s -> s.rawText?.any { it.isDigit() } == true }
                 hasFailure || hasConflict || hasFingerprintWarn || skippedWithDigit
             }.take(25)
