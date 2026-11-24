@@ -1,7 +1,10 @@
 package com.bookkeeping.app.ui.screen.transactions
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -10,40 +13,39 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -157,9 +159,21 @@ fun TransactionEditScreen(
     BackHandler(onBack = onCancel)
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
-                title = { Text(tr("编辑账单"), fontWeight = FontWeight.SemiBold) },
+                windowInsets = WindowInsets(0, 0, 0, 0),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+                title = {
+                    Text(
+                        text = tr("编辑账单"),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onCancel) {
                         Icon(
@@ -178,52 +192,91 @@ fun TransactionEditScreen(
             )
         },
         bottomBar = {
-            Surface(color = MaterialTheme.colorScheme.surface) {
-                Column {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+            ) {
+                Column(modifier = Modifier.navigationBarsPadding()) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        TextButton(onClick = onDelete) {
-                            Text(tr("删除"), color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(
+                            onClick = onDelete,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                            modifier = Modifier.height(44.dp),
+                        ) {
+                            Text(tr("删除"), maxLines = 1)
                         }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = onCancel) { Text(tr("取消")) }
+                        OutlinedButton(
+                            onClick = onCancel,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.height(44.dp),
+                        ) {
+                            Text(tr("取消"), maxLines = 1)
+                        }
                         Button(
                             onClick = { fields?.let(onSave) },
                             enabled = canSave,
-                        ) { Text(tr("保存")) }
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.height(44.dp),
+                        ) {
+                            Text(tr("保存"), maxLines = 1)
+                        }
                     }
                 }
             }
         },
     ) { innerPadding ->
+        val fieldShape = RoundedCornerShape(14.dp)
+        val fieldColors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+            focusedContainerColor = MaterialTheme.colorScheme.surface,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // 收支类型
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FieldLabel(tr("收支类型"))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = selectedType == TransactionType.EXPENSE,
-                        onClick = { selectedType = TransactionType.EXPENSE },
-                        label = { Text(tr("支出")) },
-                    )
-                    FilterChip(
-                        selected = selectedType == TransactionType.INCOME,
-                        onClick = { selectedType = TransactionType.INCOME },
-                        label = { Text(tr("收入")) },
-                    )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    FieldLabel(tr("收支类型"))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        EditPillChip(
+                            label = tr("支出"),
+                            selected = selectedType == TransactionType.EXPENSE,
+                            onClick = { selectedType = TransactionType.EXPENSE },
+                        )
+                        EditPillChip(
+                            label = tr("收入"),
+                            selected = selectedType == TransactionType.INCOME,
+                            onClick = { selectedType = TransactionType.INCOME },
+                        )
+                    }
                 }
             }
 
@@ -248,11 +301,11 @@ fun TransactionEditScreen(
                 label = { Text(tr("金额（元）")) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
+                shape = fieldShape,
+                colors = fieldColors,
                 isError = amountError != null,
-                supportingText = {
-                    if (amountError != null) {
-                        Text(tr(amountError), color = MaterialTheme.colorScheme.error)
-                    }
+                supportingText = amountError?.let { err ->
+                    { Text(tr(err), color = MaterialTheme.colorScheme.error) }
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -271,6 +324,8 @@ fun TransactionEditScreen(
                 onValueChange = { merchant = it },
                 label = { Text(tr("商户/对方（可选）")) },
                 singleLine = true,
+                shape = fieldShape,
+                colors = fieldColors,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -280,6 +335,8 @@ fun TransactionEditScreen(
                 label = { Text(tr("备注（可选）")) },
                 minLines = 3,
                 maxLines = 6,
+                shape = fieldShape,
+                colors = fieldColors,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -290,14 +347,19 @@ fun TransactionEditScreen(
                     onValueChange = { account = it },
                     label = { Text(tr("账户（可选）")) },
                     singleLine = true,
+                    shape = fieldShape,
+                    colors = fieldColors,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     TransactionEditRules.ACCOUNT_PRESETS.forEach { preset ->
-                        FilterChip(
+                        EditPillChip(
+                            label = tr(preset),
                             selected = account.trim() == preset,
                             onClick = { account = preset },
-                            label = { Text(tr(preset)) },
                         )
                     }
                 }
@@ -315,28 +377,36 @@ fun TransactionEditScreen(
             // 发生时间：日期 + 时间两个入口
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FieldLabel(tr("发生时间"))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
                         onClick = { showDatePicker = true },
-                        modifier = Modifier.weight(1f),
+                        shape = fieldShape,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.CalendarMonth,
                             contentDescription = null,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text("${tr("日期")}：${formatEditDate(timestamp)}")
+                        Spacer(Modifier.width(6.dp))
+                        Text("${tr("日期")}：${formatEditDate(timestamp)}", maxLines = 1)
                     }
                     OutlinedButton(
                         onClick = { showTimePicker = true },
-                        modifier = Modifier.weight(1f),
+                        shape = fieldShape,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Schedule,
                             contentDescription = null,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Text("${tr("时间")}：${formatEditTime(timestamp)}")
+                        Spacer(Modifier.width(6.dp))
+                        Text("${tr("时间")}：${formatEditTime(timestamp)}", maxLines = 1)
                     }
                 }
                 errors.timestamp?.let {
@@ -361,33 +431,45 @@ fun TransactionEditScreen(
             )
 
             // 只读信息：证明这条记录是谁、同步到哪一步、有没有待上传改动。
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Text(
-                text = tr("记录信息"),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ReadOnlyField(
-                tr("记录 ID 后 6 位"),
-                "#" + initial.id.toString().takeLast(6),
-            )
-            ReadOnlyField(
-                tr("服务器同步"),
-                if (initial.remoteEventId != null) tr("已同步到服务器") else tr("尚未同步到服务器"),
-            )
-            ReadOnlyField(
-                tr("本地改动"),
-                if (initial.syncDirty || initial.remoteEventId == null) {
-                    tr("有本地改动未上传")
-                } else {
-                    tr("没有待上传的本地改动")
-                },
-            )
-            initial.duplicateOfId?.let { originalId ->
-                ReadOnlyField(
-                    tr("疑似重复原记录"),
-                    "#" + originalId.toString().takeLast(6),
-                )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = tr("记录信息"),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ReadOnlyField(
+                        tr("记录 ID 后 6 位"),
+                        "#" + initial.id.toString().takeLast(6),
+                    )
+                    ReadOnlyField(
+                        tr("服务器同步"),
+                        if (initial.remoteEventId != null) tr("已同步到服务器") else tr("尚未同步到服务器"),
+                    )
+                    ReadOnlyField(
+                        tr("本地改动"),
+                        if (initial.syncDirty || initial.remoteEventId == null) {
+                            tr("有本地改动未上传")
+                        } else {
+                            tr("没有待上传的本地改动")
+                        },
+                    )
+                    initial.duplicateOfId?.let { originalId ->
+                        ReadOnlyField(
+                            tr("疑似重复原记录"),
+                            "#" + originalId.toString().takeLast(6),
+                        )
+                    }
+                }
             }
         }
     }
@@ -437,8 +519,45 @@ private fun ReadOnlyField(label: String, value: String) {
     }
 }
 
-/** 单选下拉：分类 / 来源 / 审核状态共用，样式与新建账单对话框一致。 */
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditPillChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        },
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.outlineVariant
+            },
+        ),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        )
+    }
+}
+
+/** 单选下拉：分类 / 来源 / 审核状态共用，统一样式。 */
 @Composable
 private fun <T> ChoiceField(
     label: String,
@@ -449,41 +568,65 @@ private fun <T> ChoiceField(
     error: String? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        OutlinedTextField(
-            value = optionLabel(selected),
-            onValueChange = { },
-            readOnly = true,
-            label = { Text(label) },
-            isError = error != null,
-            supportingText = {
-                if (error != null) {
-                    Text(tr(error), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth(),
-        )
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.heightIn(max = 320.dp),
-        ) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(optionLabel(option)) },
-                    onClick = {
-                        onSelect(option)
-                        expanded = false
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        FieldLabel(label)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = true },
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = if (error != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
                     },
-                )
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = optionLabel(selected),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Icon(
+                        imageVector = Icons.Outlined.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.heightIn(max = 320.dp),
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(optionLabel(option)) },
+                        onClick = {
+                            onSelect(option)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+        if (error != null) {
+            Text(
+                text = tr(error),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }

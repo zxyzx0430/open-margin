@@ -107,9 +107,12 @@
 
 ### 4.3 安全区、挖孔屏与触控目标（高频踩坑红线）
 - **独立全屏子页**（账单详情、编辑页、导入页、诊断页、向导页等）：
-  - 自定义顶栏**必须加 `.statusBarsPadding()`**；
-  - 使用 `TopAppBar` 时**保留默认 `windowInsets`**，**严禁写 `windowInsets = WindowInsets(0, 0, 0, 0)`**（仅在外部 `Scaffold` 已消费顶部安全区的 Tab 页允许清零），防止被状态栏和前置摄像头打孔遮挡。
-- **底部安全区**：底部操作栏必须处理 `.navigationBarsPadding()`，含输入框的弹窗/页面必须处理 `.imePadding()`。
+  - 若由 `RootNavigation` 的外层 `Scaffold(innerPadding)` 托管（已消费状态栏安全区），子页自身 `Scaffold` / `TopAppBar` 应传 `WindowInsets(0, 0, 0, 0)` 以防出现双重状态栏留白；
+  - 若脱离外层 `Scaffold` 独立展示（如向导全屏页），自定义顶栏**必须加 `.statusBarsPadding()`**，或保留 `TopAppBar` 默认 `windowInsets`，防止被状态栏和前置摄像头打孔遮挡。
+- **底部弹窗（`ModalBottomSheet`）与键盘避让**：
+  - 凡含文本输入框或表单的 `ModalBottomSheet`，**必须**配置 `rememberModalBottomSheetState(skipPartiallyExpanded = true)`，防止弹出时半展开截断内容；
+  - 弹窗内部主 `Column` **必须**同时加 `.verticalScroll(rememberScrollState())` 与 `.imePadding()`（以及 `.navigationBarsPadding()`），确保软键盘弹出时输入框自动顶起、不被遮挡。
+- **底部安全区**：底部操作栏必须处理 `.navigationBarsPadding()`，含输入框的页面必须处理 `.imePadding()`。
 - **最小触控面积与无障碍**：可点击图标按钮触控区域不小于 `48.dp`；自绘图表（饼图、柱状图）必须补充 `Modifier.semantics { contentDescription = ... }`。
 - **360dp 窄屏与大字号适配**：避免一行硬塞 4 个以上等宽数值列；筛选 Chip 组与汇总标签优先用 `FlowRow` 或横向滚动。
 

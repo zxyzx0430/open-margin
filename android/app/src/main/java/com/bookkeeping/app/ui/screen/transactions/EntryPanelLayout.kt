@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -60,6 +61,7 @@ internal fun EntryPanelLayout(
             modifier = modifier
                 .fillMaxWidth()
                 .heightIn(max = 720.dp)
+                .imePadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 16.dp)
                 .verticalScroll(rememberScrollState()),
