@@ -41,25 +41,54 @@ jobs:
           bash app/download-asr-model.sh
           # 再跑一次 --check：确认落到磁盘的资产与脚本里的 sha256 完全一致。
           bash app/download-asr-model.sh --check
-      - name: Build and test Android APKs
+      - name: Runner resource diagnostics
+        run: |
+          df -h
+          free -h
+          java -version
+      - name: Run Android unit tests and build Debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           # GitHub 实验版显式开启主动截图监听；默认 false，Play 构建不传该参数。
-          ./gradlew --no-daemon -PopenMarginScreenshotWatcher=true testDebugUnitTest assembleDebug assembleRelease
+          ./gradlew --no-daemon --max-workers=2 --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" -PopenMarginScreenshotWatcher=true testDebugUnitTest assembleDebug
+      - name: Build unsigned Release APK
+        working-directory: android
+        run: |
+          # Keep the test and release packaging workloads in separate JVMs.
+          df -h
+          free -h
+          ./gradlew --no-daemon --max-workers=2 --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" -PopenMarginScreenshotWatcher=true assembleRelease
           test -s app/build/outputs/apk/release/app-release-unsigned.apk
+          unzip -tq app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Runner resources after build failure
+        if: failure()
+        run: |
+          df -h
+          free -h
+          du -sh android/app/build android/paddle-ocr-sdk/build ~/.gradle/caches 2>/dev/null || true
+      - name: Upload Android unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-reports
+          path: |
+            android/app/build/test-results/testDebugUnitTest/
+            android/app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Verify ASR payload inside the APK
         working-directory: android
         run: |
           set -euo pipefail
           APK=app/build/outputs/apk/release/app-release-unsigned.apk
           LIST=$(unzip -l "$APK")
-          echo "$LIST" | grep -q 'assets/asr/zipformer-medium-ctc/ctc-chunk-16-left-64.int8.onnx'
-          echo "$LIST" | grep -q 'assets/asr/zipformer-medium-ctc/tokens.txt'
-          echo "$LIST" | grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so'
+          grep -q 'assets/asr/zipformer-medium-ctc/ctc-chunk-16-left-64.int8.onnx' <<< "$LIST"
+          grep -q 'assets/asr/zipformer-medium-ctc/tokens.txt' <<< "$LIST"
+          grep -q 'lib/arm64-v8a/libsherpa-onnx-jni.so' <<< "$LIST"
           # 只能有一个 ONNX Runtime（paddle-ocr 的 1.21.1）。sherpa 静态链接 ORT，
           # 若这里出现第二份 libonnxruntime.so，说明 AAR 被换回了普通版本。
-          COUNT=$(echo "$LIST" | grep -c 'lib/arm64-v8a/libonnxruntime.so' || true)
+          COUNT=$(grep -c 'lib/arm64-v8a/libonnxruntime.so' <<< "$LIST" || true)
           test "$COUNT" -eq 1
           ls -l "$APK"
           echo "APK_MB=$(( $(stat -c%s "$APK") / 1024 / 1024 ))"
