@@ -222,7 +222,9 @@ fun TransactionDetailScreenContent(
         MerchantRuleDialog(
             merchant = entry.merchant,
             historyCount = if (onSaveMerchantRuleWithHistory == null) null else { name ->
-                historyTransactions.count { com.bookkeeping.app.data.merchant.matchesOtherMerchant(it, name) }
+                historyTransactions.count {
+                    !it.syncDeleted && com.bookkeeping.app.data.merchant.MerchantRules.matches(it.merchant, name)
+                }
             },
             onSaveWithHistory = onSaveMerchantRuleWithHistory?.let { save -> { name, category, update ->
                 save(name, category, update)

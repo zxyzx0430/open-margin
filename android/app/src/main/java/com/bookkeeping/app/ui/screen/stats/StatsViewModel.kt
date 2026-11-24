@@ -51,6 +51,23 @@ data class DayStatsSummary(
     val isLoaded: Boolean = false,
 )
 
+data class SubscriptionBreakdownItem(
+    val label: String,
+    val count: Int,
+    val monthlyCnyCents: Long,
+    val percentage: Float,
+)
+
+data class SubscriptionRankItem(
+    val id: Long,
+    val name: String,
+    val cadenceLabel: String,
+    val channel: String,
+    val monthlyCnyCents: Long,
+    val percentage: Float,
+    val pendingCancel: Boolean,
+)
+
 /** Aggregated subscription metrics and 12-month renewal projection for the Stats Subscription tab. */
 data class SubscriptionStatsState(
     val activeCount: Int = 0,
@@ -64,6 +81,9 @@ data class SubscriptionStatsState(
     val forecast12Months: List<MonthlyForecastPoint> = emptyList(),
     val peakMonth: MonthlyForecastPoint? = null,
     val recurringCandidateCount: Int = 0,
+    val topSubscriptions: List<SubscriptionRankItem> = emptyList(),
+    val channelBreakdown: List<SubscriptionBreakdownItem> = emptyList(),
+    val cadenceBreakdown: List<SubscriptionBreakdownItem> = emptyList(),
     val isLoaded: Boolean = false,
 )
 
@@ -273,6 +293,57 @@ internal object SubscriptionStatsCalculator {
             fxRates = fxRates,
             timeZone = timeZone,
         )
+        val totalForPct = monthlyTotal.coerceAtLeast(1L).toFloat()
+        val topSubscriptions = withMonthly
+            .sortedByDescending { it.second }
+            .take(6)
+            .map { (sub, monthly) ->
+                SubscriptionRankItem(
+                    id = sub.id,
+                    name = sub.name,
+                    cadenceLabel = when (sub.cadence.lowercase()) {
+                        "weekly" -> "每周"
+                        "quarterly" -> "每季"
+                        "yearly" -> "每年"
+                        else -> "每月"
+                    },
+                    channel = sub.paymentChannel.trim().ifBlank { "未指定" },
+                    monthlyCnyCents = monthly,
+                    percentage = if (monthlyTotal > 0L) monthly.toFloat() / totalForPct else 0f,
+                    pendingCancel = sub.pendingCancel,
+                )
+            }
+        val channelBreakdown = withMonthly
+            .groupBy { (sub, _) -> sub.paymentChannel.trim().ifBlank { "未指定" } }
+            .map { (channel, list) ->
+                val sum = list.sumOf { it.second }
+                SubscriptionBreakdownItem(
+                    label = channel,
+                    count = list.size,
+                    monthlyCnyCents = sum,
+                    percentage = if (monthlyTotal > 0L) sum.toFloat() / totalForPct else 0f,
+                )
+            }
+            .sortedByDescending { it.monthlyCnyCents }
+        val cadenceBreakdown = withMonthly
+            .groupBy { (sub, _) ->
+                when (sub.cadence.lowercase()) {
+                    "weekly" -> "周付"
+                    "quarterly" -> "季付"
+                    "yearly" -> "年付"
+                    else -> "月付"
+                }
+            }
+            .map { (label, list) ->
+                val sum = list.sumOf { it.second }
+                SubscriptionBreakdownItem(
+                    label = label,
+                    count = list.size,
+                    monthlyCnyCents = sum,
+                    percentage = if (monthlyTotal > 0L) sum.toFloat() / totalForPct else 0f,
+                )
+            }
+            .sortedByDescending { it.monthlyCnyCents }
         return SubscriptionStatsState(
             activeCount = activeCount,
             monthlyTotalCnyCents = monthlyTotal,
@@ -285,6 +356,9 @@ internal object SubscriptionStatsCalculator {
             forecast12Months = resolvedForecast.months,
             peakMonth = resolvedForecast.peakMonth,
             recurringCandidateCount = recurringCandidateCount,
+            topSubscriptions = topSubscriptions,
+            channelBreakdown = channelBreakdown,
+            cadenceBreakdown = cadenceBreakdown,
             isLoaded = true,
         )
     }

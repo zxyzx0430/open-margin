@@ -334,6 +334,30 @@ fun StatsScreen(
                             peakMonth = subscriptionStats.peakMonth,
                         )
                     }
+                    if (subscriptionStats.topSubscriptions.isNotEmpty()) {
+                        item(key = "subscription_ranking") {
+                            SubscriptionRankingCard(
+                                items = subscriptionStats.topSubscriptions,
+                                onOpenAll = { onOpenSubscriptions(false) },
+                            )
+                        }
+                    }
+                    if (subscriptionStats.channelBreakdown.isNotEmpty()) {
+                        item(key = "subscription_channel_breakdown") {
+                            SubscriptionBreakdownCard(
+                                title = bilingual("按扣款渠道分布", "By Payment Channel"),
+                                items = subscriptionStats.channelBreakdown,
+                            )
+                        }
+                    }
+                    if (subscriptionStats.cadenceBreakdown.isNotEmpty()) {
+                        item(key = "subscription_cadence_breakdown") {
+                            SubscriptionBreakdownCard(
+                                title = bilingual("按周期分布", "By Billing Cycle"),
+                                items = subscriptionStats.cadenceBreakdown,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1114,6 +1138,164 @@ private fun SubscriptionPendingCancelBanner(
 }
 
 @Composable
+private fun SubscriptionRankingCard(
+    items: List<SubscriptionRankItem>,
+    onOpenAll: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = bilingual("订阅月费排行", "Top Subscriptions (Monthly)"),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = QingText,
+                )
+                Text(
+                    text = bilingual("管理全部 ›", "Manage ›"),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = QingPrimary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onOpenAll)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            items.forEach { item ->
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = QingText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "${item.cadenceLabel} · ${item.channel}" +
+                                    if (item.pendingCancel) " · 待取消" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (item.pendingCancel) QingWarning else QingTextSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "${formatCny(item.monthlyCnyCents)}/月",
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                                fontWeight = FontWeight.SemiBold,
+                                color = QingText,
+                            )
+                            Text(
+                                text = "${(item.percentage * 100f).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                color = QingTextSecondary,
+                            )
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(QingSurfaceVariant),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(item.percentage.coerceIn(0.03f, 1f))
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(if (item.pendingCancel) QingWarning else QingPrimary),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionBreakdownCard(
+    title: String,
+    items: List<SubscriptionBreakdownItem>,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = QingText,
+            )
+            items.forEach { item ->
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "${item.label}（${item.count} 项）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = QingText,
+                        )
+                        Text(
+                            text = "${formatCny(item.monthlyCnyCents)}/月 · ${(item.percentage * 100f).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                            fontWeight = FontWeight.SemiBold,
+                            color = QingPrimaryDeep,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(QingSurfaceVariant),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(item.percentage.coerceIn(0.03f, 1f))
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(QingPrimary.copy(alpha = 0.78f)),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SubscriptionForecastCard(
     forecast: List<MonthlyForecastPoint>,
     peakMonth: MonthlyForecastPoint?,
@@ -1140,21 +1322,17 @@ private fun SubscriptionForecastCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
                     text = bilingual("未来 12 个月续费预测", "12-Month Renewal Forecast"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    color = QingText,
                 )
                 if (peakMonth != null) {
-                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = bilingual(
                             "峰值：${peakMonth.year}年${peakMonth.month}月 ${formatCny(peakMonth.totalCnyCents)}",
@@ -1179,8 +1357,26 @@ private fun SubscriptionForecastCard(
                 onSelectIndex = { selectedIndex = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
+                    .height(172.dp),
             )
+            // X-axis month ticks aligned under the 12 forecast bars
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 36.dp, end = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                forecast.forEachIndexed { idx, pt ->
+                    if (idx % 2 == 0 || idx == forecast.lastIndex) {
+                        Text(
+                            text = "${pt.month}月",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (idx == selectedIndex) QingPrimaryDeep else QingTextSecondary,
+                            fontWeight = if (idx == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
+                        )
+                    }
+                }
+            }
             if (selectedPoint != null) {
                 Row(
                     modifier = Modifier

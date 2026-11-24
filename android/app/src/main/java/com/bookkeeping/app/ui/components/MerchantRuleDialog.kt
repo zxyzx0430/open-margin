@@ -60,7 +60,7 @@ fun MerchantRuleDialog(
     var selectedCategory by remember(merchant, initialCategory) {
         mutableStateOf(initialCategory)
     }
-    var updateHistory by remember(merchant) { mutableStateOf(false) }
+    var updateHistory by remember(merchant) { mutableStateOf(true) }
 
     val trimmedMerchant = merchantName.trim()
     val placeholderMerchant = trimmedMerchant.isNotEmpty() && isCleanupSingletonMerchant(trimmedMerchant)
@@ -71,8 +71,7 @@ fun MerchantRuleDialog(
     val canUpdateHistory =
         onSaveWithHistory != null &&
             matchingHistoryCount > 0 &&
-            selectedCategory != null &&
-            selectedCategory != TransactionCategory.OTHER
+            selectedCategory != null
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

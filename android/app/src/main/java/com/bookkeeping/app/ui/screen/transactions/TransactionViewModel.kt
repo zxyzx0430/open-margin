@@ -65,7 +65,7 @@ internal object LedgerFilter {
     ): Boolean {
         if (type != null && transaction.type != type.name) return false
         if (category != null && transaction.category != category.name) return false
-        if (!AccountNormalization.matchesFilter(transaction.account, account)) return false
+        if (!AccountNormalization.matchesFilter(transaction, account)) return false
         if (startMs != null && transaction.timestamp < startMs) return false
         if (endMs != null && transaction.timestamp >= endMs) return false
         val q = query.trim()
@@ -98,7 +98,7 @@ internal object LedgerFilter {
     ): Boolean {
         if (type != null && transaction.type != type.name) return false
         if (category != null && transaction.category != category.name) return false
-        if (!AccountNormalization.matchesFilter(transaction.account, account)) return false
+        if (!AccountNormalization.matchesFilter(transaction, account)) return false
         if (startMs != null && transaction.timestamp < startMs) return false
         if (endMs != null && transaction.timestamp >= endMs) return false
         val q = query.trim()
@@ -221,7 +221,7 @@ class TransactionViewModel @Inject constructor(
                 ).map { list ->
                     val visible = list.filter {
                         !CaptureMergePolicy.isAutoMergedDuplicate(it) &&
-                            AccountNormalization.matchesFilter(it.account, filters.account)
+                            AccountNormalization.matchesFilter(it, filters.account)
                     }
                     if (amountQuery != null) {
                         visible.filter {
@@ -519,11 +519,13 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
-    fun saveMerchantRule(merchant: String, category: TransactionCategory, updateHistory: Boolean = false) {
+    fun saveMerchantRule(merchant: String, category: TransactionCategory, updateHistory: Boolean = true) {
         if (com.bookkeeping.app.data.merchant.isCleanupSingletonMerchant(merchant)) return
         viewModelScope.launch {
-            if (updateHistory) repository.categorizeOther(merchant, null, category, true)
-            else settings.rememberMerchantCategory(merchant, category)
+            settings.rememberMerchantCategory(merchant, category)
+            if (updateHistory) {
+                repository.applyMerchantRuleToHistory(merchant, category)
+            }
         }
     }
 

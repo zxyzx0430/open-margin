@@ -52,8 +52,8 @@ object RecurringCandidateDetector {
         "possible_duplicate",
     )
 
-    /** Categories where 2 isolated visits ~30 days apart are almost never a subscription. */
-    private val DAILY_SPEND_CATEGORIES = setOf("FOOD", "SHOPPING", "TRANSPORT")
+    /** Categories where irregular visits (supermarkets, food, charging, pharmacy) are rarely subscriptions. */
+    private val DAILY_SPEND_CATEGORIES = setOf("FOOD", "SHOPPING", "TRANSPORT", "HEALTH")
 
     fun candidateKey(merchant: String, currency: String, amountCents: Long): String =
         "${normalizeMerchant(merchant)}|${currency.uppercase(Locale.US)}|$amountCents"
@@ -116,15 +116,21 @@ object RecurringCandidateDetector {
             val lastSeenDay = uniqueDays.last()
             val daysSinceLast = todayDay - lastSeenDay
 
+            val isDailyCategory = latest.category in DAILY_SPEND_CATEGORIES
             val isMonthly = if (monthlyHits >= annualHits && monthlyHits > 0) {
                 val ratio = monthlyHits.toDouble() / deltas.size.toDouble()
-                val shortBursts = deltas.count { it < 15L }
+                val shortBursts = deltas.count { it < 20L }
                 val avgDelta = deltas.average()
                 val recentEnough = daysSinceLast <= MAX_MONTHLY_STALE_DAYS
+                val strictDailyGuard = if (isDailyCategory) {
+                    monthlyHits >= 3 && shortBursts == 0 && ratio >= 0.8
+                } else {
+                    true
+                }
                 val twoOccurrenceDayMatch = if (uniqueDays.size == 2) {
                     val d1 = dayOfMonth(byDay[uniqueDays[0]]!!.timestamp, timeZone)
                     val d2 = dayOfMonth(byDay[uniqueDays[1]]!!.timestamp, timeZone)
-                    abs(d1 - d2) <= 3 && latest.category !in DAILY_SPEND_CATEGORIES
+                    abs(d1 - d2) <= 2 && !isDailyCategory
                 } else {
                     true
                 }
@@ -132,6 +138,7 @@ object RecurringCandidateDetector {
                     ratio >= 0.6 &&
                     avgDelta >= 22.0 &&
                     shortBursts <= 1 &&
+                    strictDailyGuard &&
                     twoOccurrenceDayMatch
             } else {
                 false

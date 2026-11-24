@@ -40,9 +40,30 @@ object AccountNormalization {
     fun isUncategorized(rawAccount: String?): Boolean =
         normalize(rawAccount) == UNASSIGNED_ACCOUNT_KEY
 
+    /**
+     * Resolves a transaction's display account: prefers explicit [TransactionEntity.account],
+     * falling back to [TransactionEntity.source] (`WECHAT` -> 微信, `ALIPAY` -> 支付宝,
+     * `BANK_SMS` -> 银行卡) so auto-captured bills with null account are properly attributed.
+     */
+    fun effectiveAccount(transaction: TransactionEntity): String {
+        val explicit = transaction.account?.trim().orEmpty()
+        if (explicit.isNotEmpty()) return normalize(explicit)
+        return when (transaction.source.trim().uppercase()) {
+            "WECHAT" -> "微信"
+            "ALIPAY" -> "支付宝"
+            "BANK_SMS" -> "银行卡"
+            else -> UNASSIGNED_ACCOUNT_KEY
+        }
+    }
+
     fun matchesFilter(rawAccount: String?, filterAccount: String?): Boolean {
         if (filterAccount == null) return true
         return normalize(rawAccount) == normalize(filterAccount)
+    }
+
+    fun matchesFilter(transaction: TransactionEntity, filterAccount: String?): Boolean {
+        if (filterAccount == null) return true
+        return effectiveAccount(transaction) == normalize(filterAccount)
     }
 }
 
@@ -58,7 +79,7 @@ internal object AccountAggregation {
         if (filtered.isEmpty()) return emptyList()
         val total = filtered.sumOf { it.amountCents }
         return filtered
-            .groupBy { AccountNormalization.normalize(it.account) }
+            .groupBy { AccountNormalization.effectiveAccount(it) }
             .map { (key, list) ->
                 val accountTotal = list.sumOf { it.amountCents }
                 val uncategorized = key == AccountNormalization.UNASSIGNED_ACCOUNT_KEY
@@ -79,25 +100,29 @@ internal object AccountAggregation {
             )
     }
 
-    /** Fraction in [0, 1] of matched transactions that have a non-blank account. */
+    /** Fraction in [0, 1] of matched transactions that have a resolved account. */
     fun coverageRatio(
         transactions: List<TransactionEntity>,
         type: TransactionType,
     ): Float {
         val filtered = StatsTransactionPolicy.filter(transactions, type)
         if (filtered.isEmpty()) return 0f
-        val categorized = filtered.count { !AccountNormalization.isUncategorized(it.account) }
+        val categorized = filtered.count {
+            AccountNormalization.effectiveAccount(it) != AccountNormalization.UNASSIGNED_ACCOUNT_KEY
+        }
         return categorized.toFloat() / filtered.size.toFloat()
     }
 
-    /** True when strictly more than 90% of matched transactions have no account filled. */
+    /** True when strictly more than 90% of matched transactions have no resolved account. */
     fun isMostlyUncategorized(
         transactions: List<TransactionEntity>,
         type: TransactionType,
     ): Boolean {
         val filtered = StatsTransactionPolicy.filter(transactions, type)
         if (filtered.isEmpty()) return false
-        val uncategorizedCount = filtered.count { AccountNormalization.isUncategorized(it.account) }
+        val uncategorizedCount = filtered.count {
+            AccountNormalization.effectiveAccount(it) == AccountNormalization.UNASSIGNED_ACCOUNT_KEY
+        }
         return uncategorizedCount * 10 > filtered.size * 9
     }
 }
