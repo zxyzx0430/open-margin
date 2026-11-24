@@ -38,14 +38,14 @@ object PaymentCardReviewQueue {
         screenshot: ByteArray? = null,
         existingLedgerRows: List<TransactionEntity> = emptyList(),
     ): Route {
-        // Never hold uncompleted/cancelled/pending cards in the review inbox,
-        // because CaptureBookGate.mayConfirm refuses them anyway.
+        // Never hold uncompleted/pending/created cards in the review inbox,
+        // because they represent in-flight transfers or unreceived red packets.
+        // Cancelled/failed cards on multi-card pages stay visible as non-bookable
+        // previews per PaymentCardReviewQueueTest.
         val actionable = detections.filterNot {
             it.status in setOf(
                 PaymentCardStatus.PENDING,
                 PaymentCardStatus.CREATED,
-                PaymentCardStatus.CANCELLED,
-                PaymentCardStatus.FAILED,
             )
         }
         if (actionable.isEmpty()) return Route.NoBookableCandidate

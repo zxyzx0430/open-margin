@@ -392,6 +392,87 @@ class TransactionRepository @Inject constructor(
      * 调用方据此保留候选、记录真实异常并允许重试；旧入口仍会把同一个异常实例
      * 原样抛出。
      */
+    suspend fun insertApprovedCandidateIdempotently(
+        candidateId: String,
+        transaction: TransactionEntity,
+        notifySuccess: Boolean = false,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+        crossSourceWindowMs: Long = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+    ): Long? = duplicateMutex.withLock {
+        val trimmedId = candidateId.trim()
+        if (trimmedId.isEmpty()) {
+            return@withLock insertIfNotDuplicateLocked(
+                transaction = transaction,
+                notifySuccess = notifySuccess,
+                diagnosticInput = diagnosticInput,
+                crossSourceWindowMs = crossSourceWindowMs,
+                holdWeakCrossSourceMatch = false,
+            ).toLegacyTransactionId()
+        }
+        val key = "candidate:$trimmedId"
+        val existing = processedNoticeDao.find(key)
+        if (existing?.transactionId != null) {
+            return@withLock existing.transactionId
+        }
+        val result = insertIfNotDuplicateLocked(
+            transaction = transaction,
+            notifySuccess = notifySuccess,
+            diagnosticInput = diagnosticInput,
+            crossSourceWindowMs = crossSourceWindowMs,
+            holdWeakCrossSourceMatch = false,
+        )
+        when (result) {
+            is LedgerInsertResult.Inserted -> {
+                val now = System.currentTimeMillis()
+                processedNoticeDao.insertIgnore(
+                    ProcessedNoticeEntity(
+                        fingerprint = key,
+                        source = transaction.source,
+                        firstSeenMs = now,
+                        lastSeenMs = now,
+                        seenCount = 1,
+                        transactionId = result.transactionId,
+                    ),
+                )
+                processedNoticeDao.linkTransactionIfUnlinked(key, result.transactionId)
+                result.transactionId
+            }
+            is LedgerInsertResult.Merged -> {
+                val now = System.currentTimeMillis()
+                processedNoticeDao.insertIgnore(
+                    ProcessedNoticeEntity(
+                        fingerprint = key,
+                        source = transaction.source,
+                        firstSeenMs = now,
+                        lastSeenMs = now,
+                        seenCount = 1,
+                        transactionId = result.transactionId,
+                    ),
+                )
+                processedNoticeDao.linkTransactionIfUnlinked(key, result.transactionId)
+                result.transactionId
+            }
+            is LedgerInsertResult.Duplicate -> {
+                if (result.existingTransactionId > 0L) {
+                    val now = System.currentTimeMillis()
+                    processedNoticeDao.insertIgnore(
+                        ProcessedNoticeEntity(
+                            fingerprint = key,
+                            source = transaction.source,
+                            firstSeenMs = now,
+                            lastSeenMs = now,
+                            seenCount = 1,
+                            transactionId = result.existingTransactionId,
+                        ),
+                    )
+                    processedNoticeDao.linkTransactionIfUnlinked(key, result.existingTransactionId)
+                }
+                null
+            }
+            is LedgerInsertResult.Failed -> throw result.cause
+        }
+    }
+
     suspend fun insertIfNotDuplicateResult(
         transaction: TransactionEntity,
         notifySuccess: Boolean = true,
@@ -1032,7 +1113,7 @@ class TransactionRepository @Inject constructor(
             transaction = transaction,
             notifySuccess = notifySuccess,
             diagnosticInput = diagnosticInput,
-            crossSourceWindowMs = 0L,
+            crossSourceWindowMs = CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
             holdWeakCrossSourceMatch = false,
             deferPostCommitEffects = true,
         )
@@ -1595,15 +1676,14 @@ object CrossSourceDuplicatePolicy {
     ): Match? {
         if (windowMs <= 0L) return null
         if (incoming.eventTimeNeedsConfirmation) return null
-        // 只有截图/卡片/页面采集出来的行才需要这次检查；其它来源一行不变。
-        if (incoming.captureObservedAtMs == null) return null
+        val incomingFromCapture = incoming.captureObservedAtMs != null
         val pool = candidates
             .asSequence()
             .filter { it.id != incoming.id }
             .filter { !it.syncDeleted && it.duplicateOfId == null }
             .filter { it.remoteReviewStatus !in SKIPPED_STATUSES }
-            // 对侧必须来自另一条通道；同通道重放只由精确订单号或稳定事件指纹拦截。
-            .filter { it.captureObservedAtMs == null }
+            // 对侧必须来自另一条通道（页面/截图 vs 通知/短信）；同通道重放只由精确订单号或稳定事件指纹拦截。
+            .filter { (it.captureObservedAtMs != null) != incomingFromCapture }
             // 微信和支付宝同额同方也是两笔钱：按支付平台比较，不按 source 字符串。
             .filter { samePaymentPlatform(it.source, incoming.source) }
             .filter { it.amountCents == incoming.amountCents }

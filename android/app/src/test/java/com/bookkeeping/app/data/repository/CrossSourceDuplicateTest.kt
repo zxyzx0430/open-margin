@@ -464,10 +464,22 @@ class CrossSourceDuplicateTest {
         )
     }
 
-    // 通知/短信/无障碍的调用不传窗口，非截图行永远不会被这里拦下。
+    // 跨通道对称去重：页面先记下后，同订单号的通知再到达时同样能命中。
     @Test
-    fun `non screenshot caller is never blocked`() {
+    fun `late notification after page capture with same order id matches symmetrically`() {
         val existing = ledgerRow(fromScreenshot = true)
+        val incoming = ledgerRow(id = 0, fromScreenshot = false)
+        val match = CrossSourceDuplicatePolicy.findMatch(
+            listOf(existing), incoming, CrossSourceDuplicatePolicy.SCREENSHOT_WINDOW_MS,
+        )
+        assertNotNull(match)
+        assertEquals(existing.id, match!!.id)
+    }
+
+    // 同一通知通道不归跨通道去重管。
+    @Test
+    fun `same notification channel rows are not blocked by cross source policy`() {
+        val existing = ledgerRow(fromScreenshot = false)
         val incoming = ledgerRow(id = 0, fromScreenshot = false)
         assertNull(
             CrossSourceDuplicatePolicy.findMatch(

@@ -180,8 +180,9 @@ class CaptureReviewViewModel @Inject constructor(
                         category = category,
                         evidenceImageName = evidenceImageName,
                     )
-                    repository.insertIfNotDuplicate(
-                        entity,
+                    repository.insertApprovedCandidateIdempotently(
+                        candidateId = resolved.candidateId,
+                        transaction = entity,
                         notifySuccess = false,
                         diagnosticInput = TransactionDiagnosticInput(
                             attemptId = candidate.diagnosticAttemptId
