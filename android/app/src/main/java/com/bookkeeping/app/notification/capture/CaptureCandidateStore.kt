@@ -1327,7 +1327,17 @@ class CaptureCandidateStore internal constructor(
                 candidate.reason == "screenshot decode failed" ||
                 candidate.reason == "screenshot start failed" ||
                 candidate.reason.startsWith("screenshot error ")
-            val requiresFingerprint = candidate.screenshotPath != null || screenshotUnavailable ||
+            // Accessibility can save a text-only candidate when the OS screenshot
+            // request failed before any image bytes existed. There is no image
+            // to fingerprint in these explicitly recorded failure modes; they
+            // must not poison the independent MediaStore replay index.
+            val noImageWasCaptured = candidate.intakeMethod == CaptureCandidate.INTAKE_ACCESSIBILITY &&
+                candidate.screenshotPath == null && candidate.imageFingerprint == null &&
+                (candidate.reason == "screenshot decode failed" ||
+                    candidate.reason == "screenshot start failed" ||
+                    candidate.reason.startsWith("screenshot error "))
+            val requiresFingerprint = candidate.screenshotPath != null ||
+                (screenshotUnavailable && !noImageWasCaptured) ||
                 candidate.intakeMethod in setOf(
                     CaptureCandidate.INTAKE_MEDIASTORE,
                     CaptureCandidate.INTAKE_SHARE,

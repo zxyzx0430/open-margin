@@ -76,6 +76,36 @@ class ScreenshotFieldRegression1474Test {
         assertNotEquals(result.bookings[0].draft.eventTimeMs, result.bookings[1].draft.eventTimeMs)
     }
 
+    @Test fun refundAndNeighbouringPaymentDoNotShareStatus() {
+        val result = plan(stream(b("11月21日19:51", 230, 270, 440), b("退款到账通知", 320),
+            b("退款金额", 400, 280, 410), b("¥2.33", 480, 250, 440),
+            b("商品详情", 560, 55, 150), b("充电订单-预付6元", 560, 210, 520),
+            b("商户名称", 610, 55, 150), b("充电商户", 610, 210, 340),
+            b("退款方式", 670, 55, 150), b("退回支付卡(中国银行1234)", 670, 210, 590),
+            b("到账时间", 730, 55, 150), b("2026年11月21日19:51:17", 730, 210, 570),
+            b("查看退款详情", 820), b("11月22日08:28", 925, 270, 440), b("商户乙", 1010, 110, 250),
+            b("使用中国银行储蓄卡(1234)支付", 1140, 165, 530), b("¥4.00", 1220, 250, 440),
+            b("支付成功，对方已收款", 1360, 210, 540)))
+        assertEquals(2, result.decisions.size)
+        val refund = result.decisions.single { it.draft.amountCents == 233L }
+        assertEquals(CaptureCandidate.KIND_REFUND, refund.draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_INCOME, refund.draft.direction)
+        assertEquals(Action.AUTO_BOOK, refund.action)
+        val payment = result.decisions.single { it.draft.amountCents == 400L }
+        assertEquals(CaptureCandidate.KIND_PAYMENT, payment.draft.kind)
+        assertEquals(CaptureCandidate.DIRECTION_EXPENSE, payment.draft.direction)
+        assertEquals(Action.AUTO_BOOK, payment.action)
+    }
+
+    @Test fun sameShopAndAmountOnDifferentDaysRemainIndependent() {
+        val result = plan(stream(b("11月16日15:59", 195, 270, 440), b("餐饮商户", 285, 110, 250),
+            b("使用零钱支付", 420, 270, 430), b("¥10.00", 510, 250, 440), b("交易详情 >", 590, 280, 420),
+            b("11月19日22:01", 840, 270, 440), b("餐饮商户", 930, 110, 250),
+            b("使用零钱支付", 1050, 270, 430), b("¥10.00", 1140, 250, 440), b("交易详情 >", 1230, 280, 420)))
+        assertEquals(2, result.bookings.size)
+        assertTrue(result.decisions.all { it.duplicateHint == DuplicateHint.NONE })
+    }
+
     @Test fun ledgerResemblanceIsExplicitRatherThanGenericReview() {
         val blocks = stream(b("11月16日15:59", 195, 270, 440), b("饮品店", 285, 110, 250),
             b("使用零钱支付", 420, 270, 430), b("¥2.00", 510, 250, 440), b("交易详情 >", 590, 280, 420))

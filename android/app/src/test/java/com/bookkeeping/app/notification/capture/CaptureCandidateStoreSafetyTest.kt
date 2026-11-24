@@ -1080,6 +1080,27 @@ class CaptureCandidateStoreSafetyTest {
     }
 
     @Test
+    fun `text only accessibility failures do not poison screenshot fingerprint recovery`() {
+        val root = Files.createTempDirectory("candidate-store-text-only-capture")
+        try {
+            val store = CaptureCandidateStore(root.toFile())
+            listOf("screenshot decode failed", "screenshot start failed", "screenshot error 1").forEachIndexed { i, reason ->
+                assertNotNull(store.save(candidate("no-image-$i").copy(
+                    intakeMethod = CaptureCandidate.INTAKE_ACCESSIBILITY,
+                    reason = reason,
+                    imageFingerprint = null,
+                ), null))
+            }
+            val marker = root.resolve("page_capture/image-fingerprints.unavailable")
+            Files.write(marker, "unavailable\n".toByteArray())
+            assertEquals(ImageFingerprintLookup.CleanNoMatch, store.lookupImageFingerprint("e".repeat(64)))
+            assertFalse(Files.exists(marker))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `unavailable fingerprint marker stays when retained screenshot evidence lacks a fingerprint`() {
         val root = Files.createTempDirectory("candidate-store-fingerprint-missing-evidence")
         try {
