@@ -1,22 +1,23 @@
-# 清衡 · Open Margin 设计规范（Design System）
+# 清衡 · Open Margin 设计规范（Design System v2.0）
 
-> **适用范围**：Android 客户端（Jetpack Compose）、后续 iOS 客户端、官网下载页与桌面安装向导。
-> **核心用途**：统一视觉与交互语言，并作为所有开发者与 AI 编程助手（Antigravity / Claude Code / Codex 等）改 UI 时的**强制约束**，避免临时发挥与反复返工。
+> **适用范围**：Android 客户端（Jetpack Compose）、后续 iOS 客户端（SwiftUI）、官网下载页（`zxyzx.me`）、Windows 安装向导与桌面 Web 端。
+> **核心用途**：作为全项目唯一视觉与交互标准（Single Source of Truth），供开发者与所有 AI 编程助手（Antigravity / Claude Code / Codex 等）在设计和改版 UI 时强制遵循，彻底消除「想到哪写到哪」导致的反复返工。
 
 ---
 
-## 1. 设计原则与视觉气质
+## 1. 品牌气质与设计原则
 
-1. **克制清爽，数据优先**：浅暖灰背景（`#F6F5F4`）承载纯白内容卡片（`#FFFFFF`），用清衡青绿（`#24705C`）表达主操作与品牌感。拒绝花哨渐变、厚重阴影、大面积高饱和警告底色。
-2. **零信息丢失，绝不截断金额**：账本里金额是最核心的信息，宁可动态缩字号，也**绝不出现省略号或裁切**。
-3. **复用优先，禁止重复造轮子**：账单行、汇总卡、状态标签、设置分组、日期时间选择器均已有标准组件，新页面必须直接复用，不得另起炉灶画一套相似样式。
-4. **就地闭环，不绑架导航**：看某日明细、改单、核对截图尽量在当前页弹窗/抽屉或独立子页完成，退出回到原位；不无故跨 Tab 跳转把用户困在筛选态里。
+1. **克制清爽，数据优先**：浅暖灰画布（`#F6F5F4`）承载纯白卡片（`#FFFFFF`），以清衡青绿（`#24705C`）作为全端唯一品牌主色。**关闭 Material You 动态取色**（`dynamicColor = false`），拒绝蓝紫 SaaS 渐变、大面积荧光底色和厚重阴影。
+2. **金额永不裁切**：账本中金额是第一优先级信息，宁可动态缩小字号（最低 `11sp`），**绝不允许出现省略号 `...` 或右侧截断**。
+3. **单源真相，复用优先**：色彩、分类配色、账单行、汇总卡、状态标签、日期时间选择器、空态卡片均已有标准组件，新功能必须复用，禁止另画一套相似样式。
+4. **就地闭环，不绑架导航**：局部明细（如某日账单、原图核对、待确认截图）优先当页弹窗/抽屉完成，退出回到原位；不无故跨 Tab 跳转把用户困在筛选态里。
+5. **浅深双色与中英双语一等公民**：任何页面不得硬编码浅色常量或裸中文，必须在 `360dp` 窄屏、系统深色模式和英文界面下均无遮挡、无断字、无溢出。
 
 ---
 
 ## 2. 色彩系统（Design Tokens）
 
-**硬规则**：业务页面**严禁硬编码 `Color(0x...)`**，必须使用 `MaterialTheme.colorScheme`、`Color.kt` 暴露的主题感知属性或 `LocalQingSemanticColors.current`，确保浅色/深色模式同步生效。
+**硬规则**：业务代码**严禁硬编码 `Color(0x...)`**，必须使用 `MaterialTheme.colorScheme`、`Color.kt` 暴露的主题感知属性或 `LocalQingSemanticColors.current`。
 
 ### 2.1 品牌与中性色
 
@@ -24,16 +25,17 @@
 | --- | --- | --- | --- | --- |
 | 主色 Primary | `#24705C` | `#8FD9BC` | `QingPrimary` / `colorScheme.primary` | 主按钮、选中态、品牌强调 |
 | 主色容器 | `#E8F5EE` | `#0E5336` | `QingPrimaryContainer` | 汇总卡片底色、正向状态底色 |
-| 主色深字 | `#0E5336` | `#E8F0EB` | `QingPrimaryDeep` / `onPrimaryContainer` | 主色容器内标题与高亮文字 |
-| 页面底色 | `#F6F5F4` | `#101412` | `QingBackground` / `colorScheme.background` | 全局页面画布 |
-| 卡片底色 | `#FFFFFF` | `#18201D` | `QingSurface` / `colorScheme.surface` | 标准内容卡片、列表容器、弹窗 |
+| 主色深字 | `#0E5336` | `#E8F0EB` | `QingPrimaryDeep` / `onPrimaryContainer` | 主色容器内标题、图表选中气泡底 |
+| 薄荷辅色 | `#97E0B9` / `#DCF0E7` | `#97E0B9` / `#25302B` | `QingMint` / `QingMintSoft` | 柱状图默认柱色、次级浅绿容器 |
+| 页面画布 | `#F6F5F4` | `#101412` | `QingBackground` / `colorScheme.background` | 全局页面背景 |
+| 卡片表面 | `#FFFFFF` | `#18201D` | `QingSurface` / `colorScheme.surface` | 标准卡片、列表容器、弹窗 |
 | 弱容器底色 | `#F0F2F0` | `#25302B` | `QingSurfaceVariant` | 卡片内嵌套子块、中性徽章底色 |
-| 主正文 | `#151918` | `#E8F0EB` | `QingText` / `colorScheme.onSurface` | 商户名、标题、主文案 |
+| 主正文 | `#151918` | `#E8F0EB` | `QingText` / `colorScheme.onSurface` | 商户名、标题、正文 |
 | 次正文 | `#5E605F` | `#A9BDB3` | `QingTextSecondary` / `onSurfaceVariant` | 副标题、时间、说明文字 |
-| 卡片描边 / 分割线 | `#E2E5E2` | `#3A4A43` | `QingOutline` / `outlineVariant` | `1.dp` 卡片边框、列表分割线 |
+| 描边 / 分割线 | `#E2E5E2` | `#3A4A43` | `QingOutline` / `outlineVariant` | `1.dp` 卡片边框、列表分割线 |
 | 输入框描边 | `#7E8C84` | `#71837A` | `colorScheme.outline` | 输入框等交互控件边框（满足 3:1 对比度） |
 
-### 2.2 财务与状态语义色
+### 2.2 财务与状态语义色（唯一映射：`StatusTone`）
 
 | 状态 | 浅色前景 / 底色 | 深色前景 / 底色 | 代码引用 | 使用场景 |
 | --- | --- | --- | --- | --- |
@@ -42,107 +44,169 @@
 | **警告 / 待确认** | `#8A5A12` / `#FFF4DE` | `#F0C36A` / `#4A3510` | `semantic.warningText` / `StatusTone.WARNING` | 待确认重复、同步冲突、时间待确认 |
 | **中性 / 未开启** | `#5E605F` / `#F0F2F0` | `#A9BDB3` / `#25302B` | `StatusTone.NEUTRAL` | 来源标签（扫描/导入/通知/手动）、未开启 |
 
-> **禁止项**：严禁把 `tertiaryContainer`（薄荷绿）当警告色使用；严禁用大面积纯黄/纯红铺满整张卡片，警告类卡片统一用 **纯白底（`surface`） + 轻琥珀边框（`warningText.copy(alpha = 0.28f)`） + 顶部 `SoftBadge` 药丸标签**（参考 `DuplicateReviewCard`）。
+> **红线**：
+> - 严禁把 `tertiaryContainer`（薄荷绿）当警告色使用。
+> - 严禁用大面积纯黄/纯红铺满整张卡片；警告类卡片统一用 **纯白底（`surface`） + 轻琥珀边框（`warningText.copy(alpha = 0.28f)`） + 顶部 `SoftBadge` 药丸标签**（参考 `DuplicateReviewCard`）。
+> - 严禁在界面中用 `🟢 / 🔴 / ⚪` emoji 充当状态指示点，必须使用 `StatusDot(tone)`。
+
+### 2.3 15 分类单源色盘与图标体系（`CategoryColors.kt` + `CategoryVisuals.kt`）
+
+饼图扇区、图例色块、账单列表图标、日历抽屉图标、预算页图标**必须共用同一份 `CATEGORY_PALETTE` 和 `categoryVisual(category)`**，不得各页单独配色（受 `CategoryColorPaletteTest` 最小两两色差门禁保护）。
+
+- **底色生成公式**：浅色模式用 `accent.copy(alpha = 0.14f)` 做底色、`accent` 做图标色；深色模式先 `lerp(accent, Color.White, 0.30f)` 提亮，再用 `0.18f` 做底色。
+- **固定 15 色映射**：
+  - `FOOD 餐饮` `#E8590C` (`Restaurant`) · `EDUCATION 教育` `#74B816` (`School`) · `BONUS 奖金` `#FAB005` (`Payments`)
+  - `SALARY 工资` `#2F9E44` (`Payments`) · `UTILITIES 水电` `#0CA678` (`Bolt`) · `INVESTMENT 理财` `#1098AD` (`Payments`)
+  - `TRANSPORT 交通` `#1C7ED6` (`DirectionsSubway`) · `INSURANCE 保险` `#4263EB` (`MedicalServices`) · `HOUSING 住房` `#7048E8` (`Home`)
+  - `SHOPPING 购物` `#AE3EC9` (`ShoppingBag`) · `ENTERTAINMENT 娱乐` `#E64980` (`SportsEsports`) · `GIFT 红包` `#F03E3E` (`Payments`)
+  - `HEALTH 医疗` `#8C6D3F` (`MedicalServices`) · `TRANSFER 转账` `#343A40` (`SwapHoriz`) · `OTHER 其他` `#868E96` (`MoreHoriz`)
 
 ---
 
-## 3. 字体层级与金额排版
+## 3. 字体层级、图标风格与金额排版
 
-定义位置：`android/app/src/main/java/com/bookkeeping/app/ui/theme/Type.kt`
+### 3.1 字体角色（`Type.kt` / `QingType`）
 
 | 角色 | 样式 | 字号 / 行高 / 字重 | 使用场景 |
 | --- | --- | --- | --- |
-| 页面大标题 | `QingType.pageTitle` (`headlineSmall`) | `24sp / 30sp / Bold` | 各主 Tab 与子页顶部标题 |
-| 核心大数字 | `QingType.primaryKpi` (`headlineMedium`) | `28sp / 34sp / Bold` | 详情页主金额、统计页本月总支出 |
-| 卡片标题 / 列表主文 | `QingType.secondaryKpi` (`titleMedium`) | `16sp / 22sp / SemiBold` | 商户名、列表金额、汇总卡金额 |
+| 页面大标题 | `QingType.pageTitle` (`headlineSmall`) | `24sp / 30sp / Bold` | 所有主 Tab 与子页顶部标题（**跨页必须统一为 24sp Bold**） |
+| 核心主 KPI | `QingType.primaryKpi` (`headlineMedium`) | `28sp / 34sp / Bold` | 详情页主金额、统计页本月总支出 |
+| 次级 KPI / 列表主文 | `QingType.secondaryKpi` (`titleMedium`) | `16sp / 22sp / SemiBold` | 商户名、列表金额、汇总卡金额 |
 | 分组 / 行标题 | `titleSmall` | `14sp / 20sp / SemiBold` | 设置项标题、卡片小标题 |
 | 标准正文 | `bodyMedium` | `14sp / 20sp / Normal` | 弹窗说明、表单内容 |
 | 辅助副文 | `bodySmall` | `12sp / 17sp / Normal` | 账单副行、设置副标题、提示语 |
-| 标签 / 徽章 | `labelMedium` / `labelSmall` | `12sp / 11sp / Medium` | `StatusChip`、`SoftBadge`、指标小标签 |
+| 标签 / 指标名 | `labelMedium` / `QingType.metricLabel` (`labelSmall`) | `12sp / 11sp / Medium` | `StatusChip`、`SoftBadge`、汇总卡指标名 |
 
-### 金额排版铁律
-1. **所有可能超过 6 位数的金额展示位**（汇总卡、列表右侧、统计卡、预算卡）**必须使用 `AutoSizeAmountText`**（支持 `onTextLayout` 动态检测宽度溢出并逐级缩字号，保底 `11sp`），**禁止使用 `TextOverflow.Ellipsis`**。
-2. 汇总卡三列（支出 / 收入 / 结余）各自使用 `Modifier.weight(1f)`，内部 `AutoSizeAmountText` 必须带 `Modifier.fillMaxWidth()`，避免大额数字向右溢出容器。
-3. 符号统一：收入前缀用 `+`，支出与负结余前缀用标准减号 `−`（U+2212），不使用半角连字符 `-`。
+### 3.2 金额排版铁律
+1. **统一使用 `AutoSizeAmountText`**：按字符数初判 + `onTextLayout` 动态检测宽度溢出逐级缩字号（保底 `11sp`），**禁止使用 `TextOverflow.Ellipsis`**。
+2. **多列汇总防溢出**：三列汇总卡各自 `Modifier.weight(1f)`，内部 `AutoSizeAmountText` 必须带 `Modifier.fillMaxWidth()`。
+3. **符号与外币**：收入用 `+`，支出与负结余用标准减号 `−`（U+2212，不用半角 `-`）；外币保留原币种前缀（如 `USD 12.00`），不混入 CNY 汇总。
+
+### 3.3 图标风格统一
+- 业务内容区（分类、列表、空态、操作行）统一优先使用 **`Icons.Outlined.*`**；
+- 底部导航栏选中态、警示实心标识可使用 `Icons.Filled.*`；
+- 禁止在同一卡片里混用多种描边粗细的图标或用彩色 Emoji 替代矢量图标。
 
 ---
 
-## 4. 圆角、间距与安全区规范
+## 4. 圆角、间距、安全区与响应式布局
 
 ### 4.1 圆角体系（`QingShapes`）
-- `6.dp`（`extraSmall`）：小徽章 `SoftBadge`（`扫描 / 导入 / 通知`）
-- `10.dp`（`small`）：轻量行项、预览条
-- `12–14.dp`：按钮（`Button` / `OutlinedButton`）、卡片内部嵌套子卡片、横幅
-- `16–20.dp`（`medium` / `large`）：标准页面卡片、汇总卡片、`SettingsGroupCard`、`DuplicateReviewCard`
-- `28.dp`（`extraLarge`）：底部弹窗（ModalBottomSheet）顶角、大弹窗
+- `6.dp`（`extraSmall`）：`SoftBadge` 微标签（`扫描 / 导入 / 通知`）
+- `10.dp`（`small`）：轻量行项、日历单元格、预览条
+- `12–14.dp`：按钮（`Button` / `OutlinedButton`）、嵌套子卡片、横幅
+- `16–20.dp`（`medium` / `large`）：页面主卡片、汇总卡片、`SettingsGroupCard`、`DuplicateReviewCard`、`LedgerEmptyState`
+- `28.dp`（`extraLarge`）：底部弹窗（`ModalBottomSheet`）顶角
 - `50%`（`RoundedCornerShape(50)`）：`StatusChip` 药丸标签、筛选 Chip
 
 ### 4.2 间距与边框
 - **页面左右安全边距**：统一 `16.dp`。
 - **卡片间距**：纵向列表卡片间隔 `10–12.dp`。
 - **卡片内边距**：标准 `14–16.dp`；设置分组卡片横向 `16.dp`、纵向 `4.dp`（由行内 `vertical = 12.dp` 撑开）。
-- **边框与阴影**：默认用 `1.dp` 描边（`outlineVariant`）区分层次，**不滥用大阴影（elevation）**。
+- **边框与阴影**：默认 `1.dp` 描边（`outlineVariant`）+ `0.dp` 阴影，靠明度与细描边建立层次。
 
-### 4.3 安全区与挖孔屏铁律（高频踩坑项）
-- **独立全屏子页**（账单详情页、编辑页、导入页、诊断页等）：
-  - 自定义顶部栏必须添加 `.statusBarsPadding()`。
-  - 使用 `TopAppBar` 时**保留默认 `windowInsets`**，**严禁写 `windowInsets = WindowInsets(0, 0, 0, 0)`**（仅在外部 `Scaffold` 已经处理过状态栏内边距的 Tab 页才允许清零），否则会被状态栏时间和前置摄像头打孔遮挡。
-- **底部操作栏**：需适配导航栏手势条（`.navigationBarsPadding()`）与输入法弹起（`.imePadding()`）。
+### 4.3 安全区、挖孔屏与触控目标（高频踩坑红线）
+- **独立全屏子页**（账单详情、编辑页、导入页、诊断页、向导页等）：
+  - 自定义顶栏**必须加 `.statusBarsPadding()`**；
+  - 使用 `TopAppBar` 时**保留默认 `windowInsets`**，**严禁写 `windowInsets = WindowInsets(0, 0, 0, 0)`**（仅在外部 `Scaffold` 已消费顶部安全区的 Tab 页允许清零），防止被状态栏和前置摄像头打孔遮挡。
+- **底部安全区**：底部操作栏必须处理 `.navigationBarsPadding()`，含输入框的弹窗/页面必须处理 `.imePadding()`。
+- **最小触控面积与无障碍**：可点击图标按钮触控区域不小于 `48.dp`；自绘图表（饼图、柱状图）必须补充 `Modifier.semantics { contentDescription = ... }`。
+- **360dp 窄屏与大字号适配**：避免一行硬塞 4 个以上等宽数值列；筛选 Chip 组与汇总标签优先用 `FlowRow` 或横向滚动。
 
 ---
 
-## 5. 标准复用组件清单
+## 5. 五大主界面与底部导航契约
 
-开发或修改界面前，优先查下表复用已有组件：
+- **底部导航栏（`RootNavigation.kt`）**：固定 5 个 Tab——`账单 / 日历 / 统计 / 预算 / 设置`，标签固定 `maxLines = 1` 不折行。
+- **账单页（Ledger）**：顶部品牌/操作栏 → 状态胶囊 → 更新横幅（如有）→ 权限/待确认/待确认重复卡片 → `MonthlySummaryCard` → 搜索框与筛选 Chip → 按日分组的 `DayCard`（内部每行统一用 `LedgerTransactionRow`）→ 右下角三手势 `VoiceFab`。
+- **日历页（Calendar）**：月份切换头 → 月度三列汇总 → 7 列热力日历格（绿/红分位底色，选中深青绿实心胶囊）→ 底部可展开区间抽屉（明细行**强制复用 `LedgerTransactionRow`**，禁止裸露机器备注）。
+- **统计页（Stats）**：月份选择器 → 月度概览卡片（本月总支出 / 日均 / 结余 / 较上月）→ 分类占比环形图 + 可点击图例列表 → 每日趋势柱状图（点击「查看某日账单」**当页弹出 `DayDetailDialog`**，不跳账单 Tab）。
+- **预算页（Budget）**：月度总预算进度卡（金额走 `AutoSizeAmountText`）→ 预算指标采用 2×2 网格而非 4 列挤压 → 删除预算必须二次确认。
+- **设置页（Settings）**：顶部可折叠「采集与同步状态」总览卡 → 4 组 `SettingsGroupCard`（自动记账与权限 / 账本与导入导出 / 同步与备份 / 关于与反馈），每行标题和副标题均单行省略。
 
-| 组件 | 路径 | 规范要点 |
+---
+
+## 6. 数据可视化与图表规范
+
+### 6.1 分类占比环形图（`CategoryPieChart.kt`）
+- **形态**：纯环形（无环外引线、无环外文字），环宽 `16.dp`，相邻扇区留 `2°` 细缝（极小扇区保留 `0.6°` 最小可见弧度），画布留 `4.dp` 外边距防裁边。
+- **选中交互**：点击扇区（容差 `10.dp`）或点击下方图例行联动选中；选中扇区**内半径不动、外半径平滑外扩 `7.dp`**（`200ms` 动画）。
+- **环心文案**：占内圈直径 `84%`，显示选中分类的 `AutoSizeAmountText` 金额 + `分类名 · 占比%`。
+
+### 6.2 每日趋势柱状图（`DailyBarChart.kt`）
+- **形态**：高度 `190.dp`，圆角柱体；默认柱色 `QingMint`，选中柱色 `QingPrimary`。
+- **默认态与气泡**：默认自动选中当月支出最高日；顶部悬浮深绿气泡（`QingPrimaryDeep` 底 + `QingSurface` 白字）展示 `X月X日 ¥金额`。
+
+---
+
+## 7. 标准复用组件清单（写 UI 前必查）
+
+| 组件 | 路径 | 核心约束 |
 | --- | --- | --- |
-| `LedgerTransactionRow` | `ui/screen/transactions/LedgerTransactionRow.kt` | 首页账单、日历抽屉、截图导入结果统一复用。**结构固定为**：左侧 `42.dp` `MerchantAvatar` + 中间商户名（主行）与「来源 `SoftBadge` + 分类 · 账户/来源 · 时间」（副行）+ 右侧 `AutoSizeAmountText`。**严禁在商户名旁拼接 `· 转账 / · 退款 / · 已确认` 等冗余状态后缀**。 |
-| `MonthlySummaryCard` | `ui/components/SummaryCard.kt` | 顶部三列汇总卡（支出 / 收入 / 结余），青绿浅底 `QingPrimaryContainer` + `1.dp` 边框，三列等宽且金额自适应缩字号。 |
-| `AutoSizeAmountText` | `ui/components/AutoSizeAmountText.kt` | 所有金额展示统一入口，单行不换行、不省略、自动缩字号。 |
-| `StatusChip` / `SoftBadge` / `StatusDot` | `ui/components/StatusChip.kt` | 所有状态指示统一传入 `StatusTone`，禁止在页面里手写彩色小框。 |
-| `SettingsGroupCard` & `Settings*Row` | `ui/screen/settings/SettingsComponents.kt` | 设置页统一卡片与行样式：行标题与副标题固定 `maxLines = 1` + `Ellipsis`，右侧徽章与箭头右边缘严格对齐。 |
-| `LedgerDateTimePickerDialog` | `ui/components/LedgerDateTimePickerDialog.kt` | 所有日期时间选择统一使用自研滚轮选择器，禁止调用系统原生 `DatePickerDialog` / `TimePickerDialog`。 |
+| `LedgerTransactionRow` | `ui/screen/transactions/LedgerTransactionRow.kt` | 主页、日历抽屉、截图导入统一复用。左侧 `42.dp` `MerchantAvatar` + 商户名（主行）+ 来源 `SoftBadge` 与 `分类 · 账户/来源 · 时间`（副行）+ 右侧 `AutoSizeAmountText`。**严禁在商户名旁拼接 `· 转账 / · 退款 / · 已确认` 等冗余后缀**。 |
+| `MonthlySummaryCard` | `ui/components/SummaryCard.kt` | 青绿浅底 `QingPrimaryContainer` + `1.dp` 边框，三列等宽 `AutoSizeAmountText`。 |
+| `AutoSizeAmountText` | `ui/components/AutoSizeAmountText.kt` | 所有金额唯一入口，单行自适应缩放，永不用省略号。 |
+| `StatusChip` / `SoftBadge` / `StatusDot` | `ui/components/StatusChip.kt` | 统一走 `StatusTone`，禁止页面内手写状态色块或 Emoji。 |
+| `LedgerEmptyState` | `ui/components/EmptyState.kt` | **左对齐紧凑卡片**（非居中大空白插画），让上方筛选栏保持视觉锚点，必带恢复操作按钮。 |
+| `SettingsGroupCard` & `Settings*Row` | `ui/screen/settings/SettingsComponents.kt` | 标题/副标题单行省略，右侧徽章与箭头右缘对齐。 |
+| `LedgerDateTimePickerDialog` | `ui/components/LedgerDateTimePickerDialog.kt` | 全局统一自研滚轮日期时间选择器，禁止退回系统原生弹窗。 |
 | `SiteUpdateBanner` | `ui/components/SiteUpdateBanner.kt` | 首页新版本提示，提供明确三动作（忽略此版本 / 下次再提醒 / 立即更新）。 |
-| `VoiceFab` | `ui/components/VoiceFab.kt` | 首页右下角三手势主入口：单击手记、双击批量导截图、长按离线语音。 |
+| `VoiceFab` | `ui/components/VoiceFab.kt` | 单击手记、双击批量导截图、长按离线语音。 |
 
 ---
 
-## 6. 交互、按钮与弹窗规范
+## 8. 交互、空态/加载/错误态与文案规范
 
-### 6.1 按钮层级与排版
-- **主按钮（Primary）**：青绿实心 `Button`，用于保存、确认导入、合并为一笔、立即更新。高度 `40–48.dp`，圆角 `12–14.dp`。
-- **次按钮（Secondary）**：`OutlinedButton`（`1.dp` `outlineVariant` 边框），用于保留两笔、取消、导出。
-- **危险按钮（Destructive）**：浅红底 `errorContainer` + 红字，或红字描边按钮，用于删除、关闭远程同步、清空。
-- **双按钮 / 多按钮并排**：同一行操作按钮尽量等宽（`Modifier.weight(1f)`）、统一高度与圆角，视觉对称；文字强制 `maxLines = 1`。
+### 8.1 按钮层级与弹窗规则
+- **主按钮**：青绿实心 `Button`（保存、确认导入、合并为一笔、立即更新），高 `40–48.dp`，圆角 `12–14.dp`。
+- **次按钮**：`OutlinedButton`（`1.dp` `outlineVariant` 边框），用于保留两笔、取消、导出。
+- **危险按钮**：`errorContainer` 浅红底 + 红字，或红字描边（删除、清空、关闭远程同步）；清空/批量删除必须二次确认。
+- **并排对称**：同行多按钮等宽（`Modifier.weight(1f)`）、等高、等圆角，文字 `maxLines = 1`。
+- **弹窗切 Tab 清状态**：切换子标签（如待确认 ↔ 已忽略）必须清空残留的瞬态提示 `message`，并同步刷新标题。
 
-### 6.2 弹窗与抽屉规范
-- **局部明细不跳 Tab**：例如统计页点击某日柱状图，当页弹出 `DayDetailDialog` 查看明细，关闭后留在统计页原位置。
-- **筛选态必须有一键退出**：凡进入按日/按分类筛选的列表视图，顶部必须有显眼的一键「全部账单」或「清空筛选」按钮。
-- **Tab 切换清状态**：弹窗内部切换子标签（如待确认 ↔ 已忽略）时，必须同步清空上一页残留的瞬态提示 `message`，并同步更新弹窗标题。
-- **列表项可预览可清理**：截图审核与已忽略列表的缩略图均需支持点击放大预览原图，并提供单条删除与一键清空（高风险清空需二次确认）。
+### 8.2 三态规范（空态 / 加载态 / 错误态）
+- **空态**：使用 `LedgerEmptyState` 左对齐紧凑卡片，明确区分「无筛选结果 / 本月无账单 / 账本为空」，给出一步动作。
+- **加载态**：列表/汇总使用占位骨架卡（如 `LoadingMonthlySummaryCard`），避免整页白屏大转圈。
+- **错误态**：必须用人话说明原因并附可执行动作（重试 / 去设置 / 导出排障日志），禁止静默吞错或只弹裸异常栈。
 
-### 6.3 机器备注与可读性
-- 面向用户的列表（日历抽屉、账单列表、诊断页）**禁止直接裸露原始机器前缀**（如 `[导入] 微信账单 第245行 · 单号...`）；统一提炼为来源徽章 + 结构化字段，仅在存在用户手工备注时单独展示。
-- 系统权限向导与设置项文案**必须与 `strings.xml` 中的系统服务名称 100% 一致**，并写明「跳转后在哪个菜单找哪个名字、点哪个开关」。
-
----
-
-## 7. 国际化与防溢出规范
-
-1. **所有界面中文文案必须用 `tr("...")` 包裹**，并在 `EnglishUiText.kt` 补齐完全一致的 Key（不允许重复 Key），确保 `TranslationCoverageTest` 单测通过。
-2. **窄屏（360dp）+ 英文模式兼容**：
-   - 标题、Tab、Chip、按钮、设置行均需设 `maxLines = 1` 与 `overflow = TextOverflow.Ellipsis`（或使用 `FlowRow` 自动换行），禁止出现中文单字折行（如把「双向同步」折成「双向同」+「步」）或英文撑爆布局。
+### 8.3 机器备注与权限文案
+- 面向用户的账单行（首页、日历抽屉、诊断页）**禁止裸露 `[导入] 微信账单 第X行 · 单号...` 机器前缀**；通过 `CalendarNote.kt` / `ledgerTransactionSourceTag` 提炼为来源徽章与干净的手工备注。
+- 系统权限向导与设置项文案**必须与 `strings.xml` 中的系统服务全称 100% 一致**，并写清系统菜单路径与开关名称。
 
 ---
 
-## 8. 交付前自检清单（AI 协作专用）
+## 9. 国际化与防溢出规范
 
-每次修改或新增界面前，请直接向 AI 助手声明「**严格遵循 `docs/DESIGN_SYSTEM.md`**」，并在提交前逐项核对：
+1. **全量 `tr(...)` 包裹**：所有可见中文字符串必须包 `tr("...")`，并同步在 `EnglishUiText.kt` 补齐完全一致的 Key（禁止重复 Key）。
+2. **单行防断字**：行标题、Tab、Chip、按钮统一 `maxLines = 1` + `TextOverflow.Ellipsis`，禁止中文断成单字折行（如「双向同」+「步」）或英文撑爆布局。
 
-- [ ] **色彩合规**：没有硬编码 `Color(0x...)`，浅色/深色模式与 `StatusTone` 语义正确，无大面积刺眼黄/红底卡片。
-- [ ] **金额安全**：所有金额均使用 `AutoSizeAmountText`，测试 `-¥999,999.99` 级别大额无截断、无省略号。
-- [ ] **挖孔屏与安全区**：独立子页顶部已处理 `statusBarsPadding()` / 默认 `TopAppBar` insets，不被状态栏或摄像头遮挡。
-- [ ] **组件复用**：账单行复用 `LedgerTransactionRow`（无 `· 转账` 等冗余后缀），时间选择复用 `LedgerDateTimePickerDialog`。
-- [ ] **交互闭环**：按钮对称等宽、无死胡同跳转、弹窗切 Tab 会清理旧提示语、机器备注不裸露。
-- [ ] **文案与翻译**：所有新文案均包裹 `tr(...)` 并已在 `EnglishUiText.kt` 补齐，英文与窄屏下无断字溢出。
+---
+
+## 10. 跨端视觉统一规范（Web / Windows / 未来 iOS）
+
+- **全端统一清衡青绿体系**：
+  - Android 客户端（`#24705C` / `#F6F5F4`）与官网下载页（`zxyzx.me`，`#1B5E43` / `#F6F7F4`）已对齐。
+  - **历史遗留待统一**：Windows 一键部署向导（`deploy/windows/setup/web/styles.css`）与 Wallos 桌面端扩展（`deploy/wallos-extension/ui-unified.css`）目前仍沿用早期蓝色主色 `#426de5`。**今后所有新增或翻新的 Web / 桌面 / iOS 页面，一律采用清衡青绿主色与暖灰白卡体系，不再新增蓝紫色页面**。
+- **Web 金额排版**：所有 KPI 与账单金额样式必须开启 `font-variant-numeric: tabular-nums` 保证数字纵向对齐。
+
+---
+
+## 11. 自动化门禁测试与 AI 交付自检清单
+
+### 11.1 仓库内置 UI 门禁测试（改动相关区域必过）
+- `CategoryColorPaletteTest`：锁定 15 分类颜色完整性与最小两两色差。
+- `AmountTextSizingTest`：锁定金额自适应缩字号分档与 `11sp` 下限。
+- `TranslationCoverageTest` & `EnglishUiTextTest`：锁定 `tr(...)` 与 `EnglishUiText.kt` 全覆盖无重复键。
+- `CalendarAdaptiveLayoutTest` & `CalendarNumberDisplayTest`：锁定日历分屏高度与数字显示。
+- `StatsPieChartTest` & `StatsAggregationTest`：锁定环形图几何与统计口径。
+
+### 11.2 AI 协作交付前自检清单
+每次让 AI 助手（Antigravity / Claude Code / Codex 等）修改界面时，请声明「**严格遵循 `docs/DESIGN_SYSTEM.md`**」，提交前逐项核对：
+
+- [ ] **色彩与深色模式**：无硬编码 `Color(0x...)`，深色模式可读，无大面积刺眼黄/红底卡片，无 Emoji 状态点。
+- [ ] **分类单源**：分类色与图标均来自 `categoryColor` / `categoryVisual`，未另写配色表。
+- [ ] **金额安全**：金额统一走 `AutoSizeAmountText`，大额（如 `-¥999,999.99`）无截断无省略号。
+- [ ] **挖孔屏与安全区**：独立子页顶栏有 `.statusBarsPadding()` 或默认 `TopAppBar` insets，底栏有 `.navigationBarsPadding()`。
+- [ ] **组件复用**：账单行复用 `LedgerTransactionRow`（无 `· 转账` 等冗余后缀），时间选择复用 `LedgerDateTimePickerDialog`，空态复用 `LedgerEmptyState`。
+- [ ] **图表与交互**：环形图无环外引线、局部明细不跨 Tab 跳转、按钮等宽对称、切 Tab 清空残留提示、机器备注不裸露。
+- [ ] **双语与窄屏**：新文案均包 `tr(...)` 并补 `EnglishUiText.kt`，`360dp` 窄屏与英文模式下无断字溢出。
