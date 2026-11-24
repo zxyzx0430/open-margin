@@ -1,5 +1,6 @@
 package com.bookkeeping.app.notification.accessibility
 
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CandidateSaveFailure
 import com.bookkeeping.app.notification.capture.CandidateSaveResult
@@ -35,6 +36,7 @@ object PaymentCardReviewQueue {
         capturedAtMs: Long,
         store: CaptureCandidateStore,
         screenshot: ByteArray? = null,
+        existingLedgerRows: List<TransactionEntity> = emptyList(),
     ): Route {
         // Never hold uncompleted/cancelled/pending cards in the review inbox,
         // because CaptureBookGate.mayConfirm refuses them anyway.
@@ -58,6 +60,7 @@ object PaymentCardReviewQueue {
                 store = store,
                 screenshot = screenshot,
                 reason = reason,
+                existingLedgerRows = existingLedgerRows,
             )
             return Route.HeldForReview(saved = saved, reason = reason)
         }
@@ -121,13 +124,16 @@ object PaymentCardReviewQueue {
         store: CaptureCandidateStore,
         screenshot: ByteArray? = null,
         reason: String = MULTI_CARD_REASON,
+        existingLedgerRows: List<TransactionEntity> = emptyList(),
     ): SaveResult {
         val existingPending = store.pending().toMutableList()
         val saved = mutableListOf<CaptureCandidate>()
         var failed = 0
         var indexFull = 0
         candidates.forEach { candidate ->
-            if (isDuplicatePending(candidate, existingPending)) {
+            if (isDuplicatePending(candidate, existingPending) ||
+                isAlreadyInLedger(candidate, existingLedgerRows)
+            ) {
                 return@forEach
             }
             val pending = candidate.copy(
@@ -182,6 +188,48 @@ object PaymentCardReviewQueue {
             samePage || sameMerchant || closeInTime
         }
     }
+
+    internal fun isAlreadyInLedger(
+        candidate: CaptureCandidate,
+        existingLedgerRows: List<TransactionEntity>,
+    ): Boolean {
+        if (existingLedgerRows.isEmpty()) return false
+        val orderId = candidate.orderId?.trim()?.takeIf { it.isNotEmpty() }
+        val candidateTime = candidate.eventTimeMs ?: candidate.capturedAtMs
+        val candidateMerchant = normalizeMerchantForDedup(candidate.merchantCandidates.firstOrNull())
+        return existingLedgerRows.any { row ->
+            if (row.syncDeleted) return@any false
+            val rowOrderId = row.sourceTransactionId?.trim()?.takeIf { it.isNotEmpty() }
+            if (orderId != null && rowOrderId != null) {
+                return@any orderId == rowOrderId
+            }
+            if (row.amountCents != candidate.amountCents) return@any false
+            val directionMatch = when (candidate.direction) {
+                CaptureCandidate.DIRECTION_EXPENSE -> row.type == "EXPENSE"
+                CaptureCandidate.DIRECTION_INCOME -> row.type == "INCOME"
+                else -> true
+            }
+            if (!directionMatch) return@any false
+            if (kotlin.math.abs(row.timestamp - candidateTime) > 120_000L) return@any false
+            val rowMerchant = normalizeMerchantForDedup(row.merchant)
+            if (candidateMerchant != null && rowMerchant != null) {
+                candidateMerchant.contains(rowMerchant) || rowMerchant.contains(candidateMerchant)
+            } else {
+                true
+            }
+        }
+    }
+
+    private fun normalizeMerchantForDedup(raw: String?): String? {
+        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (trimmed in GENERIC_MERCHANT_PLACEHOLDERS) return null
+        return trimmed.lowercase().replace(Regex("[\\s·•\\-_]+"), "")
+            .takeIf { it.isNotEmpty() }
+    }
+
+    private val GENERIC_MERCHANT_PLACEHOLDERS = setOf(
+        "未知商户", "转入", "转出", "转账", "微信支付", "支付宝", "微信", "收款", "付款",
+    )
 
     const val MULTI_CARD_REASON = "multiple payment cards; confirm each separately"
     const val AMBIGUOUS_GEOMETRY_REASON = "invalid OCR bounds; confirm transaction details"

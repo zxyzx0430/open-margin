@@ -2,12 +2,15 @@ package com.bookkeeping.app.notification.accessibility
 
 import com.bookkeeping.app.capture.screenshot.ScreenshotPageInterpreter
 import com.bookkeeping.app.capture.screenshot.TextBlock
+import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import java.nio.file.Files
 import java.util.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -225,9 +228,104 @@ class UserFeedbackRegressionTest {
         val first = evidence.drafts[0]
         val second = evidence.drafts[1]
         assertEquals(350L, first.amountCents)
-        assertTrue(first.eventTimeNeedsConfirmation)
+        assertNull(first.eventTimeMs)
         assertEquals(950L, second.amountCents)
-        assertFalse(second.eventTimeNeedsConfirmation)
+        assertNotNull(second.eventTimeMs)
         assertEquals("广州便利店", second.merchantCandidates.firstOrNull())
+    }
+
+    @Test
+    fun `pending review queue suppresses duplicate already recorded in ledger within 2 minutes`() {
+        val dir = Files.createTempDirectory("review-ledger-dedup").toFile()
+        try {
+            val store = CaptureCandidateStore(dir)
+            val candidate = CaptureCandidate(
+                packageName = PaymentCardDetector.WECHAT,
+                pageIdentity = "wechat:pay:400",
+                amountCents = 400L,
+                merchantCandidates = listOf("校园超市"),
+                orderId = null,
+                capturedAtMs = now,
+                screenshotPath = null,
+                confidence = 0.85f,
+                reason = "multi-card",
+                kind = CaptureCandidate.KIND_PAYMENT,
+                eventTimeMs = now,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+            )
+            val existingLedger = listOf(
+                TransactionEntity(
+                    id = 2241L,
+                    amountCents = 400L,
+                    type = "EXPENSE",
+                    category = "SHOPPING",
+                    merchant = "校园超市",
+                    source = "WECHAT",
+                    timestamp = now - 30_000L,
+                ),
+            )
+            val result = PaymentCardReviewQueue.saveForReview(
+                candidates = listOf(candidate),
+                store = store,
+                existingLedgerRows = existingLedger,
+            )
+            assertEquals(0, result.saved.size)
+            assertTrue(store.pending().isEmpty())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `pending review queue keeps distinct merchant or older transaction even with same amount`() {
+        val dir = Files.createTempDirectory("review-ledger-distinct").toFile()
+        try {
+            val store = CaptureCandidateStore(dir)
+            val candidate = CaptureCandidate(
+                packageName = PaymentCardDetector.WECHAT,
+                pageIdentity = "wechat:pay:400",
+                amountCents = 400L,
+                merchantCandidates = listOf("蜜雪冰城"),
+                orderId = null,
+                capturedAtMs = now,
+                screenshotPath = null,
+                confidence = 0.85f,
+                reason = "multi-card",
+                kind = CaptureCandidate.KIND_PAYMENT,
+                eventTimeMs = now,
+                direction = CaptureCandidate.DIRECTION_EXPENSE,
+            )
+            val existingLedger = listOf(
+                // Different merchant within 2 minutes -> must keep
+                TransactionEntity(
+                    id = 2242L,
+                    amountCents = 400L,
+                    type = "EXPENSE",
+                    category = "FOOD",
+                    merchant = "瑞幸咖啡",
+                    source = "WECHAT",
+                    timestamp = now - 20_000L,
+                ),
+                // Same merchant but 5 minutes older -> must keep
+                TransactionEntity(
+                    id = 2243L,
+                    amountCents = 400L,
+                    type = "EXPENSE",
+                    category = "FOOD",
+                    merchant = "蜜雪冰城",
+                    source = "WECHAT",
+                    timestamp = now - 300_000L,
+                ),
+            )
+            val result = PaymentCardReviewQueue.saveForReview(
+                candidates = listOf(candidate),
+                store = store,
+                existingLedgerRows = existingLedger,
+            )
+            assertEquals(1, result.saved.size)
+            assertEquals(1, store.pending().size)
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
@@ -71,6 +72,8 @@ open class PageRecognitionService : AccessibilityService() {
     private var lastScreenshotWindowId: Int = 0
     private var lastScreenshotPageIdentity: String? = null
     private var lastScreenshotAttemptAtMs: Long = 0L
+    @Volatile
+    private var lastTakeScreenshotCallMs: Long = 0L
     private var lastWindowActivity: String? = null
     private var lastWindowPackage: String? = null
     private val recentCaptureKeys = mutableMapOf<String, Long>()
@@ -192,22 +195,32 @@ open class PageRecognitionService : AccessibilityService() {
                 )
                 return
             }
-            when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store)) {
-                is PaymentCardReviewQueue.Route.HeldForReview -> {
-                    lastPageIdentity = firstIdentity
-                    lastPageEventId = firstOrderId
-                    lastCaptureAtMs = now
-                    ServiceHealthLog.record(
-                        context = applicationContext,
-                        channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
-                        event = ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
-                        summary = "页面识别多笔/待确认候选，已转入待确认",
-                        detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
+            val needsReviewQueue = cards.size > 1 || cards.any { it.reviewRequired }
+            if (needsReviewQueue) {
+                scope.launch {
+                    val recentLedger = runCatching {
+                        repository.screenshotDedupRows(limit = 100)
+                    }.getOrDefault(emptyList())
+                    val pageRoute = PaymentCardReviewQueue.route(
+                        detections = cards,
+                        capturedAtMs = now,
+                        store = store,
+                        existingLedgerRows = recentLedger,
                     )
-                    if (pageRoute.saved.saved.isNotEmpty()) {
-                        ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
-                    }
-                    scope.launch {
+                    if (pageRoute is PaymentCardReviewQueue.Route.HeldForReview) {
+                        lastPageIdentity = firstIdentity
+                        lastPageEventId = firstOrderId
+                        lastCaptureAtMs = now
+                        ServiceHealthLog.record(
+                            context = applicationContext,
+                            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                            event = ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
+                            summary = "页面识别多笔/待确认候选，已转入待确认",
+                            detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
+                        )
+                        if (pageRoute.saved.saved.isNotEmpty()) {
+                            ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
+                        }
                         repository.recordDiagnostic(
                             attemptId = TransactionDiagnostics.newAttemptId(),
                             stage = TransactionDiagnostics.STAGE_DEDUP,
@@ -218,8 +231,11 @@ open class PageRecognitionService : AccessibilityService() {
                                 if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "",
                         )
                     }
-                    return
                 }
+                return
+            }
+            when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store)) {
+                is PaymentCardReviewQueue.Route.HeldForReview -> return
 
                 is PaymentCardReviewQueue.Route.SingleCandidate -> {
                     val candidates = listOf(pageRoute.candidate)
@@ -441,6 +457,10 @@ open class PageRecognitionService : AccessibilityService() {
                 details = "OCR payment-page capture started",
             )
             try {
+                val sinceLastCall = SystemClock.elapsedRealtime() - lastTakeScreenshotCallMs
+                if (sinceLastCall in 0 until MIN_TAKE_SCREENSHOT_INTERVAL_MS) {
+                    kotlinx.coroutines.delay(MIN_TAKE_SCREENSHOT_INTERVAL_MS - sinceLastCall)
+                }
                 takeScreenshotCompat(
                     windowId,
                     object : AccessibilityService.TakeScreenshotCallback {
@@ -493,11 +513,15 @@ open class PageRecognitionService : AccessibilityService() {
                                         screenHeightPx = height,
                                         pageIdentity = pageIdentity,
                                     )
+                                    val recentLedger = runCatching {
+                                        repository.screenshotDedupRows(limit = 100)
+                                    }.getOrDefault(emptyList())
                                     when (val pageRoute = PaymentCardReviewQueue.route(
                                         detections = cards,
                                         capturedAtMs = now,
                                         store = store,
                                         screenshot = bytes,
+                                        existingLedgerRows = recentLedger,
                                     )) {
                                         is PaymentCardReviewQueue.Route.HeldForReview -> {
                                             ServiceHealthLog.record(
@@ -610,12 +634,19 @@ open class PageRecognitionService : AccessibilityService() {
 
                         override fun onFailure(errorCode: Int) {
                             recordScreenshotFallback(errorCode)
+                            val isThrottled =
+                                errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT
                             scope.launch {
                                 repository.recordDiagnostic(
                                     attemptId = attemptId,
                                     stage = TransactionDiagnostics.STAGE_CAPTURE,
-                                    result = TransactionDiagnostics.RESULT_FAILURE,
-                                    details = "Screenshot capture failed",
+                                    result = if (isThrottled) TransactionDiagnostics.RESULT_WARNING
+                                    else TransactionDiagnostics.RESULT_FAILURE,
+                                    details = if (isThrottled) {
+                                        "Screenshot throttled by system interval (error=3)"
+                                    } else {
+                                        "Screenshot capture failed"
+                                    },
                                 )
                             }
                             Log.e(TAG, "OCR screenshot failed: $errorCode")
@@ -693,6 +724,10 @@ open class PageRecognitionService : AccessibilityService() {
                 details = "Payment-page candidate capture started",
             )
             try {
+                val sinceLastCall = SystemClock.elapsedRealtime() - lastTakeScreenshotCallMs
+                if (sinceLastCall in 0 until MIN_TAKE_SCREENSHOT_INTERVAL_MS) {
+                    kotlinx.coroutines.delay(MIN_TAKE_SCREENSHOT_INTERVAL_MS - sinceLastCall)
+                }
                 takeScreenshotCompat(
                     windowId,
                     object : AccessibilityService.TakeScreenshotCallback {
@@ -765,6 +800,16 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     private fun recordScreenshotFallback(errorCode: Int) {
+        if (errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) {
+            ServiceHealthLog.record(
+                context = applicationContext,
+                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                event = ServiceHealthLog.EVENT_THROTTLED,
+                summary = "系统截屏间隔过短已节流 (error=3)",
+                detail = "error=$errorCode, rom=" + DeviceRomDetector.current().family.name,
+            )
+            return
+        }
         ServiceHealthLog.record(
             context = applicationContext,
             channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
@@ -779,6 +824,7 @@ open class PageRecognitionService : AccessibilityService() {
         windowId: Int,
         callback: AccessibilityService.TakeScreenshotCallback,
     ) {
+        lastTakeScreenshotCallMs = SystemClock.elapsedRealtime()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && windowId != 0) {
             takeScreenshotOfWindow(
                 windowId,
@@ -1043,6 +1089,7 @@ open class PageRecognitionService : AccessibilityService() {
     @android.annotation.SuppressLint("NewApi")
     private fun captureScreenshot(candidate: CaptureCandidate) {
         try {
+            lastTakeScreenshotCallMs = SystemClock.elapsedRealtime()
             takeScreenshot(
                 Display.DEFAULT_DISPLAY,
                 mainExecutor,
@@ -1256,6 +1303,7 @@ open class PageRecognitionService : AccessibilityService() {
         private const val TAG = "BkPageRecognition"
         private const val PAGE_CAPTURE_DEDUP_MS = 5 * 60_000L
         private const val SCREENSHOT_BURST_COOLDOWN_MS = 3_000L
+        private const val MIN_TAKE_SCREENSHOT_INTERVAL_MS = 1_200L
         private const val CAPTURE_KEY_TTL_MS = 10 * 60_000L
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
         private const val PAGE_RECOGNITION_CLASS =

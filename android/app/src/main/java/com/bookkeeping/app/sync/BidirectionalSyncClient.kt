@@ -176,7 +176,6 @@ internal class BidirectionalSyncClient(
         val revision=change.getLong("revision")
         val previous=local(id)
         if(previous!=null && previous.remoteRevision>=revision){
-            recordSync(previous,TransactionDiagnostics.RESULT_SUCCESS,"Stale server change ignored")
             return
         }
         if(previous?.syncDirty==true){
