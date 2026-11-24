@@ -167,10 +167,14 @@ object RecurringCandidateDetector {
                 }
 
                 val isYearly = if (!isMonthly && annualHits > 0) {
+                    val yearlyDailyGuard = !isDailyCategory
+                    val yearlyAmountGuard = hasStrongSignal || meanAmount >= 3000.0
                     daysSinceLast <= MAX_YEARLY_STALE_DAYS &&
                         uniqueDays.size <= 3 &&
                         meanDelta in 350.0..380.0 &&
-                        deltaStd <= 10.0
+                        deltaStd <= 10.0 &&
+                        yearlyDailyGuard &&
+                        yearlyAmountGuard
                 } else {
                     false
                 }
