@@ -384,7 +384,6 @@ fun SettingsScreen(
             }
 
             item { SectionHeader(tr("记账与采集")) }
-            item { ScreenshotCaptureCard() }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -406,6 +405,7 @@ fun SettingsScreen(
                     )
                 }
             }
+            item { ScreenshotCaptureCard() }
 
             item { SectionHeader(tr("数据与同步")) }
             item {

@@ -1013,10 +1013,15 @@ private fun SubscriptionStructureGrid(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            SectionHeader(bilingual("订阅结构", "Subscription Breakdown"))
+            Text(
+                text = bilingual("订阅结构", "Subscription Breakdown"),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = QingText,
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SubscriptionStructureCell(
                     label = bilingual("在用周期订阅", "Active Subscriptions"),
@@ -1029,9 +1034,10 @@ private fun SubscriptionStructureGrid(
                     modifier = Modifier.weight(1f),
                 )
             }
+            HorizontalDivider(color = QingOutline.copy(alpha = 0.5f))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SubscriptionStructureCell(
                     label = bilingual("最高月费订阅", "Highest Monthly"),
@@ -1057,11 +1063,8 @@ private fun SubscriptionStructureCell(
     subValue: String? = null,
 ) {
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(QingSurfaceVariant.copy(alpha = 0.7f))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
+        modifier = modifier.padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = label,
@@ -1420,9 +1423,9 @@ private fun SubscriptionForecastBarChart(
     val maxCents = forecast.maxOfOrNull { it.totalCentsOrZero() }?.coerceAtLeast(1L) ?: 1L
     val outlineColor = QingOutline
     val labelColor = QingTextSecondary
-    val normalBarColor = QingMint
+    val normalBarColor = QingPrimary.copy(alpha = 0.28f)
     val selectedBarColor = QingPrimary
-    val peakBarColor = QingWarning
+    val peakBarColor = QingPrimaryDeep
     val chartDesc = bilingual("未来 12 个月续费预测柱状图", "12-month subscription renewal forecast chart")
 
     Canvas(
@@ -2288,6 +2291,7 @@ private fun CategoryDetailDialog(
                             .fillMaxWidth()
                             .weight(1f)
                             .padding(top = 8.dp),
+                        contentPadding = PaddingValues(bottom = 48.dp),
                     ) {
                         items(rows, key = { it.id }) { transaction ->
                             CategoryDetailTransactionRow(
@@ -2398,6 +2402,7 @@ private fun DayDetailDialog(
                             .fillMaxWidth()
                             .weight(1f)
                             .padding(top = 8.dp),
+                        contentPadding = PaddingValues(bottom = 48.dp),
                     ) {
                         items(rows, key = { it.id }) { transaction ->
                             val category = remember(transaction.category) {
