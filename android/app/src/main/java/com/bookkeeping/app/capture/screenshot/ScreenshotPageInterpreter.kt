@@ -173,10 +173,9 @@ object ScreenshotPageInterpreter {
 
     /**
      * WeChat chat transfer bubbles: the amount, the counterparty's action and
-     * the word 转账. 已被接收 is only drawn in the sender's bubble and 已收款
-     * only in the receiver's, so those words identify the side. 待接收 is drawn
-     * on both bubbles — the sender waiting for the money to be accepted and the
-     * receiver waiting to accept it — so that word says nothing about direction.
+     * the word 转账. Settled state words establish completion; when readable
+     * geometry is available, direction uses the combination of state and side.
+     * 待接收 is drawn on both sides and alone proves neither direction nor completion.
      */
     private val TRANSFER_BUBBLE_STATES = listOf("已被接收", "已接收", "已收款", "待接收")
 
@@ -827,17 +826,11 @@ object ScreenshotPageInterpreter {
     /**
      * A WeChat chat transfer bubble: amount + state + 转账.
      *
-     * [direction] is the direction the state word itself proves, or null when
-     * the word proves nothing. 待接收 is printed on the sender's bubble (the
-     * money already left me, waiting for the other side to accept) and on the
-     * receiver's bubble (waiting for me to accept), so only the bubble's own
-     * position may decide the direction there; without that position the draft
-     * stays DIRECTION_UNKNOWN and the user has to pick.
-     *
-     * Only 已收款 proves the money arrived. 已被接收 / 已接收 prove the money left
-     * me and the other side took it: the transfer is settled, so those bubbles
-     * are completed expenses. 待接收 describes a transfer that has not landed
-     * yet, so it stays unfinished and direction-unknown.
+     * [direction] is the text-only fallback when a bubble's side cannot be read.
+     * 已被接收 / 已接收 and 已收款 establish settlement, but readable geometry
+     * also participates in direction selection (see bubbleDirectionOf).
+     * 待接收 does not establish settlement or a text-only direction; without
+     * readable geometry its direction stays UNKNOWN and requires a user pick.
      */
     private data class TransferBubble(
         val direction: String?,
@@ -875,10 +868,9 @@ object ScreenshotPageInterpreter {
     /**
      * Direction for a chat transfer bubble.
      *
-     * A state word that identifies its own side is used when the page carries no
-     * readable side, and must agree with one when it does: a contradiction stays
-     * UNKNOWN. A word that proves nothing (待接收) leaves the decision to the
-     * bubble's side, and without a side stays UNKNOWN — never a guess.
+     * With readable geometry, apply the state-specific left/right mapping.
+     * Without a readable side, use the settled state's text-only fallback.
+     * 待接收 has no text-only direction and therefore stays UNKNOWN without geometry.
      */
     private fun bubbleDirectionOf(
         text: String,

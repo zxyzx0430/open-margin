@@ -138,16 +138,16 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(listOf("7-11"), draft.merchantCandidates)
     }
 
-    /** Sender side of a WeChat chat: the orange bubble on the left. */
+    /** Right-side accepted bubble: settled outgoing transfer under the current OCR rules. */
     private fun sentTransferBubblePage() = listOf(
         blockAt("在吗", 60, 120, 220),
         blockAt("晚上一起吃饭", 420, 120, 760),
-        blockAt("¥200.00", 80, 200, 300),
-        blockAt("已被接收", 90, 240, 200),
-        blockAt("转账", 90, 280, 160),
+        blockAt("¥200.00", 500, 200, 720),
+        blockAt("已被接收", 510, 240, 620),
+        blockAt("转账", 510, 280, 580),
     )
 
-    /** Receiver side of the same chat: the bubble sits on the right. */
+    /** Right-side collected bubble: settled incoming transfer under the current OCR rules. */
     private fun receivedTransferBubblePage() = listOf(
         blockAt("收到", 60, 120, 200),
         blockAt("¥200.00", 500, 200, 720),
@@ -164,8 +164,7 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
         assertTrue(draft.directionExplicit)
-        // 已被接收 means the counterparty took the money: the transfer is final
-        // and the expense is complete, not an open question for the user.
+        // The right-side 已被接收 bubble is a settled outgoing transfer.
         assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
         assertTrue(draft.completionExplicit)
         // The word is printed in the bubble, so nothing is inferred from layout.
@@ -199,6 +198,29 @@ class ScreenshotAuditMerchantTransferTest {
         assertEquals(Action.AUTO_BOOK, decision.action)
         assertEquals(1, result.bookings.size)
         assertTrue(result.needsConfirmation.isEmpty())
+    }
+
+    @Test
+    fun `settled transfer states on the left follow the geometry aware direction rules`() {
+        val cases = listOf(
+            "已被接收" to CaptureCandidate.DIRECTION_INCOME,
+            "已收款" to CaptureCandidate.DIRECTION_EXPENSE,
+        )
+        for ((state, expectedDirection) in cases) {
+            val blocks = listOf(
+                blockAt("在吗", 60, 120, 220),
+                blockAt("晚上一起吃饭", 420, 120, 760),
+                blockAt("¥200.00", 80, 200, 300),
+                blockAt(state, 90, 240, 200),
+                blockAt("转账", 90, 280, 160),
+            )
+            val draft = ScreenshotPageInterpreter.interpret(blocks, capturedAt, zone).drafts.single()
+            assertEquals(CaptureCandidate.KIND_TRANSFER, draft.kind)
+            assertEquals(expectedDirection, draft.direction)
+            assertTrue(draft.directionExplicit)
+            assertEquals(CaptureCandidate.COMPLETION_COMPLETED, draft.completionStatus)
+            assertTrue(draft.completionExplicit)
+        }
     }
 
     @Test
