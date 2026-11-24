@@ -78,11 +78,19 @@ class DiagnosticMigrationTest {
     }
 
     @Test
-    fun `the shared builder declares version 13 and registers the migration`() {
+    fun `the shared builder declares version 14 and registers the migration`() {
         val source = databaseSource()
         assertTrue(
-            "BookkeepingDatabase must declare version = 13",
-            Regex("""version\s*=\s*13""").containsMatchIn(source),
+            "BookkeepingDatabase must declare version = 14",
+            Regex("""version\s*=\s*14""").containsMatchIn(source),
+        )
+        assertTrue(
+            "MIGRATION_13_14 must be part of the addMigrations chain",
+            Regex("""addMigrations\([^)]*MIGRATION_13_14""").containsMatchIn(source),
+        )
+        assertTrue(
+            "MIGRATION_13_14 must exist",
+            Regex("""val MIGRATION_13_14\s*=\s*object\s*:\s*Migration\(13,\s*14\)""").containsMatchIn(source),
         )
         assertTrue(
             "MIGRATION_12_13 must be part of the addMigrations chain",
