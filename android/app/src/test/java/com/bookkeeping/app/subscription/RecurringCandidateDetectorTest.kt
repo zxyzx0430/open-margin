@@ -110,4 +110,32 @@ class RecurringCandidateDetectorTest {
         )
         assertTrue(candidates.isEmpty())
     }
+
+    @Test
+    fun rejectsFrequentDailySpendNoiseAndDismissedCandidates() {
+        val nowMs = dateMs(2026, 11, 24)
+        val txs = listOf(
+            // High-frequency charging/food: 5 visits in a few days + 1 gap of 30 days -> NOT a subscription
+            tx(1, "自来充", 400, dateMs(2026, 9, 1), category = "TRANSPORT"),
+            tx(2, "自来充", 400, dateMs(2026, 9, 3), category = "TRANSPORT"),
+            tx(3, "自来充", 400, dateMs(2026, 9, 6), category = "TRANSPORT"),
+            tx(4, "自来充", 400, dateMs(2026, 9, 10), category = "TRANSPORT"),
+            tx(5, "自来充", 400, dateMs(2026, 10, 10), category = "TRANSPORT"),
+            // Food with only 2 visits 30 days apart -> NOT a subscription
+            tx(6, "蜜雪冰城", 600, dateMs(2026, 10, 15), category = "FOOD"),
+            tx(7, "蜜雪冰城", 600, dateMs(2026, 11, 15), category = "FOOD"),
+            // Genuine monthly subscription that user dismissed
+            tx(8, "iCloud", 600, dateMs(2026, 9, 15), category = "ENTERTAINMENT"),
+            tx(9, "iCloud", 600, dateMs(2026, 10, 15), category = "ENTERTAINMENT"),
+            tx(10, "iCloud", 600, dateMs(2026, 11, 15), category = "ENTERTAINMENT"),
+        )
+        val key = RecurringCandidateDetector.candidateKey("iCloud", "CNY", 600)
+        val candidates = RecurringCandidateDetector.detect(
+            transactions = txs,
+            nowMs = nowMs,
+            timeZone = tz,
+            dismissedKeys = setOf(key),
+        )
+        assertTrue(candidates.isEmpty())
+    }
 }

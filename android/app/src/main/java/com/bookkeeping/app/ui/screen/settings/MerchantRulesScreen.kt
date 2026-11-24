@@ -1097,7 +1097,7 @@ private fun MerchantRuleSheet(
                         val selected = category ?: return@Button
                         onSave(name.trim(), selected, paused, applyToHistory)
                     },
-                    enabled = issue == null,
+                    enabled = issue == null || issue == MerchantRuleIssue.DUPLICATE,
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -57,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -184,6 +188,7 @@ fun EditSubscriptionSheet(
     }
 
     var showDueDatePicker by remember { mutableStateOf(false) }
+    var showCurrencyMenu by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var nameError by remember { mutableStateOf<String?>(null) }
     var amountError by remember { mutableStateOf<String?>(null) }
@@ -193,8 +198,8 @@ fun EditSubscriptionSheet(
         if (parsedAmountCents == null || currency == "CNY") null
         else SubscriptionFxRatesCalculator.estimateCnyCents(parsedAmountCents, currency, fxRates)
     }
-    val dueDateLabel = remember(nextDueMs) {
-        SimpleDateFormat("yyyy年M月d日", Locale.CHINA).format(Date(nextDueMs))
+    val dueShortLabel = remember(nextDueMs) {
+        SimpleDateFormat("M/d", Locale.CHINA).format(Date(nextDueMs))
     }
 
     ModalBottomSheet(
@@ -211,6 +216,7 @@ fun EditSubscriptionSheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            // Header (matches 新建账单)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -231,92 +237,179 @@ fun EditSubscriptionSheet(
                 }
             }
 
-            // 1. Name
-            OutlinedTextField(
-                value = name,
-                onValueChange = {
-                    name = it
-                    nameError = null
-                },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("订阅名称") },
-                placeholder = { Text("例如 ChatGPT Plus、淘宝 88VIP") },
-                singleLine = true,
-                isError = nameError != null,
-                supportingText = nameError?.let { err -> { Text(err) } },
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = QingPrimary,
-                    unfocusedBorderColor = QingOutline,
-                    cursorColor = QingPrimary,
-                ),
-            )
-
-            // 2. Amount + Currency
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "金额与币种",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = QingTextSecondary,
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+            // 1. Hero Amount + Currency + Embedded Date Pill (matches 新建账单)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = QingSurfaceVariant.copy(alpha = 0.55f),
                 ) {
-                    SUPPORTED_CURRENCIES.forEach { code ->
-                        SubscriptionChoiceChip(
-                            label = code,
-                            selected = currency == code,
-                            onClick = { currency = code },
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Box {
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(role = Role.Button) { showCurrencyMenu = true },
+                                shape = RoundedCornerShape(10.dp),
+                                color = QingSurface,
+                            ) {
+                                Text(
+                                    text = "${currencyPrefix(currency)} $currency",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = QingPrimaryDeep,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showCurrencyMenu,
+                                onDismissRequest = { showCurrencyMenu = false },
+                            ) {
+                                SUPPORTED_CURRENCIES.forEach { code ->
+                                    DropdownMenuItem(
+                                        text = { Text("${currencyPrefix(code)} $code") },
+                                        onClick = {
+                                            currency = code
+                                            showCurrencyMenu = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (amountText.isEmpty()) {
+                                Text(
+                                    text = "0.00",
+                                    style = MaterialTheme.typography.headlineSmall.copy(
+                                        fontFeatureSettings = "tnum",
+                                    ),
+                                    fontWeight = FontWeight.Bold,
+                                    color = QingTextSecondary.copy(alpha = 0.45f),
+                                )
+                            }
+                            BasicTextField(
+                                value = amountText,
+                                onValueChange = { raw ->
+                                    val cleaned = raw.filter { it.isDigit() || it == '.' }
+                                    if (cleaned.count { it == '.' } <= 1) {
+                                        amountText = cleaned
+                                        amountError = null
+                                    }
+                                },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                textStyle = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = QingText,
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                cursorBrush = SolidColor(QingPrimary),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(role = Role.Button) { showDueDatePicker = true },
+                            shape = RoundedCornerShape(10.dp),
+                            color = QingSurface,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.CalendarMonth,
+                                    contentDescription = null,
+                                    tint = QingPrimary,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                                Text(
+                                    text = dueShortLabel,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = QingText,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (amountError != null) {
+                    Text(
+                        text = amountError.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingExpense,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                } else if (previewCnyCents != null) {
+                    Text(
+                        text = "约折合人民币 ${formatCny(previewCnyCents)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingTextSecondary,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
+            }
+
+            // 2. Borderless soft Name input
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = QingSurfaceVariant.copy(alpha = 0.55f),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 13.dp),
+                    ) {
+                        if (name.isEmpty()) {
+                            Text(
+                                text = "订阅名称（如 ChatGPT Plus、淘宝 88VIP）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = QingTextSecondary,
+                            )
+                        }
+                        BasicTextField(
+                            value = name,
+                            onValueChange = {
+                                name = it
+                                nameError = null
+                            },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = QingText,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                            cursorBrush = SolidColor(QingPrimary),
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { raw ->
-                        val cleaned = raw.filter { it.isDigit() || it == '.' }
-                        if (cleaned.count { it == '.' } <= 1) {
-                            amountText = cleaned
-                            amountError = null
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("每期金额 ($currency)") },
-                    placeholder = { Text("0.00") },
-                    prefix = {
-                        Text(
-                            text = currencyPrefix(currency),
-                            color = QingPrimaryDeep,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    singleLine = true,
-                    isError = amountError != null,
-                    supportingText = when {
-                        amountError != null -> {
-                            val errMsg = amountError
-                            errMsg?.let { msg -> { Text(msg) } }
-                        }
-                        previewCnyCents != null -> {
-                            { Text("约折合人民币 ${formatCny(previewCnyCents)}") }
-                        }
-                        else -> null
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = QingPrimary,
-                        unfocusedBorderColor = QingOutline,
-                        cursorColor = QingPrimary,
-                    ),
-                )
+                if (nameError != null) {
+                    Text(
+                        text = nameError.orEmpty(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingExpense,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
             }
 
-            // 3. Cadence
+            // 3. Cadence row
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "扣款周期",
-                    style = MaterialTheme.typography.labelLarge,
+                    text = "周期",
+                    style = MaterialTheme.typography.labelMedium,
                     color = QingTextSecondary,
                 )
                 Row(
@@ -334,55 +427,11 @@ fun EditSubscriptionSheet(
                 }
             }
 
-            // 4. Next due date
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "下次扣款日",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = QingTextSecondary,
-                )
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(role = Role.Button) { showDueDatePicker = true },
-                    shape = RoundedCornerShape(14.dp),
-                    color = QingSurfaceVariant.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, QingOutline),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CalendarMonth,
-                            contentDescription = null,
-                            tint = QingPrimary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = dueDateLabel,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = QingText,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = "更改",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = QingPrimary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-
-            // 5. Payment channel
+            // 4. Payment channel chips (matches 新建账单 账户 row)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "支付渠道",
-                    style = MaterialTheme.typography.labelLarge,
+                    text = "扣款渠道",
+                    style = MaterialTheme.typography.labelMedium,
                     color = QingTextSecondary,
                 )
                 FlowRow(
@@ -407,32 +456,13 @@ fun EditSubscriptionSheet(
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = customChannelText,
-                    onValueChange = { input ->
-                        customChannelText = input
-                        if (input.isNotBlank()) {
-                            paymentChannel = input.trim()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("自定义支付渠道（如 招行储蓄卡）") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = QingPrimary,
-                        unfocusedBorderColor = QingOutline,
-                        cursorColor = QingPrimary,
-                    ),
-                )
             }
 
-            // 6. Auto-renew + Notify settings
+            // 5. Auto-renew + Notify settings (borderless soft card)
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                color = QingSurfaceVariant.copy(alpha = 0.4f),
-                border = BorderStroke(1.dp, QingOutline),
+                color = QingSurfaceVariant.copy(alpha = 0.45f),
             ) {
                 Column {
                     Row(
@@ -450,7 +480,7 @@ fun EditSubscriptionSheet(
                                 color = QingText,
                             )
                             Text(
-                                text = "扣款日过后自动滚动到下一期",
+                                text = "扣款日过后自动推进到下一期",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = QingTextSecondary,
                             )
@@ -462,7 +492,7 @@ fun EditSubscriptionSheet(
                     }
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 14.dp),
-                        color = QingOutline,
+                        color = QingOutline.copy(alpha = 0.5f),
                     )
                     Row(
                         modifier = Modifier
@@ -480,9 +510,9 @@ fun EditSubscriptionSheet(
                             )
                             Text(
                                 text = if (notifyEnabled) {
-                                    "将在扣款前 $notifyDaysBefore 天提醒"
+                                    "提前 $notifyDaysBefore 天发送本地通知"
                                 } else {
-                                    "关闭本地提醒"
+                                    "已关闭本地提醒"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = QingTextSecondary,
@@ -515,21 +545,34 @@ fun EditSubscriptionSheet(
                 }
             }
 
-            // 7. Note
-            OutlinedTextField(
-                value = note,
-                onValueChange = { note = it },
+            // 6. Borderless soft Note input
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("备注（可选）") },
-                placeholder = { Text("例如 家庭车 / 年付优惠 / 绑定邮箱") },
-                maxLines = 3,
                 shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = QingPrimary,
-                    unfocusedBorderColor = QingOutline,
-                    cursorColor = QingPrimary,
-                ),
-            )
+                color = QingSurfaceVariant.copy(alpha = 0.55f),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    if (note.isEmpty()) {
+                        Text(
+                            text = "备注（可选）",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = QingTextSecondary,
+                        )
+                    }
+                    BasicTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        maxLines = 3,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = QingText),
+                        cursorBrush = SolidColor(QingPrimary),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
 
             // Save button
             Button(

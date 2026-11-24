@@ -74,10 +74,12 @@ class CalendarViewModel @Inject constructor(
     val recurringCandidateCount: StateFlow<Int> = combine(
         transactions,
         allSubscriptions,
-    ) { txs, subs ->
+        subscriptionRepository.observeDismissedCandidateKeys(),
+    ) { txs, subs, dismissedKeys ->
         RecurringCandidateDetector.detect(
             transactions = txs,
             existingSubscriptions = subs,
+            dismissedKeys = dismissedKeys,
         ).size
     }
         .flowOn(Dispatchers.Default)

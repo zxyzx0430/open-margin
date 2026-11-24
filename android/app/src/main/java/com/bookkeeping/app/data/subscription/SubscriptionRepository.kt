@@ -1,10 +1,15 @@
 package com.bookkeeping.app.data.subscription
 
+import android.content.Context
 import com.bookkeeping.app.data.local.dao.SubscriptionDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.SubscriptionEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import java.util.TimeZone
 import java.util.UUID
@@ -19,10 +24,33 @@ data class SubscriptionMonthOccurrence(
 
 @Singleton
 class SubscriptionRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val subscriptionDao: SubscriptionDao,
     private val transactionDao: TransactionDao,
     private val fxRates: SubscriptionFxRates,
 ) {
+    private val candidatePrefs by lazy {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    private val _dismissedCandidateKeys = MutableStateFlow(loadDismissedKeys())
+
+    fun observeDismissedCandidateKeys(): StateFlow<Set<String>> = _dismissedCandidateKeys.asStateFlow()
+
+    fun dismissRecurringCandidate(candidateKey: String) {
+        if (candidateKey.isBlank()) return
+        val updated = _dismissedCandidateKeys.value + candidateKey
+        _dismissedCandidateKeys.value = updated
+        candidatePrefs.edit().putStringSet(KEY_DISMISSED_CANDIDATES, updated).apply()
+    }
+
+    private fun loadDismissedKeys(): Set<String> =
+        candidatePrefs.getStringSet(KEY_DISMISSED_CANDIDATES, emptySet())?.toSet() ?: emptySet()
+
+    companion object {
+        private const val PREFS_NAME = "subscription_candidate_prefs"
+        private const val KEY_DISMISSED_CANDIDATES = "dismissed_recurring_candidates"
+    }
     fun observeActive(): Flow<List<SubscriptionEntity>> = subscriptionDao.observeActive()
 
     fun observeAll(): Flow<List<SubscriptionEntity>> = subscriptionDao.observeAllNonDeleted()
@@ -203,6 +231,7 @@ class SubscriptionRepository @Inject constructor(
             nowMs = nowMs,
             lookbackMonths = months,
             timeZone = timeZone,
+            dismissedKeys = _dismissedCandidateKeys.value,
         )
     }
 

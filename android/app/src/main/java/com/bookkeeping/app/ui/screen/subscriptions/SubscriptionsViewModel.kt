@@ -72,14 +72,20 @@ class SubscriptionsViewModel @Inject constructor(
     val recurringCandidates: StateFlow<List<RecurringCandidate>> = combine(
         allTransactions,
         allSubscriptions,
-    ) { txs, subs ->
+        subscriptionRepository.observeDismissedCandidateKeys(),
+    ) { txs, subs, dismissedKeys ->
         RecurringCandidateDetector.detect(
             transactions = txs,
             existingSubscriptions = subs,
+            dismissedKeys = dismissedKeys,
         )
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun dismissCandidate(candidateKey: String) {
+        subscriptionRepository.dismissRecurringCandidate(candidateKey)
+    }
 
     val historyStatsBySubscriptionId: StateFlow<Map<Long, SubscriptionHistoryStats>> = combine(
         allSubscriptions,
