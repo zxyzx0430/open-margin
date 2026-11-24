@@ -257,7 +257,8 @@ object ScreenshotPageInterpreter {
         // Footer statistics, promo banners and phone status-bar chrome belong to the shell, not to the transaction.
         val chromeStripped = stripStatusBarChrome(ordered)
         val serviceStream = isWechatServiceStream(chromeStripped)
-        val content = stripDailyReportCards(chromeStripped).filterNot { isNoiseLine(it.text) }
+        val content = (if (serviceStream) stripDailyReportCards(chromeStripped) else chromeStripped)
+            .filterNot { isNoiseLine(it.text) }
         val allText = content.joinToString("\n") { it.text }
         if (isOwnAppUiPage(allText)) {
             return ScreenshotPageEvidence(
@@ -283,7 +284,13 @@ object ScreenshotPageInterpreter {
                 detected
             }
         }
-        val pageType = detectPageType(allText, content.any { amountOf(it.text) != null })
+        // A quoted or embedded bill-list label inside a chat bubble is not the page title.
+        val chatShell = content.any { it.text.trim().replace(" ", "") == "按住说话" } &&
+            isTransferBubbleText(allText)
+        val classificationText = if (chatShell) {
+            content.filterNot { LIST_MARKERS.any(it.text::contains) }.joinToString("\n") { it.text }
+        } else allText
+        val pageType = detectPageType(classificationText, content.any { amountOf(it.text) != null })
         if (pageType == PAGE_LIST) {
             return ScreenshotPageEvidence(
                 platform = platform,
@@ -1498,7 +1505,8 @@ object ScreenshotPageInterpreter {
                     it.text.contains("已收款") || it.text.contains("转账")
             }
         }
-        if (bubbleSegments.size < 2) return null
+        // Never let a two-bubble association erase a third amount-bearing card.
+        if (bubbleSegments.size != 2 || segments.size != 2) return null
         // Guard against two opposite-side bubbles with no chat header/timestamp (e.g. stacked test fixtures).
         val amounts = bubbleSegments.mapNotNull { seg -> seg.firstNotNullOfOrNull { amountOf(it.text) } }.distinct()
         val amount = amounts.singleOrNull() ?: return null
@@ -1551,6 +1559,14 @@ object ScreenshotPageInterpreter {
             if (acceptedSeg == receivedSeg || acceptedX == null || receivedX == null ||
                 kotlin.math.abs(acceptedX - receivedX) < maxOf(accepted.right - accepted.left, received.right - received.left) ||
                 accepted.top >= received.top || contact == null) return null
+        }
+        // Same-side bubbles are not one event even when the amounts happen to agree.
+        if (acceptedX != null && receivedX != null) {
+            val accepted = acceptedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) }
+            val received = receivedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) }
+            if (accepted != null && received != null &&
+                kotlin.math.abs(acceptedX - receivedX) < maxOf(accepted.right - accepted.left, received.right - received.left)
+            ) return null
         }
         val consolidatedDirection = when {
             acceptedX != null && receivedX != null && acceptedX < receivedX ->

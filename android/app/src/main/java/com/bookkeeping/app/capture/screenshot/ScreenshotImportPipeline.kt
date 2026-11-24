@@ -345,6 +345,10 @@ object ScreenshotImportPipeline {
         val amount = draft.amountCents?.takeIf { it > 0L } ?: return false
         if (earlier.amountCents != amount) return false
         if (earlier.direction != draft.direction) return false
+        // Explicitly different event times are evidence against the same-image
+        // replay hypothesis; identical shop/amount alone must not suppress them.
+        if (draft.eventTimeMs != null && earlier.eventTimeMs != null &&
+            kotlin.math.abs(draft.eventTimeMs - earlier.eventTimeMs) > DEDUP_WINDOW_MS) return false
         if (normalizeCurrency(earlier.currency) != normalizeCurrency(draft.currency)) return false
         val mine = draft.merchantCandidates.firstOrNull().orEmpty()
         val theirs = earlier.merchantCandidates.firstOrNull().orEmpty()

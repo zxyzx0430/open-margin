@@ -219,7 +219,7 @@ class CaptureCandidateStore internal constructor(
         if (File(dir, FINGERPRINT_UNAVAILABLE_NAME).exists()) {
             if (!recoverImageFingerprintsLocked(nowMs)) {
                 return@synchronized knownFingerprintResultLocked(fingerprint, nowMs)
-                    ?: ImageFingerprintLookup.Unavailable("fingerprint index unavailable")
+                    ?: ImageFingerprintLookup.Unavailable(fingerprintRecoveryBlockerLocked(nowMs))
             }
         }
         if ((imageFingerprintFile.exists() && !imageFingerprintFile.isFile) ||
@@ -1253,6 +1253,20 @@ class CaptureCandidateStore internal constructor(
                 markImageFingerprintIndexUnavailableLocked()
             }
         }
+    }
+
+    // Surface the failed invariant without exposing hashes, paths or raw OCR.
+    private fun fingerprintRecoveryBlockerLocked(nowMs: Long): String {
+        if (!indexFile.isFile) return "candidate history missing"
+        if (!candidateHistoryIsCompleteLocked()) return "candidate history completeness is unverified"
+        val candidates = readLatestCandidatesStrict() ?: return "candidate evidence is unreadable"
+        val expected = fingerprintEvidence(candidates, nowMs) ?: return "candidate fingerprint evidence is incomplete"
+        val previous = readImageFingerprints()
+        val expectedKeys = expected.mapTo(mutableSetOf()) { it.fingerprint }
+        if (previous?.any { !ScreenshotRetention.isExpired(it.capturedAtMs, nowMs) && it.fingerprint !in expectedKeys } == true) {
+            return "retained fingerprint missing from candidate history"
+        }
+        return "fingerprint index recovery write or verification failed"
     }
 
     private fun recoverImageFingerprintsLocked(nowMs: Long): Boolean {

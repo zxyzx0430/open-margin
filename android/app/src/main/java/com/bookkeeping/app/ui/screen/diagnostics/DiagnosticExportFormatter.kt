@@ -238,7 +238,13 @@ internal object DiagnosticExportFormatter {
                     appendLine(
                         "[${timeFmt.format(Date(attempt.startedAtMs))}] attempt=${attempt.attemptId} " +
                             "entry=${attempt.entry.name} outcome=${attempt.outcome.name} " +
-                            "semantic=${DiagnosticHumanizer.outcomePillKey(semantic)} " +
+                            "semantic=${if (attempt.outcome == DiagnosticTimeline.Outcome.SUCCESS && attempt.entry.name in setOf("SYNC", "DELETE", "EDIT")) {
+                                when (attempt.entry.name) {
+                                    "SYNC" -> "同步成功"
+                                    "DELETE" -> "删除成功"
+                                    else -> "编辑成功"
+                                }
+                            } else DiagnosticHumanizer.outcomePillKey(semantic)} " +
                             "duration=${DiagnosticTimeline.formatDuration(attempt.durationMs)} " +
                             "txId=${attempt.transactionId ?: "-"}",
                     )

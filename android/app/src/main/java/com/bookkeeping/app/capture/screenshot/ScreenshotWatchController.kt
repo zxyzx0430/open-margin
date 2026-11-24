@@ -150,11 +150,13 @@ object ScreenshotWatchController {
         var unreadableRetries = 0
         var unreadRows = 0
         var watermark = lastScannedId
+        val outcomes = mutableListOf<String>()
         for (id in ids) {
             // 只有真的读到这一行才推进水位；读不到（相册行还没落盘）就留着下次再试，
             // 后面的 _ID 照常前进，不会因为一张坏行把整个监听卡死。
             val result = runCatching { ingestNow(context, id) }
                 .getOrElse { IngestAttemptResult(read = false, disposition = "error", detail = it.javaClass.simpleName) }
+            outcomes += "id=$id ${result.disposition}${result.detail?.let { " ($it)" }.orEmpty()}"
             if (result.read) {
                 watermark = watermarkAfterMediaRow(watermark, id, result.read)
                 ScreenshotWatchSettings.setLastScannedId(context, watermark)
@@ -170,7 +172,8 @@ object ScreenshotWatchController {
             channel = ServiceHealthLog.CHANNEL_SCREENSHOT,
             event = ServiceHealthLog.EVENT_SCAN_MISSED,
             summary = "相册补扫 $lastScannedId->$maxId: scanned=$scanned, skipped=$skipped, retry=$unreadableRetries",
-            detail = if (unreadRows > 0) "unread=$unreadRows" else null,
+            detail = (listOfNotNull(if (unreadRows > 0) "unread=$unreadRows" else null) + outcomes)
+                .joinToString(" | ").takeIf { it.isNotBlank() },
         )
         return allAfter.size > ids.size && unreadRows == 0
     }
@@ -219,13 +222,15 @@ object ScreenshotWatchController {
             }
         }
         val summary = buildString {
-            append("booked=${finalOutcome.booked}, pending=${finalOutcome.pending}, ignored=${finalOutcome.ignored}")
+            append("booked=${finalOutcome.booked}, pending=${finalOutcome.pending}, waiting=${finalOutcome.waiting}, linked=${finalOutcome.linked}, duplicate=${finalOutcome.duplicates}, ignored=${finalOutcome.ignored}, failed=${finalOutcome.failed}")
             if (finalOutcome.repeatImage) append(", repeat=true")
             finalOutcome.failure?.let { append(", failure=${it.name}") }
             if (retried) append(", retried=UNREADABLE")
         }
         return IngestAttemptResult(
-            read = true,
+            // A temporarily unreadable file is not a completed scan. Keep its
+            // watermark retryable instead of losing it after one short retry.
+            read = finalOutcome.failure != FailureReason.UNREADABLE,
             ingested = true,
             retriedUnreadable = retried,
             disposition = if (finalOutcome.failure != null) "failed" else "ingested",
