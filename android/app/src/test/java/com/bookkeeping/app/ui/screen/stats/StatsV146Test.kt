@@ -278,16 +278,19 @@ class StatsV146Test {
         currency: String = "CNY",
         status: String = "confirmed",
         duplicateOfId: Long? = null,
+        source: String = TransactionSource.MANUAL.name,
+        note: String = "",
     ): TransactionEntity = TransactionEntity(
         amountCents = amountCents,
         type = type.name,
         category = TransactionCategory.FOOD.name,
-        source = TransactionSource.MANUAL.name,
+        source = source,
         account = account,
         timestamp = 1_700_000_000_000L,
         currency = currency,
         remoteReviewStatus = status,
         duplicateOfId = duplicateOfId,
+        note = note,
     )
 
     private fun sub(
