@@ -550,6 +550,16 @@ try {
                     $summary = Get-OmCheckSummary $checks
                     Write-OmJson -Context $context -Value @{ ok = $summary.ok; checks = $checks; summary = $summary }
                 }
+                '^/api/logs/export$' {
+                    if ($method -ne 'GET') {
+                        Write-OmJson -Context $context -Value @{ ok = $false; code = 'METHOD_NOT_ALLOWED' } -Status 405
+                        break
+                    }
+                    $bundle = Export-OmDiagnosticsBundle -StateRoot $StateRoot -RepoRoot $RepoRoot -SetupPort $Port
+                    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+                    $headers = @{ 'Content-Disposition' = "attachment; filename=`"open-margin-win-logs-$stamp.txt`"" }
+                    Write-OmResponse -Context $context -Status 200 -ContentType 'text/plain; charset=utf-8' -Text $bundle -Headers $headers
+                }
                 '^/api/logs$' {
                     if ($method -ne 'GET') {
                         Write-OmJson -Context $context -Value @{ ok = $false; code = 'METHOD_NOT_ALLOWED' } -Status 405
