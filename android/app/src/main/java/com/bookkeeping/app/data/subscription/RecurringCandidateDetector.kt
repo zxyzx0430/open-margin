@@ -8,6 +8,8 @@ import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.roundToLong
+import kotlin.math.sqrt
 
 data class RecurringCandidate(
     val merchant: String,
@@ -24,16 +26,22 @@ data class RecurringCandidate(
 )
 
 /**
- * Pure detector ported & hardened from backend/features.py `recurring_candidates`.
- *
- * Requires consistent cadence intervals (not sporadic/daily food or charging
- * spending that happens to have 2 dates 30 days apart) and supports persistent
- * user dismissal via [dismissedKeys].
+ * Industrial-grade recurring subscription detector modeled on open-source
+ * personal finance engines:
+ * 1. Groups by (normalizedMerchant, currency) and clusters amounts within ±5%
+ *    tolerance so foreign-currency FX fluctuations (e.g. USD -> CNY) still match.
+ * 2. Evaluates interval mean & standard deviation (monthly: mean 27..34d, sigma <= 4d;
+ *    yearly: mean 350..380d, sigma <= 10d) to reject irregular supermarket/food visits.
+ * 3. Tiered threshold: strong subscription keywords allow 2 occurrences;
+ *    general / daily-spend merchants require >= 3 consistent cycles.
+ * 4. Staleness guard & persistent dismissal via [dismissedKeys].
  */
 object RecurringCandidateDetector {
     private const val DAY_MS = 86_400_000L
     private const val MAX_MONTHLY_STALE_DAYS = 65L
     private const val MAX_YEARLY_STALE_DAYS = 400L
+    private const val AMOUNT_CLUSTER_TOLERANCE = 0.05 // ±5%
+    private const val MAX_AMOUNT_CV = 0.05
 
     private val IGNORED_MERCHANTS = setOf(
         "",
@@ -52,8 +60,17 @@ object RecurringCandidateDetector {
         "possible_duplicate",
     )
 
-    /** Categories where irregular visits (supermarkets, food, charging, pharmacy) are rarely subscriptions. */
     private val DAILY_SPEND_CATEGORIES = setOf("FOOD", "SHOPPING", "TRANSPORT", "HEALTH")
+
+    /** Merchants/notes with explicit subscription signals can match after 2 consistent cycles. */
+    private val STRONG_SUBSCRIPTION_KEYWORDS = listOf(
+        "会员", "vip", "连续包月", "自动续费", "订阅", "包年", "包季",
+        "icloud", "apple one", "apple music", "chatgpt", "openai", "claude", "anthropic",
+        "cursor", "github", "copilot", "netflix", "spotify", "youtube", "disney",
+        "88vip", "话费", "宽带", "中国移动", "中国联通", "中国电信",
+        "百度网盘", "夸克网盘", "阿里云盘", "腾讯视频", "爱奇艺", "优酷", "芒果tv",
+        "网易云", "qq音乐", "喜马拉雅", "wps", "notion", "keep", "健身房", "乐刻",
+    )
 
     fun candidateKey(merchant: String, currency: String, amountCents: Long): String =
         "${normalizeMerchant(merchant)}|${currency.uppercase(Locale.US)}|$amountCents"
@@ -77,121 +94,164 @@ object RecurringCandidateDetector {
             .sortedBy { it.timestamp }
             .toList()
 
-        data class GroupKey(
+        data class MerchantKey(
             val normalizedMerchant: String,
             val currency: String,
-            val amountCents: Long,
         )
 
-        val grouped = linkedMapOf<GroupKey, MutableList<TransactionEntity>>()
+        val byMerchant = linkedMapOf<MerchantKey, MutableList<TransactionEntity>>()
         for (tx in filtered) {
             val normalized = normalizeMerchant(tx.merchant)
             if (normalized in IGNORED_MERCHANTS) continue
-            val key = GroupKey(normalized, tx.currency.uppercase(Locale.US), tx.amountCents)
-            grouped.getOrPut(key) { mutableListOf() }.add(tx)
+            val key = MerchantKey(normalized, tx.currency.uppercase(Locale.US))
+            byMerchant.getOrPut(key) { mutableListOf() }.add(tx)
         }
 
         val activeOrExistingSubs = existingSubscriptions.filter { it.deletedAtMs == null }
         val candidates = mutableListOf<RecurringCandidate>()
 
-        for ((key, records) in grouped) {
-            if (records.size < 2) continue
-            val cKey = "${key.normalizedMerchant}|${key.currency}|${key.amountCents}"
-            if (cKey in dismissedKeys) continue
+        for ((mKey, allRecords) in byMerchant) {
+            if (allRecords.size < 2) continue
 
-            // Deduplicate same-day repeats while keeping latest timestamp per civil day.
-            val byDay = linkedMapOf<Long, TransactionEntity>()
-            for (r in records) {
-                byDay[localEpochDay(r.timestamp, timeZone)] = r
-            }
-            val uniqueDays = byDay.keys.sorted()
-            if (uniqueDays.size < 2) continue
+            // Cluster records by ±5% amount tolerance so FX-drifting subscriptions stay grouped
+            // while unrelated prices at the same merchant stay separated.
+            val clusters = clusterByAmount(allRecords)
 
-            val deltas = (0 until uniqueDays.lastIndex).map { uniqueDays[it + 1] - uniqueDays[it] }
-            val monthlyHits = deltas.count { it in 26L..35L }
-            val annualHits = deltas.count { it in 350L..380L }
-            if (monthlyHits == 0 && annualHits == 0) continue
+            for (records in clusters) {
+                if (records.size < 2) continue
 
-            val latest = records.last()
-            val lastSeenDay = uniqueDays.last()
-            val daysSinceLast = todayDay - lastSeenDay
-
-            val isDailyCategory = latest.category in DAILY_SPEND_CATEGORIES
-            val isMonthly = if (monthlyHits >= annualHits && monthlyHits > 0) {
-                val ratio = monthlyHits.toDouble() / deltas.size.toDouble()
-                val shortBursts = deltas.count { it < 20L }
-                val avgDelta = deltas.average()
-                val recentEnough = daysSinceLast <= MAX_MONTHLY_STALE_DAYS
-                val strictDailyGuard = if (isDailyCategory) {
-                    monthlyHits >= 3 && shortBursts == 0 && ratio >= 0.8
-                } else {
-                    true
+                val byDay = linkedMapOf<Long, TransactionEntity>()
+                for (r in records.sortedBy { it.timestamp }) {
+                    byDay[localEpochDay(r.timestamp, timeZone)] = r
                 }
-                val twoOccurrenceDayMatch = if (uniqueDays.size == 2) {
-                    val d1 = dayOfMonth(byDay[uniqueDays[0]]!!.timestamp, timeZone)
-                    val d2 = dayOfMonth(byDay[uniqueDays[1]]!!.timestamp, timeZone)
-                    abs(d1 - d2) <= 2 && !isDailyCategory
+                val uniqueDays = byDay.keys.sorted()
+                if (uniqueDays.size < 2) continue
+
+                val dedupRecords = uniqueDays.mapNotNull { byDay[it] }
+                val amounts = dedupRecords.map { it.amountCents.toDouble() }
+                val meanAmount = amounts.average()
+                if (meanAmount <= 0.0) continue
+                val amountStd = stdDev(amounts, meanAmount)
+                if (amountStd / meanAmount > MAX_AMOUNT_CV) continue
+
+                val deltas = (0 until uniqueDays.lastIndex).map { (uniqueDays[it + 1] - uniqueDays[it]).toDouble() }
+                val meanDelta = deltas.average()
+                val deltaStd = stdDev(deltas, meanDelta)
+                val monthlyHits = deltas.count { it in 26.0..35.0 }
+                val annualHits = deltas.count { it in 350.0..380.0 }
+                if (monthlyHits == 0 && annualHits == 0) continue
+
+                val latest = dedupRecords.last()
+                val lastSeenDay = uniqueDays.last()
+                val daysSinceLast = todayDay - lastSeenDay
+                val hasStrongSignal = hasStrongSubscriptionSignal(latest.merchant, latest.note)
+                val isDailyCategory = latest.category in DAILY_SPEND_CATEGORIES && !hasStrongSignal
+                val hasShortBurst = deltas.any { it < 20.0 }
+
+                val isMonthly = if (monthlyHits >= annualHits && monthlyHits > 0) {
+                    val recentEnough = daysSinceLast <= MAX_MONTHLY_STALE_DAYS
+                    val statsConsistent = meanDelta in 27.0..34.0 && deltaStd <= 4.0 && !hasShortBurst
+                    val enoughSamples = when {
+                        uniqueDays.size >= 3 -> true
+                        hasStrongSignal -> {
+                            val d1 = dayOfMonth(dedupRecords[0].timestamp, timeZone)
+                            val d2 = dayOfMonth(dedupRecords[1].timestamp, timeZone)
+                            abs(d1 - d2) <= 3
+                        }
+                        else -> false // General & daily-spend merchants require >= 3 cycles
+                    }
+                    val dailyGuard = !isDailyCategory || (uniqueDays.size >= 3 && deltaStd <= 3.0)
+                    recentEnough && statsConsistent && enoughSamples && dailyGuard
                 } else {
-                    true
+                    false
                 }
-                recentEnough &&
-                    ratio >= 0.6 &&
-                    avgDelta >= 22.0 &&
-                    shortBursts <= 1 &&
-                    strictDailyGuard &&
-                    twoOccurrenceDayMatch
-            } else {
-                false
-            }
 
-            val isYearly = if (!isMonthly && annualHits > 0) {
-                daysSinceLast <= MAX_YEARLY_STALE_DAYS &&
-                    uniqueDays.size <= 3 &&
-                    deltas.all { it >= 300L }
-            } else {
-                false
-            }
+                val isYearly = if (!isMonthly && annualHits > 0) {
+                    daysSinceLast <= MAX_YEARLY_STALE_DAYS &&
+                        uniqueDays.size <= 3 &&
+                        meanDelta in 350.0..380.0 &&
+                        deltaStd <= 10.0
+                } else {
+                    false
+                }
 
-            if (!isMonthly && !isYearly) continue
-            val cadence = if (isMonthly) SubscriptionCadence.MONTHLY else SubscriptionCadence.YEARLY
+                if (!isMonthly && !isYearly) continue
+                val cadence = if (isMonthly) SubscriptionCadence.MONTHLY else SubscriptionCadence.YEARLY
+                val repAmountCents = latest.amountCents
+                val cKey = candidateKey(latest.merchant, mKey.currency, repAmountCents)
+                if (cKey in dismissedKeys) continue
 
-            val alreadyTracked = activeOrExistingSubs.any { sub ->
-                sub.currency.equals(key.currency, ignoreCase = true) &&
-                    sub.amountCents == key.amountCents &&
-                    SubscriptionProjection.merchantsMatch(sub.name, latest.merchant)
-            }
-            if (alreadyTracked) continue
+                val alreadyTracked = activeOrExistingSubs.any { sub ->
+                    val amountWithin5Pct = abs(sub.amountCents - repAmountCents) <=
+                        max(100L, (repAmountCents * 0.05).roundToLong())
+                    sub.currency.equals(mKey.currency, ignoreCase = true) &&
+                        amountWithin5Pct &&
+                        SubscriptionProjection.merchantsMatch(sub.name, latest.merchant)
+                }
+                if (alreadyTracked) continue
 
-            val lastSeenMs = records.maxOf { it.timestamp }
-            val nextDue = SubscriptionProjection.advancePast(
-                nextDueMs = SubscriptionProjection.advanceDueMs(lastSeenMs, cadence, timeZone = timeZone),
-                cadence = cadence,
-                referenceMs = nowMs,
-                startMs = lastSeenMs,
-                timeZone = timeZone,
-            )
-
-            candidates.add(
-                RecurringCandidate(
-                    merchant = latest.merchant.trim(),
-                    currency = key.currency,
-                    amountCents = key.amountCents,
+                val lastSeenMs = dedupRecords.maxOf { it.timestamp }
+                val nextDue = SubscriptionProjection.advancePast(
+                    nextDueMs = SubscriptionProjection.advanceDueMs(lastSeenMs, cadence, timeZone = timeZone),
                     cadence = cadence,
-                    occurrences = uniqueDays.size,
-                    matchingIntervals = max(monthlyHits, annualHits),
-                    lastSeenMs = lastSeenMs,
-                    suggestedNextDueMs = nextDue,
-                    suggestedChannel = inferChannel(latest),
-                    matchedTimestampsMs = uniqueDays.mapNotNull { byDay[it]?.timestamp },
-                    candidateKey = cKey,
-                ),
-            )
+                    referenceMs = nowMs,
+                    startMs = lastSeenMs,
+                    timeZone = timeZone,
+                )
+
+                candidates.add(
+                    RecurringCandidate(
+                        merchant = latest.merchant.trim(),
+                        currency = mKey.currency,
+                        amountCents = repAmountCents,
+                        cadence = cadence,
+                        occurrences = uniqueDays.size,
+                        matchingIntervals = max(monthlyHits, annualHits),
+                        lastSeenMs = lastSeenMs,
+                        suggestedNextDueMs = nextDue,
+                        suggestedChannel = inferChannel(latest),
+                        matchedTimestampsMs = dedupRecords.map { it.timestamp },
+                        candidateKey = cKey,
+                    ),
+                )
+            }
         }
 
         return candidates.sortedWith(
             compareByDescending<RecurringCandidate> { it.matchingIntervals }
                 .thenByDescending { it.lastSeenMs },
         )
+    }
+
+    private fun clusterByAmount(records: List<TransactionEntity>): List<List<TransactionEntity>> {
+        val sorted = records.sortedBy { it.amountCents }
+        val clusters = mutableListOf<MutableList<TransactionEntity>>()
+        for (tx in sorted) {
+            val match = clusters.firstOrNull { cluster ->
+                val anchor = cluster.first().amountCents
+                abs(tx.amountCents - anchor) <= anchor * AMOUNT_CLUSTER_TOLERANCE
+            }
+            if (match != null) {
+                match.add(tx)
+            } else {
+                clusters.add(mutableListOf(tx))
+            }
+        }
+        return clusters
+    }
+
+    private fun stdDev(values: List<Double>, mean: Double): Double {
+        if (values.size <= 1) return 0.0
+        val variance = values.sumOf { v ->
+            val d = v - mean
+            d * d
+        } / values.size.toDouble()
+        return sqrt(variance)
+    }
+
+    private fun hasStrongSubscriptionSignal(merchant: String, note: String): Boolean {
+        val hay = "${merchant.lowercase(Locale.ROOT)} ${note.lowercase(Locale.ROOT)}"
+        return STRONG_SUBSCRIPTION_KEYWORDS.any { hay.contains(it) }
     }
 
     private fun normalizeMerchant(raw: String): String =

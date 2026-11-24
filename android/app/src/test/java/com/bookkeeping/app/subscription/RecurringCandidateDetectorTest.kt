@@ -138,4 +138,32 @@ class RecurringCandidateDetectorTest {
         )
         assertTrue(candidates.isEmpty())
     }
+
+    @Test
+    fun detectsFxDriftingSubscriptionAndTwoCycleStrongKeywordWhileRejectingSupermarket() {
+        val nowMs = dateMs(2026, 11, 24)
+        val txs = listOf(
+            // FX-drifting foreign subscription (ChatGPT Plus ~¥133-134 within ±5%)
+            tx(1, "OpenAI ChatGPT Plus", 13316, dateMs(2026, 9, 15), category = "ENTERTAINMENT"),
+            tx(2, "OpenAI ChatGPT Plus", 13405, dateMs(2026, 10, 15), category = "ENTERTAINMENT"),
+            tx(3, "OpenAI ChatGPT Plus", 13290, dateMs(2026, 11, 15), category = "ENTERTAINMENT"),
+            // Strong subscription keyword with 2 monthly cycles -> accepted
+            tx(4, "腾讯视频会员", 2500, dateMs(2026, 10, 10), category = "ENTERTAINMENT"),
+            tx(5, "腾讯视频会员", 2500, dateMs(2026, 11, 10), category = "ENTERTAINMENT"),
+            // Supermarket with 2 visits 2 days apart + 1 visit 30 days ago -> rejected
+            tx(6, "喜盈盈生鲜超市", 500, dateMs(2026, 10, 20), category = "SHOPPING"),
+            tx(7, "喜盈盈生鲜超市", 500, dateMs(2026, 11, 20), category = "SHOPPING"),
+            tx(8, "喜盈盈生鲜超市", 500, dateMs(2026, 11, 22), category = "SHOPPING"),
+        )
+        val candidates = RecurringCandidateDetector.detect(
+            transactions = txs,
+            nowMs = nowMs,
+            timeZone = tz,
+        )
+        assertEquals(2, candidates.size)
+        assertEquals("OpenAI ChatGPT Plus", candidates[0].merchant)
+        assertEquals(3, candidates[0].occurrences)
+        assertEquals("腾讯视频会员", candidates[1].merchant)
+        assertEquals(2, candidates[1].occurrences)
+    }
 }
