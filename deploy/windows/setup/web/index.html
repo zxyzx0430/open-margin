@@ -16,6 +16,7 @@
       </div>
     </div>
     <div class="om-header-right">
+      <button id="btn-export-logs-top" class="om-btn om-btn-ghost om-home-btn" type="button">导出日志</button>
       <button id="btn-home" class="om-btn om-btn-ghost om-home-btn" type="button">返回主界面</button>
       <span id="header-state" class="om-pill om-pill-neutral">正在检查</span>
       <span id="version" class="om-version">v1.3.1</span>
@@ -299,7 +300,10 @@
         <button id="btn-status-enable" class="om-btn om-btn-ghost">重新开启远程同步</button>
       </div>
       <div class="om-card">
-        <h3>最近日志</h3>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+          <h3 style="margin:0;">最近日志</h3>
+          <button id="btn-status-export-logs" class="om-btn om-btn-ghost" type="button">一键导出排障日志</button>
+        </div>
         <pre id="status-logs" class="om-logs"></pre>
       </div>
     </section>
@@ -309,7 +313,10 @@
   <div id="log-drawer" class="om-drawer om-hidden">
     <div class="om-drawer-head">
       <strong>部署日志</strong>
-      <button id="btn-close-logs" class="om-btn om-btn-ghost">关闭</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="btn-drawer-export-logs" class="om-btn om-btn-primary" type="button">一键导出日志</button>
+        <button id="btn-close-logs" class="om-btn om-btn-ghost" type="button">关闭</button>
+      </div>
     </div>
     <pre id="log-lines" class="om-logs"></pre>
   </div>

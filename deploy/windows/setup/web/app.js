@@ -748,6 +748,31 @@ async function refreshLogs() {
   }
 }
 
+async function exportLogs() {
+  try {
+    const response = await fetch('/api/logs/export', { credentials: 'same-origin' });
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    const text = await response.text();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="([^"]+)"/i);
+    const filename = match ? match[1] : 'open-margin-win-logs.txt';
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('已导出排障日志，可直接发给开发者。');
+  } catch (error) {
+    toast('导出日志失败：' + (error.message || '未知错误'), true);
+  }
+}
+
 async function runSimpleAction(name, successMessage) {
   const ledgerTab = name === 'repair' ? beginLedgerHandoff() : null;
   try {
@@ -1005,6 +1030,9 @@ async function boot() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  $('btn-export-logs-top').addEventListener('click', exportLogs);
+  $('btn-status-export-logs').addEventListener('click', exportLogs);
+  $('btn-drawer-export-logs').addEventListener('click', exportLogs);
   $('btn-home').addEventListener('click', goHome);
   document.querySelectorAll('[data-probe-mode]').forEach((btn) => {
     btn.addEventListener('click', () => setProbeMode(btn.getAttribute('data-probe-mode')));
