@@ -80,6 +80,7 @@ import com.bookkeeping.app.ui.screen.settings.MerchantRulesScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
+import com.bookkeeping.app.ui.screen.subscriptions.SubscriptionsManageScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionListScreen
 import com.bookkeeping.app.ui.screen.transactions.TransactionViewModel
@@ -269,9 +270,14 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     route = BottomNavItem.Calendar.route,
                     popEnterTransition = { EnterTransition.None },
                 ) {
-                    CalendarScreen(onOpenDetail = { id ->
-                        navController.navigate(AppRoutes.transactionDetail(id))
-                    })
+                    CalendarScreen(
+                        onOpenDetail = { id ->
+                            navController.navigate(AppRoutes.transactionDetail(id))
+                        },
+                        onOpenSubscriptions = { pendingCancel ->
+                            navController.navigate(AppRoutes.subscriptions(pendingCancel))
+                        },
+                    )
                 }
                 composable(
                     route = BottomNavItem.Stats.route,
@@ -288,6 +294,9 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         },
                         onOpenTransaction = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
                         onOpenOtherCleanup = { navController.navigate(AppRoutes.MERCHANT_RULES_CLEANUP) },
+                        onOpenSubscriptions = { pendingCancel ->
+                            navController.navigate(AppRoutes.subscriptions(pendingCancel))
+                        },
                     )
                 }
                 // 账单页仍可打开独立导入页；设置页入口在本页弹出导入 / 导出面板。
@@ -364,6 +373,29 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                                 restoreState = true
                             }
                         },
+                        onOpenSubscriptions = { pendingCancel ->
+                            navController.navigate(AppRoutes.subscriptions(pendingCancel))
+                        },
+                    )
+                }
+                composable(
+                    route = AppRoutes.SUBSCRIPTIONS_ROUTE,
+                    arguments = listOf(
+                        navArgument(AppRoutes.SUBSCRIPTIONS_PENDING_CANCEL_ARG) {
+                            type = NavType.BoolType
+                            defaultValue = false
+                        },
+                    ),
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
+                ) { backStackEntry ->
+                    val filterPendingCancel = backStackEntry.arguments
+                        ?.getBoolean(AppRoutes.SUBSCRIPTIONS_PENDING_CANCEL_ARG) == true
+                    SubscriptionsManageScreen(
+                        initialFilterPendingCancel = filterPendingCancel,
+                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(

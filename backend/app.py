@@ -258,9 +258,17 @@ def correct_rounding(item: AmountCorrection):
         db.execute("UPDATE transactions SET amount_cents=? WHERE id=?", (item.corrected_cents,row["id"]))
     return {"ok": True, "corrected": True}
 
-from sync_v2 import router as sync_router, changes as sync_changes, push as sync_push
+from sync_v2 import (
+    router as sync_router,
+    changes as sync_changes,
+    push as sync_push,
+    subscriptions_pull as sync_subscriptions_pull,
+    subscriptions_push as sync_subscriptions_push,
+)
 sync_router.add_api_route("/changes",sync_changes,methods=["GET"],dependencies=[Depends(device_auth)])
 sync_router.add_api_route("/push",sync_push,methods=["POST"],dependencies=[Depends(device_auth)])
+sync_router.add_api_route("/subscriptions",sync_subscriptions_pull,methods=["GET"],dependencies=[Depends(device_auth)])
+sync_router.add_api_route("/subscriptions/push",sync_subscriptions_push,methods=["POST"],dependencies=[Depends(device_auth)])
 app.include_router(sync_router)
 
 @app.get("/api/v1/transactions", dependencies=[Depends(admin_auth)])

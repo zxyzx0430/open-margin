@@ -32,6 +32,8 @@ def is_device_user_agent(user_agent: str | None) -> bool:
 DEVICE_SYNC_PATHS = frozenset({
     "/api/v2/sync/changes",
     "/api/v2/sync/push",
+    "/api/v2/sync/subscriptions",
+    "/api/v2/sync/subscriptions/push",
     "/api/v1/transactions/batch",
     "/api/v1/transactions/correct-rounding",
 })

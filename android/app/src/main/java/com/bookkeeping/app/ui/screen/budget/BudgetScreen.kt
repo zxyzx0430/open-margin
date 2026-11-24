@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Lightbulb
@@ -44,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -101,6 +103,7 @@ import java.util.Locale
 @Composable
 fun BudgetScreen(
     onOpenLedger: (StatsLedgerDrilldown) -> Unit = {},
+    onOpenSubscriptions: (Boolean) -> Unit = {},
     viewModel: BudgetViewModel = hiltViewModel(),
 ) {
     val budget by viewModel.budget.collectAsState()
@@ -108,6 +111,7 @@ fun BudgetScreen(
     val summary by viewModel.summary.collectAsState()
     val selectedMonth by viewModel.selectedMonth.collectAsState()
     val previousMonthReference by viewModel.previousMonthExpenseReference.collectAsState()
+    val monthlyLockedSubscriptionCents by viewModel.monthlyLockedSubscriptionCents.collectAsState()
     val previousMonthExpenseCents = previousMonthReference
         .takeIf { it.targetMonth == selectedMonth }?.amountCents ?: 0L
 
@@ -176,6 +180,44 @@ fun BudgetScreen(
                     isFutureMonth = isFutureMonth,
                     onSetBudget = { suggestedTotalYuan = null; showEditTotal = true },
                 )
+            }
+
+            if (monthlyLockedSubscriptionCents > 0L) {
+                item(key = "locked_subscription_hint") {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(role = Role.Button) { onOpenSubscriptions(false) },
+                        shape = RoundedCornerShape(14.dp),
+                        color = QingSurface,
+                        border = BorderStroke(1.dp, QingOutline),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Autorenew,
+                                contentDescription = null,
+                                tint = QingPrimary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                text = "其中已锁定周期续费 ${formatCny(monthlyLockedSubscriptionCents)} ›",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                color = QingTextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
             }
 
             if (!hasBudget && previousMonthExpenseCents > 0L) {

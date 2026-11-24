@@ -3,6 +3,7 @@ package com.bookkeeping.app.di
 import android.content.Context
 import com.bookkeeping.app.data.local.BookkeepingDatabase
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
+import com.bookkeeping.app.data.local.dao.SubscriptionDao
 import com.bookkeeping.app.data.local.dao.TransactionDiagnosticDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import dagger.Module
@@ -34,4 +35,8 @@ object DatabaseModule {
     @Provides
     fun provideTransactionDiagnosticDao(db: BookkeepingDatabase): TransactionDiagnosticDao =
         db.transactionDiagnosticDao()
+
+    @Provides
+    fun provideSubscriptionDao(db: BookkeepingDatabase): SubscriptionDao =
+        db.subscriptionDao()
 }

@@ -88,9 +88,17 @@ class SettingsViewModel @Inject constructor(
         merchant: String,
         category: TransactionCategory,
         learningPaused: Boolean,
+        applyToHistory: Boolean = true,
+        onComplete: (Int) -> Unit = {},
     ) {
         viewModelScope.launch {
             prefs.saveMerchantRule(previousMerchant, merchant, category, learningPaused)
+            val updated = if (applyToHistory) {
+                repository.applyMerchantRuleToHistory(merchant, category)
+            } else {
+                0
+            }
+            onComplete(updated)
         }
     }
 

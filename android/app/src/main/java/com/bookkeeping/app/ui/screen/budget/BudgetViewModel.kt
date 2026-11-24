@@ -11,6 +11,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.data.subscription.SubscriptionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +31,12 @@ import javax.inject.Inject
 class BudgetViewModel @Inject constructor(
     private val budgetPrefs: BudgetPreferences,
     private val transactionRepository: TransactionRepository,
+    private val subscriptionRepository: SubscriptionRepository,
 ) : ViewModel() {
+
+    val monthlyLockedSubscriptionCents: StateFlow<Long> = subscriptionRepository.observeActive()
+        .map { subscriptionRepository.monthlyEquivalentTotalCnyCents() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     private val _selectedMonth = MutableStateFlow(BudgetMonth.currentKey())
     val selectedMonth: StateFlow<String> = _selectedMonth

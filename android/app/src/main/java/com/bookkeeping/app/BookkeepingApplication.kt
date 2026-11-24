@@ -15,6 +15,7 @@ import com.bookkeeping.app.data.settings.SettingsPreferences
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.capture.screenshot.ScreenshotWatchController
 import com.bookkeeping.app.notification.CaptureHealthWorker
+import com.bookkeeping.app.notification.SubscriptionReminderWorker
 import com.bookkeeping.app.notification.capture.CaptureCandidateStore
 import com.bookkeeping.app.notification.capture.ScreenshotEvidenceRetentionWorker
 import com.bookkeeping.app.notification.CategoryLearning
@@ -69,6 +70,7 @@ class BookkeepingApplication : Application() {
         scheduleCaptureHealthRecovery()
         scheduleDiagnosticRetention()
         scheduleScreenshotRetention()
+        SubscriptionReminderWorker.scheduleDaily(this)
         // 新截图监听默认关闭；只有用户在设置里开启并授权后才会真正注册。
         runCatching { ScreenshotWatchController.start(this) }
         // 观察者可能在上次进程里被 MIUI 静默丢掉回调：启动时按 _ID 水位补扫一次。

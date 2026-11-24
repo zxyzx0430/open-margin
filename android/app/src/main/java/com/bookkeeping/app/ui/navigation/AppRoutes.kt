@@ -29,5 +29,12 @@ object AppRoutes {
     const val TRANSACTION_DETAIL = "transaction/{id}"
     const val TRANSACTION_ID = "id"
 
+    /** 全部订阅管理独立子页：可从日历、统计、预算进入，返回回原页。 */
+    const val SUBSCRIPTIONS_ROUTE = "subscriptions?pendingCancel={pendingCancel}"
+    const val SUBSCRIPTIONS_PENDING_CANCEL_ARG = "pendingCancel"
+
+    fun subscriptions(filterPendingCancel: Boolean = false): String =
+        "subscriptions?pendingCancel=$filterPendingCancel"
+
     fun transactionDetail(id: Long): String = "transaction/$id"
 }

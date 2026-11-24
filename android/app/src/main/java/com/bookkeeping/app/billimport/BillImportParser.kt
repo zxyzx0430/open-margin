@@ -12,17 +12,18 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Parses WeChat Pay / Alipay bill exports into a preview. It never writes to the
- * ledger; callers must show [BillImportPreview] and import only after explicit
- * user confirmation.
+ * Parses WeChat Pay / Alipay / Open Margin / Qianji / Yimu / Shark bill exports
+ * into a preview. It never writes to the ledger; callers must show
+ * [BillImportPreview] and import only after explicit user confirmation.
  */
 object BillImportParser {
 
     private const val UTF8_BOM = "﻿"
+    private val BOOKKEEPING_APP_SOURCES = setOf(BillSource.QIANJI, BillSource.YIMU, BillSource.SHARK)
 
     private val HEADER_ALIASES: Map<String, Set<String>> = mapOf(
         "time" to setOf(
-            "交易时间", "交易创建时间", "付款时间", "创建时间", "时间",
+            "交易时间", "交易创建时间", "付款时间", "创建时间", "时间", "日期",
             "transactiontime", "time", "date",
         ),
         "merchant" to setOf(
@@ -34,7 +35,7 @@ object BillImportParser {
             "amount",
         ),
         "direction" to setOf(
-            "收/支", "收支", "收/付款", "资金方向", "方向",
+            "收/支", "收支", "收支类型", "收/付款", "资金方向", "方向",
             "direction", "incomeexpense",
         ),
         "status" to setOf(
@@ -50,16 +51,24 @@ object BillImportParser {
             "paymentmethod", "payment",
         ),
         "category" to setOf(
-            "交易分类", "分类",
+            "交易分类", "分类", "类别",
             "category",
+        ),
+        "subCategory" to setOf(
+            "二级分类", "子类", "子分类",
+            "subcategory",
         ),
         "description" to setOf(
             "商品说明", "商品", "商品名称",
             "description", "product",
         ),
         "account" to setOf(
-            "账户",
-            "account",
+            "账户", "账户1",
+            "account", "account1",
+        ),
+        "account2" to setOf(
+            "账户2", "转入账户", "目标账户",
+            "account2",
         ),
         "source" to setOf(
             "来源",
@@ -158,6 +167,7 @@ object BillImportParser {
             dataRows++
 
             val rowNumber = index + 1
+            val isBookkeepingApp = !openMarginExport && source in BOOKKEEPING_APP_SOURCES
             val timeRaw = value(raw, columns.time)
             val merchantRaw = value(raw, columns.merchant)
             val amountRaw = value(raw, columns.amount)
@@ -165,11 +175,16 @@ object BillImportParser {
             val statusRaw = value(raw, columns.status)
             val orderId = value(raw, columns.orderId).takeIf { it.isNotBlank() }
             val payment = value(raw, columns.payment).takeIf { it.isNotBlank() }
-            val sourceCategory = value(raw, columns.category).takeIf { it.isNotBlank() }
-            val description = value(raw, columns.description).takeIf { it.isNotBlank() }
-            val account = value(raw, columns.account).takeIf { it.isNotBlank() }
-            val ledgerSource = value(raw, columns.source).takeIf { it.isNotBlank() }
-            val note = value(raw, columns.note).takeIf { it.isNotBlank() }
+            val subCategory = cleanOptionalField(value(raw, columns.subCategory), isBookkeepingApp)
+            val rawCategory = cleanOptionalField(value(raw, columns.category), isBookkeepingApp)
+            val sourceCategory = rawCategory ?: subCategory
+            val description = cleanOptionalField(value(raw, columns.description), isBookkeepingApp)
+                ?: subCategory
+            val account1 = cleanOptionalField(value(raw, columns.account), isBookkeepingApp)
+            val account2 = cleanOptionalField(value(raw, columns.account2), isBookkeepingApp)
+            val account = account1 ?: account2
+            val explicitLedgerSource = value(raw, columns.source).takeIf { it.isNotBlank() }
+            val note = cleanOptionalField(value(raw, columns.note), isBookkeepingApp)
 
             val occurredAt = parseTime(timeRaw, options.timeZoneId)
             val amount = parseAmount(amountRaw)
@@ -178,17 +193,35 @@ object BillImportParser {
             // Only skip it when it has no valid transaction time or amount.
             if (isSummaryRow(raw) && (occurredAt == null || amount == null)) continue
 
-            val merchant = merchantRaw.trim()
+            val merchant = when {
+                openMarginExport -> merchantRaw.trim()
+                isBookkeepingApp -> resolveBookkeepingMerchant(
+                    merchantRaw = merchantRaw,
+                    note = note,
+                    subCategory = subCategory,
+                    sourceCategory = sourceCategory,
+                    account1 = account1,
+                    account2 = account2,
+                    directionRaw = directionRaw,
+                )
+                else -> merchantRaw.trim()
+            }
             val direction = parseDirection(directionRaw, amount?.negative == true)
-            val status = if (openMarginExport && columns.status < 0) {
+            val status = if (columns.status < 0 && (openMarginExport || isBookkeepingApp)) {
                 BillStatus.SUCCESS
             } else {
                 parseStatus(statusRaw)
             }
             val rowSource = if (openMarginExport) {
-                detectRowSource(ledgerSource, source)
+                detectRowSource(explicitLedgerSource, source)
             } else {
                 source
+            }
+            val ledgerSource = explicitLedgerSource ?: when (rowSource) {
+                BillSource.QIANJI -> "钱迹"
+                BillSource.YIMU -> "一木记账"
+                BillSource.SHARK -> "鲨鱼记账"
+                else -> null
             }
 
             val parsed = if (occurredAt != null && amount != null) {
@@ -219,7 +252,7 @@ object BillImportParser {
                 occurredAt == null -> "无法解析交易时间：$timeRaw"
                 amountRaw.isBlank() -> "金额为空"
                 amount == null -> "无法解析金额：$amountRaw"
-                merchant.isBlank() && !openMarginExport -> "商户为空，需人工确认"
+                merchant.isBlank() && !openMarginExport && !isBookkeepingApp -> "商户为空，需人工确认"
                 else -> null
             }
             if (parseError != null) {
@@ -306,8 +339,10 @@ object BillImportParser {
         val orderId: Int,
         val payment: Int,
         val category: Int,
+        val subCategory: Int,
         val description: Int,
         val account: Int,
+        val account2: Int,
         val source: Int,
         val note: Int,
     )
@@ -329,8 +364,10 @@ object BillImportParser {
                 orderId = findColumn(row, HEADER_ALIASES.getValue("orderId")),
                 payment = findColumn(row, HEADER_ALIASES.getValue("payment")),
                 category = findColumn(row, HEADER_ALIASES.getValue("category")),
+                subCategory = findColumn(row, HEADER_ALIASES.getValue("subCategory")),
                 description = findColumn(row, HEADER_ALIASES.getValue("description")),
                 account = findColumn(row, HEADER_ALIASES.getValue("account")),
+                account2 = findColumn(row, HEADER_ALIASES.getValue("account2")),
                 source = findColumn(row, HEADER_ALIASES.getValue("source")),
                 note = findColumn(row, HEADER_ALIASES.getValue("note")),
             )
@@ -364,8 +401,36 @@ object BillImportParser {
         return when (text.uppercase(Locale.ROOT)) {
             "微信", "WECHAT" -> BillSource.WECHAT
             "支付宝", "ALIPAY" -> BillSource.ALIPAY
+            "钱迹", "QIANJI" -> BillSource.QIANJI
+            "一木", "一木记账", "YIMU" -> BillSource.YIMU
+            "鲨鱼", "鲨鱼记账", "SHARK" -> BillSource.SHARK
             else -> BillSource.UNKNOWN
         }
+    }
+
+    private fun cleanOptionalField(raw: String, stripPlaceholder: Boolean): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        if (stripPlaceholder && (trimmed == "/" || trimmed == "-")) return null
+        return trimmed
+    }
+
+    private fun resolveBookkeepingMerchant(
+        merchantRaw: String,
+        note: String?,
+        subCategory: String?,
+        sourceCategory: String?,
+        account1: String?,
+        account2: String?,
+        directionRaw: String,
+    ): String {
+        val explicit = merchantRaw.trim()
+        if (explicit.isNotEmpty()) return explicit
+        if (!note.isNullOrBlank()) return note
+        if (!subCategory.isNullOrBlank()) return subCategory
+        if (!sourceCategory.isNullOrBlank()) return sourceCategory
+        if (!account1.isNullOrBlank() && !account2.isNullOrBlank()) return "$account1 -> $account2"
+        return directionRaw.trim().ifBlank { "未知商户" }
     }
 
     private fun findColumn(row: List<String>, aliases: Set<String>): Int {
@@ -379,16 +444,41 @@ object BillImportParser {
         if (index < 0) "" else row.getOrNull(index)?.trim().orEmpty()
 
     private fun detectSource(fileName: String?, headerRow: List<String>): BillSource {
-        val name = fileName.orEmpty()
-        val lower = name.lowercase(Locale.ROOT)
-        if ("wechat" in lower || "微信" in name) return BillSource.WECHAT
-        if ("alipay" in lower || "支付宝" in name) return BillSource.ALIPAY
         val headers = headerRow.map(::normalizeHeader).toSet()
         if ("商户单号" in headers) return BillSource.WECHAT
         if ("商家订单号" in headers || "交易订单号" in headers || "交易分类" in headers) {
             return BillSource.ALIPAY
         }
+        if (isQianjiHeaders(headers)) return BillSource.QIANJI
+        if (isYimuHeaders(headers)) return BillSource.YIMU
+        if (isSharkHeaders(headers)) return BillSource.SHARK
+
+        val name = fileName.orEmpty()
+        val lower = name.lowercase(Locale.ROOT)
+        if ("wechat" in lower || "微信" in name) return BillSource.WECHAT
+        if ("alipay" in lower || "支付宝" in name) return BillSource.ALIPAY
+        if ("qianji" in lower || "钱迹" in name) return BillSource.QIANJI
+        if ("yimu" in lower || "一木" in name) return BillSource.YIMU
+        if ("shark" in lower || "鲨鱼" in name) return BillSource.SHARK
         return BillSource.UNKNOWN
+    }
+
+    private fun isQianjiHeaders(headers: Set<String>): Boolean {
+        if ("商户" in headers || "交易对方" in headers || "来源" in headers) return false
+        if ("账户1" in headers || "账户2" in headers || "二级分类" in headers) return true
+        return "时间" in headers && "分类" in headers && "类型" in headers && "金额" in headers
+    }
+
+    private fun isYimuHeaders(headers: Set<String>): Boolean {
+        if ("商户" in headers || "交易对方" in headers || "来源" in headers) return false
+        if ("收支类型" in headers) return true
+        return "日期" in headers && "类别" in headers && "金额" in headers
+    }
+
+    private fun isSharkHeaders(headers: Set<String>): Boolean {
+        if ("商户" in headers || "交易对方" in headers || "来源" in headers) return false
+        if ("账户1" in headers || "账户2" in headers || "收支类型" in headers) return false
+        return "日期" in headers && "类型" in headers && "分类" in headers && "金额" in headers
     }
 
     private fun errorPreview(source: BillSource, format: BillFormat, message: String): BillImportPreview =
@@ -472,7 +562,7 @@ object BillImportParser {
     private fun parseDirection(raw: String, negative: Boolean): BillDirection {
         val text = raw.trim()
         return when {
-            text.contains("不计") -> BillDirection.NEUTRAL
+            text.contains("不计") || text.contains("转账") || text.contains("还款") -> BillDirection.NEUTRAL
             text.contains("支出") || text.contains("付款") || text == "支" -> BillDirection.EXPENSE
             text.contains("收入") || text.contains("收款") || text == "收" -> BillDirection.INCOME
             text.isBlank() && negative -> BillDirection.EXPENSE
@@ -502,6 +592,8 @@ object BillImportParser {
             ?.takeIf { it >= BigDecimal.valueOf(20_000L) && it <= BigDecimal.valueOf(80_000L) }
             ?.let { return excelSerialToMillis(it, timeZoneId) }
         val patterns = listOf(
+            "yyyy-MM-dd HH:mm:ss.SSS",
+            "yyyy/MM/dd HH:mm:ss.SSS",
             "yyyy-MM-dd HH:mm:ss",
             "yyyy/MM/dd HH:mm:ss",
             "yyyy-M-d H:mm:ss",
@@ -513,8 +605,11 @@ object BillImportParser {
             "yyyy-MM-dd'T'HH:mm:ss",
             "yyyy-MM-dd",
             "yyyy/MM/dd",
+            "yyyy-M-d",
+            "yyyy/M/d",
             "yyyy年M月d日 HH:mm:ss",
             "yyyy年M月d日 HH:mm",
+            "yyyy年M月d日",
         )
         for (pattern in patterns) {
             val format = SimpleDateFormat(pattern, Locale.CHINA).apply {

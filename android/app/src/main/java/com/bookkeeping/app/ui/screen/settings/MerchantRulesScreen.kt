@@ -269,15 +269,20 @@ fun MerchantRulesScreen(
             existingMerchants = rulesByMerchant.keys,
             recentMerchants = recentMerchants,
             onDismiss = { adding = false },
-            onSave = { merchant, category, paused ->
+            onSave = { merchant, category, paused, applyToHistory ->
                 adding = false
                 viewModel.saveMerchantRule(
                     previousMerchant = null,
                     merchant = merchant,
                     category = category,
                     learningPaused = paused,
-                )
-                notify(tr("已保存"))
+                    applyToHistory = applyToHistory,
+                ) { updated ->
+                    notify(
+                        if (updated > 0) tr("已保存，同步更新 %d 笔历史账单").format(updated)
+                        else tr("已保存"),
+                    )
+                }
             },
             onDelete = {},
             onEditExisting = { merchant ->
@@ -299,15 +304,20 @@ fun MerchantRulesScreen(
             existingMerchants = rulesByMerchant.keys,
             recentMerchants = emptyList(),
             onDismiss = { editing = null },
-            onSave = { merchant, category, paused ->
+            onSave = { merchant, category, paused, applyToHistory ->
                 editing = null
                 viewModel.saveMerchantRule(
                     previousMerchant = entry.merchant,
                     merchant = merchant,
                     category = category,
                     learningPaused = paused,
-                )
-                notify(tr("已保存"))
+                    applyToHistory = applyToHistory,
+                ) { updated ->
+                    notify(
+                        if (updated > 0) tr("已保存，同步更新 %d 笔历史账单").format(updated)
+                        else tr("已保存"),
+                    )
+                }
             },
             onDelete = { merchant ->
                 editing = null
@@ -900,7 +910,7 @@ private fun MerchantRuleSheet(
     existingMerchants: Set<String>,
     recentMerchants: List<String>,
     onDismiss: () -> Unit,
-    onSave: (merchant: String, category: TransactionCategory, learningPaused: Boolean) -> Unit,
+    onSave: (merchant: String, category: TransactionCategory, learningPaused: Boolean, applyToHistory: Boolean) -> Unit,
     onDelete: (merchant: String) -> Unit,
     onEditExisting: (merchant: String) -> Unit,
 ) {
@@ -908,6 +918,7 @@ private fun MerchantRuleSheet(
     var name by remember(entry) { mutableStateOf(entry?.merchant.orEmpty()) }
     var category by remember(entry) { mutableStateOf(entry?.category) }
     var paused by remember(entry) { mutableStateOf(entry?.learningPaused ?: false) }
+    var applyToHistory by remember(entry) { mutableStateOf(true) }
     var confirmingDelete by remember { mutableStateOf(false) }
 
     val issue = merchantRuleIssue(
@@ -1006,6 +1017,37 @@ private fun MerchantRuleSheet(
                     .clip(RoundedCornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .toggleable(
+                        value = applyToHistory,
+                        role = Role.Switch,
+                        onValueChange = { applyToHistory = it },
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = tr("同时更新历史账单"),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = tr("将已记录的同名商户历史账单一起改为此分类"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = applyToHistory, onCheckedChange = null)
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .toggleable(
                         value = paused,
                         role = Role.Switch,
                         onValueChange = { paused = it },
@@ -1053,7 +1095,7 @@ private fun MerchantRuleSheet(
                 Button(
                     onClick = {
                         val selected = category ?: return@Button
-                        onSave(name.trim(), selected, paused)
+                        onSave(name.trim(), selected, paused, applyToHistory)
                     },
                     enabled = issue == null,
                     modifier = Modifier

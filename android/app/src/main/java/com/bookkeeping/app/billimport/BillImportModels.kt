@@ -1,7 +1,7 @@
 package com.bookkeeping.app.billimport
 
 /** Source inferred from the file name or the export headers. */
-enum class BillSource { WECHAT, ALIPAY, UNKNOWN }
+enum class BillSource { WECHAT, ALIPAY, QIANJI, YIMU, SHARK, UNKNOWN }
 
 enum class BillFormat { CSV, TSV, TEXT, XLSX }
 

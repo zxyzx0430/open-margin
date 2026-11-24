@@ -132,7 +132,7 @@ class SubscriptionPatchTests(unittest.TestCase):
             wallos_api.edit(8,active=False)
         self.assertEqual(api.call_args.args[1]["inactive"],1)
 
-    def test_strict_payment_channel_does_not_silently_substitute(self):
+    def test_payment_channel_safely_falls_back_instead_of_breaking_sync(self):
         with tempfile.TemporaryDirectory() as tmp:
             db=Path(tmp)/"wallos.db"
             with sqlite_connect(db) as con:
@@ -145,12 +145,18 @@ class SubscriptionPatchTests(unittest.TestCase):
                 INSERT INTO household VALUES(1,1);
                 INSERT INTO categories VALUES(1,1,'无分类');
                 INSERT INTO payment_methods VALUES(3,1,1,'Cash');
+                INSERT INTO payment_methods VALUES(4,1,1,'AliPay');
+                INSERT INTO payment_methods VALUES(5,1,1,'Credit Card');
                 """)
             with patch.object(wallos_api,"WALLOS_DB",db):
-                with self.assertRaisesRegex(wallos_api.WallosError,"Unsupported payment channel"):
-                    wallos_api.valid_subscription_links("MysteryPay")
-                with self.assertRaisesRegex(wallos_api.WallosError,"not configured"):
-                    wallos_api.valid_subscription_links("WeChat")
+                self.assertEqual(
+                    wallos_api.valid_subscription_links("MysteryPay")["payment_method_id"],3)
+                self.assertEqual(
+                    wallos_api.valid_subscription_links("花呗")["payment_method_id"],4)
+                self.assertEqual(
+                    wallos_api.valid_subscription_links("云闪付")["payment_method_id"],5)
+                self.assertEqual(
+                    wallos_api.valid_subscription_links("WeChat")["payment_method_id"],3)
                 self.assertEqual(
                     wallos_api.valid_subscription_links("")["payment_method_id"],3)
 

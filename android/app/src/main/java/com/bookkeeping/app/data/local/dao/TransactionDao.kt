@@ -56,6 +56,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 AND category = 'OTHER'")
     suspend fun currentOther(): List<TransactionEntity>
 
+    @Query("SELECT * FROM transactions WHERE syncDeleted = 0")
+    suspend fun currentActive(): List<TransactionEntity>
+
     // 查指定时间范围内的（用于"本月"统计等）
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 AND timestamp >= :startMs AND timestamp < :endMs ORDER BY timestamp DESC")
     fun observeBetween(startMs: Long, endMs: Long): Flow<List<TransactionEntity>>

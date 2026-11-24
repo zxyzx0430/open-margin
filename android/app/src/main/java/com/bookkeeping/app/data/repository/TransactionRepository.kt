@@ -172,6 +172,41 @@ class TransactionRepository @Inject constructor(
         return updates.size
     }
 
+    /**
+     * 商户分类规则保存/编辑后，回溯更新所有匹配该商户的历史账单（不限原分类是否为 OTHER），
+     * 并标记同步脏数据，解决「修改规则后历史 186 笔旧账单未跟着变」的问题。
+     */
+    suspend fun applyMerchantRuleToHistory(
+        merchant: String,
+        category: TransactionCategory,
+    ): Int {
+        if (isCleanupSingletonMerchant(merchant)) return 0
+        val updates = database.withTransaction {
+            val now = System.currentTimeMillis()
+            val matched = dao.currentActive()
+                .filter { row ->
+                    !row.syncDeleted &&
+                        row.category != category.name &&
+                        MerchantRules.matches(row.merchant, merchant)
+                }
+                .map { markCategorized(it, category.name, now, UUID.randomUUID().toString()) }
+            if (matched.isNotEmpty()) dao.updateAll(matched)
+            matched
+        }
+        if (updates.isNotEmpty()) {
+            withContext(NonCancellable) {
+                requestSyncForTransactions(
+                    updates.map {
+                        TransactionDiagnosticInput(
+                            callSite = "TransactionRepository.applyMerchantRuleToHistory",
+                        ) to it
+                    },
+                )
+            }
+        }
+        return updates.size
+    }
+
     fun observeDuplicateCandidates(): Flow<List<TransactionEntity>> =
         dao.observeDuplicateCandidates()
 

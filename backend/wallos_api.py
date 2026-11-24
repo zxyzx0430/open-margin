@@ -79,6 +79,7 @@ def normalize(row: dict) -> dict:
         "notify":bool(int(row.get("notify") or 0)),
         "notify_days_before":row.get("notify_days_before"),
         "active":not bool(int(row.get("inactive") or 0)),
+        "note":row.get("notes") or "",
         "source":"Wallos", "payment_confirmed":False,
     }
 
@@ -87,11 +88,71 @@ def get_all():
     return sorted([normalize(item) for item in result.get("subscriptions",[])],
                   key=lambda row:row["next_due_ms"] or 0)
 
+PAYMENT_CHANNEL_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "": ("未指定（待确认）", "未指定", "Money", "Cash", "现金"),
+    "未指定（待确认）": ("未指定（待确认）", "未指定", "Money", "Cash", "现金"),
+    "未指定": ("未指定（待确认）", "未指定", "Money", "Cash", "现金"),
+    "待确认": ("未指定（待确认）", "未指定", "Money", "Cash", "现金"),
+    "unspecified": ("未指定（待确认）", "未指定", "Money", "Cash", "现金"),
+    "alipay": ("AliPay", "支付宝"),
+    "支付宝": ("支付宝", "AliPay"),
+    "花呗": ("花呗", "蚂蚁花呗", "AliPay", "支付宝"),
+    "蚂蚁花呗": ("蚂蚁花呗", "花呗", "AliPay", "支付宝"),
+    "wechat": ("WeChat", "WeChat Pay", "微信", "微信支付"),
+    "wechat pay": ("WeChat", "WeChat Pay", "微信", "微信支付"),
+    "微信": ("微信", "微信支付", "WeChat", "WeChat Pay"),
+    "微信支付": ("微信支付", "微信", "WeChat", "WeChat Pay"),
+    "credit card": ("Credit Card", "信用卡", "银行卡", "Debit Card", "储蓄卡"),
+    "信用卡": ("信用卡", "Credit Card", "银行卡"),
+    "debit card": ("Debit Card", "储蓄卡", "银行卡", "Credit Card", "信用卡"),
+    "银行卡": ("银行卡", "储蓄卡", "Debit Card", "Credit Card", "信用卡"),
+    "储蓄卡": ("储蓄卡", "银行卡", "Debit Card", "Credit Card", "信用卡"),
+    "借记卡": ("借记卡", "储蓄卡", "银行卡", "Debit Card", "Credit Card", "信用卡"),
+    "云闪付": ("云闪付", "UnionPay", "Credit Card", "信用卡", "银行卡"),
+    "unionpay": ("UnionPay", "云闪付", "Credit Card", "信用卡", "银行卡"),
+    "京东白条": ("京东白条", "白条", "Credit Card", "信用卡", "AliPay", "支付宝"),
+    "白条": ("白条", "京东白条", "Credit Card", "信用卡", "AliPay", "支付宝"),
+    "apple pay": ("Apple Pay", "Credit Card", "信用卡", "银行卡"),
+    "applepay": ("Apple Pay", "Credit Card", "信用卡", "银行卡"),
+    "抖音支付": ("抖音支付", "AliPay", "支付宝", "WeChat", "微信", "Credit Card"),
+    "douyin": ("抖音支付", "AliPay", "支付宝", "WeChat", "微信", "Credit Card"),
+}
+
+_GENERIC_FALLBACK_METHODS: tuple[str, ...] = (
+    "未指定（待确认）",
+    "未指定",
+    "Money",
+    "Cash",
+    "现金",
+)
+
+
+def _fallback_candidates_for(raw_channel: str) -> list[str]:
+    key = raw_channel.strip().casefold()
+    candidates: list[str] = []
+    if raw_channel.strip():
+        candidates.append(raw_channel.strip())
+    if key in PAYMENT_CHANNEL_CANDIDATES:
+        candidates.extend(PAYMENT_CHANNEL_CANDIDATES[key])
+    elif key:
+        if "微信" in key or "wechat" in key:
+            candidates.extend(PAYMENT_CHANNEL_CANDIDATES["微信"])
+        elif "支付宝" in key or "alipay" in key or "花呗" in key:
+            candidates.extend(PAYMENT_CHANNEL_CANDIDATES["花呗"])
+        elif "银行" in key or "储蓄" in key or "信用" in key or "卡" in key or "白条" in key or "闪付" in key or "apple" in key or "huawei" in key or "samsung" in key:
+            candidates.extend(("Credit Card", "信用卡", "Debit Card", "储蓄卡", "银行卡"))
+    candidates.extend(_GENERIC_FALLBACK_METHODS)
+    return candidates
+
+
 def valid_subscription_links(payment_channel: str = "") -> dict:
     """Resolve required Wallos UI relationships from the owner's actual DB.
 
     Omission used to create subscriptions with NULL member/category/payment_method
     which broke Wallos subscriptions.php under PHP 8.
+    Supports Chinese payment channels and safely falls back to the closest
+    configured Wallos payment method so sync never fails on unconfigured or
+    custom channel names.
     """
     path=WALLOS_DB
     with closing(sqlite3.connect(f"file:{path}?mode=ro",uri=True)) as db:
@@ -103,36 +164,46 @@ def valid_subscription_links(payment_channel: str = "") -> dict:
         category=db.execute("SELECT id FROM categories WHERE user_id=? AND name=? LIMIT 1",(owner,"无分类")).fetchone()
         if not category:
             category=db.execute("SELECT id FROM categories WHERE user_id=? ORDER BY id LIMIT 1",(owner,)).fetchone()
-        channel=payment_channel.strip().lower()
-        unspecified=channel in ("", "未指定（待确认）")
-        if unspecified:
-            method_name="未指定（待确认）"
-        elif channel in ("alipay","支付宝"):
-            method_name="AliPay"
-        elif channel in ("wechat","微信","微信支付"):
-            method_name="WeChat"
-        elif channel in ("credit card","debit card","银行卡","信用卡"):
-            method_name="Credit Card"
-        else:
-            raise WallosError("Unsupported payment channel; use a known Wallos payment method")
-        method=db.execute("SELECT id FROM payment_methods WHERE user_id=? AND enabled=1 AND name=? LIMIT 1",
-                          (owner,method_name)).fetchone()
-        if not method and unspecified:
-            # A new upstream installation may have no custom unspecified method.
-            method=db.execute("""SELECT id FROM payment_methods
-                WHERE user_id=? AND enabled=1
-                ORDER BY CASE WHEN name IN ('Money','Cash','现金') THEN 0 ELSE 1 END,id LIMIT 1""",
-                (owner,)).fetchone()
-        if not method and not unspecified:
-            raise WallosError("Specified payment channel is not configured in Wallos")
-        if not (household and category and method):
+        enabled_methods=db.execute(
+            "SELECT id,name FROM payment_methods WHERE user_id=? AND enabled=1 ORDER BY id",
+            (owner,),
+        ).fetchall()
+        by_name = {
+            str(row[1]).strip().casefold(): row[0]
+            for row in enabled_methods
+            if row[1] is not None
+        }
+        method_id = None
+        for candidate in _fallback_candidates_for(payment_channel):
+            matched = by_name.get(candidate.strip().casefold())
+            if matched is not None:
+                method_id = matched
+                break
+        if method_id is None and enabled_methods:
+            method_id = enabled_methods[0][0]
+        if not (household and category and method_id is not None):
             raise WallosError("Wallos member, category or payment method missing")
         return {"payer_user_id":household[0],"category_id":category[0],
-                "payment_method_id":method[0]}
+                "payment_method_id":method_id}
+
+
+def format_wallos_notes(payment_channel: str = "", note: str = "") -> str:
+    parts: list[str] = []
+    clean_note = (note or "").strip()
+    if clean_note:
+        parts.append(clean_note)
+    clean_channel = (payment_channel or "").strip()
+    if clean_channel:
+        channel_tag = f"Payment channel: {clean_channel}"
+        if channel_tag not in clean_note:
+            parts.append(channel_tag)
+    return "\n".join(parts)
+
 
 def add(name: str,amount_cents:int,currency:str,cadence:str,next_due_ms:int,
         payment_channel:str="",start_date:str|None=None,
-        auto_renew:bool=True,notify:bool=False,notify_days_before:int|None=None):
+        auto_renew:bool=True,notify:bool=False,notify_days_before:int|None=None,
+        note:str=""):
     """Create through the native Wallos HTTP API; never write Wallos SQLite."""
     if currency not in CURRENCIES or cadence not in CYCLES:
         raise WallosError("Unsupported currency or cadence")
@@ -144,7 +215,7 @@ def add(name: str,amount_cents:int,currency:str,cadence:str,next_due_ms:int,
         "action":"add","name":name,"price":f"{amount_cents/100:.2f}",
         "currency_id":CURRENCIES[currency],"frequency":freq,"cycle":cycle,
         "next_payment":local_date,"auto_renew":int(auto_renew),"notify":int(notify),
-        "notes":("Payment channel: "+payment_channel) if payment_channel else ""
+        "notes":format_wallos_notes(payment_channel, note)
     }
     if start_date is not None: payload["start_date"]=start_date
     if notify_days_before is not None: payload["notify_days_before"]=notify_days_before
@@ -183,6 +254,7 @@ def edit(subscription_id:int, **changes):
         elif key in ("auto_renew","notify"): payload[key]=int(value)
         elif key=="active": payload["inactive"]=int(not value)
         elif key=="notify_days_before": payload[key]=value
+        elif key=="note": payload["notes"]=value
         else: raise WallosError("Unsupported edit field: "+key)
     if len(payload)==2: raise WallosError("No edit fields supplied")
     call("/api/subscriptions/set_subscriptions.php",payload)

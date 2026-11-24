@@ -13,6 +13,7 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.CaptureMergePolicy
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.settings.SettingsPreferences
+import com.bookkeeping.app.ui.screen.stats.AccountNormalization
 import com.bookkeeping.app.ui.screen.transactions.DuplicateCandidate as SaveCandidate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -60,9 +61,11 @@ internal object LedgerFilter {
         category: TransactionCategory?,
         startMs: Long?,
         endMs: Long?,
+        account: String? = null,
     ): Boolean {
         if (type != null && transaction.type != type.name) return false
         if (category != null && transaction.category != category.name) return false
+        if (!AccountNormalization.matchesFilter(transaction.account, account)) return false
         if (startMs != null && transaction.timestamp < startMs) return false
         if (endMs != null && transaction.timestamp >= endMs) return false
         val q = query.trim()
@@ -91,9 +94,11 @@ internal object LedgerFilter {
         category: TransactionCategory?,
         startMs: Long?,
         endMs: Long?,
+        account: String? = null,
     ): Boolean {
         if (type != null && transaction.type != type.name) return false
         if (category != null && transaction.category != category.name) return false
+        if (!AccountNormalization.matchesFilter(transaction.account, account)) return false
         if (startMs != null && transaction.timestamp < startMs) return false
         if (endMs != null && transaction.timestamp >= endMs) return false
         val q = query.trim()
@@ -136,6 +141,7 @@ class TransactionViewModel @Inject constructor(
     private data class FilterState(
         val type: TransactionType?,
         val category: TransactionCategory?,
+        val account: String?,
         val period: PeriodState,
     )
 
@@ -147,6 +153,9 @@ class TransactionViewModel @Inject constructor(
 
     private val _categoryFilter = MutableStateFlow<TransactionCategory?>(null)
     val categoryFilter: StateFlow<TransactionCategory?> = _categoryFilter
+
+    private val _accountFilter = MutableStateFlow<String?>(null)
+    val accountFilter: StateFlow<String?> = _accountFilter
 
     private val _timeFilter = MutableStateFlow(LedgerTimeFilter.ALL)
     val timeFilter: StateFlow<LedgerTimeFilter> = _timeFilter
@@ -193,8 +202,8 @@ class TransactionViewModel @Inject constructor(
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
         combine(
             _searchQuery.debounce(220),
-            combine(_typeFilter, _categoryFilter, periodState) { type, category, period ->
-                FilterState(type, category, period)
+            combine(_typeFilter, _categoryFilter, _accountFilter, periodState) { type, category, account, period ->
+                FilterState(type, category, account, period)
             },
         ) { query, filters -> query to filters }
             .flatMapLatest { (query, filters) ->
@@ -210,7 +219,10 @@ class TransactionViewModel @Inject constructor(
                     startMs = start,
                     endMs = end,
                 ).map { list ->
-                    val visible = list.filter { !CaptureMergePolicy.isAutoMergedDuplicate(it) }
+                    val visible = list.filter {
+                        !CaptureMergePolicy.isAutoMergedDuplicate(it) &&
+                            AccountNormalization.matchesFilter(it.account, filters.account)
+                    }
                     if (amountQuery != null) {
                         visible.filter {
                             LedgerFilter.matches(
@@ -220,6 +232,7 @@ class TransactionViewModel @Inject constructor(
                                 filters.category,
                                 start,
                                 end,
+                                filters.account,
                             )
                         }
                     } else {
@@ -276,6 +289,10 @@ class TransactionViewModel @Inject constructor(
         _categoryFilter.value = category
     }
 
+    fun setAccountFilter(account: String?) {
+        _accountFilter.value = account?.trim()?.let { AccountNormalization.normalize(it) }
+    }
+
     fun setTimeFilter(time: LedgerTimeFilter) {
         _timeFilter.value = time
     }
@@ -284,17 +301,20 @@ class TransactionViewModel @Inject constructor(
     fun selectTimeFilterOnly(time: LedgerTimeFilter) {
         _typeFilter.value = null
         _categoryFilter.value = null
+        _accountFilter.value = null
         _timeFilter.value = time
     }
 
     fun selectTypeFilterOnly(type: TransactionType) {
         _categoryFilter.value = null
+        _accountFilter.value = null
         _timeFilter.value = LedgerTimeFilter.ALL
         _typeFilter.value = type
     }
 
     fun selectCategoryFilterOnly(category: TransactionCategory) {
         _typeFilter.value = null
+        _accountFilter.value = null
         _timeFilter.value = LedgerTimeFilter.ALL
         _categoryFilter.value = category
     }
@@ -314,6 +334,7 @@ class TransactionViewModel @Inject constructor(
         _searchQuery.value = ""
         _typeFilter.value = null
         _categoryFilter.value = null
+        _accountFilter.value = null
         _selectedMonth.value = BudgetMonth.currentKey()
         _selectedYear.value = Calendar.getInstance().get(Calendar.YEAR)
         _timeFilter.value = LedgerTimeFilter.ALL
@@ -324,6 +345,7 @@ class TransactionViewModel @Inject constructor(
         _searchQuery.value = ""
         _typeFilter.value = null
         _categoryFilter.value = null
+        _accountFilter.value = null
         _timeFilter.value = LedgerTimeFilter.ALL
     }
 
@@ -345,6 +367,7 @@ class TransactionViewModel @Inject constructor(
             category = _categoryFilter.value,
             startMs = range?.first,
             endMs = range?.second,
+            account = _accountFilter.value,
         )
     }
 

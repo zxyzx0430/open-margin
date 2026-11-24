@@ -2,8 +2,10 @@ package com.bookkeeping.app.sync
 
 import android.content.SharedPreferences
 import com.bookkeeping.app.data.local.BookkeepingDatabase
+import com.bookkeeping.app.data.local.entity.SubscriptionEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import com.bookkeeping.app.data.subscription.SubscriptionFxRatesCalculator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -412,11 +414,156 @@ internal class BidirectionalSyncClient(
         return PushOutcome(false,conflictIds,missingIds)
     }
 
+    private suspend fun syncSubscriptions() {
+        val subDao = db.subscriptionDao()
+        val dirty = subDao.getDirty()
+        val response = if (dirty.isNotEmpty()) {
+            val payloadItems = JSONArray()
+            for (row in dirty) {
+                payloadItems.put(
+                    JSONObject().apply {
+                        put("sync_uuid", row.syncUuid)
+                        row.wallosId?.let { put("wallos_id", it) }
+                        put("name", row.name)
+                        put("amount_cents", row.amountCents)
+                        put("currency", row.currency)
+                        put("cadence", row.cadence)
+                        put("next_due_ms", row.nextDueMs)
+                        row.startMs?.let { put("start_ms", it) }
+                        put("payment_channel", row.paymentChannel)
+                        put("auto_renew", row.autoRenew)
+                        put("pending_cancel", row.pendingCancel)
+                        put("notify_enabled", row.notifyEnabled)
+                        put("notify_days_before", row.notifyDaysBefore)
+                        put("active", row.active)
+                        put("note", row.note)
+                        put("updated_at_ms", row.updatedAtMs)
+                        row.deletedAtMs?.let { put("deleted_at_ms", it) }
+                    },
+                )
+            }
+            request("POST", "subscriptions/push", JSONObject().put("items", payloadItems))
+        } else {
+            request("GET", "subscriptions")
+        } ?: return
+
+        if (response.first in setOf(404, 405, 501, 503) || response.first != 200) {
+            // Gracefully preserve existing transaction sync if server lacks subscription sync or Wallos is down.
+            return
+        }
+
+        val doc = response.second
+        val expectedServerId = prefs.getString("sync_server_id", null)
+        val remoteServerId = doc.optString("server_id", "")
+        if (!expectedServerId.isNullOrBlank() && remoteServerId.isNotBlank() && expectedServerId != remoteServerId) {
+            return
+        }
+
+        val fxJson = doc.optJSONObject("fx_rates")
+        val fxRates = if (fxJson != null) {
+            val merged = SubscriptionFxRatesCalculator.mergeRatesJson(fxJson)
+            prefs.edit()
+                .putString(
+                    SubscriptionFxRatesCalculator.PREFS_KEY_FX_RATES,
+                    SubscriptionFxRatesCalculator.encodeRatesJson(merged),
+                )
+                .apply()
+            merged
+        } else {
+            SubscriptionFxRatesCalculator.parseRatesJson(
+                prefs.getString(SubscriptionFxRatesCalculator.PREFS_KEY_FX_RATES, null),
+            )
+        }
+
+        val idMap = doc.optJSONObject("id_map")
+        val pushResults = doc.optJSONArray("results")
+        if (pushResults != null) {
+            for (i in 0 until pushResults.length()) {
+                val res = pushResults.optJSONObject(i) ?: continue
+                val status = res.optString("status", "")
+                val uuid = res.optString("sync_uuid", "")
+                if (uuid.isBlank() || status == "server_wins") continue
+                val wid = when {
+                    res.has("wallos_id") && !res.isNull("wallos_id") -> res.optLong("wallos_id")
+                    idMap != null && idMap.has(uuid) && !idMap.isNull(uuid) -> idMap.optLong(uuid)
+                    else -> null
+                }
+                subDao.clearDirty(uuid, wid)
+            }
+        }
+
+        val remoteItems = doc.optJSONArray("items")
+        if (remoteItems != null) {
+            for (i in 0 until remoteItems.length()) {
+                val item = remoteItems.optJSONObject(i) ?: continue
+                val syncUuid = item.optString("sync_uuid", "")
+                if (syncUuid.isBlank()) continue
+                val wallosId = if (item.has("wallos_id") && !item.isNull("wallos_id")) item.optLong("wallos_id") else null
+                val remoteUpdatedAtMs = item.optLong("updated_at_ms", 0L)
+                val local = subDao.getBySyncUuid(syncUuid) ?: wallosId?.let { subDao.getByWallosId(it) }
+                if (local != null && local.dirty && local.updatedAtMs >= remoteUpdatedAtMs) {
+                    continue
+                }
+                val amountCents = item.optLong("amount_cents", 0L)
+                val currency = item.optString("currency", "CNY")
+                val nextDueMs = item.optLong("next_due_ms", 0L)
+                if (nextDueMs <= 0L) continue
+                val startMs = if (item.has("start_ms") && !item.isNull("start_ms")) item.optLong("start_ms") else null
+                val merged = SubscriptionEntity(
+                    id = local?.id ?: 0L,
+                    syncUuid = syncUuid,
+                    wallosId = wallosId,
+                    name = item.optString("name", ""),
+                    amountCents = amountCents,
+                    currency = currency,
+                    cnyEstimateCents = SubscriptionFxRatesCalculator.estimateCnyCents(amountCents, currency, fxRates),
+                    cadence = item.optString("cadence", "monthly"),
+                    nextDueMs = nextDueMs,
+                    startMs = startMs,
+                    paymentChannel = item.optString("payment_channel", ""),
+                    autoRenew = item.optBoolean("auto_renew", true),
+                    pendingCancel = item.optBoolean("pending_cancel", false),
+                    notifyEnabled = item.optBoolean("notify_enabled", true),
+                    notifyDaysBefore = item.optInt("notify_days_before", 3),
+                    active = item.optBoolean("active", true),
+                    note = item.optString("note", ""),
+                    updatedAtMs = remoteUpdatedAtMs,
+                    deletedAtMs = null,
+                    dirty = false,
+                )
+                subDao.upsert(merged)
+            }
+        }
+
+        val tombstones = doc.optJSONArray("tombstones")
+        if (tombstones != null) {
+            for (i in 0 until tombstones.length()) {
+                val tomb = tombstones.optJSONObject(i) ?: continue
+                val syncUuid = tomb.optString("sync_uuid", "")
+                if (syncUuid.isBlank()) continue
+                val deletedAtMs = tomb.optLong("deleted_at_ms", 0L)
+                val remoteUpdatedAtMs = tomb.optLong("updated_at_ms", deletedAtMs)
+                if (deletedAtMs <= 0L) continue
+                val local = subDao.getBySyncUuid(syncUuid) ?: continue
+                if (!local.dirty || remoteUpdatedAtMs > local.updatedAtMs) {
+                    subDao.applyRemoteTombstone(syncUuid, deletedAtMs)
+                }
+            }
+        }
+    }
+
     suspend fun run():Boolean=withContext(Dispatchers.IO){
         if(!pull())return@withContext false
         val push=push()
         if(!push.success)return@withContext false
         if(!pull())return@withContext false
+        try {
+            syncSubscriptions()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Subscription sync errors must never fail or block transaction sync.
+        }
         // 两个数字分开写：pending 是还没推上去的本地修改（正常现象），
         // conflictIds 才是两端都改过、需要用户逐笔决定的冲突。
         val waiting=dao.pendingCount()

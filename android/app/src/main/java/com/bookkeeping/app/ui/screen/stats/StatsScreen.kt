@@ -1,11 +1,14 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import android.graphics.Paint
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,39 +16,35 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
-import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.outlined.EventRepeat
+import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,7 +57,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,15 +67,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -86,6 +91,7 @@ import com.bookkeeping.app.data.budget.MonthComparison
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
+import com.bookkeeping.app.data.subscription.MonthlyForecastPoint
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
@@ -96,6 +102,7 @@ import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingBackground
 import com.bookkeeping.app.ui.theme.QingExpense
 import com.bookkeeping.app.ui.theme.QingIncome
+import com.bookkeeping.app.ui.theme.QingMint
 import com.bookkeeping.app.ui.theme.QingMintSoft
 import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimary
@@ -105,12 +112,14 @@ import com.bookkeeping.app.ui.theme.QingSurface
 import com.bookkeeping.app.ui.theme.QingSurfaceVariant
 import com.bookkeeping.app.ui.theme.QingText
 import com.bookkeeping.app.ui.theme.QingTextSecondary
+import com.bookkeeping.app.ui.theme.QingWarning
+import com.bookkeeping.app.ui.theme.QingWarningContainer
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 import kotlin.math.abs
+import kotlin.math.min
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,9 +127,14 @@ fun StatsScreen(
     onOpenLedger: (StatsLedgerDrilldown) -> Unit = {},
     onOpenTransaction: (Long) -> Unit = {},
     onOpenOtherCleanup: () -> Unit = {},
+    onOpenSubscriptions: (filterPendingCancel: Boolean) -> Unit = {},
     viewModel: StatsViewModel = hiltViewModel(),
 ) {
+    val selectedTab by viewModel.selectedTab.collectAsState()
     val stats by viewModel.categoryStats.collectAsState()
+    val accountStats by viewModel.accountStats.collectAsState()
+    val isAccountMostlyUncategorized by viewModel.isAccountMostlyUncategorized.collectAsState()
+    val subscriptionStats by viewModel.subscriptionStats.collectAsState()
     val totalCents by viewModel.totalCents.collectAsState()
     val balanceCents by viewModel.balanceCents.collectAsState()
     val viewingType by viewModel.viewingType.collectAsState()
@@ -139,10 +153,14 @@ fun StatsScreen(
     var showDayPicker by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<TransactionCategory?>(null) }
     var selectedTrendDay by remember(selectedMonth, viewingType, period) { mutableStateOf<Int?>(null) }
+    var accountsExpanded by remember(selectedMonth, selectedYear, selectedDate, viewingType, period) {
+        mutableStateOf(false)
+    }
 
     fun ledgerDrilldown(
         category: TransactionCategory? = null,
         day: Int? = null,
+        account: String? = null,
     ): StatsLedgerDrilldown {
         val selectedMonthNumber = BudgetMonth.parse(selectedMonth)?.month ?: 1
         val drillDate = when {
@@ -157,6 +175,7 @@ fun StatsScreen(
             day = drillDate?.day,
             category = category,
             type = viewingType,
+            account = account,
         )
     }
 
@@ -177,25 +196,6 @@ fun StatsScreen(
                         fontWeight = FontWeight.Bold,
                     )
                 },
-                actions = {
-                    when (period) {
-                        StatsPeriod.MONTH -> MonthPickerButton(
-                            month = selectedMonth,
-                            onClick = { showMonthPicker = true },
-                        )
-                        StatsPeriod.YEAR -> YearStepper(
-                            year = selectedYear,
-                            onPrevious = { viewModel.shiftYear(-1) },
-                            onNext = { viewModel.shiftYear(1) },
-                        )
-                        StatsPeriod.DAY -> DateStepper(
-                            date = selectedDate,
-                            onPrevious = { viewModel.shiftDay(-1) },
-                            onNext = { viewModel.shiftDay(1) },
-                            onClick = { showDayPicker = true },
-                        )
-                    }
-                },
             )
         },
     ) { innerPadding ->
@@ -203,73 +203,137 @@ fun StatsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(key = "period_toggle") {
-                PeriodToggle(
-                    selected = period,
-                    onSelect = viewModel::setPeriod,
+            item(key = "stats_tab_bar") {
+                StatsTabBar(
+                    selected = selectedTab,
+                    onSelect = viewModel::setSelectedTab,
                 )
             }
-            item(key = "type_toggle") {
-                TypeToggle(
-                    selected = viewingType,
-                    onSelect = viewModel::setViewingType,
-                )
-            }
-            item(key = "summary") {
-                if (period == StatsPeriod.DAY) {
-                    DayStatsSummaryCard(
-                        summary = selectedDaySummary,
-                    )
-                } else {
-                    StatsSummaryCard(
-                        totalCents = totalCents,
-                        dailyAverageCents = dailyAverage,
-                        balanceCents = balanceCents,
-                        comparison = comparison,
-                        type = viewingType,
+
+            if (selectedTab != StatsTab.SUBSCRIPTION) {
+                item(key = "compact_period_bar") {
+                    CompactPeriodFilterBar(
                         period = period,
+                        selectedMonth = selectedMonth,
+                        selectedYear = selectedYear,
+                        selectedDate = selectedDate,
+                        onSelectPeriod = viewModel::setPeriod,
+                        onOpenMonthPicker = { showMonthPicker = true },
+                        onPreviousYear = { viewModel.shiftYear(-1) },
+                        onNextYear = { viewModel.shiftYear(1) },
+                        onPreviousDay = { viewModel.shiftDay(-1) },
+                        onNextDay = { viewModel.shiftDay(1) },
+                        onOpenDayPicker = { showDayPicker = true },
                     )
                 }
-            }
-            if (stats.isEmpty()) {
-                item(key = "empty") {
-                    EmptyStatsCard(
-                        type = viewingType,
-                        period = period,
-                        onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
-                    )
+                item(key = "summary") {
+                    if (period == StatsPeriod.DAY) {
+                        DayStatsSummaryCard(
+                            summary = selectedDaySummary,
+                        )
+                    } else {
+                        StatsSummaryCard(
+                            totalCents = totalCents,
+                            dailyAverageCents = dailyAverage,
+                            balanceCents = balanceCents,
+                            comparison = comparison,
+                            type = viewingType,
+                            period = period,
+                        )
+                    }
+                }
+                if (stats.isEmpty()) {
+                    item(key = "empty") {
+                        EmptyStatsCard(
+                            type = viewingType,
+                            period = period,
+                            onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
+                        )
+                    }
+                } else {
+                    item(key = "donut") {
+                        CategoryDonutCard(
+                            stats = stats,
+                            totalCents = totalCents,
+                            type = viewingType,
+                            onCategoryClick = { selectedCategory = it },
+                        )
+                    }
+                    if (isAccountMostlyUncategorized) {
+                        item(key = "account_distribution_hint") {
+                            CollapsedAccountDistributionHint()
+                        }
+                    } else if (accountStats.isNotEmpty()) {
+                        item(key = "account_distribution") {
+                            AccountDistributionCard(
+                                accountStats = accountStats,
+                                type = viewingType,
+                                expanded = accountsExpanded,
+                                onToggleExpanded = { accountsExpanded = !accountsExpanded },
+                                onAccountClick = { accountKey ->
+                                    onOpenLedger(ledgerDrilldown(account = accountKey))
+                                },
+                            )
+                        }
+                    }
+                    when (period) {
+                        StatsPeriod.MONTH -> item(key = "daily_trend") {
+                            DailyTrendCard(
+                                dailyTotals = dailyTotals,
+                                dailyAverageCents = dailyAverage,
+                                monthKey = selectedMonth,
+                                onOpenLedger = { day ->
+                                    selectedTrendDay = day
+                                },
+                            )
+                        }
+                        StatsPeriod.YEAR -> item(key = "monthly_trend") {
+                            MonthlyTrendCard(
+                                monthlyTotals = monthlyTotals,
+                                year = selectedYear,
+                                type = viewingType,
+                            )
+                        }
+                        StatsPeriod.DAY -> Unit
+                    }
                 }
             } else {
-                item(key = "donut") {
-                    CategoryDonutCard(
-                        stats = stats,
-                        totalCents = totalCents,
-                        type = viewingType,
-                        onCategoryClick = { selectedCategory = it },
-                    )
-                }
-                when (period) {
-                    StatsPeriod.MONTH -> item(key = "daily_trend") {
-                        DailyTrendCard(
-                            dailyTotals = dailyTotals,
-                            dailyAverageCents = dailyAverage,
-                            monthKey = selectedMonth,
-                            onOpenLedger = { day ->
-                                selectedTrendDay = day
-                            },
+                if (subscriptionStats.activeCount == 0) {
+                    item(key = "subscription_empty") {
+                        SubscriptionEmptyGuideCard(
+                            recurringCandidateCount = subscriptionStats.recurringCandidateCount,
+                            onDiscoverClick = { onOpenSubscriptions(false) },
+                            onAddClick = { onOpenSubscriptions(false) },
                         )
                     }
-                    StatsPeriod.YEAR -> item(key = "monthly_trend") {
-                        MonthlyTrendCard(
-                            monthlyTotals = monthlyTotals,
-                            year = selectedYear,
-                            type = viewingType,
+                } else {
+                    item(key = "subscription_summary") {
+                        SubscriptionSummaryCard(
+                            state = subscriptionStats,
+                            onOpenAllSubscriptions = { onOpenSubscriptions(false) },
                         )
                     }
-                    StatsPeriod.DAY -> Unit
+                    item(key = "subscription_structure") {
+                        SubscriptionStructureGrid(state = subscriptionStats)
+                    }
+                    if (subscriptionStats.pendingCancelCount > 0) {
+                        item(key = "subscription_pending_cancel") {
+                            SubscriptionPendingCancelBanner(
+                                pendingCancelCount = subscriptionStats.pendingCancelCount,
+                                monthlySavingsCents = subscriptionStats.pendingCancelMonthlySavingsCents,
+                                onClick = { onOpenSubscriptions(true) },
+                            )
+                        }
+                    }
+                    item(key = "subscription_forecast") {
+                        SubscriptionForecastCard(
+                            forecast = subscriptionStats.forecast12Months,
+                            peakMonth = subscriptionStats.peakMonth,
+                        )
+                    }
                 }
             }
         }
@@ -356,137 +420,909 @@ fun StatsScreen(
 }
 
 @Composable
-private fun TypeToggle(
-    selected: TransactionType,
-    onSelect: (TransactionType) -> Unit,
+private fun StatsTabBar(
+    selected: StatsTab,
+    onSelect: (StatsTab) -> Unit,
 ) {
-    Row(
+    val shape = RoundedCornerShape(14.dp)
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        shape = shape,
+        color = QingSurface,
+        border = BorderStroke(1.dp, QingOutline),
     ) {
-        TypePill(
-            text = tr("支出"),
-            selected = selected == TransactionType.EXPENSE,
-            income = false,
-            onClick = { onSelect(TransactionType.EXPENSE) },
-            modifier = Modifier.weight(1f),
-        )
-        TypePill(
-            text = tr("收入"),
-            selected = selected == TransactionType.INCOME,
-            income = true,
-            onClick = { onSelect(TransactionType.INCOME) },
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun TypePill(
-    text: String,
-    selected: Boolean,
-    income: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(50)
-    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
-    Row(
-        modifier = modifier
-            .heightIn(min = 48.dp)
-            .clip(shape)
-            .background(if (selected) QingPrimary else QingSurface)
-            .border(1.dp, if (selected) QingPrimary else QingOutline, shape)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .selectableGroup()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatsTabSegment(
+                text = tr("支出"),
+                selected = selected == StatsTab.EXPENSE,
+                onClick = { onSelect(StatsTab.EXPENSE) },
+                modifier = Modifier.weight(1f),
             )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Icon(
-            imageVector = if (income) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
-            contentDescription = null,
-            tint = foreground,
-            modifier = Modifier.size(15.dp),
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = foreground,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+            StatsTabSegment(
+                text = tr("收入"),
+                selected = selected == StatsTab.INCOME,
+                onClick = { onSelect(StatsTab.INCOME) },
+                modifier = Modifier.weight(1f),
+            )
+            StatsTabSegment(
+                text = bilingual("订阅", "Subscriptions"),
+                selected = selected == StatsTab.SUBSCRIPTION,
+                onClick = { onSelect(StatsTab.SUBSCRIPTION) },
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
 @Composable
-private fun PeriodToggle(
-    selected: StatsPeriod,
-    onSelect: (StatsPeriod) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        PeriodPill(
-            text = tr("月度"),
-            selected = selected == StatsPeriod.MONTH,
-            onClick = { onSelect(StatsPeriod.MONTH) },
-            modifier = Modifier.weight(1f),
-        )
-        PeriodPill(
-            text = tr("全年"),
-            selected = selected == StatsPeriod.YEAR,
-            onClick = { onSelect(StatsPeriod.YEAR) },
-            modifier = Modifier.weight(1f),
-        )
-        PeriodPill(
-            text = tr("按日"),
-            selected = selected == StatsPeriod.DAY,
-            onClick = { onSelect(StatsPeriod.DAY) },
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun PeriodPill(
+private fun StatsTabSegment(
     text: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(50)
+    val pillShape = RoundedCornerShape(10.dp)
     val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
     Box(
         modifier = modifier
-            .heightIn(min = 44.dp)
-            .clip(shape)
-            .background(if (selected) QingPrimary else QingSurface)
-            .border(1.dp, if (selected) QingPrimary else QingOutline, shape)
+            .heightIn(min = 38.dp)
+            .clip(pillShape)
+            .background(if (selected) QingPrimary else Color.Transparent)
             .selectable(
                 selected = selected,
-                role = Role.RadioButton,
+                role = Role.Tab,
                 onClick = onClick,
             )
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelLarge,
             color = foreground,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
         )
     }
 }
+
+@Composable
+private fun CompactPeriodFilterBar(
+    period: StatsPeriod,
+    selectedMonth: String,
+    selectedYear: Int,
+    selectedDate: StatsDate,
+    onSelectPeriod: (StatsPeriod) -> Unit,
+    onOpenMonthPicker: () -> Unit,
+    onPreviousYear: () -> Unit,
+    onNextYear: () -> Unit,
+    onPreviousDay: () -> Unit,
+    onNextDay: () -> Unit,
+    onOpenDayPicker: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CompactPeriodPillGroup(
+            selected = period,
+            onSelect = onSelectPeriod,
+        )
+        Spacer(Modifier.width(8.dp))
+        when (period) {
+            StatsPeriod.MONTH -> CompactMonthPickerButton(
+                month = selectedMonth,
+                onClick = onOpenMonthPicker,
+            )
+            StatsPeriod.YEAR -> CompactYearStepper(
+                year = selectedYear,
+                onPrevious = onPreviousYear,
+                onNext = onNextYear,
+            )
+            StatsPeriod.DAY -> CompactDateStepper(
+                date = selectedDate,
+                onPrevious = onPreviousDay,
+                onNext = onNextDay,
+                onClick = onOpenDayPicker,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactPeriodPillGroup(
+    selected: StatsPeriod,
+    onSelect: (StatsPeriod) -> Unit,
+) {
+    val containerShape = RoundedCornerShape(50)
+    Surface(
+        shape = containerShape,
+        color = QingSurface,
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Row(
+            modifier = Modifier
+                .selectableGroup()
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CompactPeriodOption(
+                text = bilingual("日", "Day"),
+                selected = selected == StatsPeriod.DAY,
+                onClick = { onSelect(StatsPeriod.DAY) },
+            )
+            CompactPeriodOption(
+                text = bilingual("月", "Mo"),
+                selected = selected == StatsPeriod.MONTH,
+                onClick = { onSelect(StatsPeriod.MONTH) },
+            )
+            CompactPeriodOption(
+                text = bilingual("年", "Yr"),
+                selected = selected == StatsPeriod.YEAR,
+                onClick = { onSelect(StatsPeriod.YEAR) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactPeriodOption(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(50)
+    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
+    Box(
+        modifier = Modifier
+            .heightIn(min = 32.dp)
+            .clip(shape)
+            .background(if (selected) QingPrimary else Color.Transparent)
+            .selectable(
+                selected = selected,
+                role = Role.RadioButton,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = foreground,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+@Composable
+private fun CollapsedAccountDistributionHint() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = QingSurface,
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.AccountBalanceWallet,
+                contentDescription = null,
+                tint = QingTextSecondary,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                text = bilingual(
+                    "按账户分布 · 当期超 90% 账单未填写账户，已收起",
+                    "By account · Over 90% of bills lack an account",
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = QingTextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountDistributionCard(
+    accountStats: List<AccountStat>,
+    type: TransactionType,
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    onAccountClick: (String) -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    val hasMore = accountStats.size > AccountAggregation.DEFAULT_VISIBLE_LIMIT
+    val visibleStats = if (expanded || !hasMore) {
+        accountStats
+    } else {
+        accountStats.take(AccountAggregation.DEFAULT_VISIBLE_LIMIT)
+    }
+    val remainingCount = (accountStats.size - AccountAggregation.DEFAULT_VISIBLE_LIMIT).coerceAtLeast(0)
+    val maxTotalCents = accountStats.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
+    val activeBarColor = if (type == TransactionType.INCOME) QingIncome else QingPrimary
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SectionHeader(bilingual("按账户分布", "Account Distribution"))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                visibleStats.forEach { stat ->
+                    val barColor = if (stat.isUncategorized) {
+                        QingTextSecondary.copy(alpha = 0.42f)
+                    } else {
+                        activeBarColor
+                    }
+                    val fillFraction = if (maxTotalCents > 0L && stat.totalCents > 0L) {
+                        (stat.totalCents.toFloat() / maxTotalCents.toFloat()).coerceIn(0.03f, 1f)
+                    } else {
+                        0f
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable(role = Role.Button) { onAccountClick(stat.accountKey) }
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = accountDisplayLabel(stat),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (stat.isUncategorized) FontWeight.Normal else FontWeight.Medium,
+                                color = if (stat.isUncategorized) QingTextSecondary else QingText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "${stat.count}${bilingual("笔", "")} · ${categoryPercentText(stat.percentage)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = QingTextSecondary,
+                                maxLines = 1,
+                            )
+                            AutoSizeAmountText(
+                                text = formatCny(stat.totalCents),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (stat.isUncategorized) QingTextSecondary else QingText,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.widthIn(min = 72.dp, max = 96.dp),
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = QingTextSecondary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(QingSurfaceVariant),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            if (fillFraction > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(fillFraction)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(50))
+                                        .background(barColor),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (hasMore) {
+                HorizontalDivider(color = QingOutline)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(role = Role.Button, onClick = onToggleExpanded)
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = if (expanded) {
+                            bilingual("收起", "Collapse")
+                        } else {
+                            bilingual("展开其余 $remainingCount 个账户", "Show $remainingCount more")
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = QingPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Icon(
+                        imageVector = if (expanded) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
+                        },
+                        contentDescription = null,
+                        tint = QingPrimary,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionEmptyGuideCard(
+    recurringCandidateCount: Int,
+    onDiscoverClick: () -> Unit,
+    onAddClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(QingMintSoft),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.EventRepeat,
+                    contentDescription = null,
+                    tint = QingPrimary,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+            Text(
+                text = bilingual("还没有在用周期订阅", "No active subscriptions yet"),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = QingText,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = if (recurringCandidateCount > 0) {
+                    bilingual(
+                        "已从历史账单探测到 $recurringCandidateCount 项疑似周期扣费，管理后即可折算月均固定成本并预测 12 个月续费峰值。",
+                        "Detected $recurringCandidateCount likely recurring bills. Track them to view monthly fixed costs and 12-month renewal peaks.",
+                    )
+                } else {
+                    bilingual(
+                        "记录房租、会员、云服务等周期扣费后，这里会自动折算月均固定成本并预测未来 12 个月续费峰值。",
+                        "Add memberships, rent, or cloud plans to see your monthly fixed costs and 12-month renewal forecast.",
+                    )
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = QingTextSecondary,
+                textAlign = TextAlign.Center,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onAddClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text(
+                        text = bilingual("添加第一条订阅", "Add first subscription"),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onDiscoverClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, QingOutline),
+                ) {
+                    Text(
+                        text = if (recurringCandidateCount > 0) {
+                            bilingual(
+                                "从历史账单自动发现（$recurringCandidateCount）",
+                                "Discover from bills ($recurringCandidateCount)",
+                            )
+                        } else {
+                            bilingual("从历史账单自动发现", "Discover from bills")
+                        },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionSummaryCard(
+    state: SubscriptionStatsState,
+    onOpenAllSubscriptions: () -> Unit,
+) {
+    val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
+    val forecastTotalCents = state.forecast12Months.sumOf { it.totalCnyCents }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(QingPrimaryContainer)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = bilingual("月均固定成本", "Monthly Fixed Cost"),
+                style = MaterialTheme.typography.labelMedium,
+                color = mutedOnContainer,
+            )
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(role = Role.Button, onClick = onOpenAllSubscriptions)
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = bilingual("全部订阅", "All subscriptions"),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = QingPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = QingPrimary,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+        AutoSizeAmountText(
+            text = formatCny(state.monthlyTotalCnyCents),
+            style = MaterialTheme.typography.headlineMedium,
+            color = QingPrimaryDeep,
+            fontWeight = FontWeight.Bold,
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            SummaryMetric(
+                label = bilingual("折合年费", "Annualized"),
+                modifier = Modifier.weight(1f),
+            ) {
+                AutoSizeAmountText(
+                    text = formatCny(state.monthlyTotalCnyCents * 12L),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = QingPrimaryDeep,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Start,
+                )
+            }
+            SummaryMetric(
+                label = bilingual("未来12月预计", "Next 12 Months"),
+                modifier = Modifier.weight(1f),
+            ) {
+                AutoSizeAmountText(
+                    text = formatCny(forecastTotalCents),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = QingPrimaryDeep,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Start,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionStructureGrid(
+    state: SubscriptionStatsState,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SectionHeader(bilingual("订阅结构", "Subscription Breakdown"))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SubscriptionStructureCell(
+                    label = bilingual("在用周期订阅", "Active Subscriptions"),
+                    value = "${state.activeCount} ${bilingual("项", "")}".trim(),
+                    modifier = Modifier.weight(1f),
+                )
+                SubscriptionStructureCell(
+                    label = bilingual("平均每项月费", "Avg Monthly Cost"),
+                    value = formatCny(state.averageMonthlyCnyCents),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SubscriptionStructureCell(
+                    label = bilingual("最高月费订阅", "Highest Monthly"),
+                    value = formatCny(state.mostExpensiveMonthlyCnyCents),
+                    subValue = state.mostExpensiveName,
+                    modifier = Modifier.weight(1f),
+                )
+                SubscriptionStructureCell(
+                    label = bilingual("需手动续费", "Manual Renewal"),
+                    value = "${state.manualRenewalCount} ${bilingual("项", "")}".trim(),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionStructureCell(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    subValue: String? = null,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(QingSurfaceVariant.copy(alpha = 0.7f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = QingTextSecondary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        AutoSizeAmountText(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            color = QingText,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Start,
+        )
+        if (!subValue.isNullOrBlank()) {
+            Text(
+                text = subValue,
+                style = MaterialTheme.typography.labelSmall,
+                color = QingPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionPendingCancelBanner(
+    pendingCancelCount: Int,
+    monthlySavingsCents: Long,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(role = Role.Button, onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = QingWarningContainer,
+        border = BorderStroke(1.dp, QingWarning.copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Savings,
+                contentDescription = null,
+                tint = QingWarning,
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                text = bilingual(
+                    "已标记 $pendingCancelCount 项准备取消，退订后每月可省 ${formatCny(monthlySavingsCents)}",
+                    "$pendingCancelCount marked to cancel · save ${formatCny(monthlySavingsCents)}/mo",
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = QingWarning,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowRight,
+                contentDescription = null,
+                tint = QingWarning,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionForecastCard(
+    forecast: List<MonthlyForecastPoint>,
+    peakMonth: MonthlyForecastPoint?,
+) {
+    if (forecast.isEmpty()) return
+    val defaultSelectedIndex = remember(forecast, peakMonth) {
+        if (peakMonth != null) {
+            forecast.indexOfFirst { it.year == peakMonth.year && it.month == peakMonth.month }
+                .coerceAtLeast(0)
+        } else {
+            0
+        }
+    }
+    var selectedIndex by remember(forecast) { mutableIntStateOf(defaultSelectedIndex) }
+    val selectedPoint = forecast.getOrNull(selectedIndex)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = QingSurface),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = bilingual("未来 12 个月续费预测", "12-Month Renewal Forecast"),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (peakMonth != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = bilingual(
+                            "峰值：${peakMonth.year}年${peakMonth.month}月 ${formatCny(peakMonth.totalCnyCents)}",
+                            "Peak: ${yearMonthShortLabel(peakMonth.year, peakMonth.month)} ${formatCny(peakMonth.totalCnyCents)}",
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = QingWarning,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(QingWarningContainer)
+                            .padding(horizontal = 9.dp, vertical = 4.dp),
+                    )
+                }
+            }
+            SubscriptionForecastBarChart(
+                forecast = forecast,
+                peakMonth = peakMonth,
+                selectedIndex = selectedIndex,
+                onSelectIndex = { selectedIndex = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp),
+            )
+            if (selectedPoint != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(QingMintSoft.copy(alpha = 0.65f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = bilingual(
+                            "${selectedPoint.year}年${selectedPoint.month}月 · ${selectedPoint.occurrenceCount} 笔续费",
+                            "${yearMonthShortLabel(selectedPoint.year, selectedPoint.month)} · ${selectedPoint.occurrenceCount} renewals",
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = QingPrimaryDeep,
+                    )
+                    AutoSizeAmountText(
+                        text = formatCny(selectedPoint.totalCnyCents),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = QingPrimaryDeep,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionForecastBarChart(
+    forecast: List<MonthlyForecastPoint>,
+    peakMonth: MonthlyForecastPoint?,
+    selectedIndex: Int,
+    onSelectIndex: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (forecast.isEmpty()) return
+    val maxCents = forecast.maxOfOrNull { it.totalCentsOrZero() }?.coerceAtLeast(1L) ?: 1L
+    val outlineColor = QingOutline
+    val labelColor = QingTextSecondary
+    val normalBarColor = QingMint
+    val selectedBarColor = QingPrimary
+    val peakBarColor = QingWarning
+    val chartDesc = bilingual("未来 12 个月续费预测柱状图", "12-month subscription renewal forecast chart")
+
+    Canvas(
+        modifier = modifier
+            .semantics { contentDescription = chartDesc }
+            .pointerInput(forecast) {
+                detectTapGestures { position ->
+                    val leftPad = 38.dp.toPx()
+                    val rightPad = 6.dp.toPx()
+                    val chartWidth = size.width.toFloat() - leftPad - rightPad
+                    if (chartWidth <= 0f) return@detectTapGestures
+                    if (position.x in leftPad..(leftPad + chartWidth)) {
+                        val slot = chartWidth / forecast.size
+                        val idx = ((position.x - leftPad) / slot).toInt().coerceIn(0, forecast.lastIndex)
+                        onSelectIndex(idx)
+                    }
+                }
+            },
+    ) {
+        val leftPad = 38.dp.toPx()
+        val rightPad = 6.dp.toPx()
+        val topPad = 12.dp.toPx()
+        val bottomPad = 20.dp.toPx()
+        val chartWidth = (size.width - leftPad - rightPad).coerceAtLeast(1f)
+        val chartHeight = (size.height - topPad - bottomPad).coerceAtLeast(1f)
+        val slot = chartWidth / forecast.size
+        val barWidth = (slot * 0.56f).coerceAtLeast(6f)
+
+        val axisPaint = Paint().apply {
+            color = labelColor.toArgb()
+            textSize = 9.sp.toPx()
+            isAntiAlias = true
+            textAlign = Paint.Align.RIGHT
+        }
+        val monthPaint = Paint().apply {
+            color = labelColor.toArgb()
+            textSize = 9.sp.toPx()
+            isAntiAlias = true
+            textAlign = Paint.Align.CENTER
+        }
+
+        for (i in 0..3) {
+            val y = topPad + chartHeight * (i / 3f)
+            drawLine(
+                color = outlineColor.copy(alpha = 0.7f),
+                start = Offset(leftPad, y),
+                end = Offset(leftPad + chartWidth, y),
+                strokeWidth = 1.dp.toPx(),
+            )
+            val value = maxCents * (3 - i) / 3
+            drawContext.canvas.nativeCanvas.drawText(
+                "¥${value / 100}",
+                leftPad - 5.dp.toPx(),
+                y + 3.dp.toPx(),
+                axisPaint,
+            )
+        }
+
+        forecast.forEachIndexed { index, point ->
+            val x = leftPad + index * slot + (slot - barWidth) / 2f
+            val ratio = point.totalCnyCents.toFloat() / maxCents.toFloat()
+            val barHeight = (ratio * chartHeight).coerceAtLeast(
+                if (point.totalCnyCents > 0L) 3.dp.toPx() else 0f,
+            )
+            val top = topPad + chartHeight - barHeight
+            val isPeak = peakMonth != null &&
+                point.year == peakMonth.year &&
+                point.month == peakMonth.month
+            val isSelected = index == selectedIndex
+            val color = when {
+                isPeak -> peakBarColor
+                isSelected -> selectedBarColor
+                else -> normalBarColor
+            }
+            if (barHeight > 0f) {
+                val radius = min(barWidth / 2f, barHeight / 2f)
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(x, top),
+                    size = Size(barWidth, barHeight),
+                    cornerRadius = CornerRadius(radius, radius),
+                )
+            }
+            if (index % 2 == 0 || isPeak || isSelected) {
+                drawContext.canvas.nativeCanvas.drawText(
+                    monthShortLabel(point.month),
+                    x + barWidth / 2f,
+                    size.height - 3.dp.toPx(),
+                    monthPaint,
+                )
+            }
+        }
+    }
+}
+
+private fun MonthlyForecastPoint.totalCentsOrZero(): Long = totalCnyCents.coerceAtLeast(0L)
 
 @Composable
 private fun StatsSummaryCard(
@@ -1475,19 +2311,19 @@ private fun CategoryDetailTransactionRow(
 }
 
 @Composable
-private fun MonthPickerButton(
+private fun CompactMonthPickerButton(
     month: String,
     onClick: () -> Unit,
 ) {
     val shape = RoundedCornerShape(50)
     Row(
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = 38.dp)
             .clip(shape)
             .background(QingSurface)
             .border(1.dp, QingOutline, shape)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -1495,7 +2331,7 @@ private fun MonthPickerButton(
             imageVector = Icons.Outlined.CalendarMonth,
             contentDescription = null,
             tint = QingPrimary,
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(15.dp),
         )
         Text(
             text = monthLabel(month),
@@ -1503,6 +2339,8 @@ private fun MonthPickerButton(
             color = QingPrimaryDeep,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
         Icon(
             imageVector = Icons.Default.ArrowDropDown,
@@ -1514,7 +2352,7 @@ private fun MonthPickerButton(
 }
 
 @Composable
-private fun DateStepper(
+private fun CompactDateStepper(
     date: StatsDate,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1525,7 +2363,7 @@ private fun DateStepper(
     val canGoNext = date.year < StatsViewModel.MAX_YEAR
     Row(
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = 38.dp)
             .clip(shape)
             .background(QingSurface)
             .border(1.dp, QingOutline, shape),
@@ -1534,43 +2372,44 @@ private fun DateStepper(
         IconButton(
             onClick = onPrevious,
             enabled = canGoPrevious,
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(32.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowLeft,
                 contentDescription = tr("前一天"),
                 tint = if (canGoPrevious) QingPrimary else QingTextSecondary.copy(alpha = 0.38f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(17.dp),
             )
         }
         Text(
-            text = statsDateLabel(date),
+            text = compactStatsDateLabel(date),
             style = MaterialTheme.typography.labelMedium,
             color = QingPrimaryDeep,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
+            softWrap = false,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .clickable(onClick = onClick)
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .padding(horizontal = 2.dp, vertical = 6.dp),
         )
         IconButton(
             onClick = onNext,
             enabled = canGoNext,
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(32.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowRight,
                 contentDescription = tr("后一天"),
                 tint = if (canGoNext) QingPrimary else QingTextSecondary.copy(alpha = 0.38f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(17.dp),
             )
         }
     }
 }
 
 @Composable
-private fun YearStepper(
+private fun CompactYearStepper(
     year: Int,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -1580,7 +2419,7 @@ private fun YearStepper(
     val canGoNext = year < StatsViewModel.MAX_YEAR
     Row(
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            .heightIn(min = 38.dp)
             .clip(shape)
             .background(QingSurface)
             .border(1.dp, QingOutline, shape),
@@ -1589,13 +2428,13 @@ private fun YearStepper(
         IconButton(
             onClick = onPrevious,
             enabled = canGoPrevious,
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(32.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowLeft,
                 contentDescription = tr("上一年"),
                 tint = if (canGoPrevious) QingPrimary else QingTextSecondary.copy(alpha = 0.38f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(17.dp),
             )
         }
         Text(
@@ -1604,20 +2443,65 @@ private fun YearStepper(
             color = QingPrimaryDeep,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 4.dp),
         )
         IconButton(
             onClick = onNext,
             enabled = canGoNext,
-            modifier = Modifier.size(40.dp),
+            modifier = Modifier.size(32.dp),
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowRight,
                 contentDescription = tr("下一年"),
                 tint = if (canGoNext) QingPrimary else QingTextSecondary.copy(alpha = 0.38f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(17.dp),
             )
         }
     }
+}
+
+private fun bilingual(zh: String, en: String): String =
+    if (AppLanguage.current() == AppLanguage.ENGLISH) en else zh
+
+private fun accountDisplayLabel(stat: AccountStat): String {
+    if (AppLanguage.current() != AppLanguage.ENGLISH) return stat.displayName
+    return when (stat.accountKey) {
+        AccountNormalization.UNASSIGNED_ACCOUNT_KEY -> "Uncategorized Account"
+        "微信" -> "WeChat"
+        "支付宝" -> "Alipay"
+        "现金" -> "Cash"
+        "银行卡" -> "Bank Card"
+        else -> stat.displayName
+    }
+}
+
+private fun yearMonthShortLabel(year: Int, month: Int): String {
+    if (AppLanguage.current() != AppLanguage.ENGLISH) return "${year}年${month}月"
+    val cal = Calendar.getInstance().apply {
+        clear()
+        set(Calendar.YEAR, year)
+        set(Calendar.MONTH, month - 1)
+    }
+    return SimpleDateFormat("MMM yyyy", Locale.ENGLISH).format(cal.time)
+}
+
+internal fun compactStatsDateLabel(
+    date: StatsDate,
+    currentYear: Int = Calendar.getInstance().get(Calendar.YEAR),
+    english: Boolean = AppLanguage.current() == AppLanguage.ENGLISH,
+): String {
+    if (date.year != currentYear) {
+        return "%02d/%02d/%02d".format(Locale.US, date.year % 100, date.month, date.day)
+    }
+    if (!english) {
+        return "${date.month}月${date.day}日"
+    }
+    val calendar = Calendar.getInstance().apply {
+        clear()
+        set(date.year, date.month - 1, date.day, 12, 0, 0)
+    }
+    return SimpleDateFormat("MMM d", Locale.ENGLISH).format(calendar.time)
 }
 
 private fun yearLabel(year: Int): String =

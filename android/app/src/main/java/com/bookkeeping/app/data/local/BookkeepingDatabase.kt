@@ -7,9 +7,11 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bookkeeping.app.data.local.dao.ProcessedNoticeDao
+import com.bookkeeping.app.data.local.dao.SubscriptionDao
 import com.bookkeeping.app.data.local.dao.TransactionDiagnosticDao
 import com.bookkeeping.app.data.local.dao.TransactionDao
 import com.bookkeeping.app.data.local.entity.ProcessedNoticeEntity
+import com.bookkeeping.app.data.local.entity.SubscriptionEntity
 import com.bookkeeping.app.data.local.entity.TransactionDiagnosticEventEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 
@@ -17,8 +19,13 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 // entities = 这个库里有哪些"表"
 // version = 数据库版本号；每次改 Entity 结构需要 +1 并写 Migration
 @Database(
-    entities = [TransactionEntity::class, ProcessedNoticeEntity::class, TransactionDiagnosticEventEntity::class],
-    version = 13,
+    entities = [
+        TransactionEntity::class,
+        ProcessedNoticeEntity::class,
+        TransactionDiagnosticEventEntity::class,
+        SubscriptionEntity::class,
+    ],
+    version = 14,
     exportSchema = false  // 不导出 schema 文件；正式上线建议开
 )
 abstract class BookkeepingDatabase : RoomDatabase() {
@@ -28,6 +35,8 @@ abstract class BookkeepingDatabase : RoomDatabase() {
     abstract fun processedNoticeDao(): ProcessedNoticeDao
 
     abstract fun transactionDiagnosticDao(): TransactionDiagnosticDao
+
+    abstract fun subscriptionDao(): SubscriptionDao
 
     companion object {
         const val DB_NAME = "bookkeeping.db"
@@ -39,8 +48,57 @@ abstract class BookkeepingDatabase : RoomDatabase() {
          */
         fun build(context: Context): BookkeepingDatabase =
             Room.databaseBuilder(context, BookkeepingDatabase::class.java, DB_NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(
+                    MIGRATION_1_2,
+                    MIGRATION_2_3,
+                    MIGRATION_3_4,
+                    MIGRATION_4_5,
+                    MIGRATION_5_6,
+                    MIGRATION_6_7,
+                    MIGRATION_7_8,
+                    MIGRATION_8_9,
+                    MIGRATION_9_10,
+                    MIGRATION_10_11,
+                    MIGRATION_11_12,
+                    MIGRATION_12_13,
+                    MIGRATION_13_14,
+                )
                 .build()
+
+        // v14: recurring subscriptions table for local scheduling, notifications, and Wallos bidirectional sync.
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `subscriptions` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `syncUuid` TEXT NOT NULL,
+                        `wallosId` INTEGER,
+                        `name` TEXT NOT NULL,
+                        `amountCents` INTEGER NOT NULL,
+                        `currency` TEXT NOT NULL DEFAULT 'CNY',
+                        `cnyEstimateCents` INTEGER,
+                        `cadence` TEXT NOT NULL,
+                        `nextDueMs` INTEGER NOT NULL,
+                        `startMs` INTEGER,
+                        `paymentChannel` TEXT NOT NULL DEFAULT '',
+                        `autoRenew` INTEGER NOT NULL DEFAULT 1,
+                        `pendingCancel` INTEGER NOT NULL DEFAULT 0,
+                        `notifyEnabled` INTEGER NOT NULL DEFAULT 1,
+                        `notifyDaysBefore` INTEGER NOT NULL DEFAULT 3,
+                        `active` INTEGER NOT NULL DEFAULT 1,
+                        `note` TEXT NOT NULL DEFAULT '',
+                        `updatedAtMs` INTEGER NOT NULL,
+                        `deletedAtMs` INTEGER,
+                        `dirty` INTEGER NOT NULL DEFAULT 1
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_subscriptions_syncUuid` ON `subscriptions` (`syncUuid`)",
+                )
+            }
+        }
 
         // v13: local-only archived screenshot evidence filename for scanned rows.
         // Additive only; existing rows keep NULL and never enter sync payloads.

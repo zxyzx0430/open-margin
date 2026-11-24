@@ -38,6 +38,37 @@ object BillImportMapping {
         "转账", "转入", "转出", "汇款", "提现", "发给", "信用卡还款", "还款",
     )
 
+    private val BOOKKEEPING_APP_SOURCES = setOf(
+        BillSource.QIANJI,
+        BillSource.YIMU,
+        BillSource.SHARK,
+    )
+    private val BOOKKEEPING_CATEGORY_KEYWORDS: List<Pair<List<String>, TransactionCategory>> = listOf(
+        listOf("餐饮", "三餐", "饮食", "吃饭", "美食", "外卖", "零食", "水果", "茶饮", "酒水", "买菜", "早餐", "午餐", "晚餐", "夜宵", "咖啡", "饮品") to TransactionCategory.FOOD,
+        listOf("交通", "出行", "打车", "地铁", "公交", "火车", "机票", "汽车", "加油", "停车", "高速", "过路") to TransactionCategory.TRANSPORT,
+        listOf("购物", "日用", "百货", "服饰", "衣服", "鞋帽", "美妆", "护肤", "数码", "家居", "网购", "宠物", "母婴", "烟酒") to TransactionCategory.SHOPPING,
+        listOf("娱乐", "休闲", "旅游", "旅行", "度假", "游戏", "电影", "健身", "运动", "游玩") to TransactionCategory.ENTERTAINMENT,
+        listOf("住房", "房租", "租房", "房贷", "物业", "装修", "住宿") to TransactionCategory.HOUSING,
+        listOf("水电", "话费", "网费", "宽带", "通讯", "水费", "电费", "燃气", "暖气", "充值") to TransactionCategory.UTILITIES,
+        listOf("医疗", "健康", "看病", "药品", "体检", "买药") to TransactionCategory.HEALTH,
+        listOf("教育", "学习", "书籍", "培训", "学费", "书") to TransactionCategory.EDUCATION,
+        listOf("工资", "薪资", "薪水", "兼职", "薪酬") to TransactionCategory.SALARY,
+        listOf("奖金", "年终奖", "补贴", "报销", "福利") to TransactionCategory.BONUS,
+        listOf("理财", "投资", "基金", "股票", "利息", "收益", "分红") to TransactionCategory.INVESTMENT,
+        listOf("保险", "保费") to TransactionCategory.INSURANCE,
+        listOf("红包", "礼金", "人情", "礼物", "送礼", "社交") to TransactionCategory.GIFT,
+        listOf("转账", "还款", "借出", "借入") to TransactionCategory.TRANSFER,
+    )
+
+    fun sourceLabel(source: BillSource): String = when (source) {
+        BillSource.WECHAT -> "微信账单"
+        BillSource.ALIPAY -> "支付宝账单"
+        BillSource.QIANJI -> "钱迹账单"
+        BillSource.YIMU -> "一木记账"
+        BillSource.SHARK -> "鲨鱼记账"
+        BillSource.UNKNOWN -> "账单"
+    }
+
     fun ledgerRowKey(row: BillImportRow): String =
         BillImportParser.duplicateKey(row)
 
@@ -170,7 +201,7 @@ object BillImportMapping {
         val rowSource = when (row.source) {
             BillSource.WECHAT -> TransactionSource.WECHAT.name
             BillSource.ALIPAY -> TransactionSource.ALIPAY.name
-            BillSource.UNKNOWN -> null
+            BillSource.QIANJI, BillSource.YIMU, BillSource.SHARK, BillSource.UNKNOWN -> null
         }
         if (rowOrder != null && rowSource != null) {
             transactions.firstOrNull { tx ->
@@ -360,7 +391,7 @@ object BillImportMapping {
         val source = when (row.source) {
             BillSource.WECHAT -> ClassificationSource.WECHAT
             BillSource.ALIPAY -> ClassificationSource.ALIPAY
-            BillSource.UNKNOWN -> ClassificationSource.OTHER
+            BillSource.QIANJI, BillSource.YIMU, BillSource.SHARK, BillSource.UNKNOWN -> ClassificationSource.OTHER
         }
         val status = when (row.status) {
             BillStatus.SUCCESS -> ClassificationStatus.COMPLETED
@@ -369,7 +400,7 @@ object BillImportMapping {
             BillStatus.FAILED -> ClassificationStatus.FAILED
             BillStatus.UNKNOWN -> ClassificationStatus.UNKNOWN
         }
-        return CategoryClassifier.classify(
+        val result = CategoryClassifier.classify(
             ClassificationInput(
                 merchantRaw = row.merchant,
                 contextText = row.rawFields.joinToString(" "),
@@ -381,6 +412,22 @@ object BillImportMapping {
                 amountCents = row.amountCents,
             ),
         )
+        if (row.source in BOOKKEEPING_APP_SOURCES &&
+            !result.ruleId.startsWith("post:") &&
+            !result.ruleId.startsWith("user:") &&
+            !result.ruleId.startsWith("learned:")
+        ) {
+            val mapped = mapBookkeepingCategory(row.sourceCategory, row.description)
+            if (mapped != null && mapped != TransactionCategory.OTHER) {
+                return result.copy(
+                    category = mapped,
+                    confidence = 0.9f,
+                    ruleId = "bookkeeping-category:${row.sourceCategory.orEmpty()}",
+                    reason = "imported bookkeeping app category",
+                )
+            }
+        }
+        return result
     }
 
     fun toTransactionEntity(row: BillImportRow): TransactionEntity? {
@@ -394,7 +441,7 @@ object BillImportMapping {
             val source = parseLedgerSource(row.ledgerSource) ?: when (row.source) {
                 BillSource.WECHAT -> TransactionSource.WECHAT
                 BillSource.ALIPAY -> TransactionSource.ALIPAY
-                BillSource.UNKNOWN -> TransactionSource.OTHER
+                BillSource.QIANJI, BillSource.YIMU, BillSource.SHARK, BillSource.UNKNOWN -> TransactionSource.OTHER
             }
             val category = parseLedgerCategory(row.sourceCategory)
                 ?: classificationFor(row).category
@@ -430,7 +477,7 @@ object BillImportMapping {
         val source = when (row.source) {
             BillSource.WECHAT -> TransactionSource.WECHAT
             BillSource.ALIPAY -> TransactionSource.ALIPAY
-            BillSource.UNKNOWN -> TransactionSource.OTHER
+            BillSource.QIANJI, BillSource.YIMU, BillSource.SHARK, BillSource.UNKNOWN -> TransactionSource.OTHER
         }
         val merchantCategory = categoryFor(row.merchant)
         val category = when {
@@ -447,13 +494,7 @@ object BillImportMapping {
         val transfer = category == TransactionCategory.TRANSFER
         val note = buildString {
             append("[导入] ")
-            append(
-                when (row.source) {
-                    BillSource.WECHAT -> "微信账单"
-                    BillSource.ALIPAY -> "支付宝账单"
-                    BillSource.UNKNOWN -> "账单"
-                },
-            )
+            append(sourceLabel(row.source))
             if (refund) append(" · 退款")
             if (neutral) append(" · 不计收支")
             if (withdrawal) append(" · 提现")
@@ -463,7 +504,18 @@ object BillImportMapping {
             append("行")
             row.orderId?.let { append(" · 单号 ").append(it) }
             row.paymentMethod?.let { append(" · ").append(it) }
-            row.sourceCategory?.let { append(" · 分类 ").append(it) }
+            row.sourceCategory?.let { cat ->
+                append(" · 分类 ").append(cat)
+                val sub = row.description?.trim()?.takeIf {
+                    it.isNotEmpty() && it != cat && it != row.note
+                }
+                if (sub != null && row.source in BOOKKEEPING_APP_SOURCES) {
+                    append("/").append(sub)
+                }
+            }
+            row.note?.trim()?.takeIf { it.isNotEmpty() && it != "/" }?.let {
+                append(" · ").append(it)
+            }
         }
         return TransactionEntity(
             amountCents = row.amountCents,
@@ -472,6 +524,7 @@ object BillImportMapping {
             merchant = row.merchant,
             note = note,
             source = source.name,
+            account = row.account?.trim()?.takeIf { it.isNotEmpty() },
             timestamp = row.occurredAtMs,
             currency = row.currency,
             merchantIconKey = MerchantIconCatalog.forMerchant(row.merchant)?.key,
@@ -531,5 +584,22 @@ object BillImportMapping {
         return TransactionCategory.entries.firstOrNull { category ->
             category.displayName == text || category.name.equals(text, ignoreCase = true)
         }
+    }
+
+    private fun mapBookkeepingCategory(
+        sourceCategory: String?,
+        subCategory: String?,
+    ): TransactionCategory? {
+        for (candidate in listOfNotNull(sourceCategory, subCategory)) {
+            val text = candidate.trim()
+            if (text.isEmpty() || text == "其他" || text.equals("OTHER", ignoreCase = true)) {
+                continue
+            }
+            parseLedgerCategory(text)?.takeIf { it != TransactionCategory.OTHER }?.let { return it }
+            BOOKKEEPING_CATEGORY_KEYWORDS.firstOrNull { (keywords, _) ->
+                keywords.any { text.contains(it, ignoreCase = true) }
+            }?.let { return it.second }
+        }
+        return null
     }
 }

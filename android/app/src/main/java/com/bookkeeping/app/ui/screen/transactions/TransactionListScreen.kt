@@ -120,6 +120,7 @@ import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewCard
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewDialog
 import com.bookkeeping.app.ui.screen.capture.CaptureReviewViewModel
+import com.bookkeeping.app.ui.screen.stats.AccountNormalization
 import com.bookkeeping.app.ui.screen.stats.StatsLedgerDrilldown
 import com.bookkeeping.app.ui.screen.stats.StatsPeriod
 import com.bookkeeping.app.ui.components.SiteUpdateBanner
@@ -180,6 +181,7 @@ fun TransactionListScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val typeFilter by viewModel.typeFilter.collectAsState()
     val categoryFilter by viewModel.categoryFilter.collectAsState()
+    val accountFilter by viewModel.accountFilter.collectAsState()
     val timeFilter by viewModel.timeFilter.collectAsState()
     val periodTransactions by viewModel.periodTransactions.collectAsState()
     val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
@@ -225,6 +227,7 @@ fun TransactionListScreen(
         activeDrilldown = request
         viewModel.setTypeFilter(request.type)
         viewModel.setCategoryFilter(request.category)
+        viewModel.setAccountFilter(request.account)
         if (request.day != null) {
             viewModel.setMonth(request.year, request.month)
             exactDateFilter = localDayRange(request.year, request.month, request.day)
@@ -321,6 +324,7 @@ fun TransactionListScreen(
     val noChips = searchQuery.isBlank() &&
         typeFilter == null &&
         categoryFilter == null &&
+        accountFilter == null &&
         timeFilter == LedgerTimeFilter.ALL
     val filterActive = !noChips || exactDateFilter != null
     val categoryTotals = remember(periodTransactions, typeFilter) {
@@ -677,6 +681,17 @@ fun TransactionListScreen(
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
                 ) {
+                    accountFilter?.let { activeAccount ->
+                        LedgerFilterChip(
+                            label = accountFilterLabel(activeAccount),
+                            selected = true,
+                            leadingIcon = Icons.Default.Close,
+                            onClick = {
+                                viewModel.setAccountFilter(null)
+                                activeDrilldown = activeDrilldown?.copy(account = null)
+                            },
+                        )
+                    }
                     LedgerFilterChip(
                         label = categoryFilter?.let { tr(it.displayName) } ?: tr("分类"),
                         selected = categoryFilter != null,
@@ -1321,8 +1336,22 @@ private fun drilldownPeriodLabel(request: StatsLedgerDrilldown): String {
         }
     }
     val category = request.category?.let { " · " + tr(it.displayName) } ?: ""
+    val account = request.account?.let { " · " + accountFilterLabel(it) } ?: ""
     val recordsLabel = (if (english) " " else "") + tr("账单")
-    return range + category + recordsLabel
+    return range + category + account + recordsLabel
+}
+
+private fun accountFilterLabel(account: String): String {
+    val normalized = AccountNormalization.normalize(account)
+    if (AppLanguage.current() != AppLanguage.ENGLISH) return normalized
+    return when (normalized) {
+        AccountNormalization.UNASSIGNED_ACCOUNT_KEY -> "Uncategorized Account"
+        "微信" -> "WeChat"
+        "支付宝" -> "Alipay"
+        "现金" -> "Cash"
+        "银行卡" -> "Bank Card"
+        else -> normalized
+    }
 }
 
 @Composable

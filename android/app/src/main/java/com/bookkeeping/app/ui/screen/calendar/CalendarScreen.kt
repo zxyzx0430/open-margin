@@ -7,7 +7,9 @@ import android.icu.util.ChineseCalendar
 import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
@@ -52,6 +54,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -93,17 +96,31 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.bookkeeping.app.data.budget.BudgetMonth
+import com.bookkeeping.app.data.local.entity.SubscriptionEntity
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.CalendarDateText
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
+import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.screen.stats.StatsTransactionPolicy
+import com.bookkeeping.app.ui.screen.subscriptions.EditSubscriptionSheet
+import com.bookkeeping.app.ui.screen.subscriptions.SubscriptionDetailSheet
+import com.bookkeeping.app.ui.screen.subscriptions.SubscriptionHistoryStats
+import com.bookkeeping.app.ui.screen.subscriptions.formatSmartCny
+import com.bookkeeping.app.ui.screen.subscriptions.subscriptionCadenceLabel
 import com.bookkeeping.app.ui.screen.transactions.LedgerTransactionRow
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
+import com.bookkeeping.app.ui.theme.QingMintSoft
+import com.bookkeeping.app.ui.theme.QingOutline
+import com.bookkeeping.app.ui.theme.QingPrimary
+import com.bookkeeping.app.ui.theme.QingPrimaryDeep
+import com.bookkeeping.app.ui.theme.QingSurfaceVariant
+import com.bookkeeping.app.ui.theme.QingText
+import com.bookkeeping.app.ui.theme.QingTextSecondary
 import java.math.BigInteger
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -378,8 +395,19 @@ internal fun nextCalendarAmountFontSizeSp(currentFontSizeSp: Float): Float =
 fun CalendarScreen(
     viewModel: CalendarViewModel = hiltViewModel(),
     onOpenDetail: (Long) -> Unit = {},
+    onOpenSubscriptions: (Boolean) -> Unit = {},
 ) {
     val transactions by viewModel.transactions.collectAsState()
+    val allSubscriptions by viewModel.allSubscriptions.collectAsState()
+    val fxRates by viewModel.fxRates.collectAsState()
+    val monthlyOccurrencesByDay by viewModel.monthlyOccurrencesByDay.collectAsState()
+    val monthlyRenewalSummary by viewModel.monthlyRenewalSummary.collectAsState()
+    val activeSubscriptionCount by viewModel.activeSubscriptionCount.collectAsState()
+    val recurringCandidateCount by viewModel.recurringCandidateCount.collectAsState()
+    val historyStatsById by viewModel.historyStatsBySubscriptionId.collectAsState()
+    var detailSubscriptionId by remember { mutableStateOf<Long?>(null) }
+    var detailIsPaidInCycle by remember { mutableStateOf(false) }
+    var editingSubscription by remember { mutableStateOf<SubscriptionEntity?>(null) }
     val context = LocalContext.current
     val prefs = remember(context) {
         context.getSharedPreferences(CALENDAR_PREFS, Context.MODE_PRIVATE)
@@ -703,6 +731,15 @@ fun CalendarScreen(
             },
         )
         MonthTotalsRow(monthTransactions)
+        LaunchedEffect(monthKey) {
+            viewModel.setMonthKey(monthKey)
+        }
+        MonthlySubscriptionCapsuleBar(
+            summary = monthlyRenewalSummary,
+            activeSubscriptionCount = activeSubscriptionCount,
+            recurringCandidateCount = recurringCandidateCount,
+            onClick = { onOpenSubscriptions(false) },
+        )
         if (showMonthPicker) {
             MonthPickerDialog(
                 selectedMonth = monthKey,
@@ -719,6 +756,7 @@ fun CalendarScreen(
             year = parts.year,
             month = parts.month,
             transactions = monthTransactions,
+            occurrencesByDay = monthlyOccurrencesByDay,
             gridRowHeight = gridRowHeight,
             weekStartsMonday = weekStartsMonday,
             showLunar = showLunar,
@@ -761,19 +799,66 @@ fun CalendarScreen(
         }
         }
         if (selectionStart != null && selectionEnd != null) {
+            val selectedDaySubscriptions = if (
+                selectionStart == selectionEnd &&
+                selectionStart.year == parts.year &&
+                selectionStart.month == parts.month
+            ) {
+                monthlyOccurrencesByDay[selectionStart.day].orEmpty()
+            } else {
+                emptyList()
+            }
             CalendarListDrawer(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
                 availableHeight = availableHeight,
                 start = selectionStart,
                 end = selectionEnd,
                 transactions = selectedTransactions,
+                daySubscriptions = selectedDaySubscriptions,
                 onClear = {
                     rangeStart = null
                     rangeEnd = null
                 },
                 onOpenDetail = onOpenDetail,
+                onOpenSubscriptionDetail = { occ ->
+                    detailSubscriptionId = occ.subscription.id
+                    detailIsPaidInCycle = occ.isPaidInCycle
+                },
             )
         }
+    }
+
+    val activeDetailSubscription = remember(allSubscriptions, detailSubscriptionId) {
+        detailSubscriptionId?.let { id -> allSubscriptions.firstOrNull { it.id == id } }
+    }
+    activeDetailSubscription?.let { sub ->
+        SubscriptionDetailSheet(
+            subscription = sub,
+            historyStats = historyStatsById[sub.id] ?: SubscriptionHistoryStats(),
+            fxRates = fxRates,
+            isPaidInCurrentCycle = detailIsPaidInCycle,
+            onDismiss = { detailSubscriptionId = null },
+            onToggleAutoRenew = { viewModel.toggleAutoRenew(sub.id) },
+            onTogglePendingCancel = { viewModel.togglePendingCancel(sub.id) },
+            onToggleNotify = { viewModel.toggleNotify(sub.id) },
+            onUpdateNotifyDaysBefore = { days -> viewModel.setNotifyDaysBefore(sub.id, days) },
+            onAdvanceToNextCycle = { viewModel.advanceToNextCycle(sub.id) },
+            onEdit = {
+                detailSubscriptionId = null
+                editingSubscription = sub
+            },
+            onDeactivate = { viewModel.deactivate(sub.id) },
+        )
+    }
+
+    editingSubscription?.let { sub ->
+        EditSubscriptionSheet(
+            existing = sub,
+            fxRates = fxRates,
+            onDismiss = { editingSubscription = null },
+            onSave = { updated -> viewModel.saveSubscription(updated) },
+            onDelete = { id -> viewModel.softDeleteSubscription(id) },
+        )
     }
 }
 
@@ -896,10 +981,105 @@ private fun CalendarMetric(
 }
 
 @Composable
+private fun MonthlySubscriptionCapsuleBar(
+    summary: MonthlyRenewalSummary,
+    activeSubscriptionCount: Int,
+    recurringCandidateCount: Int,
+    onClick: () -> Unit,
+) {
+    val bgColor = if (activeSubscriptionCount > 0 || recurringCandidateCount > 0) {
+        QingMintSoft
+    } else {
+        QingSurfaceVariant.copy(alpha = 0.65f)
+    }
+    val textColor = if (activeSubscriptionCount > 0 || recurringCandidateCount > 0) {
+        QingPrimaryDeep
+    } else {
+        QingTextSecondary
+    }
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = bgColor,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (activeSubscriptionCount > 0 || recurringCandidateCount > 0) {
+                QingPrimary.copy(alpha = 0.16f)
+            } else {
+                QingOutline
+            },
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when {
+                activeSubscriptionCount > 0 -> {
+                    val leftText = if (summary.totalCount > 0) {
+                        "↻ 本月续费 ${summary.totalCount} 笔 · ${formatSmartCny(summary.totalCnyCents)}（待扣 ${formatSmartCny(summary.remainingUnpaidCnyCents)}）"
+                    } else {
+                        "↻ 本月暂无续费 · 共 $activeSubscriptionCount 项订阅"
+                    }
+                    Text(
+                        text = leftText,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontFeatureSettings = "tnum",
+                        ),
+                        fontWeight = FontWeight.Medium,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "全部 ›",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = QingPrimary,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+                recurringCandidateCount > 0 -> {
+                    Text(
+                        text = "✨ 发现 $recurringCandidateCount 项疑似自动续费，一键管理 ›",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                else -> {
+                    Text(
+                        text = "管理周期续费 · 添加 ›",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CalendarMonthGrid(
     year: Int,
     month: Int,
     transactions: List<TransactionEntity>,
+    occurrencesByDay: Map<Int, List<SubscriptionOccurrence>>,
     gridRowHeight: androidx.compose.ui.unit.Dp,
     weekStartsMonday: Boolean,
     showLunar: Boolean,
@@ -1239,6 +1419,7 @@ private fun CalendarMonthGrid(
                                 HeatmapMode.NET -> MaterialTheme.colorScheme.primary
                                 HeatmapMode.OFF -> Color.Transparent
                             }
+                            val dayOccurrences = if (inMonth) occurrencesByDay[day].orEmpty() else emptyList()
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
@@ -1257,6 +1438,25 @@ private fun CalendarMonthGrid(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 if (inMonth) {
+                                    if (dayOccurrences.isNotEmpty()) {
+                                        val hasPendingCancel = dayOccurrences.any {
+                                            it.subscription.pendingCancel
+                                        }
+                                        val dotColor = if (hasPendingCancel) {
+                                            Color(0xFFF59E0B)
+                                        } else {
+                                            Color(0xFF3B82F6)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(top = 2.dp, end = 2.dp)
+                                                .size(8.dp)
+                                                .border(1.5.dp, Color.White, CircleShape)
+                                                .clip(CircleShape)
+                                                .background(dotColor),
+                                        )
+                                    }
                                     Column(
                                         modifier = Modifier.padding(bottom = 2.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1328,8 +1528,10 @@ private fun CalendarListDrawer(
     start: CalendarDate,
     end: CalendarDate,
     transactions: List<TransactionEntity>,
+    daySubscriptions: List<SubscriptionOccurrence>,
     onClear: () -> Unit,
     onOpenDetail: (Long) -> Unit,
+    onOpenSubscriptionDetail: (SubscriptionOccurrence) -> Unit,
 ) {
     val english = AppLanguage.current() == AppLanguage.ENGLISH
     val density = LocalDensity.current
@@ -1478,7 +1680,7 @@ private fun CalendarListDrawer(
                     )
                 }
             }
-            if (transactions.isNotEmpty()) {
+            if (transactions.isNotEmpty() || daySubscriptions.isNotEmpty()) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1486,8 +1688,45 @@ private fun CalendarListDrawer(
                         .padding(top = 4.dp),
                     contentPadding = PaddingValues(bottom = 12.dp),
                 ) {
-                    items(transactions, key = { it.id }) { transaction ->
-                        CalendarTransactionRow(transaction) { onOpenDetail(transaction.id) }
+                    if (daySubscriptions.isNotEmpty()) {
+                        item(key = "day_subscriptions_section") {
+                            DaySubscriptionsSection(
+                                subscriptions = daySubscriptions,
+                                onOpenSubscriptionDetail = onOpenSubscriptionDetail,
+                            )
+                        }
+                        item(key = "day_transactions_divider") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 10.dp, bottom = 4.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                HorizontalDivider(
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
+                                )
+                                Text(
+                                    text = "当日流水 · ${transactions.size} 笔",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = QingTextSecondary,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+                    if (transactions.isNotEmpty()) {
+                        items(transactions, key = { it.id }) { transaction ->
+                            CalendarTransactionRow(transaction) { onOpenDetail(transaction.id) }
+                        }
+                    } else if (daySubscriptions.isNotEmpty()) {
+                        item(key = "no_day_transactions") {
+                            Text(
+                                text = calendarDrawerEmptyLabel(start != end, english),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 12.dp),
+                            )
+                        }
                     }
                 }
             } else {
@@ -1505,6 +1744,92 @@ private fun CalendarListDrawer(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DaySubscriptionsSection(
+    subscriptions: List<SubscriptionOccurrence>,
+    onOpenSubscriptionDetail: (SubscriptionOccurrence) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = QingSurfaceVariant.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, QingOutline),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "当日续费计划",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = QingPrimaryDeep,
+            )
+            subscriptions.forEachIndexed { index, occ ->
+                val sub = occ.subscription
+                val channel = sub.paymentChannel.trim()
+                    .takeIf { it.isNotEmpty() && it != "未指定" }
+                    ?.let { " · $it" }
+                    ?: ""
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onOpenSubscriptionDetail(occ) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Text(
+                                text = sub.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = if (occ.isPaidInCycle) QingTextSecondary else QingText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (occ.isPaidInCycle) {
+                                SoftBadge(text = "✓ 本期已入账", tone = StatusTone.POSITIVE)
+                            } else {
+                                SoftBadge(
+                                    text = if (sub.pendingCancel) "待扣 · 待取消" else "待扣",
+                                    tone = if (sub.pendingCancel) StatusTone.WARNING else StatusTone.NEUTRAL,
+                                )
+                            }
+                        }
+                        Text(
+                            text = "${subscriptionCadenceLabel(sub.cadence)}$channel",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = QingTextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        text = formatCny(occ.cnyAmountCents),
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontFeatureSettings = "tnum",
+                        ),
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (occ.isPaidInCycle) QingTextSecondary else QingText,
+                    )
+                }
+                if (index != subscriptions.lastIndex) {
+                    HorizontalDivider(color = QingOutline.copy(alpha = 0.7f))
                 }
             }
         }

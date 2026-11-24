@@ -5,10 +5,16 @@ import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.budget.BudgetCalculations
 import com.bookkeeping.app.data.budget.BudgetMonth
 import com.bookkeeping.app.data.budget.MonthComparison
+import com.bookkeeping.app.data.local.entity.SubscriptionEntity
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.TransactionRepository
+import com.bookkeeping.app.data.subscription.MonthlyForecastPoint
+import com.bookkeeping.app.data.subscription.SubscriptionFxRatesCalculator
+import com.bookkeeping.app.data.subscription.SubscriptionProjection
+import com.bookkeeping.app.data.subscription.SubscriptionRepository
+import com.bookkeeping.app.data.subscription.TwelveMonthForecast
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,8 +26,12 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import java.util.Calendar
+import java.util.TimeZone
 import javax.inject.Inject
 import kotlin.math.roundToLong
+
+/** Top-level segmented tabs on the stats screen. */
+enum class StatsTab { EXPENSE, INCOME, SUBSCRIPTION }
 
 /** Day, month, or full-year view for the stats screen. */
 enum class StatsPeriod { DAY, MONTH, YEAR }
@@ -41,7 +51,23 @@ data class DayStatsSummary(
     val isLoaded: Boolean = false,
 )
 
-/** Range and category carried from a stats drilldown into the ledger. */
+/** Aggregated subscription metrics and 12-month renewal projection for the Stats Subscription tab. */
+data class SubscriptionStatsState(
+    val activeCount: Int = 0,
+    val monthlyTotalCnyCents: Long = 0L,
+    val averageMonthlyCnyCents: Long = 0L,
+    val mostExpensiveName: String? = null,
+    val mostExpensiveMonthlyCnyCents: Long = 0L,
+    val manualRenewalCount: Int = 0,
+    val pendingCancelCount: Int = 0,
+    val pendingCancelMonthlySavingsCents: Long = 0L,
+    val forecast12Months: List<MonthlyForecastPoint> = emptyList(),
+    val peakMonth: MonthlyForecastPoint? = null,
+    val recurringCandidateCount: Int = 0,
+    val isLoaded: Boolean = false,
+)
+
+/** Range, category, and optional account carried from a stats drilldown into the ledger. */
 data class StatsLedgerDrilldown(
     val period: StatsPeriod,
     val year: Int,
@@ -49,6 +75,7 @@ data class StatsLedgerDrilldown(
     val day: Int? = null,
     val category: TransactionCategory? = null,
     val type: TransactionType,
+    val account: String? = null,
 )
 
 /** One month of a full-year view (month is 1..12). */
@@ -117,6 +144,11 @@ internal object StatsAggregation {
             }
             .sortedByDescending { it.totalCents }
     }
+
+    fun accountStats(
+        transactions: List<TransactionEntity>,
+        type: TransactionType,
+    ): List<AccountStat> = AccountAggregation.accountStats(transactions, type)
 
     fun dailyTotals(
         transactions: List<TransactionEntity>,
@@ -204,12 +236,70 @@ internal object StatsAggregation {
     )
 }
 
-// 统计页 ViewModel：选中日期/月/年、支出/收入聚合与环比
+/** Pure subscription analytics math so unit tests can verify monthly/peak metrics directly. */
+internal object SubscriptionStatsCalculator {
+    fun compute(
+        activeSubscriptions: List<SubscriptionEntity>,
+        startYear: Int = Calendar.getInstance().get(Calendar.YEAR),
+        startMonth: Int = Calendar.getInstance().get(Calendar.MONTH) + 1,
+        fxRates: Map<String, Double> = SubscriptionFxRatesCalculator.DEFAULT_RATES,
+        forecast: TwelveMonthForecast? = null,
+        monthlyTotalOverrideCnyCents: Long? = null,
+        pendingCancelSavingsOverrideCnyCents: Long? = null,
+        recurringCandidateCount: Int = 0,
+        timeZone: TimeZone = TimeZone.getDefault(),
+    ): SubscriptionStatsState {
+        val active = activeSubscriptions.filter { it.active && it.deletedAtMs == null }
+        val withMonthly = active.map { sub ->
+            sub to SubscriptionProjection.monthlyEquivalentCnyCents(sub, fxRates)
+        }
+        val monthlyTotal = monthlyTotalOverrideCnyCents ?: withMonthly.sumOf { it.second }
+        val activeCount = active.size
+        val averageMonthly = if (activeCount == 0) {
+            0L
+        } else {
+            (monthlyTotal.toDouble() / activeCount).roundToLong()
+        }
+        val mostExpensive = withMonthly.maxByOrNull { it.second }
+        val manualRenewalCount = active.count { !it.autoRenew }
+        val pendingCancelSubs = withMonthly.filter { it.first.pendingCancel }
+        val pendingCancelCount = pendingCancelSubs.size
+        val pendingCancelSavings =
+            pendingCancelSavingsOverrideCnyCents ?: pendingCancelSubs.sumOf { it.second }
+        val resolvedForecast = forecast ?: SubscriptionProjection.forecast12Months(
+            subscriptions = active,
+            startYear = startYear,
+            startMonth = startMonth,
+            fxRates = fxRates,
+            timeZone = timeZone,
+        )
+        return SubscriptionStatsState(
+            activeCount = activeCount,
+            monthlyTotalCnyCents = monthlyTotal,
+            averageMonthlyCnyCents = averageMonthly,
+            mostExpensiveName = mostExpensive?.first?.name,
+            mostExpensiveMonthlyCnyCents = mostExpensive?.second ?: 0L,
+            manualRenewalCount = manualRenewalCount,
+            pendingCancelCount = pendingCancelCount,
+            pendingCancelMonthlySavingsCents = pendingCancelSavings,
+            forecast12Months = resolvedForecast.months,
+            peakMonth = resolvedForecast.peakMonth,
+            recurringCandidateCount = recurringCandidateCount,
+            isLoaded = true,
+        )
+    }
+}
+
+// 统计页 ViewModel：选中日期/月/年、支出/收入/订阅聚合与环比
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class StatsViewModel @Inject constructor(
     private val repository: TransactionRepository,
+    private val subscriptionRepository: SubscriptionRepository,
 ) : ViewModel() {
+
+    private val _selectedTab = MutableStateFlow(StatsTab.EXPENSE)
+    val selectedTab: StateFlow<StatsTab> = _selectedTab
 
     // 收入还是支出（切换显示哪个方向的统计）
     private val _viewingType = MutableStateFlow(TransactionType.EXPENSE)
@@ -383,8 +473,71 @@ class StatsViewModel @Inject constructor(
         MonthComparison(0L, 0L, null),
     )
 
+    val accountStats: StateFlow<List<AccountStat>> = combine(
+        periodTransactions,
+        _viewingType,
+    ) { transactions, type ->
+        AccountAggregation.accountStats(transactions, type)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val accountCoverageRatio: StateFlow<Float> = combine(
+        periodTransactions,
+        _viewingType,
+    ) { transactions, type ->
+        AccountAggregation.coverageRatio(transactions, type)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
+
+    val isAccountMostlyUncategorized: StateFlow<Boolean> = combine(
+        periodTransactions,
+        _viewingType,
+    ) { transactions, type ->
+        AccountAggregation.isMostlyUncategorized(transactions, type)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val subscriptionStats: StateFlow<SubscriptionStatsState> =
+        combine(
+            subscriptionRepository.observeActive(),
+            repository.observeAll(),
+        ) { activeSubs, _ -> activeSubs }
+            .map { activeSubs ->
+                val cal = Calendar.getInstance()
+                val startYear = cal.get(Calendar.YEAR)
+                val startMonth = cal.get(Calendar.MONTH) + 1
+                val forecast = subscriptionRepository.forecast12Months(startYear, startMonth)
+                val monthlyTotal = subscriptionRepository.monthlyEquivalentTotalCnyCents()
+                val pendingCancelSavings = subscriptionRepository.pendingCancelMonthlySavingsCnyCents()
+                val candidateCount = subscriptionRepository.detectRecurringCandidates().size
+                SubscriptionStatsCalculator.compute(
+                    activeSubscriptions = activeSubs,
+                    startYear = startYear,
+                    startMonth = startMonth,
+                    forecast = forecast,
+                    monthlyTotalOverrideCnyCents = monthlyTotal,
+                    pendingCancelSavingsOverrideCnyCents = pendingCancelSavings,
+                    recurringCandidateCount = candidateCount,
+                )
+            }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                SubscriptionStatsState(),
+            )
+
+    fun setSelectedTab(tab: StatsTab) {
+        _selectedTab.value = tab
+        when (tab) {
+            StatsTab.EXPENSE -> _viewingType.value = TransactionType.EXPENSE
+            StatsTab.INCOME -> _viewingType.value = TransactionType.INCOME
+            StatsTab.SUBSCRIPTION -> Unit
+        }
+    }
+
     fun setViewingType(type: TransactionType) {
         _viewingType.value = type
+        _selectedTab.value = when (type) {
+            TransactionType.EXPENSE -> StatsTab.EXPENSE
+            TransactionType.INCOME -> StatsTab.INCOME
+        }
     }
 
     fun setPeriod(period: StatsPeriod) {
