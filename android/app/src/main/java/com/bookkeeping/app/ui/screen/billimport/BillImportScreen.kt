@@ -285,9 +285,10 @@ internal fun BillImportExportSheet(
             }
         }
 
-        if (state.preview != null) {
-            // 账单导入预览与确认（保留完整滚动列表体验）
-            ImportSummary(preview = state.preview!!)
+        val preview = state.preview
+        if (preview != null) {
+            // 账单导入预览与确认（保留完整滚动列表体验；捕获局部不可变 preview，防止 reset 时 LazyColumn 重组 NPE）
+            ImportSummary(preview = preview)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -295,7 +296,7 @@ internal fun BillImportExportSheet(
                     .heightIn(max = 360.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                items(state.preview!!.rows) { row -> ImportPreviewRow(row) }
+                items(preview.rows) { row -> ImportPreviewRow(row) }
             }
             HorizontalDivider()
             if (state.done) {
@@ -312,7 +313,7 @@ internal fun BillImportExportSheet(
                     Text(tr("完成"))
                 }
             } else {
-                val count = state.preview!!.importableRows.size
+                val count = preview.importableRows.size
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),

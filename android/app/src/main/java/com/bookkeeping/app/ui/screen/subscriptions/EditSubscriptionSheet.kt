@@ -294,7 +294,10 @@ fun EditSubscriptionSheet(
                     singleLine = true,
                     isError = amountError != null,
                     supportingText = when {
-                        amountError != null -> { { Text(amountError!!) } }
+                        amountError != null -> {
+                            val errMsg = amountError
+                            errMsg?.let { msg -> { Text(msg) } }
+                        }
                         previewCnyCents != null -> {
                             { Text("约折合人民币 ${formatCny(previewCnyCents)}") }
                         }
