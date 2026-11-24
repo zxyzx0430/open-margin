@@ -28,6 +28,10 @@ class StatsV146Test {
         assertEquals("支付宝", AccountNormalization.normalize("支付宝"))
         assertEquals("支付宝", AccountNormalization.normalize("支付宝余额"))
         assertEquals("支付宝", AccountNormalization.normalize("alipay"))
+        assertEquals("支付宝", AccountNormalization.normalize("花呗"))
+        assertEquals("支付宝", AccountNormalization.normalize("蚂蚁花呗"))
+        assertEquals("支付宝", AccountNormalization.normalize("Huabei"))
+        assertEquals("支付宝", AccountNormalization.normalize("Ant Credit Pay"))
         assertEquals("招商银行储蓄卡", AccountNormalization.normalize("招商银行储蓄卡"))
         assertEquals(AccountNormalization.UNASSIGNED_ACCOUNT_KEY, AccountNormalization.normalize(null))
         assertEquals(AccountNormalization.UNASSIGNED_ACCOUNT_KEY, AccountNormalization.normalize(""))
@@ -109,6 +113,13 @@ class StatsV146Test {
         assertTrue(AccountNormalization.matchesFilter(blank.account, AccountNormalization.UNASSIGNED_ACCOUNT_KEY))
         assertTrue(AccountNormalization.matchesFilter(spaces.account, AccountNormalization.UNASSIGNED_ACCOUNT_KEY))
         assertFalse(AccountNormalization.matchesFilter(wechatLegacy.account, AccountNormalization.UNASSIGNED_ACCOUNT_KEY))
+
+        val huabeiTx = tx(amountCents = 1_200L, account = "花呗")
+        assertTrue(AccountNormalization.matchesFilter(huabeiTx.account, "支付宝"))
+        assertEquals("支付宝", AccountNormalization.effectiveAccount(huabeiTx))
+
+        val noteHuabei = tx(amountCents = 1_200L, account = null, source = "OTHER", note = "[自动支付] 花呗扣款")
+        assertEquals("支付宝", AccountNormalization.effectiveAccount(noteHuabei))
 
         assertTrue(
             LedgerFilter.matchesDisplayed(

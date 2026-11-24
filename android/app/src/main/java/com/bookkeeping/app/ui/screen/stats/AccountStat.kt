@@ -26,12 +26,16 @@ object AccountNormalization {
         if (trimmed.isEmpty()) return UNASSIGNED_ACCOUNT_KEY
         return when (trimmed) {
             "微信支付", "微信零钱", "微信" -> "微信"
-            "支付宝余额", "支付宝" -> "支付宝"
+            "支付宝余额", "支付宝", "花呗", "蚂蚁花呗" -> "支付宝"
             UNASSIGNED_ACCOUNT_KEY -> UNASSIGNED_ACCOUNT_KEY
             else -> when {
                 trimmed.equals("WeChat", ignoreCase = true) ||
                     trimmed.equals("WeChat Pay", ignoreCase = true) -> "微信"
-                trimmed.equals("Alipay", ignoreCase = true) -> "支付宝"
+                trimmed.equals("Alipay", ignoreCase = true) ||
+                    trimmed.equals("Huabei", ignoreCase = true) ||
+                    trimmed.equals("Ant Credit Pay", ignoreCase = true) ||
+                    trimmed.equals("Ant Check Later", ignoreCase = true) ||
+                    trimmed.contains("花呗", ignoreCase = true) -> "支付宝"
                 else -> trimmed
             }
         }
@@ -42,12 +46,30 @@ object AccountNormalization {
 
     /**
      * Resolves a transaction's display account: prefers explicit [TransactionEntity.account],
-     * falling back to [TransactionEntity.source] (`WECHAT` -> 微信, `ALIPAY` -> 支付宝,
+     * falling back to note contents mentioning payment channels (e.g. 花呗, 支付宝, 微信) or
+     * [TransactionEntity.source] (`WECHAT` -> 微信, `ALIPAY` -> 支付宝,
      * `BANK_SMS` -> 银行卡) so auto-captured bills with null account are properly attributed.
      */
     fun effectiveAccount(transaction: TransactionEntity): String {
         val explicit = transaction.account?.trim().orEmpty()
         if (explicit.isNotEmpty()) return normalize(explicit)
+
+        val note = transaction.note.trim()
+        if (note.isNotEmpty()) {
+            if (note.contains("花呗", ignoreCase = true) ||
+                note.contains("Huabei", ignoreCase = true) ||
+                note.contains("支付宝", ignoreCase = true) ||
+                note.contains("Alipay", ignoreCase = true)
+            ) {
+                return "支付宝"
+            }
+            if (note.contains("微信", ignoreCase = true) ||
+                note.contains("WeChat", ignoreCase = true)
+            ) {
+                return "微信"
+            }
+        }
+
         return when (transaction.source.trim().uppercase()) {
             "WECHAT" -> "微信"
             "ALIPAY" -> "支付宝"

@@ -106,7 +106,6 @@ private val CADENCE_OPTIONS = listOf(
 private val PAYMENT_CHANNEL_PRESETS = listOf(
     "微信",
     "支付宝",
-    "花呗",
     "银行卡",
     "云闪付",
     "京东白条",
@@ -160,7 +159,8 @@ fun EditSubscriptionSheet(
         )
     }
     val initialChannel = remember(existing?.id, candidatePrefill) {
-        (existing?.paymentChannel ?: candidatePrefill?.suggestedChannel.orEmpty()).trim()
+        val raw = (existing?.paymentChannel ?: candidatePrefill?.suggestedChannel.orEmpty()).trim()
+        if (raw == "花呗" || raw == "蚂蚁花呗" || raw.equals("Huabei", ignoreCase = true) || raw.contains("花呗")) "支付宝" else raw
     }
     var paymentChannel by remember(existing?.id, candidatePrefill) {
         mutableStateOf(initialChannel)
