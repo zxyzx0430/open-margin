@@ -100,18 +100,42 @@ internal object DiagnosticExportFormatter {
             }
             appendLine()
 
-            // Section 2: 服务运行轨迹
+            // Section 2: 服务运行轨迹（折叠连续空扫）
             val healthEntries = meta.serviceHealthEntries.take(ServiceHealthLog.MAX_ENTRIES)
             appendLine("---------- [2/4] 服务运行轨迹 (${healthEntries.size} 条) ----------")
             if (healthEntries.isEmpty()) {
                 appendLine("(暂无服务运行轨迹)")
             } else {
-                healthEntries.forEach { entry ->
+                var idx = 0
+                while (idx < healthEntries.size) {
+                    val entry = healthEntries[idx]
+                    val isIdleAlbumScan = entry.channel == ServiceHealthLog.CHANNEL_SCREENSHOT &&
+                        entry.detail.isNullOrBlank() &&
+                        entry.summary.contains("scanned=0, skipped=0, retry=0")
+                    if (isIdleAlbumScan) {
+                        var end = idx + 1
+                        while (end < healthEntries.size &&
+                            healthEntries[end].channel == ServiceHealthLog.CHANNEL_SCREENSHOT &&
+                            healthEntries[end].detail.isNullOrBlank() &&
+                            healthEntries[end].summary.contains("scanned=0, skipped=0, retry=0")
+                        ) {
+                            end++
+                        }
+                        val count = end - idx
+                        if (count >= 2) {
+                            val newest = timeFmt.format(Date(entry.occurredAtMs))
+                            val oldest = timeFmt.format(Date(healthEntries[end - 1].occurredAtMs))
+                            appendLine("$oldest ~ $newest [screenshot/scan_missed] 相册空扫折叠 ×$count (${entry.summary})")
+                            idx = end
+                            continue
+                        }
+                    }
                     append("${timeFmt.format(Date(entry.occurredAtMs))} [${entry.channel}/${entry.event}] ${entry.summary}")
                     if (!entry.detail.isNullOrBlank()) {
                         append(" | detail=${entry.detail}")
                     }
                     appendLine()
+                    idx++
                 }
             }
             appendLine()
@@ -156,12 +180,59 @@ internal object DiagnosticExportFormatter {
             }
             appendLine()
 
-            // Section 4: 完整诊断链路
+            // 异常与待排查速览（置顶，方便开发者前 30 行直接定位问题）
+            val highlights = attempts.filter { attempt ->
+                val hasFailure = attempt.outcome == DiagnosticAttemptOutcome.FAILURE
+                val hasConflict = attempt.steps.any { it.details.contains("conflict", ignoreCase = true) }
+                val hasFingerprintWarn = attempt.steps.any { it.details.contains("fingerprint", ignoreCase = true) }
+                val skippedWithDigit = attempt.outcome == DiagnosticAttemptOutcome.WARNING &&
+                    attempt.steps.any { s -> s.rawText?.any { it.isDigit() } == true }
+                hasFailure || hasConflict || hasFingerprintWarn || skippedWithDigit
+            }.take(25)
+            if (highlights.isNotEmpty()) {
+                appendLine("---------- 异常与待排查速览 (${highlights.size} 条) ----------")
+                highlights.forEach { a ->
+                    val lastStep = a.steps.lastOrNull()
+                    val detail = listOfNotNull(
+                        lastStep?.details?.takeIf { it.isNotBlank() },
+                        lastStep?.outputSummary?.takeIf { it.isNotBlank() },
+                    ).joinToString(" | ")
+                    appendLine(
+                        "  [${timeFmt.format(Date(a.startedAtMs))}] ${a.entry.name}/${a.outcome.name} txId=${a.transactionId ?: "-"} | $detail",
+                    )
+                }
+                appendLine()
+            }
+
+            // Section 4: 完整诊断链路（折叠连续 Stale 同步并去重同 attempt 重复原始正文）
             appendLine("---------- [4/4] 完整诊断链路 (${attempts.size} 条 / ${eventsNewestFirst.size} 步) ----------")
             if (attempts.isEmpty()) {
                 appendLine("(当前筛选条件下暂无诊断事件)")
             } else {
-                attempts.forEach { attempt ->
+                var idx = 0
+                while (idx < attempts.size) {
+                    val attempt = attempts[idx]
+                    val isPureStaleSync = attempt.steps.size == 1 &&
+                        attempt.steps.first().details == "Stale server change ignored"
+                    if (isPureStaleSync) {
+                        var end = idx + 1
+                        while (end < attempts.size &&
+                            attempts[end].steps.size == 1 &&
+                            attempts[end].steps.first().details == "Stale server change ignored"
+                        ) {
+                            end++
+                        }
+                        val count = end - idx
+                        if (count >= 2) {
+                            val txIds = attempts.subList(idx, end).mapNotNull { it.transactionId }
+                            val rangeText = if (txIds.isNotEmpty()) "txId=${txIds.min()}..${txIds.max()}" else "txId=-"
+                            appendLine(
+                                "[${timeFmt.format(Date(attempt.startedAtMs))}] [同步历史折叠] 跳过 $count 条本地已是最新版本的服务端变更 ($rangeText)",
+                            )
+                            idx = end
+                            continue
+                        }
+                    }
                     val semantic = DiagnosticHumanizer.semanticOutcome(attempt)
                     val explanation = DiagnosticHumanizer.explainAttemptKey(attempt)
                     appendLine(
@@ -172,6 +243,7 @@ internal object DiagnosticExportFormatter {
                             "txId=${attempt.transactionId ?: "-"}",
                     )
                     appendLine("  摘要说明: $explanation")
+                    var lastPrintedRaw: String? = null
                     attempt.steps.forEach { step ->
                         append("  - ${stepFmt.format(Date(step.occurredAtMs))} [${step.stage}/${step.result}]")
                         if (!step.callSite.isNullOrBlank()) append(" (${step.callSite})")
@@ -184,7 +256,8 @@ internal object DiagnosticExportFormatter {
                             appendLine("    结果: ${step.outputSummary}")
                         }
                         val raw = step.rawText?.takeIf { it.isNotBlank() }
-                        if (raw != null) {
+                        if (raw != null && raw != lastPrintedRaw) {
+                            lastPrintedRaw = raw
                             if (includeRawText) {
                                 appendLine("    原始正文: ${truncateRawTextForExport(raw)}")
                             } else {
@@ -192,6 +265,7 @@ internal object DiagnosticExportFormatter {
                             }
                         }
                     }
+                    idx++
                 }
             }
         }

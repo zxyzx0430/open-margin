@@ -113,9 +113,12 @@ object NotificationParser {
         if (INCOMPLETE_HINTS.any { full.contains(it) }) return false
         val explicitExpense = COMPLETED_EXPENSE_HINTS.any { full.contains(it) } &&
             !(full.contains("你有一笔") || full.contains("您有一笔")) ||
+            GENERAL_EXPENSE_REGEX.containsMatchIn(full) ||
             (full.contains("你有一笔") || full.contains("您有一笔")) &&
                 (full.contains("的支出") || full.contains("支出，") || full.contains("支出。"))
-        val explicitIncome = COMPLETED_INCOME_HINTS.any { full.contains(it) }
+        val explicitIncome = COMPLETED_INCOME_HINTS.any { full.contains(it) } ||
+            REFUND_RECEIVED_REGEX.containsMatchIn(full) ||
+            GENERAL_INCOME_REGEX.containsMatchIn(full)
         val payToMerchant = PAY_TO_MERCHANT_REGEX.containsMatchIn(full)
         val payToYou = PAY_TO_YOU_REGEX.containsMatchIn(full)
         val receivedTransfer = RECEIVED_TRANSFER.containsMatchIn(full)
@@ -194,11 +197,12 @@ object NotificationParser {
         when (source) {
             TransactionSource.WECHAT -> listOf(
                 "微信支付", "微信收款", "服务通知", "支付通知", "收款通知", "退款到账",
-                "微信红包", "Weixin Pay", "WeChat Pay",
+                "微信红包", "账单通知", "动账提醒", "扣款通知", "转账通知",
+                "Weixin Pay", "WeChat Pay",
             ).any { title.contains(it, ignoreCase = true) }
             TransactionSource.ALIPAY -> listOf(
                 "支付宝", "付款成功", "收款成功", "支付助手", "交易提醒", "支付提醒",
-                "到账通知", "退款",
+                "到账通知", "退款", "账单通知", "动账提醒", "收支提醒", "扣款通知", "转账通知",
             ).any { title.contains(it, ignoreCase = true) }
             else -> false
         }
@@ -227,9 +231,12 @@ object NotificationParser {
             // the actual amount; the payment verb must win over the word
             // "领取...红包".
             INCOME_KEYWORDS.any { full.contains(it) } -> TransactionType.INCOME
+            REFUND_RECEIVED_REGEX.containsMatchIn(full) -> TransactionType.INCOME
+            GENERAL_INCOME_REGEX.containsMatchIn(full) -> TransactionType.INCOME
             PAY_TO_YOU_REGEX.containsMatchIn(full) -> TransactionType.INCOME
             RECEIVED_TRANSFER.containsMatchIn(full) -> TransactionType.INCOME
             EXPENSE_KEYWORDS.any { full.contains(it) } -> TransactionType.EXPENSE
+            GENERAL_EXPENSE_REGEX.containsMatchIn(full) -> TransactionType.EXPENSE
             PAY_TO_MERCHANT_REGEX.containsMatchIn(full) -> TransactionType.EXPENSE
             isIncomingRedPacket(full) -> TransactionType.INCOME
             isOutgoingRedPacket(full) -> TransactionType.EXPENSE

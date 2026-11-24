@@ -224,9 +224,10 @@ class ScreenshotAuditMerchantTransferTest {
     @Test
     fun `two stacked transfer bubbles stay two independent candidates`() {
         val blocks = listOf(
-            blockAt("¥200.00", 80, 200, 300),
-            blockAt("已被接收", 90, 240, 200),
-            blockAt("转账", 90, 280, 160),
+            blockAt("在吗", 60, 120, 220),
+            blockAt("¥200.00", 500, 200, 720),
+            blockAt("已被接收", 510, 240, 620),
+            blockAt("转账", 510, 280, 580),
             blockAt("¥200.00", 500, 420, 720),
             blockAt("已收款", 510, 460, 620),
             blockAt("转账", 510, 500, 580),
@@ -349,7 +350,7 @@ class ScreenshotAuditMerchantTransferTest {
     @Test
     fun `waiting transfer on the sender side with geometry is an expense`() {
         val draft = ScreenshotPageInterpreter
-            .interpret(waitingTransferPage(amountLeft = 80, amountRight = 300), capturedAt, zone)
+            .interpret(waitingTransferPage(amountLeft = 500, amountRight = 720), capturedAt, zone)
             .drafts.single()
 
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, draft.direction)
@@ -362,7 +363,7 @@ class ScreenshotAuditMerchantTransferTest {
     @Test
     fun `waiting transfer on the receiver side with geometry is an income`() {
         val draft = ScreenshotPageInterpreter
-            .interpret(waitingTransferPage(amountLeft = 500, amountRight = 720), capturedAt, zone)
+            .interpret(waitingTransferPage(amountLeft = 80, amountRight = 300), capturedAt, zone)
             .drafts.single()
 
         assertEquals(CaptureCandidate.DIRECTION_INCOME, draft.direction)

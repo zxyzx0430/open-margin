@@ -78,7 +78,8 @@ object ScreenshotImportPipeline {
                 ScreenshotPageInterpreter.PAGE_UNKNOWN -> FailureReason.UNKNOWN_PAGE
                 else -> FailureReason.NOT_TRANSACTION
             }
-            return ImportPlan(emptyList(), failure)
+            val detail = "pageType=${evidence.pageType}, platform=${evidence.platform}, reason=${evidence.reason}"
+            return ImportPlan(emptyList(), failure, detailReason = detail)
         }
 
         val decisions = mutableListOf<CandidateDecision>()

@@ -887,12 +887,14 @@ object ScreenshotPageInterpreter {
     ): String {
         return when (side) {
             "LEFT" -> when {
-                text.contains("已被接收") || text.contains("已接收") -> CaptureCandidate.DIRECTION_INCOME
+                text.contains("已被接收") || text.contains("已接收") || text.contains("待接收") ->
+                    CaptureCandidate.DIRECTION_INCOME
                 text.contains("已收款") -> CaptureCandidate.DIRECTION_EXPENSE
                 else -> CaptureCandidate.DIRECTION_UNKNOWN
             }
             "RIGHT" -> when {
-                text.contains("已被接收") || text.contains("已接收") -> CaptureCandidate.DIRECTION_EXPENSE
+                text.contains("已被接收") || text.contains("已接收") || text.contains("待接收") ->
+                    CaptureCandidate.DIRECTION_EXPENSE
                 text.contains("已收款") -> CaptureCandidate.DIRECTION_INCOME
                 else -> CaptureCandidate.DIRECTION_UNKNOWN
             }

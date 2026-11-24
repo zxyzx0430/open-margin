@@ -184,6 +184,7 @@ data class ImportPlan(
     val decisions: List<CandidateDecision>,
     val failure: FailureReason? = null,
     val repeatImage: Boolean = false,
+    val detailReason: String? = null,
 ) {
     /**
      * Rows the caller may write. Refund / red packet / withdrawal kinds are

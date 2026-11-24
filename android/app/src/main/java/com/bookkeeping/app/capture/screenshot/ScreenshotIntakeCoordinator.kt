@@ -374,7 +374,7 @@ class ScreenshotIntakeCoordinator private constructor(
             // no ledger write and no user-visible noise. The OCR text rides along
             // because a page that parsed to nothing is exactly the case a user
             // reports as "it did not record".
-            recordIntakeFailure(attemptId, source, failure, ocrSummary, rawText)
+            recordIntakeFailure(attemptId, source, failure, ocrSummary, rawText, plan.detailReason)
             return Outcome(
                 failure = failure,
                 repeatImage = plan.repeatImage,
@@ -406,6 +406,10 @@ class ScreenshotIntakeCoordinator private constructor(
                 merchant = draft.merchantCandidates.firstOrNull(),
             )
         }
+        val fieldSnapshot = firstDraft?.let { draft ->
+            val timeTag = if (draft.eventTimeMs != null) "time=parsed" else "time=fallback_capture"
+            "kind=${draft.kind}, dir=${draft.direction}, $timeTag"
+        }
         recordStep(
             attemptId = attemptId,
             stage = TransactionDiagnostics.STAGE_PARSE,
@@ -416,6 +420,7 @@ class ScreenshotIntakeCoordinator private constructor(
             outputSummary = listOfNotNull(
                 "${drafts.size} 笔候选",
                 candidateSummary,
+                fieldSnapshot,
             ).joinToString(" · "),
             rawText = rawText,
         )
@@ -841,6 +846,7 @@ class ScreenshotIntakeCoordinator private constructor(
         failure: FailureReason,
         inputSummary: String? = null,
         rawText: String? = null,
+        outputSummary: String? = null,
     ) {
         val note = ScreenshotImportDiagnostics.failureNote(attemptId, failure)
         recordStep(
@@ -850,6 +856,7 @@ class ScreenshotIntakeCoordinator private constructor(
             details = note.details,
             callSite = CALL_SITE_INGEST,
             inputSummary = inputSummary,
+            outputSummary = outputSummary,
             rawText = rawText,
         )
     }
@@ -860,8 +867,9 @@ class ScreenshotIntakeCoordinator private constructor(
         failure: FailureReason,
         inputSummary: String? = null,
         rawText: String? = null,
+        detailReason: String? = null,
     ) {
-        recordFailure(attemptId, failure, inputSummary, rawText)
+        recordFailure(attemptId, failure, inputSummary, rawText, detailReason)
         runCatching { failureNoticeSink(source, failure) }
     }
 
