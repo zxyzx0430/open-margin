@@ -573,25 +573,43 @@ object ScreenshotPageInterpreter {
                         }
                     }
                     // In WeChat Pay chat streams, a standalone time divider ("22:09") sits
-                    // below card i's footer ("账单详情 >") and above card i+1's header, so it
-                    // belongs to card i+1 below rather than card i above.
+                    // below card i's footer ("账单详情 >") and above card i+1's header.
+                    // If there is a card i+1 below, assign it to i+1; if there is NO card i+1
+                    // (e.g. a clipped peeked card at the bottom whose amount was cut off),
+                    // drop trailing blocks below the footer + time divider / new card start
+                    // so they never pollute card i above.
+                    val bestPos = boxedAnchors.indexOf(best)
+                    val nextAnchorIdx = boxedAnchors.getOrNull(bestPos + 1)
+                    val footerBelowBest = blocks.firstOrNull { candidate ->
+                        hasGeometry(candidate) &&
+                            candidate.top >= anchors[best].top &&
+                            candidate.top < block.top &&
+                            BILL_ROW_FOOTERS.any(candidate.text::contains)
+                    }
                     if (isTimeOrDateLine(block.text.trim()) && boxedAnchors.size >= 2) {
-                        val bestPos = boxedAnchors.indexOf(best)
-                        val nextAnchorIdx = boxedAnchors.getOrNull(bestPos + 1)
                         if (nextAnchorIdx != null &&
                             block.top > anchors[best].top &&
-                            block.top < anchors[nextAnchorIdx].top
+                            block.top < anchors[nextAnchorIdx].top &&
+                            footerBelowBest != null
                         ) {
-                            val prevCardFooterAboveTime = blocks.any { candidate ->
-                                hasGeometry(candidate) &&
-                                    candidate.top >= anchors[best].top &&
-                                    candidate.top < block.top &&
-                                    BILL_ROW_FOOTERS.any(candidate.text::contains)
-                            }
-                            if (prevCardFooterAboveTime) {
-                                best = nextAnchorIdx
-                            }
+                            best = nextAnchorIdx
                         }
+                    } else if (nextAnchorIdx == null && footerBelowBest != null && block.top > footerBelowBest.top) {
+                        val hasTrailingDivider = blocks.any { candidate ->
+                            hasGeometry(candidate) &&
+                                candidate.top > footerBelowBest.top &&
+                                candidate.top <= block.top &&
+                                (isTimeOrDateLine(candidate.text.trim()) || candidate.text.contains("提现"))
+                        }
+                        if (hasTrailingDivider) {
+                            return@forEach
+                        }
+                    }
+                    if (nextAnchorIdx == null && footerBelowBest != null &&
+                        block.top > footerBelowBest.top &&
+                        isTimeOrDateLine(block.text.trim())
+                    ) {
+                        return@forEach
                     }
                     segments[best] += block
                 }
@@ -720,9 +738,8 @@ object ScreenshotPageInterpreter {
             directionOf(segmentText, amountBlock.text, pageType)
         } else {
             // The state word and the bubble's own position are independent
-            // evidence. When both are readable they must agree; a contradiction
-            // stays UNKNOWN instead of being guessed.
-            bubbleDirectionOf(bubble.direction, side)
+            // evidence. Left 已被接收 = INCOME, Right 已被接收 = EXPENSE.
+            bubbleDirectionOf(segmentText, bubble.direction, side)
         }
         val kind = kindOf(segmentText, direction)
         val completion = if (bubble != null) {
@@ -863,19 +880,31 @@ object ScreenshotPageInterpreter {
      * UNKNOWN. A word that proves nothing (待接收) leaves the decision to the
      * bubble's side, and without a side stays UNKNOWN — never a guess.
      */
-    private fun bubbleDirectionOf(textDirection: String?, side: String?): String {
-        if (textDirection == null) return side ?: CaptureCandidate.DIRECTION_UNKNOWN
-        if (side == null || side == textDirection) return textDirection
-        return CaptureCandidate.DIRECTION_UNKNOWN
+    private fun bubbleDirectionOf(
+        text: String,
+        textDirection: String?,
+        side: String?,
+    ): String {
+        return when (side) {
+            "LEFT" -> when {
+                text.contains("已被接收") || text.contains("已接收") -> CaptureCandidate.DIRECTION_INCOME
+                text.contains("已收款") -> CaptureCandidate.DIRECTION_EXPENSE
+                else -> CaptureCandidate.DIRECTION_UNKNOWN
+            }
+            "RIGHT" -> when {
+                text.contains("已被接收") || text.contains("已接收") -> CaptureCandidate.DIRECTION_EXPENSE
+                text.contains("已收款") -> CaptureCandidate.DIRECTION_INCOME
+                else -> CaptureCandidate.DIRECTION_UNKNOWN
+            }
+            else -> textDirection ?: CaptureCandidate.DIRECTION_UNKNOWN
+        }
     }
 
     private fun isTransferBubbleText(text: String): Boolean =
         text.contains("转账") && TRANSFER_BUBBLE_STATES.any(text::contains)
 
     /**
-     * Which side of the page a chat bubble is drawn on: the sender's bubble sits
-     * on the left, the receiver's on the right. A side is only returned when
-     * real boxes and a wide enough page make it unambiguous.
+     * Which side of the page a chat bubble is drawn on ("LEFT" or "RIGHT").
      */
     private fun bubbleSideOf(amount: TextBlock, pageLeft: Int, pageRight: Int): String? {
         if (!hasGeometry(amount)) return null
@@ -884,8 +913,8 @@ object ScreenshotPageInterpreter {
         val center = (amount.left + amount.right) / 2
         val ratio = (center - pageLeft).toFloat() / span
         return when {
-            ratio <= 0.35f -> CaptureCandidate.DIRECTION_EXPENSE
-            ratio >= 0.65f -> CaptureCandidate.DIRECTION_INCOME
+            ratio <= 0.40f -> "LEFT"
+            ratio >= 0.60f -> "RIGHT"
             else -> null
         }
     }
@@ -1435,11 +1464,29 @@ object ScreenshotPageInterpreter {
             ?: aboveFirstBubble.firstOrNull { isPlausibleChatContact(it.text) }?.text?.trim()
         val eventTimeMs = eventTimeOf(transferTimeBlock.text, capturedAtMs, timeZone)
 
+        val acceptedSeg = bubbleSegments.firstOrNull { seg ->
+            seg.any { it.text.contains("已被接收") || it.text.contains("已接收") }
+        }
+        val receivedSeg = bubbleSegments.firstOrNull { seg ->
+            seg.any { it.text.contains("已收款") }
+        }
+        val acceptedX = acceptedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) }
+            ?.let { (it.left + it.right) / 2 }
+        val receivedX = receivedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) }
+            ?.let { (it.left + it.right) / 2 }
+        val consolidatedDirection = when {
+            acceptedX != null && receivedX != null && acceptedX < receivedX ->
+                CaptureCandidate.DIRECTION_INCOME
+            acceptedX != null && receivedX != null && acceptedX > receivedX ->
+                CaptureCandidate.DIRECTION_EXPENSE
+            else -> CaptureCandidate.DIRECTION_INCOME
+        }
+
         val draft = TransactionDraft(
             index = 0,
             amountCents = amount,
             amountUnambiguous = true,
-            direction = CaptureCandidate.DIRECTION_INCOME,
+            direction = consolidatedDirection,
             directionExplicit = true,
             kind = CaptureCandidate.KIND_TRANSFER,
             completionStatus = CaptureCandidate.COMPLETION_COMPLETED,

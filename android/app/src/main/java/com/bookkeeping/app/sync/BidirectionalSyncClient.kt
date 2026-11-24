@@ -167,9 +167,23 @@ internal class BidirectionalSyncClient(
                           else row?.duplicateOfId,
             // Order IDs are local import evidence; keep them across server pulls.
             sourceTransactionId=row?.sourceTransactionId,
+            evidenceImageName=row?.evidenceImageName,
             eventTimeNeedsConfirmation=eventTimeNeedsConfirmation,
         )
     }
+
+    private fun hasSameBusinessContent(local: TransactionEntity, remote: TransactionEntity): Boolean =
+        local.syncDeleted == remote.syncDeleted &&
+            local.amountCents == remote.amountCents &&
+            local.currency == remote.currency &&
+            local.type == remote.type &&
+            local.category == remote.category &&
+            local.merchant == remote.merchant &&
+            local.note == remote.note &&
+            local.source == remote.source &&
+            local.account == remote.account &&
+            local.timestamp == remote.timestamp &&
+            local.remoteReviewStatus == remote.remoteReviewStatus
 
     private suspend fun applyChange(change:JSONObject) {
         val id=change.getString("event_id")
