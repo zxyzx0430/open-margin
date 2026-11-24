@@ -255,7 +255,9 @@ object ScreenshotPageInterpreter {
             )
         }
         // Footer statistics, promo banners and phone status-bar chrome belong to the shell, not to the transaction.
-        val content = stripStatusBarChrome(ordered).filterNot { isNoiseLine(it.text) }
+        val chromeStripped = stripStatusBarChrome(ordered)
+        val serviceStream = isWechatServiceStream(chromeStripped)
+        val content = stripDailyReportCards(chromeStripped).filterNot { isNoiseLine(it.text) }
         val allText = content.joinToString("\n") { it.text }
         if (isOwnAppUiPage(allText)) {
             return ScreenshotPageEvidence(
@@ -319,7 +321,7 @@ object ScreenshotPageInterpreter {
             return it
         }
 
-        val segments = splitSegments(content)
+        val segments = if (serviceStream) splitServiceStream(content) else splitSegments(content)
         if (segments.isEmpty()) {
             return ScreenshotPageEvidence(
                 platform = platform,
@@ -341,7 +343,9 @@ object ScreenshotPageInterpreter {
         // A bill list prints only money that already moved, so a row with no
         // unfinished word is settled. Card-level, because one list screenshot
         // can hold several rows and one unfinished row must not stop the rest.
-        val settledRowCards = settledBillRowCards(cards)
+        val settledRowCards = settledBillRowCards(cards) + if (serviceStream) {
+            cards.filter { isProvenServicePayment(it.blocks) }.map { it.index }
+        } else emptyList()
         val refundCard = cards.associate { card -> card.index to carriesAny(card.blocks, REFUND_PAGE_MARKERS) }
         val futureDebitCard = cards.associate { card ->
             card.index to carriesAny(card.blocks, FUTURE_DEBIT_MARKERS)
@@ -415,7 +419,9 @@ object ScreenshotPageInterpreter {
                 val amountBlock = card.blocks.firstOrNull { amountOf(it.text) != null }
                 val refundCompleted = card.blocks.any { block ->
                     REFUND_COMPLETED_MARKERS.any(block.text::contains) &&
-                        isCompletionMarker(block.text) && isBoundStatus(block, amountBlock)
+                        isCompletionMarker(block.text) && (isBoundStatus(block, amountBlock) ||
+                        (serviceStream && isDatedSingleAmountCard(card.blocks) &&
+                            block.text.trim() == "退款到账通知"))
                 }
                 val ambiguousCompletion = !refundCompleted &&
                     draft.completionStatus == CaptureCandidate.COMPLETION_COMPLETED
@@ -501,6 +507,74 @@ object ScreenshotPageInterpreter {
 
     private fun isNoticePage(text: String): Boolean =
         COMPLETED_MARKERS.none(text::contains) && NOTICE_MARKERS.any(text::contains)
+
+    // Only the WeChat Pay message stream has this exact header and bottom navigation.
+    // Do not relax detail-page or actual bill-list gates just because a page has money.
+    private fun isWechatServiceStream(blocks: List<TextBlock>): Boolean {
+        val labels = blocks.map { it.text.trim() }.toSet()
+        return "微信支付" in labels && listOf("我的账单", "支付服务", "优惠").count { it in labels } >= 2
+    }
+
+    private val SERVICE_DIVIDER = Regex(
+        "^(?:(?:今天|昨天|昨日|前天|(?:周|星期)[一二三四五六日天]|\\d{1,2}月\\d{1,2}日)\\s*)?\\d{1,2}:\\d{2}$",
+    )
+
+    private fun isServiceDivider(block: TextBlock): Boolean =
+        hasGeometry(block) && SERVICE_DIVIDER.matches(block.text.trim())
+
+    // Remove an entire statistics card before amount anchoring and page classification.
+    // Never strip a real list title globally; this rule is scoped to the report block.
+    private fun stripDailyReportCards(blocks: List<TextBlock>): List<TextBlock> {
+        val result = mutableListOf<TextBlock>()
+        var inReport = false
+        for (block in blocks) {
+            val line = block.text.trim()
+            if (line == "记账日报") {
+                inReport = true
+                continue
+            }
+            if (inReport) {
+                if (isServiceDivider(block)) inReport = false
+                else continue
+            }
+            result += block
+        }
+        return result
+    }
+
+    // Date dividers are card boundaries, not fields of the previous nearest amount.
+    // Inside a region with multiple amounts retain the existing conservative splitter.
+    private fun splitServiceStream(blocks: List<TextBlock>): List<List<TextBlock>> {
+        if (blocks.none(::isServiceDivider)) return splitSegments(blocks)
+        val groups = mutableListOf<MutableList<TextBlock>>()
+        var group = mutableListOf<TextBlock>()
+        for (block in blocks) {
+            if (isServiceDivider(block) && group.isNotEmpty()) {
+                groups += group
+                group = mutableListOf()
+            }
+            group += block
+        }
+        if (group.isNotEmpty()) groups += group
+        return groups.filter { group -> group.any { amountOf(it.text) != null } }
+            .flatMap { group -> splitSegments(group) }
+    }
+
+    private fun isDatedSingleAmountCard(blocks: List<TextBlock>): Boolean =
+        blocks.count { amountOf(it.text) != null } == 1 &&
+            blocks.any(::isServiceDivider)
+
+    private fun isProvenServicePayment(blocks: List<TextBlock>): Boolean {
+        if (!isDatedSingleAmountCard(blocks)) return false
+        val amount = blocks.single { amountOf(it.text) != null }
+        if (!isPlainCurrencyLine(amount.text) || !hasGeometry(amount)) return false
+        if (carriesAny(blocks, NON_FINAL_MARKERS + listOf("零钱提现发起", "待接收"))) return false
+        if (carriesAny(blocks, REFUND_PAGE_MARKERS + listOf("转账", "红包", "提现"))) return false
+        // A clipped footer is okay only when the same dated card has the full
+        // payment sentence and a usable merchant above its amount.
+        return blocks.any { isPaymentMethodRow(it.text) && it.text.trim().startsWith("使用") } &&
+            merchantOf(blocks, amount).isNotEmpty()
+    }
 
     private fun isNoiseLine(line: String): Boolean {
         val text = line.trim()
@@ -1438,8 +1512,11 @@ object ScreenshotPageInterpreter {
         // and fall back to the chat's HH:mm divider while still rejecting headerless stacked fixtures.
         val transferTimeBlock = timeBlocks.lastOrNull { !TIME_ONLY_REGEX.matches(it.text.trim()) }
             ?: timeBlocks.lastOrNull()
-            ?: return null
-        val transferTimeIdx = content.indexOf(transferTimeBlock)
+        // A cropped conversation may have no time divider. Only a real chat
+        // shell plus exactly two complementary opposite-side bubbles qualifies.
+        if (transferTimeBlock == null && (bubbleSegments.size != 2 || segments.size != 2 ||
+                content.none { it.text.trim() == "按住说话" || it.text.trim() == "按住 说话" })) return null
+        val transferTimeIdx = transferTimeBlock?.let { content.indexOf(it) } ?: -1
         val firstNonTimeOnlyIdx = content.indexOfFirst { b ->
             val t = b.text.trim()
             !TIME_ONLY_REGEX.matches(t) && isTimeOrDateLine(t)
@@ -1456,7 +1533,7 @@ object ScreenshotPageInterpreter {
         }
         val contact = headerCandidates.firstOrNull { isPlausibleChatContact(it.text) }?.text?.trim()
             ?: aboveFirstBubble.firstOrNull { isPlausibleChatContact(it.text) }?.text?.trim()
-        val eventTimeMs = eventTimeOf(transferTimeBlock.text, capturedAtMs, timeZone)
+        val eventTimeMs = transferTimeBlock?.let { eventTimeOf(it.text, capturedAtMs, timeZone) }
 
         val acceptedSeg = bubbleSegments.firstOrNull { seg ->
             seg.any { it.text.contains("已被接收") || it.text.contains("已接收") }
@@ -1468,6 +1545,13 @@ object ScreenshotPageInterpreter {
             ?.let { (it.left + it.right) / 2 }
         val receivedX = receivedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) }
             ?.let { (it.left + it.right) / 2 }
+        if (transferTimeBlock == null) {
+            val accepted = acceptedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) } ?: return null
+            val received = receivedSeg?.firstOrNull { amountOf(it.text) != null && hasGeometry(it) } ?: return null
+            if (acceptedSeg == receivedSeg || acceptedX == null || receivedX == null ||
+                kotlin.math.abs(acceptedX - receivedX) < maxOf(accepted.right - accepted.left, received.right - received.left) ||
+                accepted.top >= received.top || contact == null) return null
+        }
         val consolidatedDirection = when {
             acceptedX != null && receivedX != null && acceptedX < receivedX ->
                 CaptureCandidate.DIRECTION_INCOME
@@ -1489,7 +1573,7 @@ object ScreenshotPageInterpreter {
             eventTimeMs = eventTimeMs,
             pageIdentity = "wechat:$pageType:$amount:${noiseKey(contact)}",
             supportedPaymentPage = true,
-            reason = "consolidated chat transfer bubbles",
+            reason = if (eventTimeMs == null) "paired chat transfer; time needs confirmation" else "consolidated chat transfer bubbles",
         )
         return ScreenshotPageEvidence(
             platform = CaptureCandidate.PLATFORM_WECHAT,

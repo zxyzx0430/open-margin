@@ -107,6 +107,9 @@ object ScreenshotImportPipeline {
                 previewOnly = previewOnly,
             )
             var action = assessment.action
+            if (action == Action.AUTO_BOOK && draft.reason == "paired chat transfer; time needs confirmation") {
+                action = Action.ASK_USER
+            }
             // Belt and braces: the policy already asks for these kinds, but a
             // screenshot decision must never carry AUTO_BOOK for money that
             // only the user can classify, even if a caller forgets to pass the
@@ -117,12 +120,12 @@ object ScreenshotImportPipeline {
             // 层 1：账本里已经有同额、同向、时间邻近、但由另一条采集通道记下的一条。
             // 层 3：同一张图里已经出现过同额、同向、同商户的一条。
             // 两者都只降级为人工确认，绝不静默替用户判断「这是同一笔」。
-            val crossSource = if (action == Action.AUTO_BOOK) {
+            val crossSource = if (action == Action.AUTO_BOOK || action == Action.ASK_USER) {
                 crossSourceLedgerMatch(draft, request.capturedAtMs, crossChannelRows)
             } else {
                 null
             }
-            val sameImageRepeat = action == Action.AUTO_BOOK &&
+            val sameImageRepeat = (action == Action.AUTO_BOOK || action == Action.ASK_USER) &&
                 draftsSeenHere.any { isSameMoneyAsEarlierDraft(draft, it) }
             if (crossSource != null || sameImageRepeat) action = Action.ASK_USER
             draftsSeenHere += draft
@@ -132,6 +135,7 @@ object ScreenshotImportPipeline {
             val duplicateHint = when {
                 crossSource != null -> DuplicateHint.CROSS_CHANNEL
                 sameImageRepeat -> DuplicateHint.SAME_IMAGE
+                dedup.first == ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS -> DuplicateHint.LEDGER_AMBIGUOUS
                 else -> DuplicateHint.NONE
             }
             var reason = draft.reason
@@ -160,6 +164,9 @@ object ScreenshotImportPipeline {
                     reason = when {
                         crossSource != null -> "same amount already recorded from another channel"
                         sameImageRepeat -> "same amount appears twice in this screenshot"
+                        dedup.first == ScreenshotCapturePolicy.DuplicateResult.AMBIGUOUS -> "possible existing ledger transaction"
+                        draft.reason == "paired chat transfer; time needs confirmation" -> draft.reason
+                        !draft.completionExplicit -> "completion evidence missing; needs confirmation"
                         ScreenshotCapturePolicy.requiresConfirmation(draft.kind) ->
                             "${draft.kind.lowercase(Locale.ROOT)} needs confirmation before booking"
                         // 金额读到了、方向没读到：卡片的第一个动作是让用户点 支出/收入，

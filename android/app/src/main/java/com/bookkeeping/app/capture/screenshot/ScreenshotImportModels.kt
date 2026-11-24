@@ -162,6 +162,9 @@ enum class DuplicateHint {
      * sibling draft, which may itself have been booked.
      */
     SAME_IMAGE,
+
+    /** Existing ledger resemblance without enough evidence to link automatically. */
+    LEDGER_AMBIGUOUS,
 }
 
 /** What the pipeline decided for one draft. */

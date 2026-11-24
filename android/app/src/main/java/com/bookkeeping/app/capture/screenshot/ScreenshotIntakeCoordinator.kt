@@ -421,11 +421,16 @@ class ScreenshotIntakeCoordinator private constructor(
                 "${drafts.size} 笔候选",
                 candidateSummary,
                 fieldSnapshot,
+                plan.decisions.joinToString(" | ") { d ->
+                    "#${d.index} ${d.action} ${d.draft.direction} ${d.draft.amountCents} " +
+                        "completion=${d.draft.completionStatus}/${d.draft.completionExplicit} " +
+                        "duplicate=${d.duplicateHint} reason=${d.reason}"
+                },
             ).joinToString(" · "),
             rawText = rawText,
         )
 
-        val matched = plan.decisions.mapNotNull { it.matchedTransactionId }
+        val matched = plan.decisions.filter { it.action == Action.LINK_EXISTING }.mapNotNull { it.matchedTransactionId }
         recordStep(
             attemptId = attemptId,
             stage = TransactionDiagnostics.STAGE_DEDUP,
@@ -446,7 +451,7 @@ class ScreenshotIntakeCoordinator private constructor(
             outputSummary = when {
                 matched.isNotEmpty() -> "命中已有 ${matched.joinToString("、") { "#$it" }}，跳过 ${matched.size} 笔"
                 fingerprintLookup is ImageFingerprintLookup.Unavailable ->
-                    "截图指纹索引不可用；仍由账本写入层执行查重"
+                    "截图指纹索引不可用：${fingerprintLookup.reason}；仍由账本写入层执行查重"
                 else -> "未命中已有账单"
             },
             rawText = rawText,

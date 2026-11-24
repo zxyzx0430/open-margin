@@ -72,7 +72,7 @@ object ScreenshotCandidateFactory {
      * [CandidateDecision.reason]. Everything else keeps the free-text reason.
      */
     private fun reasonOf(decision: CandidateDecision): String = when (decision.duplicateHint) {
-        DuplicateHint.CROSS_CHANNEL -> CaptureCandidate.REASON_LIKELY_DUPLICATE
+        DuplicateHint.CROSS_CHANNEL, DuplicateHint.LEDGER_AMBIGUOUS -> CaptureCandidate.REASON_LIKELY_DUPLICATE
         DuplicateHint.SAME_IMAGE -> CaptureCandidate.REASON_SAME_IMAGE_REPEAT
         DuplicateHint.NONE -> decision.reason.take(80).ifBlank { "screenshot" }
     }
