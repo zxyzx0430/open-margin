@@ -169,6 +169,7 @@ fun TransactionDetailScreenContent(
     } else {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             topBar = {
                 DetailHeader(
                     syncLabel = entry?.let(::transactionSyncLabel),

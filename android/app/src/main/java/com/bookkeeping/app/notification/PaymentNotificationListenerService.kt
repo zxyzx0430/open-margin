@@ -34,6 +34,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
 
     // 后台协程作用域。Service 销毁时一起 cancel。
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val callbackBurstFilter = NotificationCallbackBurstFilter()
 
     override fun onCreate() {
         super.onCreate()
@@ -194,14 +195,14 @@ class PaymentNotificationListenerService : NotificationListenerService() {
         // do not print them to logcat even in debug builds.
 
         if (packageName !in setOf("com.eg.android.AlipayGphone", "com.tencent.mm")) return
-        // Structured summary plus the verbatim title + body: when a user reports
-        // "paid ¥5 on WeChat and it was not recorded", only the原文 shows whether
-        // the parse missed or the notification never arrived. Raw text is bounded
-        // by DiagnosticRawText, stored only on this device and erasable in the log
-        // screen; it never reaches Logcat or the sync payload.
         val appLabel = if (packageName == "com.tencent.mm") "微信" else "支付宝"
         val inputSummary = "$appLabel 通知 1 条（正文 ${body.orEmpty().length} 字）"
         val rawText = DiagnosticRawText.titleAndBody(title, body)
+        // Xiaomi HyperOS / Android 16 frequently fires onNotificationPosted twice
+        // within 0-2ms for the exact same notification key & body. Suppress the
+        // duplicate callback before it creates an AMBIGUOUS_REUSE pending card.
+        val callbackKey = "${sbn.key.orEmpty()}|${sbn.postTime}|$rawText"
+        if (callbackBurstFilter.shouldSuppress(callbackKey, System.currentTimeMillis())) return
         val diagnosticInput = TransactionDiagnosticInput(
             callSite = "PaymentNotificationListenerService.onNotificationPosted",
             rawText = rawText,
@@ -386,5 +387,44 @@ class PaymentNotificationListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "BkNotifListener"
         private const val REBIND_DELAY_MS = 3_000L
+    }
+}
+
+/**
+ * Thread-safe in-memory filter that suppresses identical OS notification
+ * callbacks delivered within [windowMs] (e.g. HyperOS 3.0 0-2ms double-posts).
+ */
+internal class NotificationCallbackBurstFilter(
+    private val windowMs: Long = DEFAULT_WINDOW_MS,
+    private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
+) {
+    private val recent = LinkedHashMap<String, Long>()
+
+    @Synchronized
+    fun shouldSuppress(key: String, nowMs: Long): Boolean {
+        val iterator = recent.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (nowMs - entry.value > windowMs) {
+                iterator.remove()
+            } else {
+                break
+            }
+        }
+        val previous = recent[key]
+        if (previous != null && nowMs - previous in 0..windowMs) {
+            return true
+        }
+        recent[key] = nowMs
+        while (recent.size > maxEntries) {
+            val oldest = recent.entries.iterator().next().key
+            recent.remove(oldest)
+        }
+        return false
+    }
+
+    companion object {
+        const val DEFAULT_WINDOW_MS = 3_000L
+        const val DEFAULT_MAX_ENTRIES = 64
     }
 }

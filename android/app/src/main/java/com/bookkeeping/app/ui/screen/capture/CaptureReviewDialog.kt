@@ -65,6 +65,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
+import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.theme.QingErrorContainer
@@ -338,8 +339,8 @@ fun CaptureReviewDialog(
                                         hasThumbnail = true,
                                     )
                                 },
-                                onApprove = { merchant, category, direction ->
-                                    viewModel.approve(candidate, merchant, category, direction)
+                                onApprove = { merchant, category, direction, timeConfirmed ->
+                                    viewModel.approve(candidate, merchant, category, direction, timeConfirmed)
                                 },
                                 onIgnore = { viewModel.ignore(candidate) },
                             )
@@ -365,11 +366,14 @@ private fun CaptureCandidateCard(
     candidate: CaptureCandidate,
     busy: Boolean,
     onOpenPreview: () -> Unit,
-    onApprove: (String, TransactionCategory, String?) -> Unit,
+    onApprove: (String, TransactionCategory, String?, Boolean) -> Unit,
     onIgnore: () -> Unit,
 ) {
     var merchant by remember(candidate.candidateId) {
         mutableStateOf(candidate.merchantCandidates.firstOrNull().orEmpty())
+    }
+    var timeConfirmed by remember(candidate.candidateId) {
+        mutableStateOf(!candidate.eventTimeNeedsConfirmation)
     }
     var category by remember(candidate.candidateId) {
         mutableStateOf(
@@ -460,13 +464,14 @@ private fun CaptureCandidateCard(
                         }
                         if (candidate.eventTimeNeedsConfirmation) {
                             Surface(
+                                onClick = { timeConfirmed = !timeConfirmed },
                                 shape = RoundedCornerShape(999.dp),
-                                color = QingWarningContainer,
+                                color = if (timeConfirmed) QingPrimaryContainer else QingWarningContainer,
                             ) {
                                 Text(
-                                    text = tr("时间待确认"),
+                                    text = if (timeConfirmed) tr("时间已确认") else tr("时间待确认 · 点此确认"),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = QingWarning,
+                                    color = if (timeConfirmed) QingPrimary else QingWarning,
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 )
@@ -566,6 +571,20 @@ private fun CaptureCandidateCard(
                 ) {
                     Text(
                         text = tr("仅预览，不能记入账本"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            } else if (candidate.completionStatus in ScreenshotCapturePolicy.NON_FINAL_STATUSES) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = QingErrorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = tr("该笔交易尚未完成（待确认/待收款），暂不可记入账本；可点「不记这笔」移除"),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.error,
                         fontWeight = FontWeight.SemiBold,
@@ -672,7 +691,7 @@ private fun CaptureCandidateCard(
                     Text(tr("不记这笔"), color = QingTextSecondary)
                 }
                 Button(
-                    onClick = { onApprove(merchant, category, directionChoice) },
+                    onClick = { onApprove(merchant, category, directionChoice, timeConfirmed) },
                     enabled = !busy &&
                         CaptureReviewDirection.canConfirm(candidate, directionChoice),
                     shape = RoundedCornerShape(12.dp),

@@ -36,21 +36,32 @@ object PaymentCardReviewQueue {
         store: CaptureCandidateStore,
         screenshot: ByteArray? = null,
     ): Route {
-        if (detections.size > 1 || detections.any { it.reviewRequired }) {
-            val reason = if (detections.any { it.reviewRequired }) {
+        // Never hold uncompleted/cancelled/pending cards in the review inbox,
+        // because CaptureBookGate.mayConfirm refuses them anyway.
+        val actionable = detections.filterNot {
+            it.status in setOf(
+                PaymentCardStatus.PENDING,
+                PaymentCardStatus.CREATED,
+                PaymentCardStatus.CANCELLED,
+                PaymentCardStatus.FAILED,
+            )
+        }
+        if (actionable.isEmpty()) return Route.NoBookableCandidate
+        if (actionable.size > 1 || actionable.any { it.reviewRequired }) {
+            val reason = if (actionable.any { it.reviewRequired }) {
                 AMBIGUOUS_GEOMETRY_REASON
             } else {
                 MULTI_CARD_REASON
             }
             val saved = saveForReview(
-                candidates = detections.mapNotNull { candidate(it, capturedAtMs) },
+                candidates = actionable.mapNotNull { candidate(it, capturedAtMs) },
                 store = store,
                 screenshot = screenshot,
                 reason = reason,
             )
             return Route.HeldForReview(saved = saved, reason = reason)
         }
-        val candidate = detections.singleOrNull()
+        val candidate = actionable.singleOrNull()
             ?.takeIf { it.isFinal && it.direction != PaymentDirection.UNKNOWN && !it.reviewRequired }
             ?.let { candidate(it, capturedAtMs) }
             ?: return Route.NoBookableCandidate

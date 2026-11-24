@@ -1079,11 +1079,11 @@ open class PageRecognitionService : AccessibilityService() {
         return try {
             val wrapped = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace) ?: return null
             try {
-                // Copy through Canvas instead of Bitmap.copy: some vendor
-                // screenshot buffers expose a row stride that copy() mishandles.
-                Bitmap.createBitmap(wrapped.width, wrapped.height, Bitmap.Config.ARGB_8888).also {
-                    android.graphics.Canvas(it).drawBitmap(wrapped, 0f, 0f, null)
-                }
+                // Bitmap.wrapHardwareBuffer returns a Config.HARDWARE bitmap; drawing a
+                // hardware bitmap onto a software Canvas throws IllegalArgumentException
+                // ("Software rendering doesn't support hardware bitmaps") on Android 15/16.
+                // Copy directly into a software ARGB_8888 bitmap instead.
+                wrapped.copy(Bitmap.Config.ARGB_8888, false)
             } finally {
                 wrapped.recycle()
             }

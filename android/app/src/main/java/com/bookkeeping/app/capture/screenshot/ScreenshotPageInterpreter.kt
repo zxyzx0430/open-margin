@@ -49,7 +49,8 @@ object ScreenshotPageInterpreter {
         val chrome = listOf(
             "自动记账向导", "记账与采集", "数据与同步", "账单诊断日志",
             "商户分类记忆", "常驻运行状态", "待核对", "记一笔",
-            "同步冲突", "偏好设置",
+            "同步冲突", "偏好设置", "截图识别待确认", "自动记账服务正常运行中",
+            "待确认扫描结果", "去核对", "应用信息", "卸载",
         )
         val found = chrome.count { full.contains(it) }
         return (appName && found >= 1) || found >= 3
@@ -130,6 +131,11 @@ object ScreenshotPageInterpreter {
         "支付", "收款", "转账", "退款", "订单", "零钱", "钱包", "账单",
         "商户名称", "商品详情", "支付服务", "服务消息", "支付消息", "我的账单", "优惠",
         "Payment successful", "Payment method", "Debit amount", "Total debit", "Trading partner",
+    )
+
+    private val REAL_SHOU_FU_PREFIXES = listOf(
+        "收款", "收益", "收入", "收费", "收银", "收藏", "收货", "收购", "收据", "收条", "收件",
+        "付款", "付费", "付清",
     )
 
     /**
@@ -564,6 +570,27 @@ object ScreenshotPageInterpreter {
                         if (distance <= bestDistance) {
                             bestDistance = distance
                             best = index
+                        }
+                    }
+                    // In WeChat Pay chat streams, a standalone time divider ("22:09") sits
+                    // below card i's footer ("账单详情 >") and above card i+1's header, so it
+                    // belongs to card i+1 below rather than card i above.
+                    if (isTimeOrDateLine(block.text.trim()) && boxedAnchors.size >= 2) {
+                        val bestPos = boxedAnchors.indexOf(best)
+                        val nextAnchorIdx = boxedAnchors.getOrNull(bestPos + 1)
+                        if (nextAnchorIdx != null &&
+                            block.top > anchors[best].top &&
+                            block.top < anchors[nextAnchorIdx].top
+                        ) {
+                            val prevCardFooterAboveTime = blocks.any { candidate ->
+                                hasGeometry(candidate) &&
+                                    candidate.top >= anchors[best].top &&
+                                    candidate.top < block.top &&
+                                    BILL_ROW_FOOTERS.any(candidate.text::contains)
+                            }
+                            if (prevCardFooterAboveTime) {
+                                best = nextAnchorIdx
+                            }
                         }
                     }
                     segments[best] += block
@@ -1055,7 +1082,14 @@ object ScreenshotPageInterpreter {
      * digits, because real shops do ("7-ELEVEN").
      */
     private fun merchantName(value: String?, allowDigit: Boolean): String? {
-        val text = value?.trim().orEmpty()
+        var text = value?.trim().orEmpty()
+        // WeChat Pay service cards draw a yellow "收"/"付" badge icon immediately to
+        // the left of the merchant name, which OCR often merges (e.g. "收广州便利店").
+        if (text.length >= 4 && (text.startsWith("收") || text.startsWith("付")) &&
+            !REAL_SHOU_FU_PREFIXES.any { text.startsWith(it) }
+        ) {
+            text = text.drop(1).trim()
+        }
         if (text.isEmpty() || text.length > 40) return null
         if (!allowDigit && text.any(Char::isDigit)) return null
         if (text.contains('¥') || text.contains('￥') || text.endsWith("元")) return null

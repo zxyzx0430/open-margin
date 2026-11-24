@@ -182,4 +182,52 @@ class UserFeedbackRegressionTest {
         assertFalse(evidence.transactionLike)
         assertTrue(evidence.drafts.isEmpty())
     }
+
+    @Test
+    fun `clipped top node does not invalidate valid payment screen geometry`() {
+        val detections = PaymentCardDetector.fromLines(
+            packageName = PaymentCardDetector.WECHAT,
+            lines = listOf(
+                BillTextLine("顶栏被截断", top = -12, bottom = 18, left = 40, right = 300),
+                BillTextLine("支付成功", top = 120, bottom = 160, left = 100, right = 400),
+                BillTextLine("校园水吧", top = 200, bottom = 240, left = 100, right = 400),
+                BillTextLine("¥3.50", top = 280, bottom = 330, left = 100, right = 400),
+            ),
+            capturedAtMs = 1_795_529_520_000L,
+            screenHeightPx = 1200,
+            pageIdentity = "clipped-top-node",
+        )
+        assertEquals(1, detections.size)
+        assertFalse(detections.single().reviewRequired)
+        assertEquals(350L, detections.single().amountCents)
+    }
+
+    @Test
+    fun `wechat service card stream binds between-card time to next card and strips shou badge`() {
+        val zone = TimeZone.getTimeZone("Asia/Shanghai")
+        val now = 1_795_529_520_000L // 2026-11-24 22:12
+        val blocks = listOf(
+            TextBlock("微信支付", left = 400, top = 80, right = 600, bottom = 120),
+            TextBlock("校园水吧仲恺学院店", left = 180, top = 260, right = 700, bottom = 310),
+            TextBlock("使用零钱支付", left = 360, top = 360, right = 640, bottom = 400),
+            TextBlock("¥ 3.50", left = 380, top = 430, right = 620, bottom = 500),
+            TextBlock("账单详情 >", left = 380, top = 540, right = 620, bottom = 580),
+            // Timestamp divider sits closer to card 1's anchor/footer or between cards,
+            // and in WeChat chat streams it timestamps card 2 below.
+            TextBlock("22:09", left = 450, top = 620, right = 550, bottom = 650),
+            TextBlock("收广州便利店", left = 180, top = 710, right = 620, bottom = 760),
+            TextBlock("使用零钱支付", left = 360, top = 820, right = 640, bottom = 860),
+            TextBlock("¥ 9.50", left = 380, top = 890, right = 620, bottom = 960),
+            TextBlock("账单详情 >", left = 380, top = 1000, right = 620, bottom = 1040),
+        )
+        val evidence = ScreenshotPageInterpreter.interpret(blocks, now, zone)
+        assertEquals(2, evidence.drafts.size)
+        val first = evidence.drafts[0]
+        val second = evidence.drafts[1]
+        assertEquals(350L, first.amountCents)
+        assertTrue(first.eventTimeNeedsConfirmation)
+        assertEquals(950L, second.amountCents)
+        assertFalse(second.eventTimeNeedsConfirmation)
+        assertEquals("广州便利店", second.merchantCandidates.firstOrNull())
+    }
 }

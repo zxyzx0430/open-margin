@@ -148,8 +148,14 @@ class CaptureReviewViewModel @Inject constructor(
         merchant: String,
         category: TransactionCategory,
         direction: String? = null,
+        confirmedTime: Boolean = false,
     ) {
-        val resolved = CaptureReviewDirection.resolve(candidate, direction)
+        val withConfirmedTime = if (confirmedTime && candidate.eventTimeNeedsConfirmation) {
+            candidate.copy(eventTimeNeedsConfirmation = false)
+        } else {
+            candidate
+        }
+        val resolved = CaptureReviewDirection.resolve(withConfirmedTime, direction)
         if (!CaptureBookGate.mayConfirm(resolved)) {
             val message = when {
                 CaptureReviewDirection.requiresSelection(candidate) &&

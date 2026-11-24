@@ -363,25 +363,52 @@ object PaymentCardDetector {
         pageIdentity: String,
     ): List<PaymentCardDetection> {
         val source = PaymentCardSource.fromPackage(packageName) ?: return emptyList()
-        val visible = lines.filter { it.text.isNotBlank() }
-        if (visible.isEmpty()) return emptyList()
+        val rawVisible = lines.filter { it.text.isNotBlank() }
+        if (rawVisible.isEmpty()) return emptyList()
+        // Clamp partially off-screen nodes (e.g. top < 0 when scrolled) instead of
+        // letting one clipped node invalidate the geometry of the entire screen.
+        val visible = rawVisible.map { line ->
+            if (line.right > line.left && line.bottom > line.top) {
+                val clampedTop = line.top.coerceAtLeast(0)
+                val clampedLeft = line.left.coerceAtLeast(0)
+                val clampedBottom = if (screenHeightPx > 0) line.bottom.coerceAtMost(screenHeightPx) else line.bottom
+                if (clampedBottom > clampedTop) {
+                    line.copy(top = clampedTop, left = clampedLeft, bottom = clampedBottom)
+                } else {
+                    line
+                }
+            } else {
+                line
+            }
+        }
         val pageText = visible.joinToString(" ") { it.text }
-        val geometriesUsable = visible.all { it.hasUsableGeometry(screenHeightPx) }
+        val amountLines = visible.filter { parseAmount(it.text) != null }
+        val usableCount = visible.count { it.hasUsableGeometry(screenHeightPx) }
+        val geometriesUsable = visible.isNotEmpty() &&
+            (amountLines.isEmpty() || amountLines.all { it.hasUsableGeometry(screenHeightPx) }) &&
+            usableCount * 10 >= visible.size * 7
         val groups = if (geometriesUsable) {
-            groupCards(visible, screenHeightPx)
+            groupCards(visible.filter { it.hasUsableGeometry(screenHeightPx) }.ifEmpty { visible }, screenHeightPx)
         } else {
             groupCardsByText(visible)
         }
+        val hasPaymentPageContext = KIND_MARKERS.any { pageText.contains(it) } ||
+            BILL_PAGE_MARKERS.any { pageText.contains(it) } ||
+            PAYMENT_CONTEXT_MARKERS.any { pageText.contains(it) }
         val raw = groups.flatMap { group ->
             val plausibleAmounts = group.filterNot { isNoisyAmountLine(it.text, PaymentCardKind.PAYMENT) }
                 .mapNotNull { parseAmount(it.text)?.takeIf { amount -> amount > 0L } }
             if (!geometriesUsable && plausibleAmounts.size > 1) {
-                ambiguousAmountCandidates(
-                    source = source,
-                    amounts = plausibleAmounts,
-                    capturedAtMs = capturedAtMs,
-                    pageIdentity = pageIdentity,
-                )
+                if (hasPaymentPageContext) {
+                    ambiguousAmountCandidates(
+                        source = source,
+                        amounts = plausibleAmounts,
+                        capturedAtMs = capturedAtMs,
+                        pageIdentity = pageIdentity,
+                    )
+                } else {
+                    emptyList()
+                }
             } else {
                 val parsed = parseCard(source, group, pageText, capturedAtMs, pageIdentity)
                 listOfNotNull(
