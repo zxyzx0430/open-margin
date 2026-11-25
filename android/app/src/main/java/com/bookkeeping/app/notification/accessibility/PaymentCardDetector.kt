@@ -322,8 +322,7 @@ object PaymentCardDetector {
             )
         }.distinctBy { "${it.text}|${it.top}|${it.left}" }
         if (lines.isEmpty()) return emptyList()
-        val pageText = lines.joinToString(" ") { it.text }
-        if (isBillListPage(pageText)) return emptyList()
+        if (isBillListPage(lines.map { it.text })) return emptyList()
         val screenHeight = lines.maxOf { it.bottom }.coerceAtLeast(1)
         return fromLines(
             packageName = packageName,
@@ -387,6 +386,7 @@ object PaymentCardDetector {
             }
         }
         val pageText = visible.joinToString(" ") { it.text }
+        if (!allowUnattributedAmounts && isBillListPage(visible.map { it.text })) return emptyList()
         val amountLines = visible.filter { parseAmount(it.text) != null }
         val usableCount = visible.count { it.hasUsableGeometry(screenHeightPx) }
         val geometriesUsable = visible.isNotEmpty() &&
@@ -687,17 +687,38 @@ object PaymentCardDetector {
         }
     }
 
-    fun isBillListPage(text: String): Boolean {
-        val isDetailOrVoucherPage = containsAny(
-            text,
-            "账单详情", "交易详情", "订单详情", "交易单号", "商户单号", "商户订单号",
-            "微信支付凭证", "扣费凭证", "支付成功", "付款成功", "退款到账通知", "切换到发消息",
-        )
-        if (isDetailOrVoucherPage) return false
-        return containsAny(
-            text,
-            "全部账单", "收支明细", "账单统计", "查找交易", "本月统计", "记账日报", "月账单", "收支统计",
-        ) || (text.contains("账单") && containsAny(text, "本月支出", "本月收入", "本月已支出", "点击查看昨日收支", "日报设置"))
+    /**
+     * History chrome has precedence over a status word on an individual row.
+     * A detail/voucher must have its own structural evidence, not merely a link
+     * or "支付成功" inside a history row. "我的账单" is also a service-stream tab.
+     */
+    fun isBillListPage(text: String): Boolean = isBillListPage(listOf(text))
+
+    fun isBillListPage(texts: List<String>): Boolean {
+        val clean = texts.map { it.trim() }.filter { it.isNotEmpty() }
+        val text = clean.joinToString(" ")
+        val chrome = listOf("全部账单", "收支明细", "账单统计", "查找交易",
+            "本月统计", "记账日报", "月账单", "收支统计", "账单明细", "账单记录")
+        val chromeCount = chrome.count { text.contains(it) }
+        val summary = text.contains("账单") && containsAny(text, "本月支出", "本月收入",
+            "本月已支出", "点击查看昨日收支", "日报设置", "本月消费")
+        val listTitle = clean.any { it in setOf("账单", "交易记录", "退款记录", "退款列表", "全部交易", "账单搜索") }
+        val listControls = containsAny(text, "筛选", "搜索账单", "搜索交易", "全部类型",
+            "全部收支", "选择月份", "按月", "时间筛选", "交易分类")
+        val repeatedRows = clean.count { parseAmount(it) != null } >= 2 &&
+            clean.count { STANDALONE_TIME.matches(it) } >= 2
+        // Multiple independent list signals beat the status of any row.
+        val exactHistoryTitle = clean.any { it in setOf("全部账单", "收支明细", "账单统计", "账单明细", "账单记录", "退款记录", "退款列表", "账单搜索") }
+        if (exactHistoryTitle || chromeCount >= 2 || summary || listTitle && (listControls || repeatedRows)) return true
+        val detailTitle = clean.any { it in setOf("账单详情", "交易详情", "订单详情", "转账详情", "退款详情") } ||
+            (clean.size == 1 && containsAny(text, "账单详情", "交易详情", "订单详情", "转账详情", "退款详情"))
+        val detailFields = orderId(text) != null ||
+            listOf("交易金额", "实付金额", "退款金额", "转账金额", "支付金额", "付款金额").any(text::contains) &&
+            containsAny(text, "支付方式", "付款方式", "收款方", "商户名称", "退款方式", "交易时间")
+        val voucher = containsAny(text, "微信支付凭证", "扣费凭证", "退款到账通知", "切换到发消息")
+        if (chromeCount == 0) return false
+        if ((detailTitle && detailFields || voucher) && !listTitle && !listControls && !repeatedRows) return false
+        return true
     }
 
     private fun isSummaryGroup(joined: String): Boolean {

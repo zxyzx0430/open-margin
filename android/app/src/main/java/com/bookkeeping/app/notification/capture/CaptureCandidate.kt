@@ -53,6 +53,8 @@ data class CaptureCandidate(
     val transactionCurrency: String? = null,
     /** Screenshot storage/read failure, kept separate from duplicate/review reason. */
     val screenshotUnavailableReason: String? = null,
+    /** Ephemeral page visit ID, distinct from ledger transaction identity. */
+    val pageVisitId: String? = null,
 ) {
 
     fun isValid(): Boolean {
@@ -70,6 +72,7 @@ data class CaptureCandidate(
         if (completionStatus !in COMPLETION_STATUSES || eventTimeSource !in EVENT_TIME_SOURCES) return false
         if (kind !in KINDS || direction !in DIRECTIONS) return false
         if (candidateId.isBlank() || candidateId.length > 80) return false
+        if (pageVisitId != null && (pageVisitId.isBlank() || pageVisitId.length > 80)) return false
         if (matchedTransactionId != null && matchedTransactionId <= 0L) return false
         if (imageFingerprint != null && !imageFingerprint.matches(Regex("[a-f0-9]{64}"))) return false
         if (transactionSource != null && transactionSource !in TRANSACTION_SOURCES) return false
@@ -145,6 +148,7 @@ data class CaptureCandidate(
         put("transactionAccount", transactionAccount ?: JSONObject.NULL)
         put("transactionCurrency", transactionCurrency ?: JSONObject.NULL)
         put("screenshotUnavailableReason", screenshotUnavailableReason ?: JSONObject.NULL)
+        put("pageVisitId", pageVisitId ?: JSONObject.NULL)
     }
 
     companion object {
@@ -345,6 +349,7 @@ data class CaptureCandidate(
                 screenshotUnavailableReason = json.optString("screenshotUnavailableReason").takeIf {
                     it in SCREENSHOT_UNAVAILABLE_REASONS
                 },
+                pageVisitId = json.optString("pageVisitId").takeIf { it.isNotBlank() && it != "null" },
             )
             candidate.takeIf { it.isValid() }
         }.getOrNull()

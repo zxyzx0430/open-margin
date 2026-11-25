@@ -150,6 +150,8 @@ fun TransactionDiagnosticsScreen(
     var exporting by remember { mutableStateOf(false) }
     var feedbackDescription by remember { mutableStateOf("") }
     var feedbackContact by remember { mutableStateOf("") }
+    var feedbackReceipt by remember { mutableStateOf<FeedbackUploadResult?>(null) }
+    var feedbackUploadFailed by remember { mutableStateOf(false) }
     var pendingSaveContent by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -520,6 +522,7 @@ fun TransactionDiagnosticsScreen(
                         .height(48.dp),
                     onClick = {
                         exporting = true
+                        feedbackUploadFailed = false
                         scope.launch {
                             try {
                                 val fileName = DiagnosticExportFormatter.defaultFileName()
@@ -556,13 +559,12 @@ fun TransactionDiagnosticsScreen(
                                 if (uploadResult.ok) {
                                     feedbackDescription = ""
                                     showExportDialog = false
-                                    val idSuffix = uploadResult.feedbackId?.let { "（编号 $it）" }.orEmpty()
-                                    viewModel.publishNotice("已发送给开发者$idSuffix")
+                                    feedbackReceipt = uploadResult
                                 } else {
-                                    viewModel.publishNotice("发送失败，请检查网络或改用本地分享")
+                                    feedbackUploadFailed = true
                                 }
                             } catch (_: Exception) {
-                                viewModel.publishNotice("发送失败，请检查网络或改用本地分享")
+                                feedbackUploadFailed = true
                             } finally {
                                 exporting = false
                             }
@@ -574,6 +576,10 @@ fun TransactionDiagnosticsScreen(
                         maxLines = 1,
                         softWrap = false,
                     )
+                }
+                if (feedbackUploadFailed) {
+                    Text(tr("发送失败，请检查网络或改用本地分享"),
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -677,6 +683,29 @@ fun TransactionDiagnosticsScreen(
                 }
             }
         }
+    }
+    feedbackReceipt?.let { receipt ->
+        val clipboard = LocalClipboardManager.current
+        AlertDialog(
+            onDismissRequest = { feedbackReceipt = null },
+            title = { Text(tr("反馈发送成功")) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(tr("感谢你的反馈与支持！每一次反馈，都在帮助清衡变得更好。"))
+                    receipt.feedbackId?.let { id ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${tr("反馈编号")}：$id", modifier = Modifier.weight(1f))
+                            TextButton(onClick = { clipboard.setText(AnnotatedString(id)) }) {
+                                Text(tr("复制编号"))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { feedbackReceipt = null }) { Text(tr("完成")) }
+            },
+        )
     }
 }
 

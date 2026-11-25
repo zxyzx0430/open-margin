@@ -68,6 +68,25 @@ open class PageRecognitionService : AccessibilityService() {
     private var serviceConnected = false
     private var deferredPageEvent: DeferredPaymentPageEvent? = null
     private var lastInspectedPage: DeferredPaymentPageKey? = null
+    private var lastVisitKey: String? = null
+    private var visitId: String? = null
+    private var lastVisitAtMs = 0L
+
+    private fun resetPageVisit() {
+        lastVisitKey = null
+        visitId = null
+        lastVisitAtMs = 0L
+    }
+
+    private fun pageVisit(packageName: String, windowId: Int, activity: String, now: Long): String {
+        val key = "$packageName|$windowId|$activity"
+        if (key != lastVisitKey || now - lastVisitAtMs > 3_000L || visitId == null) {
+            lastVisitKey = key
+            visitId = java.util.UUID.randomUUID().toString()
+        }
+        lastVisitAtMs = now
+        return requireNotNull(visitId)
+    }
 
     private lateinit var store: CaptureCandidateStore
     private lateinit var repository: TransactionRepository
@@ -200,8 +219,12 @@ open class PageRecognitionService : AccessibilityService() {
         // WeChat's conversation list and Alipay home/chat pages contain chat
         // names, timestamps and unread badges. Never feed them to the payment
         // card parser: those pages can look like multiple small payments.
-        if (PageActivityGuard.isChatOrHomePage(packageName, activity, pageText)) return
-        if (PaymentCardDetector.isBillListPage(pageText)) {
+        if (PageActivityGuard.isChatOrHomePage(packageName, activity, pageText)) {
+            resetPageVisit()
+            return
+        }
+        if (PaymentCardDetector.isBillListPage(snapshot.root.subtreeTexts())) {
+            resetPageVisit()
             ServiceHealthLog.record(
                 context = applicationContext,
                 channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
@@ -215,10 +238,30 @@ open class PageRecognitionService : AccessibilityService() {
 
         // Payment/bill cards: merchant payment, transfer, red packet, withdrawal,
         // refund, and pay-after-use. Only explicitly completed cards may be booked.
-        val cards = PaymentCardDetector.fromSnapshot(
+        val currentVisit = pageVisit(packageName, root.windowId, activity, now)
+        val rawCards = PaymentCardDetector.fromSnapshot(
             packageName, snapshot, now, allowUnattributedAmounts = false,
         )
+        val cards = PassivePaymentEvidencePolicy.actionable(rawCards)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            PassivePaymentEvidencePolicy.requiresOcr(rawCards, cards) &&
+            windowStillCurrent(root, packageName, snapshot.root.windowId)
+        ) {
+            val identity = PaymentCardDetector.pageIdentity(packageName, pageText)
+            if (isScreenshotBurstCooldown(snapshot.root.windowId, identity, now)) return
+            if (!capturing.compareAndSet(false, true)) return
+            recordScreenshotAttempt(snapshot.root.windowId, identity, now)
+            ServiceHealthLog.record(applicationContext, ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                "page_decision", "PAGE_NODE -> PAGE_OCR verification",
+                "raw=${rawCards.size}, actionable=${cards.size}")
+            captureScreenshotForOcr(packageName, identity, now, allowStrictAuto,
+                snapshot.root.windowId, nodeFallback = cards, pageVisitId = currentVisit)
+            return
+        }
         if (cards.isNotEmpty()) {
+            ServiceHealthLog.record(applicationContext, ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                "page_decision", "PAGE_NODE",
+                "raw=${rawCards.size}, selected=${cards.size}")
             val actionableCards = PaymentCardReviewQueue.actionableDetections(cards)
             val firstIdentity = cards.first().pageIdentity
             val firstOrderId = actionableCards.firstOrNull { !it.orderId.isNullOrBlank() }?.orderId
@@ -259,6 +302,7 @@ open class PageRecognitionService : AccessibilityService() {
                             store = store,
                             existingLedgerRows = recentLedger,
                             geometryReason = PaymentCardReviewQueue.AMBIGUOUS_NODE_GEOMETRY_REASON,
+                            pageVisitId = currentVisit,
                         )
                         if (pageRoute is PaymentCardReviewQueue.Route.HeldForReview) {
                             // The in-flight flag blocks reentry; only successful
@@ -301,7 +345,7 @@ open class PageRecognitionService : AccessibilityService() {
                 }
                 return
             }
-            when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store)) {
+            when (val pageRoute = PaymentCardReviewQueue.route(cards, now, store, pageVisitId = currentVisit)) {
                 is PaymentCardReviewQueue.Route.HeldForReview -> return
 
                 is PaymentCardReviewQueue.Route.SingleCandidate -> {
@@ -425,6 +469,7 @@ open class PageRecognitionService : AccessibilityService() {
                     now,
                     allowStrictAuto,
                     snapshot.root.windowId,
+                    pageVisitId = currentVisit,
                 )
             } else {
                 finishCapture()
@@ -434,7 +479,7 @@ open class PageRecognitionService : AccessibilityService() {
 
         // Success-page fallback is part of the same pipeline. A page that already
         // produced a known non-final card must never be reinterpreted as success.
-        if (cards.isNotEmpty()) return
+        if (rawCards.isNotEmpty()) return
         val detection = PaymentPageDetector.detect(packageName, snapshot, now)
         if (!detection.isSuccessPage) {
             if (BuildConfig.DEBUG) {
@@ -485,6 +530,9 @@ open class PageRecognitionService : AccessibilityService() {
             reason = detection.reason,
             kind = CaptureCandidate.KIND_PAYMENT,
             eventTimeMs = now,
+            eventTimeSource = CaptureCandidate.TIME_SOURCE_CAPTURE,
+            eventTimeNeedsConfirmation = true,
+            pageVisitId = currentVisit,
         )
         capturing.set(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -512,6 +560,8 @@ open class PageRecognitionService : AccessibilityService() {
         now: Long,
         allowAuto: Boolean,
         windowId: Int,
+        nodeFallback: List<PaymentCardDetection> = emptyList(),
+        pageVisitId: String? = null,
     ) {
         val attemptId = TransactionDiagnostics.newAttemptId()
         val requestedAt = SystemClock.elapsedRealtime()
@@ -526,6 +576,12 @@ open class PageRecognitionService : AccessibilityService() {
                 val sinceLastCall = SystemClock.elapsedRealtime() - lastTakeScreenshotCallMs
                 if (sinceLastCall in 0 until MIN_TAKE_SCREENSHOT_INTERVAL_MS) {
                     kotlinx.coroutines.delay(MIN_TAKE_SCREENSHOT_INTERVAL_MS - sinceLastCall)
+                }
+                val active = rootInActiveWindow
+                if (active == null || active.windowId != windowId || active.packageName?.toString() != packageName) {
+                    retainNodeEvidence(nodeFallback, now, pageVisitId, "page changed before OCR")
+                    finishCapture()
+                    return@launch
                 }
                 takeScreenshotCompat(
                     windowId,
@@ -547,8 +603,9 @@ open class PageRecognitionService : AccessibilityService() {
                                         result = TransactionDiagnostics.RESULT_FAILURE,
                                         details = "Screenshot could not be decoded",
                                     )
+                                    try { retainNodeEvidence(nodeFallback, now, pageVisitId, "OCR screenshot decode failed") }
+                                    finally { finishCapture() }
                                 }
-                                finishCapture()
                                 return
                             }
                             val height = bitmap.height
@@ -609,7 +666,7 @@ open class PageRecognitionService : AccessibilityService() {
                                             } ?: BillTextLine(text = text)
                                         }
                                     }
-                                    val cards = PaymentCardDetector.fromLines(
+                                    val ocrCards = PaymentCardDetector.fromLines(
                                         packageName = packageName,
                                         lines = lines,
                                         capturedAtMs = now,
@@ -617,6 +674,11 @@ open class PageRecognitionService : AccessibilityService() {
                                         pageIdentity = pageIdentity,
                                         allowUnattributedAmounts = false,
                                     )
+                                    val history = PaymentCardDetector.isBillListPage(lines.map { it.text })
+                                    val cards = PassivePaymentEvidencePolicy.selectAfterOcr(nodeFallback, ocrCards, history)
+                                    ServiceHealthLog.record(applicationContext, ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                                        "page_decision", if (nodeFallback.isEmpty()) "PAGE_OCR" else "PAGE_FUSED",
+                                        "history=$history, node=${nodeFallback.size}, ocr=${ocrCards.size}, selected=${cards.size}")
                                     parseMs = SystemClock.elapsedRealtime() - parseStarted
                                     val routeStarted = SystemClock.elapsedRealtime()
                                     val recentLedger = runCatching {
@@ -628,6 +690,7 @@ open class PageRecognitionService : AccessibilityService() {
                                         store = store,
                                         existingLedgerRows = recentLedger,
                                         screenshotProvider = ::prepareEvidence,
+                                        pageVisitId = pageVisitId,
                                     )
                                     routeMs = (SystemClock.elapsedRealtime() - routeStarted - compressionMs).coerceAtLeast(0L)
                                     when (pageRoute) {
@@ -725,13 +788,14 @@ open class PageRecognitionService : AccessibilityService() {
                                         PaymentCardReviewQueue.Route.NoBookableCandidate -> {
                                             // Distinguish engine failure, empty OCR and insufficient
                                             // evidence without relaxing any transaction parsing rules.
-                                            outcome = OcrPageOutcomePolicy.noCandidate(result.error != null, result.isEmpty, cards.size)
+                                            outcome = if (history) "history_page" else OcrPageOutcomePolicy.noCandidate(result.error != null, result.isEmpty, cards.size)
                                             repository.recordDiagnostic(
                                                 attemptId = attemptId,
                                                 stage = TransactionDiagnostics.STAGE_PARSE,
                                                 result = if (result.error != null) TransactionDiagnostics.RESULT_FAILURE
                                                     else TransactionDiagnostics.RESULT_WARNING,
                                                 details = when (outcome) {
+                                                    "history_page" -> "Historical bill list skipped"
                                                     "engine_error" -> "OCR engine failed"
                                                     "empty_text" -> "OCR returned no text"
                                                     "no_transaction_cards" -> "OCR did not identify transaction fields"
@@ -749,6 +813,7 @@ open class PageRecognitionService : AccessibilityService() {
                                         details = "Payment page processing failed",
                                     )
                                     Log.e(TAG, "OCR capture failed: ${failure.javaClass.simpleName}")
+                                    if (!handedOff) retainNodeEvidence(nodeFallback, now, pageVisitId, "OCR exception")
                                 } finally {
                                     ServiceHealthLog.record(
                                         context = applicationContext,
@@ -787,9 +852,10 @@ open class PageRecognitionService : AccessibilityService() {
                                         "Screenshot capture failed"
                                     },
                                 )
+                                try { retainNodeEvidence(nodeFallback, now, pageVisitId, "OCR screenshot failed") }
+                                finally { finishCapture() }
                             }
                             Log.e(TAG, "OCR screenshot failed: $errorCode")
-                            finishCapture()
                         }
                     },
                 )
@@ -801,8 +867,34 @@ open class PageRecognitionService : AccessibilityService() {
                     details = "Payment page processing failed",
                 )
                 Log.e(TAG, "OCR screenshot start failed: ${failure.javaClass.simpleName}")
-                finishCapture()
+                try { retainNodeEvidence(nodeFallback, now, pageVisitId, "OCR start failed") }
+                finally { finishCapture() }
             }
+        }
+    }
+
+    private suspend fun retainNodeEvidence(
+        nodeCards: List<PaymentCardDetection>,
+        now: Long,
+        pageVisitId: String?,
+        reason: String,
+    ) {
+        val recoverable = PassivePaymentEvidencePolicy.recoverable(nodeCards)
+        if (recoverable.isEmpty()) return
+        try {
+            val recent = runCatching { repository.screenshotDedupRows(limit = 100) }.getOrDefault(emptyList())
+            val route = PaymentCardReviewQueue.route(recoverable, now, store,
+                existingLedgerRows = recent,
+                geometryReason = PaymentCardReviewQueue.AMBIGUOUS_NODE_GEOMETRY_REASON,
+                pageVisitId = pageVisitId)
+            if (route is PaymentCardReviewQueue.Route.HeldForReview) {
+                ServiceHealthLog.record(applicationContext, ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                    "page_decision", "PAGE_NODE recoverable after OCR failure",
+                    "$reason, saved=${route.saved.saved.size}, failed=${route.saved.failed}")
+                if (route.saved.saved.isNotEmpty()) ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
+            }
+        } catch (failure: Exception) {
+            Log.e(TAG, "Retaining node evidence failed: ${failure.javaClass.simpleName}")
         }
     }
 
@@ -866,6 +958,13 @@ open class PageRecognitionService : AccessibilityService() {
                 val sinceLastCall = SystemClock.elapsedRealtime() - lastTakeScreenshotCallMs
                 if (sinceLastCall in 0 until MIN_TAKE_SCREENSHOT_INTERVAL_MS) {
                     kotlinx.coroutines.delay(MIN_TAKE_SCREENSHOT_INTERVAL_MS - sinceLastCall)
+                }
+                val active = rootInActiveWindow
+                val expectedPackage = candidates.firstOrNull()?.packageName
+                if (active == null || active.windowId != windowId || active.packageName?.toString() != expectedPackage) {
+                    processCandidates(candidates.map { it.copy(reason = "screenshot start failed") },
+                        null, allowAuto, contextText, diagnosticAttemptId = attemptId)
+                    return@launch
                 }
                 takeScreenshotCompat(
                     windowId,
@@ -1457,6 +1556,7 @@ open class PageRecognitionService : AccessibilityService() {
         serviceConnected = false
         deferredPageEvent = null
         lastInspectedPage = null
+        resetPageVisit()
         // An in-flight task remains serialized until its actual completion.
         ServiceHealthLog.record(
             context = applicationContext,
@@ -1471,6 +1571,7 @@ open class PageRecognitionService : AccessibilityService() {
         serviceConnected = false
         deferredPageEvent = null
         lastInspectedPage = null
+        resetPageVisit()
         capturing.set(false)
         ServiceHealthLog.record(
             context = applicationContext,
@@ -1494,7 +1595,10 @@ open class PageRecognitionService : AccessibilityService() {
 
         private fun noOrderIdBurstKey(candidate: CaptureCandidate): String {
             val merchant = candidate.merchantCandidates.firstOrNull().orEmpty().trim()
-            return "${candidate.packageName}|${candidate.kind}|${candidate.amountCents}|$merchant"
+            val event = if (candidate.eventTimeSource == CaptureCandidate.TIME_SOURCE_ACTUAL &&
+                !candidate.eventTimeNeedsConfirmation) candidate.eventTimeMs else null
+            return "${candidate.packageName}|${candidate.pageVisitId ?: candidate.pageIdentity}|" +
+                "${candidate.kind}|${candidate.direction}|${candidate.amountCents}|$merchant|${event ?: ""}"
         }
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
         private const val PAGE_RECOGNITION_CLASS =

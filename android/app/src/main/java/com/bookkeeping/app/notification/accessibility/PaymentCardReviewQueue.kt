@@ -49,6 +49,7 @@ object PaymentCardReviewQueue {
         existingLedgerRows: List<TransactionEntity> = emptyList(),
         geometryReason: String = AMBIGUOUS_GEOMETRY_REASON,
         screenshotProvider: (() -> ByteArray?)? = null,
+        pageVisitId: String? = null,
     ): Route {
         // Never hold uncompleted/pending/created cards in the review inbox,
         // because they represent in-flight transfers or unreceived red packets.
@@ -63,7 +64,7 @@ object PaymentCardReviewQueue {
                 MULTI_CARD_REASON
             }
             val saved = saveForReview(
-                candidates = actionable.mapNotNull { candidate(it, capturedAtMs) },
+                candidates = actionable.mapNotNull { candidate(it, capturedAtMs, pageVisitId) },
                 store = store,
                 screenshot = screenshot,
                 reason = reason,
@@ -74,7 +75,7 @@ object PaymentCardReviewQueue {
         }
         val candidate = actionable.singleOrNull()
             ?.takeIf { it.isFinal && it.direction != PaymentDirection.UNKNOWN && !it.reviewRequired }
-            ?.let { candidate(it, capturedAtMs) }
+            ?.let { candidate(it, capturedAtMs, pageVisitId) }
             ?: return Route.NoBookableCandidate
         return Route.SingleCandidate(candidate)
     }
@@ -82,6 +83,7 @@ object PaymentCardReviewQueue {
     fun candidate(
         detection: PaymentCardDetection,
         capturedAtMs: Long,
+        pageVisitId: String? = null,
     ): CaptureCandidate? {
         if (detection.amountCents <= 0L) return null
         val kind = when (detection.kind) {
@@ -126,6 +128,7 @@ object PaymentCardReviewQueue {
             completionExplicit = detection.completionExplicit,
             directionExplicit = detection.directionExplicit,
             ledgerWriteAllowed = true,
+            pageVisitId = pageVisitId,
         )
     }
 
@@ -174,11 +177,17 @@ object PaymentCardReviewQueue {
         val orderId = candidate.orderId?.trim()?.takeIf { it.isNotEmpty() }
         return existingPending.any { existing ->
             val existingOrderId = existing.orderId?.trim()?.takeIf { it.isNotEmpty() }
+            if (existing.packageName != candidate.packageName) return@any false
             if (orderId != null && existingOrderId != null) {
                 return@any orderId == existingOrderId
             }
-            if (existing.packageName != candidate.packageName) return@any false
-            if (existing.kind != candidate.kind) return@any false
+            val sameVisit = candidate.pageVisitId != null && candidate.pageVisitId == existing.pageVisitId
+            val sameBurst = sameVisit && kotlin.math.abs(existing.capturedAtMs - candidate.capturedAtMs) <= 1_000L
+            val uncertainKind = existing.completionStatus == CaptureCandidate.COMPLETION_UNKNOWN ||
+                candidate.completionStatus == CaptureCandidate.COMPLETION_UNKNOWN ||
+                existing.direction == CaptureCandidate.DIRECTION_UNKNOWN ||
+                candidate.direction == CaptureCandidate.DIRECTION_UNKNOWN
+            if (existing.kind != candidate.kind && !(sameBurst && uncertainKind)) return@any false
             if (existing.amountCents != candidate.amountCents) return@any false
             if (existing.direction != candidate.direction &&
                 existing.direction != CaptureCandidate.DIRECTION_UNKNOWN &&
@@ -191,6 +200,7 @@ object PaymentCardReviewQueue {
                 candidate.eventTimeSource != CaptureCandidate.TIME_SOURCE_CAPTURE &&
                 !existing.eventTimeNeedsConfirmation && !candidate.eventTimeNeedsConfirmation &&
                 existing.eventTimeMs != null && candidate.eventTimeMs != null
+            if (bothActual && existing.eventTimeMs != candidate.eventTimeMs && sameBurst) return@any false
             val existingEventTime = if (bothActual) existing.eventTimeMs else existing.capturedAtMs
             val candidateEventTime = if (bothActual) candidate.eventTimeMs else candidate.capturedAtMs
             if (existingEventTime != null && candidateEventTime != null &&
@@ -208,7 +218,7 @@ object PaymentCardReviewQueue {
             val closeInTime = kotlin.math.abs(existing.capturedAtMs - candidate.capturedAtMs) <= 120_000L
             // Without observed times, amount + capture proximity alone is too weak
             // to suppress an otherwise independent transaction on a different page.
-            samePage || sameMerchant || (bothActual && closeInTime)
+            samePage || sameMerchant || (bothActual && closeInTime) || sameBurst
         }
     }
 

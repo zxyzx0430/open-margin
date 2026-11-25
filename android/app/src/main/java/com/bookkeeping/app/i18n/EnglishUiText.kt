@@ -830,6 +830,10 @@ internal object EnglishUiText {
         "直接发送给开发者" to "Send directly to developer",
         "发送中…" to "Sending…",
         "本地分享" to "Local share",
+        "反馈发送成功" to "Feedback sent",
+        "感谢你的反馈与支持！每一次反馈，都在帮助清衡变得更好。" to "Thank you for your feedback and support! Every report helps us improve Open Margin.",
+        "反馈编号" to "Feedback ID",
+        "复制编号" to "Copy ID",
         "发送失败，请检查网络或改用本地分享" to "Upload failed; check network or use local share",
         "记录每笔账从采集到入库经过的每一步，仅保存在本机最长 7 天；遇到问题可点右上角「导出日志」直接发给开发者排查。" to
             "Logs each step from capture to ledger (kept locally up to 7 days). Tap Export logs at the top right to send directly to the developer.",
