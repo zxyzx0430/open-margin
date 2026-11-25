@@ -136,7 +136,7 @@ class ScreenshotV1475RegressionTest {
         assertEquals(CaptureCandidate.KIND_WITHDRAWAL, withdrawal.draft.kind)
         assertEquals(CaptureCandidate.DIRECTION_EXPENSE, withdrawal.draft.direction)
         assertEquals(49900L, withdrawal.draft.amountCents)
-        assertEquals(Action.AUTO_BOOK, withdrawal.action)
+        assertEquals(Action.ASK_USER, withdrawal.action)
     }
 
     @Test
@@ -161,5 +161,43 @@ class ScreenshotV1475RegressionTest {
         val d = result.decisions.single()
         assertEquals(400L, d.draft.amountCents)
         assertEquals("快充站", d.draft.merchantCandidates.firstOrNull())
+    }
+
+    @Test
+    fun `alipay payment message stream suppresses narrow left logo badge on second card`() {
+        val blocks = listOf(
+            b("服务消息", top = 85, left = 200, right = 320, height = 33),
+            b("支付消息", top = 84, left = 367, right = 489, height = 37),
+            b("商户一", top = 211, left = 105, right = 191, height = 35),
+            b("11月9日00:16", top = 249, left = 104, right = 228, height = 23),
+            b("付款成功", top = 297, left = 289, right = 401, height = 36),
+            b("￥6.00", top = 336, left = 272, right = 417, height = 55),
+            b("查看详情>", top = 393, left = 297, right = 407, height = 30),
+            b("付款方式Visa(0888)", top = 450, left = 42, right = 276, height = 27),
+            b("商户二长名", top = 693, left = 107, right = 215, height = 33),
+            b("徽标印", top = 725, left = 45, right = 88, height = 18),
+            b("11月3日23:01", top = 729, left = 106, right = 224, height = 23),
+            b("付款成功", top = 780, left = 289, right = 400, height = 32),
+            b("¥5.67", top = 818, left = 273, right = 414, height = 50),
+            b("查看详情>", top = 873, left = 297, right = 406, height = 30),
+            b("付款方式花呗", top = 930, left = 40, right = 206, height = 27),
+        )
+        val result = ScreenshotImportPipeline.plan(
+            ScreenshotIntakeRequest(
+                IntakeSource.MEDIASTORE,
+                "content://media/external/images/media/20",
+                "image/jpeg",
+                nowMs,
+                byteSize = 300_000,
+            ),
+            blocks,
+            emptyList(),
+            timeZone = zone,
+        )
+        assertEquals(2, result.decisions.size)
+        assertEquals(600L, result.decisions[0].draft.amountCents)
+        assertEquals("商户一", result.decisions[0].draft.merchantCandidates.firstOrNull())
+        assertEquals(567L, result.decisions[1].draft.amountCents)
+        assertEquals("商户二长名", result.decisions[1].draft.merchantCandidates.firstOrNull())
     }
 }
