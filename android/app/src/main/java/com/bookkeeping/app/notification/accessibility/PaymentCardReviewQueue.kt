@@ -30,6 +30,16 @@ object PaymentCardReviewQueue {
         val indexFull: Int,
     )
 
+    internal fun actionableDetections(detections: List<PaymentCardDetection>): List<PaymentCardDetection> =
+        detections.filterNot {
+            it.status in setOf(PaymentCardStatus.PENDING, PaymentCardStatus.CREATED)
+        }
+
+    internal fun requiresReview(detections: List<PaymentCardDetection>): Boolean {
+        val actionable = actionableDetections(detections)
+        return actionable.size > 1 || actionable.any { it.reviewRequired }
+    }
+
     /** Production routing boundary shared by accessibility-tree and OCR capture. */
     fun route(
         detections: List<PaymentCardDetection>,
@@ -43,12 +53,7 @@ object PaymentCardReviewQueue {
         // because they represent in-flight transfers or unreceived red packets.
         // Cancelled/failed cards on multi-card pages stay visible as non-bookable
         // previews per PaymentCardReviewQueueTest.
-        val actionable = detections.filterNot {
-            it.status in setOf(
-                PaymentCardStatus.PENDING,
-                PaymentCardStatus.CREATED,
-            )
-        }
+        val actionable = actionableDetections(detections)
         if (actionable.isEmpty()) return Route.NoBookableCandidate
         if (actionable.size > 1 || actionable.any { it.reviewRequired }) {
             val reason = if (actionable.any { it.reviewRequired }) {

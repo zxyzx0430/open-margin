@@ -177,8 +177,9 @@ open class PageRecognitionService : AccessibilityService() {
             packageName, snapshot, now, allowUnattributedAmounts = false,
         )
         if (cards.isNotEmpty()) {
+            val actionableCards = PaymentCardReviewQueue.actionableDetections(cards)
             val firstIdentity = cards.first().pageIdentity
-            val firstOrderId = cards.firstOrNull { !it.orderId.isNullOrBlank() }?.orderId
+            val firstOrderId = actionableCards.firstOrNull { !it.orderId.isNullOrBlank() }?.orderId
             if (PageIdentityThrottlePolicy.shouldSuppress(
                     previousIdentity = lastPageIdentity,
                     previousEventId = lastPageEventId,
@@ -198,7 +199,9 @@ open class PageRecognitionService : AccessibilityService() {
                 )
                 return
             }
-            val needsReviewQueue = cards.size > 1 || cards.any { it.reviewRequired }
+            // Route on the same filtered cards as the queue. A completed card
+            // beside an unfinished card must still enter the single-card path.
+            val needsReviewQueue = PaymentCardReviewQueue.requiresReview(cards)
             if (needsReviewQueue) {
                 // Reserve before dispatching IO so rapid window events cannot enqueue
                 // the same batch while the first save is still running.

@@ -360,6 +360,29 @@ class PaymentCardReviewQueueTest {
         assertEquals(2, PaymentCardReviewQueue.saveForReview(listOf(first, second), store).saved.size)
     }
 
+    @Test
+    fun `completed card alongside unfinished card enters normal single candidate route`() = withStore { store ->
+        val completed = PaymentCardDetector.fromLines(
+            PaymentCardDetector.WECHAT,
+            listOf(line("支付成功", 10), line("Fixture shop", 40), line("¥10.00", 70)),
+            capturedAt, 600, "mixed-status-page",
+        ).single()
+        val unfinished = completed.copy(
+            status = PaymentCardStatus.PENDING,
+            kind = PaymentCardKind.TRANSFER,
+            amountCents = 2500L,
+            orderId = "pending-001",
+            cardKey = "unfinished",
+            reviewRequired = true,
+        )
+        val cards = listOf(unfinished, completed)
+        assertFalse(PaymentCardReviewQueue.requiresReview(cards))
+        val route = PaymentCardReviewQueue.route(cards, capturedAt, store)
+            as PaymentCardReviewQueue.Route.SingleCandidate
+        assertEquals(1000L, route.candidate.amountCents)
+        assertTrue(store.pending().isEmpty())
+    }
+
     private fun assertSingleAmountHeldForReview(
         detections: List<PaymentCardDetection>,
         store: CaptureCandidateStore,
