@@ -413,6 +413,11 @@ object PaymentCardDetector {
                         capturedAtMs = capturedAtMs,
                         pageIdentity = pageIdentity,
                     )
+                } else if (hasPaymentPageContext) {
+                    // A real detail card may display several monetary fields
+                    // (order amount, actual charge, etc.). Recover one card only
+                    // when an explicit primary amount independently resolves it.
+                    listOfNotNull(resolveAmbiguousDetail(source, group, pageText, capturedAtMs, pageIdentity))
                 } else {
                     emptyList()
                 }
@@ -556,6 +561,35 @@ object PaymentCardDetector {
                 reviewRequired = true,
             )
         }
+    }
+
+    private fun resolveAmbiguousDetail(
+        source: PaymentCardSource,
+        group: List<BillTextLine>,
+        pageText: String,
+        capturedAtMs: Long,
+        pageIdentity: String,
+    ): PaymentCardDetection? {
+        val card = parseCard(source, group, pageText, capturedAtMs, pageIdentity) ?: return null
+        // Do not rely on a generic page heading or choose a random unlabeled
+        // amount. Require a transaction-specific field with a unique value.
+        val labels = when (card.kind) {
+            PaymentCardKind.PAYMENT -> listOf("实付金额", "实付", "支付金额", "付款金额", "扣款金额", "交易金额")
+            PaymentCardKind.PAY_AFTER_USE -> listOf("扣款金额", "支付金额", "实付金额")
+            PaymentCardKind.TRANSFER -> listOf("转账金额", "收款金额", "付款金额")
+            PaymentCardKind.REFUND -> listOf("退款金额")
+            PaymentCardKind.WITHDRAWAL -> listOf("提现金额")
+            PaymentCardKind.RED_PACKET -> listOf("红包金额")
+            PaymentCardKind.BILL -> listOf("交易金额", "账单金额")
+        }
+        val labeledValues = group.mapNotNull { line ->
+            if (isNoisyAmountLine(line.text, card.kind)) null
+            else labels.firstNotNullOfOrNull { label -> amountAfterLabel(line.text, label) }
+        }.distinct()
+        if (labeledValues.singleOrNull() != card.amountCents) return null
+        // The existing parser determines status and direction; keep the
+        // result review-only when geometry is not trustworthy.
+        return card.copy(reviewRequired = true)
     }
 
     private fun hasCardContent(text: String): Boolean =

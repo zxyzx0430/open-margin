@@ -203,9 +203,6 @@ open class PageRecognitionService : AccessibilityService() {
                 // Reserve before dispatching IO so rapid window events cannot enqueue
                 // the same batch while the first save is still running.
                 if (!capturing.compareAndSet(false, true)) return
-                lastPageIdentity = firstIdentity
-                lastPageEventId = firstOrderId
-                lastCaptureAtMs = now
                 scope.launch {
                     try {
                         val recentLedger = runCatching {
@@ -219,6 +216,13 @@ open class PageRecognitionService : AccessibilityService() {
                             geometryReason = PaymentCardReviewQueue.AMBIGUOUS_NODE_GEOMETRY_REASON,
                         )
                         if (pageRoute is PaymentCardReviewQueue.Route.HeldForReview) {
+                            // The in-flight flag blocks reentry; only successful
+                            // handling may advance the persistent page throttle.
+                            if (pageRoute.saved.failed == 0) {
+                                lastPageIdentity = firstIdentity
+                                lastPageEventId = firstOrderId
+                                lastCaptureAtMs = now
+                            }
                             ServiceHealthLog.record(
                                 context = applicationContext,
                                 channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,

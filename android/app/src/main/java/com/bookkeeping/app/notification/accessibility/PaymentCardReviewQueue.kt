@@ -189,9 +189,13 @@ object PaymentCardReviewQueue {
             ) {
                 return@any false
             }
+            val existingMerchant = normalizeMerchantForDedup(existing.merchantCandidates.firstOrNull())
+            val candidateMerchant = normalizeMerchantForDedup(candidate.merchantCandidates.firstOrNull())
+            if (existingMerchant != null && candidateMerchant != null &&
+                !existingMerchant.contains(candidateMerchant) && !candidateMerchant.contains(existingMerchant)
+            ) return@any false
             val samePage = existing.pageIdentity == candidate.pageIdentity
-            val sameMerchant = existing.merchantCandidates.firstOrNull() != null &&
-                existing.merchantCandidates.firstOrNull() == candidate.merchantCandidates.firstOrNull()
+            val sameMerchant = existingMerchant != null && existingMerchant == candidateMerchant
             val closeInTime = kotlin.math.abs(existing.capturedAtMs - candidate.capturedAtMs) <= 120_000L
             // Without observed times, amount + capture proximity alone is too weak
             // to suppress an otherwise independent transaction on a different page.

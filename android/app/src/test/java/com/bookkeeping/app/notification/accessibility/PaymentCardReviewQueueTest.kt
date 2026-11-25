@@ -313,6 +313,53 @@ class PaymentCardReviewQueueTest {
         assertEquals(2, PaymentCardReviewQueue.saveForReview(listOf(first, second), store).saved.size)
     }
 
+    @Test
+    fun `passive capture recovers labeled actual charge without usable geometry`() = withStore { store ->
+        val cards = PaymentCardDetector.fromLines(
+            PaymentCardDetector.ALIPAY,
+            listOf("支付成功", "Fixture shop", "订单金额 ¥30.00", "实付金额 ¥25.00")
+                .map { BillTextLine(it) },
+            capturedAt, 600, "actual-charge-detail",
+            allowUnattributedAmounts = false,
+        )
+        val saved = assertSingleAmountHeldForReview(cards, store, 2500L)
+        assertTrue(CaptureBookGate.mayConfirm(saved))
+    }
+
+    @Test
+    fun `conflicting unlabeled amounts are not converted into invented payments`() = withStore { store ->
+        val cards = PaymentCardDetector.fromLines(
+            PaymentCardDetector.ALIPAY,
+            listOf("支付成功", "Fixture shop", "¥30.00", "¥25.00")
+                .map { BillTextLine(it) },
+            capturedAt, 600, "conflicting-amounts",
+            allowUnattributedAmounts = false,
+        )
+        assertTrue(cards.isEmpty())
+        assertTrue(store.pending().isEmpty())
+    }
+
+    @Test
+    fun `different merchants with same amount on same page remain separate`() = withStore { store ->
+        val first = CaptureCandidate(
+            packageName = PaymentCardDetector.ALIPAY,
+            pageIdentity = "shared-multi-card-page",
+            amountCents = 1000L,
+            merchantCandidates = listOf("Fixture grocery"),
+            orderId = null,
+            capturedAtMs = capturedAt,
+            screenshotPath = null,
+            confidence = 0.8f,
+            reason = "fixture review",
+            eventTimeSource = CaptureCandidate.TIME_SOURCE_CAPTURE,
+        )
+        val second = first.copy(
+            candidateId = java.util.UUID.randomUUID().toString(),
+            merchantCandidates = listOf("Fixture cafe"),
+        )
+        assertEquals(2, PaymentCardReviewQueue.saveForReview(listOf(first, second), store).saved.size)
+    }
+
     private fun assertSingleAmountHeldForReview(
         detections: List<PaymentCardDetection>,
         store: CaptureCandidateStore,
