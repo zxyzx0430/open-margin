@@ -233,6 +233,12 @@ internal object DiagnosticHumanizer {
             "该通知不是已完成的交易（或未含有效金额），已跳过"
         detail == "Bank SMS did not parse as a transaction" ->
             "该短信未识别为银行动账通知，已跳过"
+        detail == "OCR engine failed" ->
+            "页面 OCR 引擎处理失败，等待下次采集"
+        detail == "OCR returned no text" ->
+            "页面截图未识别到文字，已跳过"
+        detail == "OCR did not identify transaction fields" ->
+            "页面截图未识别到交易字段，已跳过"
         detail == "OCR did not identify one completed bill" ->
             "未从页面截图中识别出完整已完成的账单，已跳过"
         detail == "Candidate merged into existing transaction" ||
@@ -319,6 +325,8 @@ internal object DiagnosticHumanizer {
         detail == "Notification did not parse as a completed bill" ||
             detail == "Bank SMS did not parse as a transaction" ||
             detail == "OCR did not identify one completed bill" ||
+            detail == "OCR returned no text" ||
+            detail == "OCR did not identify transaction fields" ||
             detail == "Amount not recognized" ||
             detail == "Import preview contains no rows" ||
             detail == "Sync is disabled; transaction remains local" ||

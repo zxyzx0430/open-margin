@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
@@ -61,6 +63,11 @@ open class PageRecognitionService : AccessibilityService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val capturing = AtomicBoolean(false)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    // These fields belong to the main thread. Never retain framework events or nodes.
+    private var serviceConnected = false
+    private var deferredPageEvent: DeferredPaymentPageEvent? = null
+    private var lastInspectedPage: DeferredPaymentPageKey? = null
 
     private lateinit var store: CaptureCandidateStore
     private lateinit var repository: TransactionRepository
@@ -88,6 +95,7 @@ open class PageRecognitionService : AccessibilityService() {
             )
             store = CaptureCandidateStore(applicationContext)
             repository = entryPoint.transactionRepository()
+            serviceConnected = true
             ServiceHealthLog.record(
                 context = applicationContext,
                 channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
@@ -114,7 +122,7 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     private fun handleEvent(event: AccessibilityEvent) {
-        if (capturing.get()) return
+        if (!serviceConnected) return
         val packageName = event.packageName?.toString() ?: return
         if (packageName != PaymentPageDetector.PKG_WECHAT &&
             packageName != PaymentPageDetector.PKG_ALIPAY
@@ -125,8 +133,39 @@ open class PageRecognitionService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> Unit
             else -> return
         }
+        val hint = DeferredPaymentPageEvent(
+            packageName, event.windowId, event.className?.toString().orEmpty(),
+            event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+        )
+        if (capturing.get()) {
+            deferredPageEvent = DeferredPaymentPagePolicy.coalesce(deferredPageEvent, hint)
+            return
+        }
+        inspectCurrentPage(hint, replay = false)
+    }
+
+    // Release on the main thread and inspect only the latest still-current page.
+    private fun finishCapture() {
+        mainHandler.post {
+            if (!capturing.getAndSet(false)) return@post
+            val hint = deferredPageEvent
+            deferredPageEvent = null
+            if (serviceConnected && hint != null) {
+                try {
+                    inspectCurrentPage(hint, replay = true)
+                } catch (failure: Exception) {
+                    Log.e(TAG, "deferred page inspection failed: ${failure.javaClass.simpleName}")
+                }
+            }
+        }
+    }
+
+    private fun inspectCurrentPage(hint: DeferredPaymentPageEvent, replay: Boolean) {
+        if (!serviceConnected || capturing.get()) return
+        val packageName = hint.packageName
         val root = rootInActiveWindow ?: return
         if (root.packageName?.toString() != packageName) return
+        if (replay && !DeferredPaymentPagePolicy.isCurrentWindow(hint.windowId, root.windowId)) return
         runCatching { root.refresh() }
 
         if (lastWindowPackage != packageName) {
@@ -142,11 +181,11 @@ open class PageRecognitionService : AccessibilityService() {
 
         val now = System.currentTimeMillis()
         val snapshot = root.toSnapshot(packageName, now)
-        val eventClass = event.className?.toString().orEmpty()
+        val eventClass = hint.className
         // Window-state events also carry dialogs, popups and input methods.
         // Letting those replace the remembered activity would either block a
         // real payment page or strip the activity evidence from a chat page.
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        if (hint.windowStateChanged &&
             PageActivityGuard.isActivityClassName(packageName, eventClass)
         ) {
             lastWindowActivity = eventClass
@@ -155,6 +194,9 @@ open class PageRecognitionService : AccessibilityService() {
             ?: eventClass.takeIf { PageActivityGuard.isActivityClassName(packageName, it) }
             ?: ""
         val pageText = snapshot.flattenText()
+        val inspected = DeferredPaymentPageKey(packageName, root.windowId, activity, pageText.hashCode())
+        if (replay && !DeferredPaymentPagePolicy.shouldReplay(lastInspectedPage, inspected)) return
+        lastInspectedPage = inspected
         // WeChat's conversation list and Alipay home/chat pages contain chat
         // names, timestamps and unread badges. Never feed them to the payment
         // card parser: those pages can look like multiple small payments.
@@ -254,7 +296,7 @@ open class PageRecognitionService : AccessibilityService() {
                     } catch (failure: Exception) {
                         Log.e(TAG, "Review candidate processing failed: " + failure.javaClass.simpleName)
                     } finally {
-                        capturing.set(false)
+                        finishCapture()
                     }
                 }
                 return
@@ -366,9 +408,7 @@ open class PageRecognitionService : AccessibilityService() {
                 )
                 return
             }
-            lastPageIdentity = pageIdentity
-            lastPageEventId = null
-            lastCaptureAtMs = now
+            // Screenshot attempt cooldown is independent of verified-save throttle.
             capturing.set(true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 recordScreenshotAttempt(snapshot.root.windowId, pageIdentity, now)
@@ -387,7 +427,7 @@ open class PageRecognitionService : AccessibilityService() {
                     snapshot.root.windowId,
                 )
             } else {
-                capturing.set(false)
+                finishCapture()
             }
             return
         }
@@ -474,6 +514,7 @@ open class PageRecognitionService : AccessibilityService() {
         windowId: Int,
     ) {
         val attemptId = TransactionDiagnostics.newAttemptId()
+        val requestedAt = SystemClock.elapsedRealtime()
         scope.launch(Dispatchers.Main) {
             repository.recordDiagnostic(
                 attemptId = attemptId,
@@ -490,8 +531,15 @@ open class PageRecognitionService : AccessibilityService() {
                     windowId,
                     object : AccessibilityService.TakeScreenshotCallback {
                         override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
+                            val receivedAt = SystemClock.elapsedRealtime()
                             val bitmap = runCatching { screenshotToBitmap(screenshot) }.getOrNull()
+                            val convertedAt = SystemClock.elapsedRealtime()
                             if (bitmap == null) {
+                                ServiceHealthLog.record(
+                                    applicationContext, ServiceHealthLog.CHANNEL_ACCESSIBILITY, "ocr_timing",
+                                    "OCR screenshot decode failed",
+                                    "acquireMs=${receivedAt-requestedAt}, convertMs=${convertedAt-receivedAt}",
+                                )
                                 scope.launch {
                                     repository.recordDiagnostic(
                                         attemptId = attemptId,
@@ -500,21 +548,51 @@ open class PageRecognitionService : AccessibilityService() {
                                         details = "Screenshot could not be decoded",
                                     )
                                 }
-                                capturing.set(false)
+                                finishCapture()
                                 return
                             }
                             val height = bitmap.height
                             scope.launch {
                                 var recognizedText: String? = null
+                                var bytes: ByteArray? = null
+                                var compressed = false
+                                var compressionMs = 0L
+                                var engineAcquireMs = 0L
+                                var recognitionMs = 0L
+                                var parseMs = 0L
+                                var routeMs = 0L
+                                var backend = "unknown"
+                                var initMs: Long? = null
+                                var inferenceMs: Long? = null
+                                var fallbackMs: Long? = null
+                                var outcome = "exception"
+                                var handedOff = false
+                                fun prepareEvidence(): ByteArray? {
+                                    if (!compressed) {
+                                        compressed = true
+                                        val start = SystemClock.elapsedRealtime()
+                                        bytes = encodeScreenshot(bitmap)
+                                        compressionMs = SystemClock.elapsedRealtime() - start
+                                    }
+                                    return bytes
+                                }
                                 try {
-                                    val bytes = encodeScreenshot(bitmap)
+                                    val acquireStarted = SystemClock.elapsedRealtime()
                                     val engine = ocrEngine ?: PaddleOcrEngine(
                                         applicationContext,
                                         fallback = MlKitOcrEngine(),
                                     ).also { ocrEngine = it }
+                                    engineAcquireMs = SystemClock.elapsedRealtime() - acquireStarted
+                                    val recognizeStarted = SystemClock.elapsedRealtime()
                                     val result = withContext(Dispatchers.Default) {
                                         engine.recognize(bitmap)
                                     }
+                                    recognitionMs = SystemClock.elapsedRealtime() - recognizeStarted
+                                    backend = result.timing?.backend ?: "unknown"
+                                    initMs = result.timing?.initializationMs
+                                    inferenceMs = result.timing?.inferenceMs
+                                    fallbackMs = result.timing?.fallbackMs
+                                    val parseStarted = SystemClock.elapsedRealtime()
                                     recognizedText = result.rawText.ifBlank {
                                         result.lines.joinToString("\n") { it.text }
                                     }
@@ -539,17 +617,22 @@ open class PageRecognitionService : AccessibilityService() {
                                         pageIdentity = pageIdentity,
                                         allowUnattributedAmounts = false,
                                     )
+                                    parseMs = SystemClock.elapsedRealtime() - parseStarted
+                                    val routeStarted = SystemClock.elapsedRealtime()
                                     val recentLedger = runCatching {
                                         repository.screenshotDedupRows(limit = 100)
                                     }.getOrDefault(emptyList())
-                                    when (val pageRoute = PaymentCardReviewQueue.route(
+                                    val pageRoute = PaymentCardReviewQueue.route(
                                         detections = cards,
                                         capturedAtMs = now,
                                         store = store,
-                                        screenshot = bytes,
                                         existingLedgerRows = recentLedger,
-                                    )) {
+                                        screenshotProvider = ::prepareEvidence,
+                                    )
+                                    routeMs = (SystemClock.elapsedRealtime() - routeStarted - compressionMs).coerceAtLeast(0L)
+                                    when (pageRoute) {
                                         is PaymentCardReviewQueue.Route.HeldForReview -> {
+                                            outcome = "review_saved=${pageRoute.saved.saved.size},failed=${pageRoute.saved.failed}"
                                             ServiceHealthLog.record(
                                                 context = applicationContext,
                                                 channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
@@ -617,10 +700,11 @@ open class PageRecognitionService : AccessibilityService() {
                                                     else if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "") +
                                                     (if (missingImages > 0) " · 截图不可用 $missingImages 笔" else ""),
                                             )
-                                            capturing.set(false)
                                         }
 
                                         is PaymentCardReviewQueue.Route.SingleCandidate -> {
+                                            outcome = "single_candidate"
+                                            prepareEvidence()
                                             processCandidates(
                                                 listOf(
                                                     if (bytes == null) {
@@ -633,18 +717,28 @@ open class PageRecognitionService : AccessibilityService() {
                                                 allowAuto = allowAuto && bytes != null,
                                                 contextText = recognizedText,
                                                 diagnosticAttemptId = attemptId,
+                                                recordOcrStoreTiming = true,
                                             )
+                                            handedOff = true
                                         }
 
                                         PaymentCardReviewQueue.Route.NoBookableCandidate -> {
-                                            // No completed card was parsed; a later event may retry.
+                                            // Distinguish engine failure, empty OCR and insufficient
+                                            // evidence without relaxing any transaction parsing rules.
+                                            outcome = OcrPageOutcomePolicy.noCandidate(result.error != null, result.isEmpty, cards.size)
                                             repository.recordDiagnostic(
                                                 attemptId = attemptId,
                                                 stage = TransactionDiagnostics.STAGE_PARSE,
-                                                result = TransactionDiagnostics.RESULT_WARNING,
-                                                details = "OCR did not identify one completed bill",
+                                                result = if (result.error != null) TransactionDiagnostics.RESULT_FAILURE
+                                                    else TransactionDiagnostics.RESULT_WARNING,
+                                                details = when (outcome) {
+                                                    "engine_error" -> "OCR engine failed"
+                                                    "empty_text" -> "OCR returned no text"
+                                                    "no_transaction_cards" -> "OCR did not identify transaction fields"
+                                                    else -> "OCR did not identify one completed bill"
+                                                },
+                                                outputSummary = "lines=${result.lines.size}, cards=${cards.size}",
                                             )
-                                            capturing.set(false)
                                         }
                                     }
                                 } catch (failure: Exception) {
@@ -655,14 +749,29 @@ open class PageRecognitionService : AccessibilityService() {
                                         details = "Payment page processing failed",
                                     )
                                     Log.e(TAG, "OCR capture failed: ${failure.javaClass.simpleName}")
-                                    capturing.set(false)
                                 } finally {
+                                    ServiceHealthLog.record(
+                                        context = applicationContext,
+                                        channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                                        event = "ocr_timing",
+                                        summary = "OCR capture phase timings",
+                                        detail = "id=${attemptId.take(8)}, outcome=$outcome, backend=$backend, acquireMs=${receivedAt-requestedAt}, " +
+                                            "convertMs=${convertedAt-receivedAt}, setupMs=$engineAcquireMs, " +
+                                            "initMs=$initMs, inferMs=$inferenceMs, fallbackMs=$fallbackMs, " +
+                                            "ocrMs=$recognitionMs, parseMs=$parseMs, jpegMs=$compressionMs, routeMs=$routeMs",
+                                    )
                                     bitmap.recycle()
+                                    if (!handedOff) finishCapture()
                                 }
                             }
                         }
 
                         override fun onFailure(errorCode: Int) {
+                            ServiceHealthLog.record(
+                                applicationContext, ServiceHealthLog.CHANNEL_ACCESSIBILITY, "ocr_timing",
+                                "OCR screenshot capture failed",
+                                "error=$errorCode, acquireMs=${SystemClock.elapsedRealtime() - requestedAt}",
+                            )
                             recordScreenshotFallback(errorCode)
                             val isThrottled =
                                 errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT
@@ -680,7 +789,7 @@ open class PageRecognitionService : AccessibilityService() {
                                 )
                             }
                             Log.e(TAG, "OCR screenshot failed: $errorCode")
-                            capturing.set(false)
+                            finishCapture()
                         }
                     },
                 )
@@ -692,7 +801,7 @@ open class PageRecognitionService : AccessibilityService() {
                     details = "Payment page processing failed",
                 )
                 Log.e(TAG, "OCR screenshot start failed: ${failure.javaClass.simpleName}")
-                capturing.set(false)
+                finishCapture()
             }
         }
     }
@@ -893,8 +1002,10 @@ open class PageRecognitionService : AccessibilityService() {
         allowAuto: Boolean = true,
         contextText: String? = null,
         diagnosticAttemptId: String? = null,
+        recordOcrStoreTiming: Boolean = false,
     ) {
         scope.launch {
+            val processingStarted = SystemClock.elapsedRealtime()
             try {
                 var firstStored: CaptureCandidate? = null
                 candidates.forEachIndexed { index, candidate ->
@@ -1140,7 +1251,16 @@ open class PageRecognitionService : AccessibilityService() {
             } catch (failure: Exception) {
                 Log.e(TAG, "candidate processing failed: ${failure.javaClass.simpleName}")
             } finally {
-                capturing.set(false)
+                if (recordOcrStoreTiming) {
+                    ServiceHealthLog.record(
+                        context = applicationContext,
+                        channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                        event = "ocr_store_timing",
+                        summary = "OCR candidate storage and ledger processing",
+                        detail = "id=${diagnosticAttemptId?.take(8)}, storeMs=${SystemClock.elapsedRealtime() - processingStarted}",
+                    )
+                }
+                finishCapture()
             }
         }
     }
@@ -1241,7 +1361,7 @@ open class PageRecognitionService : AccessibilityService() {
                 Log.e(TAG, "candidate save failed: ${failure.javaClass.simpleName}")
                 recordCandidateSaveFailure("Page capture candidate save failed")
             } finally {
-                capturing.set(false)
+                finishCapture()
             }
         }
     }
@@ -1334,7 +1454,10 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        capturing.set(false)
+        serviceConnected = false
+        deferredPageEvent = null
+        lastInspectedPage = null
+        // An in-flight task remains serialized until its actual completion.
         ServiceHealthLog.record(
             context = applicationContext,
             channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
@@ -1345,6 +1468,9 @@ open class PageRecognitionService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        serviceConnected = false
+        deferredPageEvent = null
+        lastInspectedPage = null
         capturing.set(false)
         ServiceHealthLog.record(
             context = applicationContext,
@@ -1399,6 +1525,43 @@ enum class PageCaptureOutcome {
 
     /** 写入失败：保留候选、记录异常，允许下次重试。 */
     RETRY,
+}
+
+internal object OcrPageOutcomePolicy {
+    fun noCandidate(engineFailed: Boolean, empty: Boolean, cardCount: Int): String = when {
+        engineFailed -> "engine_error"
+        empty -> "empty_text"
+        cardCount == 0 -> "no_transaction_cards"
+        else -> "no_bookable_candidate"
+    }
+}
+
+internal data class DeferredPaymentPageEvent(
+    val packageName: String,
+    val windowId: Int,
+    val className: String,
+    val windowStateChanged: Boolean,
+)
+
+internal data class DeferredPaymentPageKey(
+    val packageName: String,
+    val windowId: Int,
+    val activity: String,
+    val textHash: Int,
+)
+
+internal object DeferredPaymentPagePolicy {
+    fun coalesce(previous: DeferredPaymentPageEvent?, latest: DeferredPaymentPageEvent): DeferredPaymentPageEvent =
+        if (previous != null && previous.packageName == latest.packageName &&
+            previous.windowId == latest.windowId && previous.windowId > 0 &&
+            previous.windowStateChanged && !latest.windowStateChanged
+        ) latest.copy(className = previous.className, windowStateChanged = true) else latest
+
+    fun isCurrentWindow(hintedWindowId: Int, activeWindowId: Int): Boolean =
+        hintedWindowId <= 0 || hintedWindowId == activeWindowId
+
+    fun shouldReplay(previous: DeferredPaymentPageKey?, current: DeferredPaymentPageKey): Boolean =
+        previous != current
 }
 
 data class PageCaptureThrottleState(

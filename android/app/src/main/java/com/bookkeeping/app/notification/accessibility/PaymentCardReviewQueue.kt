@@ -48,6 +48,7 @@ object PaymentCardReviewQueue {
         screenshot: ByteArray? = null,
         existingLedgerRows: List<TransactionEntity> = emptyList(),
         geometryReason: String = AMBIGUOUS_GEOMETRY_REASON,
+        screenshotProvider: (() -> ByteArray?)? = null,
     ): Route {
         // Never hold uncompleted/pending/created cards in the review inbox,
         // because they represent in-flight transfers or unreceived red packets.
@@ -67,6 +68,7 @@ object PaymentCardReviewQueue {
                 screenshot = screenshot,
                 reason = reason,
                 existingLedgerRows = existingLedgerRows,
+                screenshotProvider = screenshotProvider,
             )
             return Route.HeldForReview(saved = saved, reason = reason)
         }
@@ -133,7 +135,9 @@ object PaymentCardReviewQueue {
         screenshot: ByteArray? = null,
         reason: String = MULTI_CARD_REASON,
         existingLedgerRows: List<TransactionEntity> = emptyList(),
+        screenshotProvider: (() -> ByteArray?)? = null,
     ): SaveResult = store.withCandidateLock {
+        val evidence by lazy { if (screenshotProvider == null) screenshot else screenshotProvider.invoke() }
         val existingPending = store.pending().toMutableList()
         val saved = mutableListOf<CaptureCandidate>()
         var failed = 0
@@ -149,7 +153,7 @@ object PaymentCardReviewQueue {
                 status = CaptureCandidate.STATUS_PENDING,
                 ledgerWriteAllowed = true,
             )
-            when (val result = store.saveWithResult(pending, screenshot)) {
+            when (val result = store.saveWithResult(pending, evidence)) {
                 is CandidateSaveResult.Saved -> {
                     saved += result.candidate
                     existingPending += result.candidate

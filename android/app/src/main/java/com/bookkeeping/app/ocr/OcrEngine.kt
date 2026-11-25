@@ -10,10 +10,18 @@ data class OcrLine(
     val confidence: Float? = null,
 )
 
+data class OcrTiming(
+    val backend: String,
+    val initializationMs: Long? = null,
+    val inferenceMs: Long? = null,
+    val fallbackMs: Long? = null,
+)
+
 data class OcrResult(
     val lines: List<OcrLine> = emptyList(),
     val rawText: String = "",
     val error: String? = null,
+    val timing: OcrTiming? = null,
 ) {
     val isEmpty: Boolean get() = lines.isEmpty() && rawText.isBlank()
 }

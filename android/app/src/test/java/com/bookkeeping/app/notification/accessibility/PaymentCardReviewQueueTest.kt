@@ -427,4 +427,43 @@ class PaymentCardReviewQueueTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun `lazy OCR evidence is only prepared once for new candidates and not for duplicates`() = withStore { store ->
+        val detections = PaymentCardDetector.fromLines(
+            packageName = PaymentCardDetector.ALIPAY,
+            lines = listOf(
+                line("支付成功", 10),
+                line("Fixture breakfast shop", 40),
+                line("¥10.00", 70),
+                line("交易关闭", 100),
+                line("Fixture coffee shop", 130),
+                line("¥25.00", 160),
+            ),
+            capturedAtMs = capturedAt,
+            screenHeightPx = 600,
+            pageIdentity = "lazy-evidence",
+        )
+        var encodes = 0
+        val provider: () -> ByteArray? = { encodes++; null }
+        val first = PaymentCardReviewQueue.route(detections, capturedAt, store, screenshotProvider = provider)
+            as PaymentCardReviewQueue.Route.HeldForReview
+        assertEquals(2, first.saved.saved.size)
+        assertEquals(1, encodes)
+        val second = PaymentCardReviewQueue.route(detections, capturedAt, store, screenshotProvider = provider)
+            as PaymentCardReviewQueue.Route.HeldForReview
+        assertEquals(0, second.saved.saved.size)
+        assertEquals(1, encodes)
+        assertEquals(2, store.pending().size)
+    }
+
+    @Test
+    fun `no OCR candidate never requests JPEG evidence`() = withStore { store ->
+        var encoded = false
+        val route = PaymentCardReviewQueue.route(emptyList(), capturedAt, store,
+            screenshotProvider = { encoded = true; null })
+        assertEquals(PaymentCardReviewQueue.Route.NoBookableCandidate, route)
+        assertFalse(encoded)
+    }
+
 }
