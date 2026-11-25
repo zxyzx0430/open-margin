@@ -11,16 +11,31 @@ class ScreenshotV1475RegressionTest {
     private val zone: TimeZone = TimeZone.getTimeZone("Asia/Shanghai")
     private val nowMs = 1_795_578_900_000L
 
-    private fun plan(blocks: List<TextBlock>) =
-        ScreenshotImportPipeline.planFromBlocks(
-            blocks = blocks,
-            ledgerFingerprints = emptyList(),
-            nowMs = nowMs,
-            zone = zone,
-        )
-
     private fun b(text: String, top: Int, left: Int, right: Int, height: Int = 34) =
         TextBlock(text = text, left = left, top = top, right = right, bottom = top + height)
+
+    private fun stream(rows: List<TextBlock>) =
+        listOf(b("微信支付", top = 105, left = 250, right = 450, height = 32)) +
+            rows +
+            listOf(
+                b("我的账单", top = 1450, left = 90, right = 200, height = 28),
+                b("支付服务", top = 1450, left = 300, right = 440, height = 28),
+                b("优惠", top = 1450, left = 520, right = 620, height = 28),
+            )
+
+    private fun plan(blocks: List<TextBlock>) =
+        ScreenshotImportPipeline.plan(
+            ScreenshotIntakeRequest(
+                IntakeSource.MEDIASTORE,
+                "content://media/external/images/media/19",
+                "image/jpeg",
+                nowMs,
+                byteSize = 300_000,
+            ),
+            stream(blocks),
+            emptyList(),
+            timeZone = zone,
+        )
 
     @Test
     fun `narrow circle logo badge near title height does not override wide merchant title`() {
@@ -142,11 +157,9 @@ class ScreenshotV1475RegressionTest {
             b("账单详情>", top = 820, left = 280, right = 420, height = 30),
         )
         val result = plan(blocks)
-        assertTrue(result.decisions.size == 1 || result.pageType == ScreenshotPageType.BILL_LIST)
-        if (result.decisions.isNotEmpty()) {
-            val d = result.decisions.single()
-            assertEquals(400L, d.draft.amountCents)
-            assertEquals("快充站", d.draft.merchantCandidates.firstOrNull())
-        }
+        assertEquals(1, result.decisions.size)
+        val d = result.decisions.single()
+        assertEquals(400L, d.draft.amountCents)
+        assertEquals("快充站", d.draft.merchantCandidates.firstOrNull())
     }
 }
