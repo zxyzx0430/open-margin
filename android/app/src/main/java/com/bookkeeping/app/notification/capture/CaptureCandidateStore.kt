@@ -35,6 +35,9 @@ class CaptureCandidateStore internal constructor(
     private val imageFingerprintFile = File(dir, "image-fingerprints.jsonl")
     private val imageFingerprintMetadataFile = File(dir, "image-fingerprints.meta")
 
+    /** Keep the review-inbox read/check/write operation under the same storage lock. */
+    internal fun <T> withCandidateLock(block: () -> T): T = synchronized(lock) { block() }
+
     fun save(candidate: CaptureCandidate, screenshot: ByteArray?): CaptureCandidate? =
         (saveWithResult(candidate, screenshot) as? CandidateSaveResult.Saved)?.candidate
 

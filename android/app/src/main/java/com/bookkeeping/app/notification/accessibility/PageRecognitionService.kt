@@ -173,7 +173,9 @@ open class PageRecognitionService : AccessibilityService() {
 
         // Payment/bill cards: merchant payment, transfer, red packet, withdrawal,
         // refund, and pay-after-use. Only explicitly completed cards may be booked.
-        val cards = PaymentCardDetector.fromSnapshot(packageName, snapshot, now)
+        val cards = PaymentCardDetector.fromSnapshot(
+            packageName, snapshot, now, allowUnattributedAmounts = false,
+        )
         if (cards.isNotEmpty()) {
             val firstIdentity = cards.first().pageIdentity
             val firstOrderId = cards.firstOrNull { !it.orderId.isNullOrBlank() }?.orderId
@@ -198,39 +200,54 @@ open class PageRecognitionService : AccessibilityService() {
             }
             val needsReviewQueue = cards.size > 1 || cards.any { it.reviewRequired }
             if (needsReviewQueue) {
+                // Reserve before dispatching IO so rapid window events cannot enqueue
+                // the same batch while the first save is still running.
+                if (!capturing.compareAndSet(false, true)) return
+                lastPageIdentity = firstIdentity
+                lastPageEventId = firstOrderId
+                lastCaptureAtMs = now
                 scope.launch {
-                    val recentLedger = runCatching {
-                        repository.screenshotDedupRows(limit = 100)
-                    }.getOrDefault(emptyList())
-                    val pageRoute = PaymentCardReviewQueue.route(
-                        detections = cards,
-                        capturedAtMs = now,
-                        store = store,
-                        existingLedgerRows = recentLedger,
-                    )
-                    if (pageRoute is PaymentCardReviewQueue.Route.HeldForReview) {
-                        lastPageIdentity = firstIdentity
-                        lastPageEventId = firstOrderId
-                        lastCaptureAtMs = now
-                        ServiceHealthLog.record(
-                            context = applicationContext,
-                            channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
-                            event = ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
-                            summary = "页面识别多笔/待确认候选，已转入待确认",
-                            detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
+                    try {
+                        val recentLedger = runCatching {
+                            repository.screenshotDedupRows(limit = 100)
+                        }.getOrDefault(emptyList())
+                        val pageRoute = PaymentCardReviewQueue.route(
+                            detections = cards,
+                            capturedAtMs = now,
+                            store = store,
+                            existingLedgerRows = recentLedger,
+                            geometryReason = PaymentCardReviewQueue.AMBIGUOUS_NODE_GEOMETRY_REASON,
                         )
-                        if (pageRoute.saved.saved.isNotEmpty()) {
-                            ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
+                        if (pageRoute is PaymentCardReviewQueue.Route.HeldForReview) {
+                            ServiceHealthLog.record(
+                                context = applicationContext,
+                                channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
+                                event = if (pageRoute.saved.saved.isEmpty() && pageRoute.saved.failed == 0)
+                                    ServiceHealthLog.EVENT_SKIPPED else ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
+                                summary = if (pageRoute.saved.saved.isEmpty() && pageRoute.saved.failed == 0)
+                                    "未新增待确认（重复或已入账）"
+                                else "页面识别候选已处理",
+                                detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
+                            )
+                            if (pageRoute.saved.saved.isNotEmpty()) {
+                                ScreenshotReviewNotifier.notifyPending(applicationContext, store.pending())
+                            }
+                            repository.recordDiagnostic(
+                                attemptId = TransactionDiagnostics.newAttemptId(),
+                                stage = TransactionDiagnostics.STAGE_DEDUP,
+                                result = if (pageRoute.saved.failed == 0) TransactionDiagnostics.RESULT_WARNING
+                                else TransactionDiagnostics.RESULT_FAILURE,
+                                details = if (pageRoute.saved.saved.isEmpty() && pageRoute.saved.failed == 0)
+                                    "Duplicate pending capture ignored"
+                                else "Multi-card page held for individual confirmation",
+                                outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +
+                                    if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "",
+                            )
                         }
-                        repository.recordDiagnostic(
-                            attemptId = TransactionDiagnostics.newAttemptId(),
-                            stage = TransactionDiagnostics.STAGE_DEDUP,
-                            result = if (pageRoute.saved.failed == 0) TransactionDiagnostics.RESULT_WARNING
-                            else TransactionDiagnostics.RESULT_FAILURE,
-                            details = "Multi-card page held for individual confirmation",
-                            outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +
-                                if (pageRoute.saved.failed > 0) " · 保存失败 ${pageRoute.saved.failed} 笔" else "",
-                        )
+                    } catch (failure: Exception) {
+                        Log.e(TAG, "Review candidate processing failed: " + failure.javaClass.simpleName)
+                    } finally {
+                        capturing.set(false)
                     }
                 }
                 return
@@ -513,6 +530,7 @@ open class PageRecognitionService : AccessibilityService() {
                                         capturedAtMs = now,
                                         screenHeightPx = height,
                                         pageIdentity = pageIdentity,
+                                        allowUnattributedAmounts = false,
                                     )
                                     val recentLedger = runCatching {
                                         repository.screenshotDedupRows(limit = 100)
@@ -528,8 +546,10 @@ open class PageRecognitionService : AccessibilityService() {
                                             ServiceHealthLog.record(
                                                 context = applicationContext,
                                                 channel = ServiceHealthLog.CHANNEL_ACCESSIBILITY,
-                                                event = ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
-                                                summary = "OCR 识别到待确认交易，已转入待确认",
+                                                event = if (pageRoute.saved.saved.isEmpty() && pageRoute.saved.failed == 0)
+                                                    ServiceHealthLog.EVENT_SKIPPED else ServiceHealthLog.EVENT_HELD_FOR_REVIEW,
+                                                summary = if (pageRoute.saved.saved.isEmpty() && pageRoute.saved.failed == 0)
+                                                    "OCR 未新增待确认（重复或已入账）" else "OCR 待确认候选已处理",
                                                 detail = "saved=${pageRoute.saved.saved.size}, failed=${pageRoute.saved.failed}",
                                             )
                                             if (bytes == null) {
@@ -581,6 +601,8 @@ open class PageRecognitionService : AccessibilityService() {
                                                         "Candidate index budget full; OCR candidate was not saved"
                                                     missingImages > 0 ->
                                                         "OCR candidates saved for review; screenshot evidence unavailable"
+                                                    pageRoute.saved.saved.isEmpty() && pageRoute.saved.failed == 0 ->
+                                                        "Duplicate pending capture ignored"
                                                     else -> "OCR payment candidates held for individual review"
                                                 },
                                                 outputSummary = "待确认 ${pageRoute.saved.saved.size} 笔" +

@@ -187,6 +187,132 @@ class PaymentCardReviewQueueTest {
         assertTrue("normal route is not diverted to the review inbox", store.pending().isEmpty())
     }
 
+    @Test
+    fun `passive capture does not fan out ungrouped amounts from a payment page`() = withStore { store ->
+        val lines = listOf("账单", "13.71", "27.40", "106.12", "8.42", "59.10", "22.50")
+            .map { BillTextLine(it) }
+        val cards = PaymentCardDetector.fromLines(
+            PaymentCardDetector.ALIPAY, lines, capturedAt, 600, "user-a-burst",
+            allowUnattributedAmounts = false,
+        )
+        assertTrue(cards.isEmpty())
+        assertTrue(PaymentCardReviewQueue.route(cards, capturedAt, store) is
+            PaymentCardReviewQueue.Route.NoBookableCandidate)
+        assertTrue(store.pending().isEmpty())
+        // Explicit preview retains the previously supported diagnostic candidates.
+        assertTrue(PaymentCardDetector.fromLines(
+            PaymentCardDetector.ALIPAY, lines, capturedAt, 600, "user-a-burst",
+        ).isNotEmpty())
+        val snapshot = ScreenSnapshot.of(PaymentCardDetector.ALIPAY, capturedAt,
+            SnapshotNode(children = lines.map { SnapshotNode(text = it.text) }))
+        assertTrue(PaymentCardDetector.fromSnapshot(
+            PaymentCardDetector.ALIPAY, snapshot, capturedAt, allowUnattributedAmounts = false,
+        ).isEmpty())
+    }
+
+    @Test
+    fun `passive capture retains a complete card despite missing geometry and time`() = withStore { store ->
+        val cards = PaymentCardDetector.fromLines(
+            PaymentCardDetector.ALIPAY,
+            listOf("支付成功", "Fixture grocery shop", "¥23.45").map { BillTextLine(it) },
+            capturedAt, 600, "one-card-without-bounds",
+            allowUnattributedAmounts = false,
+        )
+        val saved = assertSingleAmountHeldForReview(cards, store, 2345L)
+        assertEquals(capturedAt, saved.eventTimeMs)
+        assertEquals(CaptureCandidate.TIME_SOURCE_CAPTURE, saved.eventTimeSource)
+        assertTrue(saved.eventTimeNeedsConfirmation)
+        assertTrue(CaptureBookGate.mayConfirm(saved))
+    }
+
+    @Test
+    fun `passive capture still keeps independent real cards`() = withStore { store ->
+        val cards = PaymentCardDetector.fromLines(
+            PaymentCardDetector.WECHAT,
+            listOf("支付成功", "Fixture breakfast shop", "¥10.00",
+                "支付成功", "Fixture coffee shop", "¥25.00").map { BillTextLine(it) },
+            capturedAt, 600, "two-independent-cards",
+            allowUnattributedAmounts = false,
+        )
+        assertEquals(2, cards.size)
+        val route = PaymentCardReviewQueue.route(cards, capturedAt, store)
+            as PaymentCardReviewQueue.Route.HeldForReview
+        assertEquals(2, route.saved.saved.size)
+    }
+
+    @Test
+    fun `concurrent repeated review batches save each candidate only once`() = withStore { store ->
+        val prototype = CaptureCandidate(
+            packageName = PaymentCardDetector.ALIPAY,
+            pageIdentity = "same-page",
+            amountCents = 1371L,
+            merchantCandidates = listOf("Fixture store"),
+            orderId = null,
+            capturedAtMs = capturedAt,
+            screenshotPath = null,
+            confidence = 0.8f,
+            reason = "fixture review",
+            eventTimeSource = CaptureCandidate.TIME_SOURCE_CAPTURE,
+        )
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(8)
+        val start = java.util.concurrent.CountDownLatch(1)
+        try {
+            val tasks = (1..30).map {
+                pool.submit<Int> {
+                    start.await()
+                    val candidate = prototype.copy(candidateId = java.util.UUID.randomUUID().toString())
+                    PaymentCardReviewQueue.saveForReview(listOf(candidate), store).saved.size
+                }
+            }
+            start.countDown()
+            assertEquals(1, tasks.sumOf { it.get(60, java.util.concurrent.TimeUnit.SECONDS) })
+            assertEquals(1, store.pending().size)
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `capture time fallback does not merge independent same amount pages`() = withStore { store ->
+        val first = CaptureCandidate(
+            packageName = PaymentCardDetector.ALIPAY,
+            pageIdentity = "first-page",
+            amountCents = 1000L,
+            merchantCandidates = emptyList(),
+            orderId = null,
+            capturedAtMs = capturedAt,
+            screenshotPath = null,
+            confidence = 0.8f,
+            reason = "fixture review",
+            eventTimeSource = CaptureCandidate.TIME_SOURCE_CAPTURE,
+        )
+        val second = first.copy(
+            candidateId = java.util.UUID.randomUUID().toString(),
+            pageIdentity = "second-page",
+            capturedAtMs = capturedAt + 1000L,
+            eventTimeMs = capturedAt + 1000L,
+        )
+        assertEquals(2, PaymentCardReviewQueue.saveForReview(listOf(first, second), store).saved.size)
+        assertEquals(2, store.pending().size)
+    }
+
+    @Test
+    fun `same amount genuine transactions with different order IDs stay separate`() = withStore { store ->
+        val first = CaptureCandidate(
+            packageName = PaymentCardDetector.ALIPAY,
+            pageIdentity = "same-page",
+            amountCents = 1000L,
+            merchantCandidates = listOf("Fixture store"),
+            orderId = "order-001",
+            capturedAtMs = capturedAt,
+            screenshotPath = null,
+            confidence = 0.8f,
+            reason = "fixture review",
+        )
+        val second = first.copy(candidateId = java.util.UUID.randomUUID().toString(), orderId = "order-002")
+        assertEquals(2, PaymentCardReviewQueue.saveForReview(listOf(first, second), store).saved.size)
+    }
+
     private fun assertSingleAmountHeldForReview(
         detections: List<PaymentCardDetection>,
         store: CaptureCandidateStore,

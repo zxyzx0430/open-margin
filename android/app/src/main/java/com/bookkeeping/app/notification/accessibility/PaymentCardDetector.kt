@@ -302,6 +302,7 @@ object PaymentCardDetector {
         packageName: String,
         snapshot: ScreenSnapshot,
         capturedAtMs: Long,
+        allowUnattributedAmounts: Boolean = true,
     ): List<PaymentCardDetection> {
         if (!isSupported(packageName)) return emptyList()
         val lines = snapshot.root.walk().mapNotNull { node ->
@@ -330,6 +331,7 @@ object PaymentCardDetector {
             capturedAtMs = capturedAtMs,
             screenHeightPx = screenHeight,
             pageIdentity = pageIdentity(packageName, snapshot.flattenText()),
+            allowUnattributedAmounts = allowUnattributedAmounts,
         )
     }
 
@@ -363,6 +365,7 @@ object PaymentCardDetector {
         capturedAtMs: Long,
         screenHeightPx: Int,
         pageIdentity: String,
+        allowUnattributedAmounts: Boolean = true,
     ): List<PaymentCardDetection> {
         val source = PaymentCardSource.fromPackage(packageName) ?: return emptyList()
         val rawVisible = lines.filter { it.text.isNotBlank() }
@@ -401,7 +404,9 @@ object PaymentCardDetector {
             val plausibleAmounts = group.filterNot { isNoisyAmountLine(it.text, PaymentCardKind.PAYMENT) }
                 .mapNotNull { parseAmount(it.text)?.takeIf { amount -> amount > 0L } }
             if (!geometriesUsable && plausibleAmounts.size > 1) {
-                if (hasPaymentPageContext) {
+                // Passive capture must not fan out amounts without transaction grouping.
+                // Explicit preview callers retain the existing review behavior.
+                if (hasPaymentPageContext && allowUnattributedAmounts) {
                     ambiguousAmountCandidates(
                         source = source,
                         amounts = plausibleAmounts,

@@ -37,6 +37,7 @@ object PaymentCardReviewQueue {
         store: CaptureCandidateStore,
         screenshot: ByteArray? = null,
         existingLedgerRows: List<TransactionEntity> = emptyList(),
+        geometryReason: String = AMBIGUOUS_GEOMETRY_REASON,
     ): Route {
         // Never hold uncompleted/pending/created cards in the review inbox,
         // because they represent in-flight transfers or unreceived red packets.
@@ -51,7 +52,7 @@ object PaymentCardReviewQueue {
         if (actionable.isEmpty()) return Route.NoBookableCandidate
         if (actionable.size > 1 || actionable.any { it.reviewRequired }) {
             val reason = if (actionable.any { it.reviewRequired }) {
-                AMBIGUOUS_GEOMETRY_REASON
+                geometryReason
             } else {
                 MULTI_CARD_REASON
             }
@@ -111,6 +112,8 @@ object PaymentCardReviewQueue {
             kind = kind,
             eventTimeMs = detection.eventTimeMs ?: capturedAtMs,
             direction = direction,
+            eventTimeSource = if (detection.eventTimeMs == null) CaptureCandidate.TIME_SOURCE_CAPTURE
+                else CaptureCandidate.TIME_SOURCE_ACTUAL,
             eventTimeNeedsConfirmation = detection.eventTimeMs == null,
             completionStatus = completion,
             completionExplicit = detection.completionExplicit,
@@ -125,7 +128,7 @@ object PaymentCardReviewQueue {
         screenshot: ByteArray? = null,
         reason: String = MULTI_CARD_REASON,
         existingLedgerRows: List<TransactionEntity> = emptyList(),
-    ): SaveResult {
+    ): SaveResult = store.withCandidateLock {
         val existingPending = store.pending().toMutableList()
         val saved = mutableListOf<CaptureCandidate>()
         var failed = 0
@@ -152,7 +155,7 @@ object PaymentCardReviewQueue {
                 }
             }
         }
-        return SaveResult(saved = saved, failed = failed, indexFull = indexFull)
+        SaveResult(saved = saved, failed = failed, indexFull = indexFull)
     }
 
     internal fun isDuplicatePending(
@@ -174,8 +177,13 @@ object PaymentCardReviewQueue {
             ) {
                 return@any false
             }
-            val existingEventTime = existing.eventTimeMs
-            val candidateEventTime = candidate.eventTimeMs
+            // A capture-time fallback is not an observed transaction timestamp.
+            val bothActual = existing.eventTimeSource != CaptureCandidate.TIME_SOURCE_CAPTURE &&
+                candidate.eventTimeSource != CaptureCandidate.TIME_SOURCE_CAPTURE &&
+                !existing.eventTimeNeedsConfirmation && !candidate.eventTimeNeedsConfirmation &&
+                existing.eventTimeMs != null && candidate.eventTimeMs != null
+            val existingEventTime = if (bothActual) existing.eventTimeMs else existing.capturedAtMs
+            val candidateEventTime = if (bothActual) candidate.eventTimeMs else candidate.capturedAtMs
             if (existingEventTime != null && candidateEventTime != null &&
                 kotlin.math.abs(existingEventTime - candidateEventTime) > 60_000L
             ) {
@@ -185,7 +193,9 @@ object PaymentCardReviewQueue {
             val sameMerchant = existing.merchantCandidates.firstOrNull() != null &&
                 existing.merchantCandidates.firstOrNull() == candidate.merchantCandidates.firstOrNull()
             val closeInTime = kotlin.math.abs(existing.capturedAtMs - candidate.capturedAtMs) <= 120_000L
-            samePage || sameMerchant || closeInTime
+            // Without observed times, amount + capture proximity alone is too weak
+            // to suppress an otherwise independent transaction on a different page.
+            samePage || sameMerchant || (bothActual && closeInTime)
         }
     }
 
@@ -233,4 +243,5 @@ object PaymentCardReviewQueue {
 
     const val MULTI_CARD_REASON = "multiple payment cards; confirm each separately"
     const val AMBIGUOUS_GEOMETRY_REASON = "invalid OCR bounds; confirm transaction details"
+    const val AMBIGUOUS_NODE_GEOMETRY_REASON = "invalid accessibility bounds; confirm transaction details"
 }
