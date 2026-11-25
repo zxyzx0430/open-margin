@@ -1138,6 +1138,19 @@ object ScreenshotPageInterpreter {
             if (isAvatarBadgeArtifact(line, window.getOrNull(i - 1)?.text, window.getOrNull(i + 1)?.text)) {
                 continue
             }
+            val candidate = window[i]
+            val title = window.filter { other ->
+                other !== candidate && hasGeometry(other) && hasGeometry(candidate) &&
+                    other.left >= candidate.right &&
+                    (other.bottom - other.top) >= (candidate.bottom - candidate.top) * 1.5 &&
+                    kotlin.math.abs((other.top + other.bottom) - (candidate.top + candidate.bottom)) <=
+                        2 * (other.bottom - other.top) &&
+                    !isMerchantInterference(other.text) &&
+                    merchantName(other.text, allowDigit = true) != null
+            }.maxByOrNull { it.bottom - it.top }
+            if (merchantName(line, allowDigit = true) != null && title != null) {
+                return listOfNotNull(merchantName(title.text, allowDigit = true))
+            }
             merchantName(line, allowDigit = true)?.let { return listOf(it) }
         }
         return emptyList()

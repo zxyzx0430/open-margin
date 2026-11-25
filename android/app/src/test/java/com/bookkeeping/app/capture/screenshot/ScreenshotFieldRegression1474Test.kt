@@ -128,4 +128,12 @@ class ScreenshotFieldRegression1474Test {
         assertEquals(Action.ASK_USER, result.decisions.single().action)
         assertNull(result.decisions.single().draft.eventTimeMs)
     }
+    @Test fun smallLogoTextDoesNotOverrideMerchantTitle() {
+        val result = plan(stream(b("11月19日13:30", 170, 270, 440),
+            TextBlock("商户甲", 112, 280, 300, 312),
+            TextBlock("标志", 58, 305, 96, 315),
+            b("使用零钱支付", 400, 270, 430), b("¥48.00", 490, 245, 440),
+            b("账单详情 >", 610, 280, 420)))
+        assertEquals("商户甲", result.decisions.single().draft.merchantCandidates.first())
+    }
 }

@@ -174,16 +174,8 @@ internal class BidirectionalSyncClient(
 
     private fun hasSameBusinessContent(local: TransactionEntity, remote: TransactionEntity): Boolean =
         local.syncDeleted == remote.syncDeleted &&
-            local.amountCents == remote.amountCents &&
-            local.currency == remote.currency &&
-            local.type == remote.type &&
-            local.category == remote.category &&
-            local.merchant == remote.merchant &&
-            local.note == remote.note &&
-            local.source == remote.source &&
-            local.account == remote.account &&
-            local.timestamp == remote.timestamp &&
-            local.remoteReviewStatus == remote.remoteReviewStatus
+            (local.syncDeleted || (UploadPayload.v2Record(local) == UploadPayload.v2Record(remote) &&
+                local.remoteReviewStatus == remote.remoteReviewStatus))
 
     private suspend fun applyChange(change:JSONObject) {
         val id=change.getString("event_id")
@@ -352,6 +344,18 @@ internal class BidirectionalSyncClient(
                         val serverMs=current.optLong("changed_at_ms",0L)
                         val phoneMs=live.syncModifiedMs
                         val serverRevision=current.getLong("revision")
+                        val equivalent = serverValue(live,id,serverRevision,
+                            current.getString("action"),current.optJSONObject("record"))
+                        if(equivalent != null && hasSameBusinessContent(live,equivalent)){
+                            dao.update(live.copy(remoteEventId=id,remoteRevision=serverRevision,
+                                syncDirty=false,syncMutationId=null))
+                            clearConflictApproval(id)
+                            conflictIds.remove(id)
+                            missingIds.remove(id)
+                            progress=true
+                            recordSync(live,TransactionDiagnostics.RESULT_SUCCESS,"Equivalent server revision acknowledged")
+                            continue
+                        }
                         // Show this exact server revision in the settings UI.
                         // If either side changes after the user taps a decision,
                         // do not silently apply that old choice to new contents.
