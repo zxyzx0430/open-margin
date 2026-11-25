@@ -494,9 +494,18 @@ object ScreenshotPageInterpreter {
         )
     }
 
+    // A platform name in an explicit contact phrase is not a payment-source
+    // signal. Remove only that phrase from platform scoring, not from OCR,
+    // page classification, or transaction parsing. Do not consume payment
+    // words such as "contact WeChat Pay support" or standalone platform names.
+    private val CONTACT_PLATFORM_MENTION = Regex(
+        """(?:微信|支付宝)[ \t]*(?:同号|号[ \t]*[:：]|联系方式)|(?:联系|添加|加)[ \t]*(?:微信|支付宝)(?![ \t]*(?:支付|账单|转账|收款|付款|零钱|客服))"""
+    )
+
     private fun detectPlatform(text: String): String {
-        val wechat = WECHAT_MARKERS.count { text.contains(it) }
-        val alipay = ALIPAY_MARKERS.count { text.contains(it) }
+        val platformText = CONTACT_PLATFORM_MENTION.replace(text, " ")
+        val wechat = WECHAT_MARKERS.count { platformText.contains(it) }
+        val alipay = ALIPAY_MARKERS.count { platformText.contains(it) }
         return when {
             wechat == 0 && alipay == 0 -> CaptureCandidate.PLATFORM_UNKNOWN
             wechat >= alipay -> CaptureCandidate.PLATFORM_WECHAT
