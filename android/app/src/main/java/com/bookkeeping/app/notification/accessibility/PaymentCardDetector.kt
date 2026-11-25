@@ -123,6 +123,8 @@ object PaymentCardDetector {
         """(?:本月|上月|今年|年度|累计|总)(?:已)?(?:支出|收入|消费|账单|提现|转账|红包|入账)|\d{1,2}月(?:已)?(?:支出|收入|消费|提现|转账|红包|入账)""",
     )
     private val PAY_AFTER_USE_MARKERS = listOf("先用后付", "已自动支付")
+    private val EMBEDDED_PARTIAL_REFUND_BADGE_REGEX =
+        Regex("已退款\\s*[（(]\\s*[¥￥]?\\s*[0-9][0-9,]*(?:\\.[0-9]{1,2})?\\s*[)）]")
     private val REFUND_MARKERS = listOf(
         "退款到账通知", "退款金额", "退款成功", "退款已到账", "退款到账",
         "已退款", "原路退回", "退款已原路退回",
@@ -575,15 +577,26 @@ object PaymentCardDetector {
         }
         if (isSummaryGroup(joined)) return null
 
-        val classification = classify(lines, joined, pageText) ?: return null
-        val amount = primaryAmount(lines, classification.kind) ?: return null
+        val hasNegativeAmount = source == PaymentCardSource.ALIPAY &&
+            lines.any { it.text.trim().startsWith("-") && parseAmount(it.text) != null }
+        val effectiveLines = if (hasNegativeAmount &&
+            lines.any { EMBEDDED_PARTIAL_REFUND_BADGE_REGEX.containsMatchIn(it.text) }
+        ) {
+            lines.filterNot { EMBEDDED_PARTIAL_REFUND_BADGE_REGEX.containsMatchIn(it.text) }
+        } else {
+            lines
+        }
+        val effectiveJoined = effectiveLines.joinToString(" ") { it.text }
+
+        val classification = classify(effectiveLines, effectiveJoined, pageText) ?: return null
+        val amount = primaryAmount(effectiveLines, classification.kind) ?: return null
         if (amount <= 0L) return null
 
-        val merchants = merchantCandidates(lines, classification.kind)
+        val merchants = merchantCandidates(effectiveLines, classification.kind)
         if (classification.kind == PaymentCardKind.BILL && merchants.isEmpty()) return null
 
-        val orderId = orderId(joined)
-        val eventTime = eventTime(lines, classification.kind, capturedAtMs)
+        val orderId = orderId(effectiveJoined)
+        val eventTime = eventTime(effectiveLines, classification.kind, capturedAtMs)
         val confidence = confidence(classification, merchants, orderId, eventTime)
         val cardKey = listOf(
             pageIdentity,

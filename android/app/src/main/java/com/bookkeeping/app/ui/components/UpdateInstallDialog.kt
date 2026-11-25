@@ -171,10 +171,22 @@ class UpdateInstallController internal constructor(
                 dismissOnClickOutside = !locked,
             ),
             title = {
-                Text(tr("发现新版本") + " " + (update.apkTag ?: update.tag))
+                val titlePrefix = if (state.stage == UpdateInstallStage.READY) {
+                    tr("新版本已下载完成")
+                } else {
+                    tr("发现新版本")
+                }
+                Text(titlePrefix + " " + (update.apkTag ?: update.tag))
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (state.stage == UpdateInstallStage.READY) {
+                        Text(
+                            text = tr("安装包已下载并校验完成，是否现在安装？"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Text(
                         tr("版本") + "：" + (update.apkTag ?: update.tag),
                         style = MaterialTheme.typography.bodyMedium,
@@ -312,7 +324,7 @@ class UpdateInstallController internal constructor(
             dismissButton = {
                 if (!locked) {
                     TextButton(onClick = { close() }) {
-                        Text(tr("取消"))
+                        Text(if (state.stage == UpdateInstallStage.READY) tr("稍后再说") else tr("取消"))
                     }
                 }
             },
@@ -340,7 +352,7 @@ private fun installConfirmLabel(state: UpdateInstallDialogState): String = when 
         if (percent == null) tr("下载中…") else tr("下载中") + " " + percent + "%"
     }
     UpdateInstallStage.VERIFYING -> tr("正在校验…")
-    UpdateInstallStage.READY -> tr("安装")
+    UpdateInstallStage.READY -> tr("立即安装")
     UpdateInstallStage.FAILED -> tr("重试")
 }
 

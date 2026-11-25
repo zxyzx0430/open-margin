@@ -198,6 +198,9 @@ internal object DiagnosticHumanizer {
     ): String? = when {
         detail == "Recent platform order ID suppressed" ->
             "该订单号刚已抓取过，已自动跳过避免重复"
+        detail == "Recent identical page capture suppressed" ||
+            detail == "Same-source burst duplicate suppressed" ->
+            "短时同页面重复触发，已自动跳过避免重复记账"
         detail == "Duplicate pending capture ignored" ->
             "待确认列表已有相同记录，本次重复抓取已忽略"
         detail == "Capture held for review; auto booking disabled" ->
@@ -284,6 +287,8 @@ internal object DiagnosticHumanizer {
 
     private fun isDedupIgnoreDetail(detail: String): Boolean =
         detail == "Recent platform order ID suppressed" ||
+            detail == "Recent identical page capture suppressed" ||
+            detail == "Same-source burst duplicate suppressed" ||
             detail == "Duplicate pending capture ignored" ||
             detail == "Exact order ID already recorded for the same payment platform; notification replay skipped" ||
             detail == "Existing source transaction ID; candidate not inserted" ||

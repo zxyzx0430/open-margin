@@ -622,7 +622,8 @@ class ScreenshotIntakeCoordinator private constructor(
                                     }
                                     // A non-empty platform order ID is the only
                                     // ledger evidence strong enough to close this card.
-                                    DuplicateReason.SOURCE_ORDER_ID -> {
+                                    DuplicateReason.SOURCE_ORDER_ID,
+                                    DuplicateReason.SAME_SOURCE_BURST -> {
                                         store.mark(stored, CaptureCandidate.STATUS_IGNORED)
                                         ignored++
                                         duplicates++

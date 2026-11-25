@@ -104,6 +104,9 @@ enum class DuplicateReason {
      * 绝不能当成已入账把候选丢掉。
      */
     CROSS_SOURCE_WEAK,
+
+    /** 同来源、同商户、同金额短时连发且无订单号：直接去重跳过，不堆叠待确认重复。 */
+    SAME_SOURCE_BURST,
 }
 
 /**
@@ -732,6 +735,22 @@ class TransactionRepository @Inject constructor(
                 details = diagnosticError(failure),
             )
             throw failure
+        }
+        if (DuplicateReviewPolicy.isSameSourceBurstDuplicate(similar, transaction)) {
+            diagnostics.record(
+                attemptId = diagnosticInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_DEDUP,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = "Same-source burst duplicate suppressed",
+                transactionId = similar!!.id,
+                callSite = callSite,
+                inputSummary = money,
+                outputSummary = "同来源短时重复触发，命中已有 #${similar.id}，跳过写入",
+            )
+            return LedgerInsertResult.Duplicate(
+                existingTransactionId = similar.id,
+                reason = DuplicateReason.SAME_SOURCE_BURST,
+            )
         }
         val candidate = if (DuplicateReviewPolicy.shouldFlag(similar, transaction)) {
             transaction.copy(

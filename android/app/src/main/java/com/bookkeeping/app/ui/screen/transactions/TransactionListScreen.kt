@@ -302,10 +302,35 @@ fun TransactionListScreen(
         if (SiteUpdatePolicy.isOfficialPackage(packageName)) {
             withContext(Dispatchers.IO) {
                 SiteUpdateCoordinator.refreshIfDue(context)
+                val cached = SiteUpdateCoordinator.cachedManifest(context)
+                com.bookkeeping.app.update.UpdateInstallFlow.cleanupObsoleteApks(
+                    context,
+                    keepFileName = cached?.let { com.bookkeeping.app.update.UpdateUrlPolicy.fileNameOf(it.apkUrl) },
+                )
             }
         }
         siteUpdateBanner = withContext(Dispatchers.IO) {
             SiteUpdateCoordinator.bannerFor(context)
+        }
+        if (SiteUpdatePolicy.isOfficialPackage(packageName) && updateInstall.dialogState == null) {
+            val readyManifest = withContext(Dispatchers.IO) {
+                val manifest = SiteUpdateCoordinator.cachedManifest(context)
+                if (manifest != null &&
+                    SiteUpdateCoordinator.shouldAutoPromptReady(manifest.versionCode) &&
+                    com.bookkeeping.app.update.UpdateInstallFlow.verifiedDownload(
+                        context,
+                        manifest.asCheckResult(),
+                    ) != null
+                ) {
+                    manifest
+                } else {
+                    null
+                }
+            }
+            if (readyManifest != null) {
+                SiteUpdateCoordinator.markAutoPromptedReady(readyManifest.versionCode)
+                updateInstall.open(readyManifest.asCheckResult())
+            }
         }
     }
 

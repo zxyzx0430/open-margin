@@ -223,6 +223,12 @@ object ScreenshotPageInterpreter {
     /** `周一` / `星期天`: a weekday label is date evidence, not merchant text. */
     private val WEEKDAY_REGEX = Regex("(?:^|[\\s:：])(?:星期|周)([一二三四五六日天])")
     private val WALLET_LEDGER_AMOUNT_REGEX = Regex("^([-+])([0-9][0-9,]*(?:\\.[0-9]{1,2})?)$")
+    private val BARE_DECIMAL_AMOUNT_REGEX = Regex("^\\s*([-+])?\\s*([0-9][0-9,]*\\.[0-9]{2})\\s*$")
+    private val EMBEDDED_PARTIAL_REFUND_BADGE_REGEX =
+        Regex("已退款\\s*[（(]\\s*[¥￥]?\\s*[0-9][0-9,]*(?:\\.[0-9]{1,2})?\\s*[)）]")
+    private val ALIPAY_DETAIL_FIELD_ANCHORS = listOf(
+        "付款方式", "支付方式", "创建时间", "支付时间", "付款时间", "订单号", "商品说明", "退款方式",
+    )
     private val YEAR_MONTH_HEADER_REGEX = Regex("(\\d{4})年(\\d{1,2})月")
     private val STATUS_BAR_CLOCK_REGEX = Regex("^\\d{1,2}:\\d{2}[….•·\\s]+$")
     private val STATUS_BAR_BACK_BADGE_REGEX = Regex("^<\\d+$")
@@ -257,10 +263,15 @@ object ScreenshotPageInterpreter {
         // Footer statistics, promo banners and phone status-bar chrome belong to the shell, not to the transaction.
         val chromeStripped = stripStatusBarChrome(ordered)
         val serviceStream = isWechatServiceStream(chromeStripped)
-        val content = (if (serviceStream) stripDailyReportCards(chromeStripped) else chromeStripped)
+        val rawContent = (if (serviceStream) stripDailyReportCards(chromeStripped) else chromeStripped)
             .filterNot { isNoiseLine(it.text) }
-        val allText = content.joinToString("\n") { it.text }
-        if (isOwnAppUiPage(allText)) {
+        val allText = rawContent.joinToString("\n") { it.text }
+        val content = normalizeAlipayDetailContent(
+            platform = detectPlatform(allText),
+            blocks = rawContent,
+        )
+        val effectiveAllText = content.joinToString("\n") { it.text }
+        if (isOwnAppUiPage(effectiveAllText)) {
             return ScreenshotPageEvidence(
                 platform = CaptureCandidate.PLATFORM_UNKNOWN,
                 pageType = PAGE_UNKNOWN,
@@ -586,6 +597,50 @@ object ScreenshotPageInterpreter {
     private fun isNoiseLine(line: String): Boolean {
         val text = line.trim()
         return NOISE_LINE_MARKERS.any(text::contains)
+    }
+
+    /**
+     * Alipay bill-detail pages print the header amount without a currency sign
+     * (e.g. `-71.60` or `5.70`), and may show an inline `已退款(¥35.30)>` badge
+     * under a negative payment amount. Normalize the single header amount block
+     * so it anchors the bill, and suppress the inline partial-refund badge when
+     * a negative header amount is already present so it is not parsed as a
+     * standalone refund.
+     */
+    private fun normalizeAlipayDetailContent(
+        platform: String,
+        blocks: List<TextBlock>,
+    ): List<TextBlock> {
+        if (platform != CaptureCandidate.PLATFORM_ALIPAY) return blocks
+        if (blocks.none { it.text.contains("账单详情") }) return blocks
+        val firstFieldIndex = blocks.indexOfFirst { block ->
+            ALIPAY_DETAIL_FIELD_ANCHORS.any { block.text.contains(it) }
+        }.let { if (it < 0) blocks.size else it }
+        var normalizedHeaderNegative = false
+        var headerNormalized = false
+        val normalized = blocks.mapIndexed { index, block ->
+            if (!headerNormalized && index < firstFieldIndex && amountOf(block.text) == null) {
+                val match = BARE_DECIMAL_AMOUNT_REGEX.matchEntire(block.text)
+                if (match != null) {
+                    val sign = match.groupValues[1]
+                    val number = match.groupValues[2]
+                    if (centsOf(number) != null) {
+                        headerNormalized = true
+                        if (sign == "-") normalizedHeaderNegative = true
+                        return@mapIndexed block.copy(text = "${sign}¥$number")
+                    }
+                }
+            }
+            if (block.text.trim().startsWith("-") && amountOf(block.text) != null && index < firstFieldIndex) {
+                normalizedHeaderNegative = true
+            }
+            block
+        }
+        return if (normalizedHeaderNegative) {
+            normalized.filterNot { EMBEDDED_PARTIAL_REFUND_BADGE_REGEX.containsMatchIn(it.text) }
+        } else {
+            normalized
+        }
     }
 
     /**
@@ -1193,7 +1248,7 @@ object ScreenshotPageInterpreter {
     private fun isMerchantInterference(line: String): Boolean {
         val text = line.trim()
         if (text.isEmpty() || text.length == 1) return true
-        if (amountOf(text) != null) return true
+        if (amountOf(text) != null || BARE_DECIMAL_AMOUNT_REGEX.matches(text)) return true
         if (isTimeOrDateLine(text)) return true
         if (STATUS_BAR_BACK_BADGE_REGEX.matches(text)) return true
         if (MERCHANT_INTERFERENCE.any(text::contains)) return true

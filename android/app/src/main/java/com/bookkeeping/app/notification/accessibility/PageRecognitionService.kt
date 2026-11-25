@@ -77,6 +77,7 @@ open class PageRecognitionService : AccessibilityService() {
     private var lastWindowActivity: String? = null
     private var lastWindowPackage: String? = null
     private val recentCaptureKeys = mutableMapOf<String, Long>()
+    private val recentNoOrderIdKeys = mutableMapOf<String, Long>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -992,6 +993,31 @@ open class PageRecognitionService : AccessibilityService() {
                             )
                             return@forEachIndexed
                         }
+                        if (dedupKey == null) {
+                            val burstKey = noOrderIdBurstKey(stored)
+                            val recentlyRepeated = synchronized(recentNoOrderIdKeys) {
+                                val firstSeen = recentNoOrderIdKeys[burstKey]
+                                if (firstSeen != null && now - firstSeen < NO_ORDER_ID_BURST_TTL_MS) {
+                                    true
+                                } else {
+                                    recentNoOrderIdKeys[burstKey] = now
+                                    recentNoOrderIdKeys.entries.removeAll {
+                                        now - it.value > NO_ORDER_ID_BURST_TTL_MS
+                                    }
+                                    false
+                                }
+                            }
+                            if (recentlyRepeated) {
+                                store.mark(stored, CaptureCandidate.STATUS_IGNORED)
+                                repository.recordDiagnostic(
+                                    attemptId = input.attemptId,
+                                    stage = TransactionDiagnostics.STAGE_DEDUP,
+                                    result = TransactionDiagnostics.RESULT_WARNING,
+                                    details = "Recent identical page capture suppressed",
+                                )
+                                return@forEachIndexed
+                            }
+                        }
 
                         if (!CaptureBookGate.mayWriteLedger(allowAuto)) {
                             // Hard gate: preview-only or auto-disabled passes keep the
@@ -1063,6 +1089,10 @@ open class PageRecognitionService : AccessibilityService() {
                             if (!candidate.orderId.isNullOrBlank()) {
                                 synchronized(recentCaptureKeys) {
                                     recentCaptureKeys.remove(candidate.dedupKey())
+                                }
+                            } else {
+                                synchronized(recentNoOrderIdKeys) {
+                                    recentNoOrderIdKeys.remove(noOrderIdBurstKey(candidate))
                                 }
                             }
                         }
@@ -1305,6 +1335,12 @@ open class PageRecognitionService : AccessibilityService() {
         private const val SCREENSHOT_BURST_COOLDOWN_MS = 3_000L
         private const val MIN_TAKE_SCREENSHOT_INTERVAL_MS = 1_200L
         private const val CAPTURE_KEY_TTL_MS = 10 * 60_000L
+        private const val NO_ORDER_ID_BURST_TTL_MS = 15_000L
+
+        private fun noOrderIdBurstKey(candidate: CaptureCandidate): String {
+            val merchant = candidate.merchantCandidates.firstOrNull().orEmpty().trim()
+            return "${candidate.packageName}|${candidate.kind}|${candidate.amountCents}|$merchant"
+        }
         private const val MAX_SCREENSHOT_BYTES = 4 * 1024 * 1024
         private const val PAGE_RECOGNITION_CLASS =
             "com.google.android.accessibility.selecttospeak.SelectToSpeakService"
@@ -1439,7 +1475,8 @@ object PageCaptureResultPolicy {
         is LedgerInsertResult.Duplicate -> when (result.reason) {
             DuplicateReason.CROSS_SOURCE_WEAK -> PageCaptureOutcome.HOLD_FOR_REVIEW
             DuplicateReason.SOURCE_ORDER_ID,
-            DuplicateReason.CROSS_SOURCE -> PageCaptureOutcome.IGNORED
+            DuplicateReason.CROSS_SOURCE,
+            DuplicateReason.SAME_SOURCE_BURST -> PageCaptureOutcome.IGNORED
         }
     }
 }

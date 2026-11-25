@@ -450,6 +450,7 @@ internal fun ConflictCard(
     onRestore: () -> Unit,
     onKeepPhone: () -> Unit,
     onKeepServer: () -> Unit,
+    resolving: Boolean = false,
 ) {
     val phone = entry.phone
     val server = entry.server
@@ -546,19 +547,29 @@ internal fun ConflictCard(
                 )
                 TextButton(onClick = onRestore) { Text(tr("展开")) }
             } else {
+                if (resolving) {
+                    Text(
+                        text = tr("正在同步处理…"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = onKeepPhone,
-                        enabled = entry.canResolve,
+                        enabled = entry.canResolve && !resolving,
                         modifier = Modifier.weight(1f),
                     ) { Text(tr("保留本机"), maxLines = 1) }
                     OutlinedButton(
                         onClick = onKeepServer,
-                        enabled = entry.canResolve,
+                        enabled = entry.canResolve && !resolving,
                         modifier = Modifier.weight(1f),
                     ) { Text(tr("采用服务器"), maxLines = 1) }
                 }
-                TextButton(onClick = onDefer) { Text(tr("稍后处理")) }
+                TextButton(
+                    onClick = onDefer,
+                    enabled = !resolving,
+                ) { Text(tr("稍后处理")) }
             }
         }
     }

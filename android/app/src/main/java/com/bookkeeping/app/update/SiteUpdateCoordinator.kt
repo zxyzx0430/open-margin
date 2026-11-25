@@ -16,6 +16,7 @@ object SiteUpdateCoordinator {
 
     @Volatile private var snoozedVersionCode: Int = 0
     @Volatile private var snoozedAtMs: Long = 0L
+    @Volatile private var autoPromptedReadyVersionCode: Int = 0
 
     /** Cached manifest for the settings row; ignores banner dismissal. */
     fun cachedManifest(context: Context): SiteUpdatePolicy.SiteUpdateManifest? {
@@ -106,6 +107,10 @@ object SiteUpdateCoordinator {
                 is SiteUpdateChecker.Result.Available -> {
                     prefs.setLastCheckMs(nowMs)
                     prefs.setCachedManifestJson(result.rawJson)
+                    UpdateInstallFlow.cleanupObsoleteApks(
+                        context,
+                        keepFileName = UpdateUrlPolicy.fileNameOf(result.manifest.apkUrl),
+                    )
                     if (prefs.autoDownloadEnabled()) {
                         SiteUpdateWorker.enqueue(context, result.rawJson)
                     }
@@ -114,6 +119,7 @@ object SiteUpdateCoordinator {
                 SiteUpdateChecker.Result.UpToDate -> {
                     prefs.setLastCheckMs(nowMs)
                     prefs.setCachedManifestJson(null)
+                    UpdateInstallFlow.cleanupObsoleteApks(context, keepFileName = null)
                     null
                 }
                 // Leave the timestamp untouched so the next entry retries
@@ -160,5 +166,20 @@ object SiteUpdateCoordinator {
         if (snoozed == 0 || versionCode > snoozed) return false
         val elapsed = nowMs - snoozedAtMs
         return elapsed in 0 until SESSION_SNOOZE_MAX_MS
+    }
+
+    fun shouldAutoPromptReady(versionCode: Int): Boolean =
+        versionCode > 0 && autoPromptedReadyVersionCode < versionCode
+
+    fun markAutoPromptedReady(versionCode: Int) {
+        if (versionCode > autoPromptedReadyVersionCode) {
+            autoPromptedReadyVersionCode = versionCode
+        }
+    }
+
+    internal fun resetSessionForTest() {
+        snoozedVersionCode = 0
+        snoozedAtMs = 0L
+        autoPromptedReadyVersionCode = 0
     }
 }

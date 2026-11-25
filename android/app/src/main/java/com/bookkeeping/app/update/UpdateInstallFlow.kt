@@ -111,6 +111,34 @@ object UpdateInstallFlow {
         return File(dir, name)
     }
 
+    /**
+     * Removes older installer APKs and `.part` leftovers from the app's private
+     * Downloads directory, optionally keeping [keepFileName] (and its `.part`).
+     */
+    fun cleanupObsoleteApks(context: Context, keepFileName: String? = null): Int =
+        cleanupObsoleteApksInDir(
+            dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+            keepFileName = keepFileName,
+        )
+
+    internal fun cleanupObsoleteApksInDir(dir: File?, keepFileName: String? = null): Int {
+        if (dir == null || !dir.isDirectory) return 0
+        val files = dir.listFiles() ?: return 0
+        var removed = 0
+        for (file in files) {
+            if (!file.isFile) continue
+            val name = file.name
+            val isInstallerFile = (name.startsWith("open-margin-") || name.startsWith("qingheng-")) &&
+                (name.endsWith(".apk") || name.endsWith(".apk.part"))
+            if (!isInstallerFile) continue
+            if (keepFileName != null && (name == keepFileName || name == "$keepFileName.part")) continue
+            if (runCatching { file.delete() }.getOrDefault(false)) {
+                removed++
+            }
+        }
+        return removed
+    }
+
     /** A previously downloaded APK that still matches the release metadata. */
     fun verifiedDownload(
         context: Context,
@@ -167,16 +195,16 @@ object UpdateInstallFlow {
             return@flow
         }
 
-        if (!hasSpace(dir, expectedSize)) {
-            emit(DownloadEvent.Failed(Failure.NO_SPACE))
-            return@flow
-        }
-
         val target = File(dir, name)
         val partFile = File(dir, "$name.part")
         downloadMutex.withLock {
+            cleanupObsoleteApksInDir(dir, keepFileName = name)
             verifiedDownload(context, update)?.let { alreadyVerified ->
                 emit(DownloadEvent.Completed(alreadyVerified))
+                return@flow
+            }
+            if (!hasSpace(dir, expectedSize)) {
+                emit(DownloadEvent.Failed(Failure.NO_SPACE))
                 return@flow
             }
             if (target.exists() && !target.delete()) {

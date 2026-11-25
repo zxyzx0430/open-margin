@@ -16,6 +16,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -53,11 +55,29 @@ fun PendingConflictsScreen(onBack: () -> Unit) {
     val pendingRows by pendingViewModel.pending.collectAsState()
     var snapshot by remember { mutableStateOf(readSyncSnapshot(prefs)) }
     var deferred by remember { mutableStateOf(setOf<String>()) }
+    var resolving by remember { mutableStateOf(mapOf<String, Long>()) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(resolving.isNotEmpty()) {
         while (true) {
-            snapshot = readSyncSnapshot(prefs)
-            delay(3_000L)
+            val latest = readSyncSnapshot(prefs)
+            snapshot = latest
+            if (resolving.isNotEmpty()) {
+                val now = System.currentTimeMillis()
+                val resolvedIds = resolving.keys.filter { it !in latest.conflictIds }
+                val timedOutIds = resolving
+                    .filter { (id, startedAt) -> id in latest.conflictIds && now - startedAt >= 15_000L }
+                    .keys
+                if (resolvedIds.isNotEmpty() || timedOutIds.isNotEmpty()) {
+                    resolving = resolving - resolvedIds.toSet() - timedOutIds
+                    if (resolvedIds.isNotEmpty()) {
+                        snackbarHostState.showSnackbar(tr("冲突已处理并同步"))
+                    } else if (timedOutIds.isNotEmpty()) {
+                        snackbarHostState.showSnackbar(tr("同步处理超时，请检查网络后重试"))
+                    }
+                }
+            }
+            delay(if (resolving.isNotEmpty()) 500L else 3_000L)
         }
     }
 
@@ -71,6 +91,7 @@ fun PendingConflictsScreen(onBack: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -120,14 +141,17 @@ fun PendingConflictsScreen(onBack: () -> Unit) {
                         index = index + 1,
                         total = conflicts.size,
                         deferred = entry.eventId in deferred,
+                        resolving = entry.eventId in resolving,
                         onDefer = { deferred = deferred + entry.eventId },
                         onRestore = { deferred = deferred - entry.eventId },
                         onKeepPhone = {
+                            resolving = resolving + (entry.eventId to System.currentTimeMillis())
                             applyConflictChoice(prefs, entry, keepPhone = true)
                             TransactionSyncWorker.requestImmediate(context)
                             snapshot = readSyncSnapshot(prefs)
                         },
                         onKeepServer = {
+                            resolving = resolving + (entry.eventId to System.currentTimeMillis())
                             applyConflictChoice(prefs, entry, keepPhone = false)
                             TransactionSyncWorker.requestImmediate(context)
                             snapshot = readSyncSnapshot(prefs)

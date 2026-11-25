@@ -537,7 +537,8 @@ class ScreenshotImportActivity : ComponentActivity() {
                 DuplicateReason.CROSS_SOURCE,
                 DuplicateReason.CROSS_SOURCE_WEAK,
                 -> WriteOutcome.SuspectedDuplicate(inserted.existingTransactionId)
-                DuplicateReason.SOURCE_ORDER_ID -> {
+                DuplicateReason.SOURCE_ORDER_ID,
+                DuplicateReason.SAME_SOURCE_BURST -> {
                     store.mark(candidate, CaptureCandidate.STATUS_IGNORED)
                     WriteOutcome.ALREADY_EXISTS
                 }

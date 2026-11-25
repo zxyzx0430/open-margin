@@ -1044,6 +1044,15 @@ internal object EnglishUiText {
         "该月还没有预算" to "No budget for this month",
         "还没有分类预算，添加后可按分类查看使用进度。" to "No category budgets yet. Add one to track category progress.",
         "账本已有金额/时间相同的记录" to "The ledger already has a record with the same amount and time",
+        "短时同页面重复触发，已自动跳过避免重复记账" to "Recent identical page capture suppressed",
+        "同来源短时重复触发，已跳过" to "Same-source burst duplicate suppressed",
+        "新版本已下载完成" to "New version downloaded",
+        "安装包已下载并校验完成，是否现在安装？" to "Installer downloaded and verified. Install now?",
+        "立即安装" to "Install now",
+        "稍后再说" to "Later",
+        "正在同步处理…" to "Syncing resolution…",
+        "冲突已处理并同步" to "Conflict resolved and synced",
+        "同步处理超时，请检查网络后重试" to "Sync resolution timed out; check your network and retry",
     ) + supplementalEnglish()
 
     private fun supplementalEnglish(): Map<String, String> = mapOf(
