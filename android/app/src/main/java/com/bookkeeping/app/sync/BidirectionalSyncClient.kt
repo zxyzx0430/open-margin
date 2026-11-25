@@ -172,7 +172,7 @@ internal class BidirectionalSyncClient(
         )
     }
 
-    private fun hasSameBusinessContent(local: TransactionEntity, remote: TransactionEntity): Boolean =
+    internal fun hasSameBusinessContent(local: TransactionEntity, remote: TransactionEntity): Boolean =
         local.syncDeleted == remote.syncDeleted &&
             (local.syncDeleted || (UploadPayload.v2Record(local) == UploadPayload.v2Record(remote) &&
                 local.remoteReviewStatus == remote.remoteReviewStatus))
@@ -185,6 +185,16 @@ internal class BidirectionalSyncClient(
             return
         }
         if(previous?.syncDirty==true){
+            val next = serverValue(previous,id,revision,change.getString("action"),
+                                   change.optJSONObject("record"))
+            if(next!=null && hasSameBusinessContent(previous,next)){
+                val acknowledged=previous.copy(remoteEventId=id,remoteRevision=revision,
+                    syncDirty=false,syncMutationId=null)
+                dao.update(acknowledged)
+                clearConflictApproval(id)
+                recordSync(acknowledged,TransactionDiagnostics.RESULT_SUCCESS,"Equivalent server revision acknowledged")
+                return
+            }
             // Never replace an unsent local edit. Push uses the preserved base
             // revision to detect an actual concurrent edit and resolve it.
             try {

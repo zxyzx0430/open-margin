@@ -13,12 +13,16 @@ import androidx.core.content.FileProvider
 import com.bookkeeping.app.rom.RomSettingsLauncher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -41,6 +45,25 @@ object UpdateInstallFlow {
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 30_000
     private const val INSTALL_RESERVE_BYTES = 64L * 1024L * 1024L
+    private const val MAX_RESUME_ATTEMPTS = 3
+    private val downloadMutex = Mutex()
+    private val contentRangeRegex = Regex("""^bytes\s+(\d+)-(\d+)/(\d+|\*)$""", RegexOption.IGNORE_CASE)
+
+    internal fun isValidPartialRange(
+        contentRange: String?,
+        expectedStart: Long,
+        expectedTotal: Long,
+    ): Boolean {
+        val raw = contentRange?.trim() ?: return false
+        val match = contentRangeRegex.matchEntire(raw) ?: return false
+        val start = match.groupValues[1].toLongOrNull() ?: return false
+        val end = match.groupValues[2].toLongOrNull() ?: return false
+        val totalToken = match.groupValues[3]
+        if (start != expectedStart || end < start) return false
+        if (totalToken == "*") return expectedTotal <= 0L
+        val total = totalToken.toLongOrNull() ?: return false
+        return if (expectedTotal > 0L) total == expectedTotal else total > end
+    }
 
     sealed interface DownloadEvent {
         data class Running(
@@ -151,152 +174,213 @@ object UpdateInstallFlow {
 
         val target = File(dir, name)
         val partFile = File(dir, "$name.part")
-        if (target.exists() && !target.delete()) {
-            emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
-            return@flow
-        }
-
-        var existingBytes = if (partFile.isFile) partFile.length() else 0L
-        if (existingBytes >= expectedSize) {
-            runCatching { partFile.delete() }
-            existingBytes = 0L
-        }
-
-        emit(
-            DownloadEvent.Running(
-                percent = ((existingBytes * PERCENT_MAX) / expectedSize).toInt().coerceIn(0, PERCENT_MAX),
-                downloadedBytes = existingBytes,
-                totalBytes = expectedSize,
-                bytesPerSecond = 0L,
-            ),
-        )
-
-        var conn: HttpURLConnection? = null
-        try {
-            conn = (URL(update.apkUrl).openConnection() as HttpURLConnection).apply {
-                connectTimeout = CONNECT_TIMEOUT_MS
-                readTimeout = READ_TIMEOUT_MS
-                instanceFollowRedirects = true
-                setRequestProperty("Accept-Encoding", "identity")
-                if (existingBytes > 0L) {
-                    setRequestProperty("Range", "bytes=$existingBytes-")
-                }
+        downloadMutex.withLock {
+            verifiedDownload(context, update)?.let { alreadyVerified ->
+                emit(DownloadEvent.Completed(alreadyVerified))
+                return@flow
             }
-            val code = conn.responseCode
-            val resumeAccepted = code == HttpURLConnection.HTTP_PARTIAL && existingBytes > 0L
-            if (code !in 200..299) {
-                if (code == 416) runCatching { partFile.delete() }
+            if (target.exists() && !target.delete()) {
                 emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
                 return@flow
             }
-
-            if (!resumeAccepted) {
-                existingBytes = 0L
+            if (partFile.isFile && partFile.length() == expectedSize) {
+                if (ApkIntegrity.verify(partFile, expectedSize, update.apkSha256) == ApkCheck.OK &&
+                    ApkSignatureVerifier.matchesInstalled(context, partFile)
+                ) {
+                    if (movePartToTarget(partFile, target)) {
+                        emit(DownloadEvent.Completed(target))
+                        return@flow
+                    }
+                }
+                runCatching { partFile.delete() }
+            } else if (partFile.isFile && partFile.length() > expectedSize) {
+                runCatching { partFile.delete() }
             }
-            val contentLength = conn.contentLengthLong
-            val totalBytes = when {
-                resumeAccepted && contentLength > 0L -> existingBytes + contentLength
-                !resumeAccepted && contentLength > 0L -> contentLength
-                else -> expectedSize
-            }
 
-            var downloaded = existingBytes
-            var lastEmitMs = System.currentTimeMillis()
-            var windowStartMs = lastEmitMs
-            var windowBytes = 0L
-            var currentSpeedBps = 0L
-            val buffer = ByteArray(BUFFER_BYTES)
+            var lastFailure = Failure.DOWNLOAD_FAILED
+            for (attempt in 1..MAX_RESUME_ATTEMPTS) {
+                var existingBytes = if (partFile.isFile) partFile.length() else 0L
+                if (existingBytes >= expectedSize) {
+                    runCatching { partFile.delete() }
+                    existingBytes = 0L
+                }
+                emit(
+                    DownloadEvent.Running(
+                        percent = ((existingBytes * PERCENT_MAX) / expectedSize).toInt().coerceIn(0, PERCENT_MAX),
+                        downloadedBytes = existingBytes,
+                        totalBytes = expectedSize,
+                        bytesPerSecond = 0L,
+                    ),
+                )
 
-            conn.inputStream.use { input ->
-                FileOutputStream(partFile, resumeAccepted).use { output ->
-                    while (currentCoroutineContext().isActive) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        if (read == 0) continue
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        windowBytes += read
+                var conn: HttpURLConnection? = null
+                var shouldRetry = false
+                try {
+                    conn = (URL(update.apkUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = CONNECT_TIMEOUT_MS
+                        readTimeout = READ_TIMEOUT_MS
+                        instanceFollowRedirects = true
+                        setRequestProperty("Accept-Encoding", "identity")
+                        if (existingBytes > 0L) {
+                            setRequestProperty("Range", "bytes=$existingBytes-")
+                        }
+                    }
+                    val code = conn.responseCode
+                    if (code !in 200..299) {
+                        if (code == 416) runCatching { partFile.delete() }
+                        lastFailure = Failure.DOWNLOAD_FAILED
+                        shouldRetry = attempt < MAX_RESUME_ATTEMPTS && code in setOf(408, 416, 429, 500, 502, 503, 504)
+                        if (!shouldRetry) {
+                            emit(DownloadEvent.Failed(lastFailure))
+                            return@flow
+                        }
+                    } else {
+                        val resumeAccepted = code == HttpURLConnection.HTTP_PARTIAL &&
+                            existingBytes > 0L &&
+                            isValidPartialRange(conn.getHeaderField("Content-Range"), existingBytes, expectedSize)
+                        if (!resumeAccepted) {
+                            existingBytes = 0L
+                        }
+                        val contentLength = conn.contentLengthLong
+                        val totalBytes = when {
+                            resumeAccepted && contentLength > 0L -> existingBytes + contentLength
+                            !resumeAccepted && contentLength > 0L -> contentLength
+                            else -> expectedSize
+                        }
 
-                        val now = System.currentTimeMillis()
-                        val elapsed = now - lastEmitMs
-                        if (elapsed >= PROGRESS_INTERVAL_MS) {
-                            val windowElapsedMs = (now - windowStartMs).coerceAtLeast(1L)
-                            currentSpeedBps = (windowBytes * 1000L) / windowElapsedMs
-                            if (windowElapsedMs >= 1500L) {
-                                windowStartMs = now
-                                windowBytes = 0L
+                        var downloaded = existingBytes
+                        var lastEmitMs = System.currentTimeMillis()
+                        var windowStartMs = lastEmitMs
+                        var windowBytes = 0L
+                        var currentSpeedBps = 0L
+                        val buffer = ByteArray(BUFFER_BYTES)
+
+                        conn.inputStream.use { input ->
+                            FileOutputStream(partFile, resumeAccepted).use { output ->
+                                while (currentCoroutineContext().isActive) {
+                                    val read = input.read(buffer)
+                                    if (read < 0) break
+                                    if (read == 0) continue
+                                    output.write(buffer, 0, read)
+                                    downloaded += read
+                                    windowBytes += read
+
+                                    val now = System.currentTimeMillis()
+                                    val elapsed = now - lastEmitMs
+                                    if (elapsed >= PROGRESS_INTERVAL_MS) {
+                                        val windowElapsedMs = (now - windowStartMs).coerceAtLeast(1L)
+                                        currentSpeedBps = (windowBytes * 1000L) / windowElapsedMs
+                                        if (windowElapsedMs >= 1500L) {
+                                            windowStartMs = now
+                                            windowBytes = 0L
+                                        }
+                                        val pct = if (totalBytes > 0L) {
+                                            ((downloaded * PERCENT_MAX) / totalBytes).toInt().coerceIn(0, PERCENT_MAX)
+                                        } else {
+                                            null
+                                        }
+                                        emit(
+                                            DownloadEvent.Running(
+                                                percent = pct,
+                                                downloadedBytes = downloaded,
+                                                totalBytes = totalBytes,
+                                                bytesPerSecond = currentSpeedBps,
+                                            ),
+                                        )
+                                        lastEmitMs = now
+                                    }
+                                }
+                                output.flush()
+                                output.fd.sync()
                             }
-                            val pct = if (totalBytes > 0L) {
-                                ((downloaded * PERCENT_MAX) / totalBytes).toInt().coerceIn(0, PERCENT_MAX)
-                            } else {
-                                null
-                            }
+                        }
+
+                        if (!currentCoroutineContext().isActive) {
+                            return@flow
+                        }
+
+                        val actualPartLength = if (partFile.isFile) partFile.length() else 0L
+                        if (actualPartLength < expectedSize) {
+                            lastFailure = Failure.SIZE_MISMATCH
+                            shouldRetry = attempt < MAX_RESUME_ATTEMPTS
+                        } else if (actualPartLength > expectedSize) {
+                            runCatching { partFile.delete() }
+                            lastFailure = Failure.SIZE_MISMATCH
+                            shouldRetry = attempt < MAX_RESUME_ATTEMPTS
+                        } else {
                             emit(
                                 DownloadEvent.Running(
-                                    percent = pct,
-                                    downloadedBytes = downloaded,
-                                    totalBytes = totalBytes,
+                                    percent = PERCENT_MAX,
+                                    downloadedBytes = actualPartLength,
+                                    totalBytes = expectedSize,
                                     bytesPerSecond = currentSpeedBps,
                                 ),
                             )
-                            lastEmitMs = now
+                            emit(DownloadEvent.Verifying)
+
+                            if (!movePartToTarget(partFile, target)) {
+                                emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+                                return@flow
+                            }
+
+                            when (ApkIntegrity.verify(target, update.apkSizeBytes, update.apkSha256)) {
+                                ApkCheck.OK -> {
+                                    if (ApkSignatureVerifier.matchesInstalled(context, target)) {
+                                        emit(DownloadEvent.Completed(target))
+                                    } else {
+                                        runCatching { target.delete() }
+                                        emit(DownloadEvent.Failed(Failure.SIGNATURE_MISMATCH))
+                                    }
+                                    return@flow
+                                }
+                                ApkCheck.SIZE_MISMATCH -> {
+                                    runCatching { target.delete() }
+                                    emit(DownloadEvent.Failed(Failure.SIZE_MISMATCH))
+                                    return@flow
+                                }
+                                ApkCheck.DIGEST_MISMATCH -> {
+                                    runCatching { target.delete() }
+                                    emit(DownloadEvent.Failed(Failure.DIGEST_MISMATCH))
+                                    return@flow
+                                }
+                                ApkCheck.MISSING -> {
+                                    emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+                                    return@flow
+                                }
+                            }
                         }
                     }
-                    output.fd.sync()
+                } catch (_: IOException) {
+                    if (!currentCoroutineContext().isActive) return@flow
+                    lastFailure = Failure.DOWNLOAD_FAILED
+                    shouldRetry = attempt < MAX_RESUME_ATTEMPTS
+                } catch (_: Exception) {
+                    if (currentCoroutineContext().isActive) {
+                        emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+                    }
+                    return@flow
+                } finally {
+                    runCatching { conn?.disconnect() }
                 }
-            }
 
-            if (!currentCoroutineContext().isActive) {
-                return@flow
-            }
-
-            emit(
-                DownloadEvent.Running(
-                    percent = PERCENT_MAX,
-                    downloadedBytes = downloaded,
-                    totalBytes = totalBytes,
-                    bytesPerSecond = currentSpeedBps,
-                ),
-            )
-            emit(DownloadEvent.Verifying)
-
-            if (!partFile.renameTo(target)) {
-                runCatching {
-                    partFile.copyTo(target, overwrite = true)
-                    partFile.delete()
-                }.onFailure {
-                    emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
+                if (!shouldRetry) {
+                    emit(DownloadEvent.Failed(lastFailure))
                     return@flow
                 }
+                delay(1000L * attempt)
             }
-
-            when (ApkIntegrity.verify(target, update.apkSizeBytes, update.apkSha256)) {
-                ApkCheck.OK -> {
-                    if (ApkSignatureVerifier.matchesInstalled(context, target)) {
-                        emit(DownloadEvent.Completed(target))
-                    } else {
-                        runCatching { target.delete() }
-                        emit(DownloadEvent.Failed(Failure.SIGNATURE_MISMATCH))
-                    }
-                }
-                ApkCheck.SIZE_MISMATCH -> {
-                    runCatching { target.delete() }
-                    emit(DownloadEvent.Failed(Failure.SIZE_MISMATCH))
-                }
-                ApkCheck.DIGEST_MISMATCH -> {
-                    runCatching { target.delete() }
-                    emit(DownloadEvent.Failed(Failure.DIGEST_MISMATCH))
-                }
-                ApkCheck.MISSING -> emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
-            }
-        } catch (_: Exception) {
-            if (currentCoroutineContext().isActive) {
-                emit(DownloadEvent.Failed(Failure.DOWNLOAD_FAILED))
-            }
-        } finally {
-            runCatching { conn?.disconnect() }
+            emit(DownloadEvent.Failed(lastFailure))
         }
     }.flowOn(Dispatchers.IO)
+
+    private fun movePartToTarget(partFile: File, target: File): Boolean {
+        if (partFile.renameTo(target)) return true
+        return runCatching {
+            partFile.copyTo(target, overwrite = true)
+            partFile.delete()
+            true
+        }.getOrDefault(false)
+    }
 
     fun hasInstallPermission(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||

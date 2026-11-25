@@ -255,6 +255,7 @@ internal object DiagnosticHumanizer {
         detail == "Server transaction change applied locally" ||
             detail == "Server acknowledged transaction upload" ||
             detail == "Server applied transaction change" ||
+            detail == "Equivalent server revision acknowledged" ||
             detail == "User-approved local transaction change applied" ||
             detail == "User-approved server transaction change applied" ->
             "云同步已完成"
@@ -331,6 +332,7 @@ internal object DiagnosticHumanizer {
             detail == "Server transaction change applied locally" ||
             detail == "Server acknowledged transaction upload" ||
             detail == "Server applied transaction change" ||
+            detail == "Equivalent server revision acknowledged" ||
             detail == "User-approved local transaction change applied" ||
             detail == "User-approved server transaction change applied" ||
             detail == "Weak cross-channel resemblance explicitly confirmed as a separate transaction"

@@ -1099,14 +1099,43 @@ object PaymentCardDetector {
         labeledMerchant(lines)?.let { return listOf(it) }
         if (kind == PaymentCardKind.WITHDRAWAL) return emptyList()
 
-        val result = LinkedHashSet<String>()
-        for (line in lines) {
+        val candidates = lines.mapNotNull { line ->
             val text = line.text.trim()
-            if (!isMerchantCandidate(text)) continue
-            result += text.take(40)
+            if (!isMerchantCandidate(text)) null else line to text.take(40)
+        }
+        val filtered = candidates.filterNot { (c, cName) ->
+            c.right > c.left && c.bottom > c.top && candidates.any { (other, otherName) ->
+                other !== c && other.right > other.left && other.bottom > other.top &&
+                    isLeftLogoBadge(c, cName, other, otherName)
+            }
+        }
+        val result = LinkedHashSet<String>()
+        for ((_, name) in (if (filtered.isNotEmpty()) filtered else candidates)) {
+            result += name
             if (result.size >= 5) break
         }
         return result.toList()
+    }
+
+    private fun isLeftLogoBadge(
+        candidate: BillTextLine,
+        candidateName: String,
+        other: BillTextLine,
+        otherName: String,
+    ): Boolean {
+        val cH = (candidate.bottom - candidate.top).toFloat()
+        val cW = (candidate.right - candidate.left).toFloat()
+        val oH = (other.bottom - other.top).toFloat()
+        val oW = (other.right - other.left).toFloat()
+        if (cH <= 0f || cW <= 0f || oH <= 0f || oW <= 0f) return false
+        val cCenterY = (candidate.top + candidate.bottom) * 0.5f
+        val oCenterY = (other.top + other.bottom) * 0.5f
+        val sameBand = kotlin.math.abs(oCenterY - cCenterY) <= maxOf(oH, cH) * 2.2f
+        val toTheRight = other.left >= candidate.left + cW * 0.5f && other.right > candidate.right
+        if (!sameBand || !toTheRight) return false
+        val tallerTitle = oH >= cH * 1.15f
+        val narrowBadge = cW < oW * 0.55f && candidateName.length <= 4 && otherName.length >= candidateName.length
+        return tallerTitle || narrowBadge
     }
 
     private fun refundMerchant(lines: List<BillTextLine>): String? {

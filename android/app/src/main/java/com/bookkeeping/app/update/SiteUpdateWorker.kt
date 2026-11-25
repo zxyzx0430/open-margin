@@ -102,6 +102,12 @@ class SiteUpdateWorker(
         private const val WORK_NAME = "site_update_download"
         private const val POLL_BUDGET_MS = 8L * 60L * 1000L
 
+        fun cancel(context: Context) {
+            runCatching {
+                WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+            }
+        }
+
         /** Unique work: repeated checks must not start parallel downloads. */
         fun enqueue(context: Context, rawManifestJson: String) {
             val request = OneTimeWorkRequestBuilder<SiteUpdateWorker>()

@@ -118,6 +118,7 @@ class EnglishUiTextDiagnosticsTest {
             "Transaction was removed while sync push was in progress",
             "Local transaction changed during sync; stale response ignored",
             "Server applied transaction change",
+            "Equivalent server revision acknowledged",
             "Server reports a conflict and no current record",
             "User-approved local transaction change applied",
             "User-approved local change was not applied",

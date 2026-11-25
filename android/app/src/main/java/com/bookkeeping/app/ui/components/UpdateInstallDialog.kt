@@ -102,6 +102,7 @@ class UpdateInstallController internal constructor(
             message = null,
         )
         downloadJob?.cancel()
+        com.bookkeeping.app.update.SiteUpdateWorker.cancel(context)
         downloadJob = scope.launch {
             UpdateInstallFlow.streamDownload(context, update).collect { event ->
                 val current = dialogState ?: return@collect

@@ -1258,7 +1258,9 @@ class TransactionRepository @Inject constructor(
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
     ) {
         val now = System.currentTimeMillis()
-        val plan = CaptureMergePolicy.mergePendingDuplicate(original, duplicate)
+        val latestOriginal = dao.getById(original.id) ?: original
+        val latestDuplicate = dao.getById(duplicate.id) ?: duplicate
+        val plan = CaptureMergePolicy.mergePendingDuplicate(latestOriginal, latestDuplicate)
         val keep = plan.keep.copy(
             syncDirty = true,
             syncModifiedMs = now,
@@ -1300,7 +1302,10 @@ class TransactionRepository @Inject constructor(
         operationStage: String,
         requestSyncAfterWrite: Boolean,
     ) {
+        val latest = dao.getById(transaction.id)
         val updated = transaction.copy(
+            remoteEventId = latest?.remoteEventId ?: transaction.remoteEventId,
+            remoteRevision = maxOf(latest?.remoteRevision ?: 0L, transaction.remoteRevision),
             syncDirty = true,
             syncModifiedMs = System.currentTimeMillis(),
             syncMutationId = UUID.randomUUID().toString(),
@@ -1470,8 +1475,11 @@ class TransactionRepository @Inject constructor(
         transaction: TransactionEntity,
         diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
     ) {
+        // Reload the latest DB row so a stale UI snapshot cannot clobber
+        // remoteRevision / remoteEventId updated by background sync.
+        val current = dao.getById(transaction.id) ?: transaction
         // Keep a local trace even though the ledger row becomes a sync tombstone.
-        val tombstone = transaction.copy(
+        val tombstone = current.copy(
             syncDeleted = true,
             syncDirty = true,
             syncModifiedMs = System.currentTimeMillis(),

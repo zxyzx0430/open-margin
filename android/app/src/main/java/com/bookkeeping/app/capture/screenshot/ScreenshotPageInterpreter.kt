@@ -1132,28 +1132,54 @@ object ScreenshotPageInterpreter {
         val amountIndex = segment.indexOfFirst { it === amountBlock }
         val above = if (amountIndex > 0) segment.subList(0, amountIndex) else emptyList()
         val window = above.takeLast(MERCHANT_LOOKUP_LINES)
-        for (i in window.indices.reversed()) {
-            val line = window[i].text.trim()
-            if (isMerchantInterference(line)) continue
-            if (isAvatarBadgeArtifact(line, window.getOrNull(i - 1)?.text, window.getOrNull(i + 1)?.text)) {
-                continue
-            }
-            val candidate = window[i]
-            val title = window.filter { other ->
-                other !== candidate && hasGeometry(other) && hasGeometry(candidate) &&
-                    other.left >= candidate.right &&
-                    (other.bottom - other.top) >= (candidate.bottom - candidate.top) * 1.5 &&
-                    kotlin.math.abs((other.top + other.bottom) - (candidate.top + candidate.bottom)) <=
-                        2 * (other.bottom - other.top) &&
-                    !isMerchantInterference(other.text) &&
-                    merchantName(other.text, allowDigit = true) != null
-            }.maxByOrNull { it.bottom - it.top }
-            if (merchantName(line, allowDigit = true) != null && title != null) {
-                return listOfNotNull(merchantName(title.text, allowDigit = true))
-            }
-            merchantName(line, allowDigit = true)?.let { return listOf(it) }
-        }
+        selectBestHeaderMerchant(window)?.let { return listOf(it) }
         return emptyList()
+    }
+
+    /**
+     * Picks the primary merchant title from lines above the amount, suppressing
+     * small/narrow left-side logo badge OCR text when a wider or taller header
+     * title sits in the same horizontal band to its right.
+     */
+    private fun selectBestHeaderMerchant(window: List<TextBlock>): String? {
+        val candidates = window.indices.mapNotNull { i ->
+            val block = window[i]
+            val line = block.text.trim()
+            if (isMerchantInterference(line)) return@mapNotNull null
+            if (isAvatarBadgeArtifact(line, window.getOrNull(i - 1)?.text, window.getOrNull(i + 1)?.text)) {
+                return@mapNotNull null
+            }
+            val normalized = merchantName(line, allowDigit = true) ?: return@mapNotNull null
+            Triple(i, block, normalized)
+        }
+        if (candidates.isEmpty()) return null
+        val filtered = candidates.filterNot { (_, c, cName) ->
+            hasGeometry(c) && candidates.any { (_, other, otherName) ->
+                other !== c && hasGeometry(other) && isLeftLogoBadgeForTitle(c, cName, other, otherName)
+            }
+        }
+        return (if (filtered.isNotEmpty()) filtered else candidates).last().third
+    }
+
+    private fun isLeftLogoBadgeForTitle(
+        candidate: TextBlock,
+        candidateName: String,
+        other: TextBlock,
+        otherName: String,
+    ): Boolean {
+        val cH = (candidate.bottom - candidate.top).toFloat()
+        val cW = (candidate.right - candidate.left).toFloat()
+        val oH = (other.bottom - other.top).toFloat()
+        val oW = (other.right - other.left).toFloat()
+        if (cH <= 0f || cW <= 0f || oH <= 0f || oW <= 0f) return false
+        val cCenterY = (candidate.top + candidate.bottom) * 0.5f
+        val oCenterY = (other.top + other.bottom) * 0.5f
+        val sameBand = kotlin.math.abs(oCenterY - cCenterY) <= maxOf(oH, cH) * 2.2f
+        val toTheRight = other.left >= candidate.left + cW * 0.5f && other.right > candidate.right
+        if (!sameBand || !toTheRight) return false
+        val tallerTitle = oH >= cH * 1.15f
+        val narrowBadge = cW < oW * 0.55f && candidateName.length <= 4 && otherName.length >= candidateName.length
+        return tallerTitle || narrowBadge
     }
 
     /**
