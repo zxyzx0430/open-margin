@@ -73,8 +73,8 @@ class QingV3TokensTest {
 
     @Test fun walletPreviewOrderAndPalette() {
         val ids = listOf(10L, 20L, 30L, 40L)
-        assertEquals(listOf(10L, 20L, 30L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(ids, null))
-        assertEquals(listOf(10L, 30L, 20L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(ids, 20L))
+        assertEquals(listOf(10L, 20L, 30L, 40L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(ids, null))
+        assertEquals(listOf(10L, 30L, 40L, 20L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(ids, 20L))
         assertEquals(5, WalletSubscriptionPalette.size)
         WalletSubscriptionPalette.forEach { color ->
             val l = androidx.compose.ui.graphics.Color.White.luminance()
@@ -89,5 +89,17 @@ class QingV3TokensTest {
         org.junit.Assert.assertEquals(1f, largeTitleProgress(1, 0, 42f, false), 0.001f)
         org.junit.Assert.assertEquals(0f, largeTitleProgress(0, 41, 42f, true), 0.001f)
         org.junit.Assert.assertEquals(1f, largeTitleProgress(0, 42, 42f, true), 0.001f)
+    }
+    @Test fun walletMembershipLimitAndReplacement() {
+        val available = (1L..8L).toList()
+        assertEquals(listOf(1L, 2L, 3L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckMembership(available, null))
+        assertEquals(emptyList<Long>(), com.bookkeeping.app.ui.screen.subscriptions.walletDeckMembership(available, emptyList()))
+        assertEquals(listOf(1L, 3L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckMembership(available, listOf(1L, 1L, 99L, 3L)))
+        val six = (1L..6L).toList()
+        assertEquals(six, com.bookkeeping.app.ui.screen.subscriptions.walletDeckAdd(six, 7L))
+        assertEquals(listOf(1L, 7L, 3L, 4L, 5L, 6L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckReplace(six, 2L, 7L))
+        assertEquals(six, com.bookkeeping.app.ui.screen.subscriptions.walletDeckReplace(six, 2L, 3L))
+        assertEquals(six, com.bookkeeping.app.ui.screen.subscriptions.walletDeckMembership(available, available))
+        assertEquals(6, com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(available, 2L).size)
     }
 }

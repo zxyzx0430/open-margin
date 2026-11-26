@@ -1563,12 +1563,13 @@ private fun CalendarListDrawer(
     )
     val rangeTotals = remember(transactions) { calendarSelectionTotals(transactions) }
 
-    val drawerShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    val drawerShape = RoundedCornerShape(22.dp)
 
     Box(
         modifier = modifier
             .height(availableHeight * visibleFraction)
-            .shadow(12.dp, drawerShape)
+            .shadow(1.dp, drawerShape, ambientColor = Color.Black.copy(alpha = 0.04f),
+                spotColor = Color.Black.copy(alpha = 0.06f))
             .clip(drawerShape)
             .background(MaterialTheme.colorScheme.surface),
     ) {

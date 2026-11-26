@@ -24,6 +24,9 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -46,6 +49,9 @@ import com.bookkeeping.app.ui.theme.WalletSubscriptionPalette
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
+import com.bookkeeping.app.i18n.AppLanguage
 
 @Composable
 internal fun rememberTouchExploration(): Boolean {
@@ -62,20 +68,34 @@ internal fun rememberTouchExploration(): Boolean {
 }
 
 internal fun walletDeckOrder(ids: List<Long>, selected: Long?): List<Long> {
-    val shown = ids.take(3)
+    val shown = ids.distinct().take(WALLET_DECK_MAX)
     return if (selected in shown) shown.filterNot { it == selected } + listOfNotNull(selected) else shown
 }
 
-/** The deck is a three-card preview; the complete management list remains below. */
+internal const val WALLET_DECK_MAX = 6
+
+/** Null is an unconfigured deck; an explicit empty list stays empty. */
+internal fun walletDeckMembership(available: List<Long>, saved: List<Long>?): List<Long> =
+    (saved ?: available.take(3)).distinct().filter { it in available }.take(WALLET_DECK_MAX)
+
+internal fun walletDeckAdd(ids: List<Long>, id: Long): List<Long> =
+    if (id in ids || ids.size >= WALLET_DECK_MAX) ids else ids + id
+
+internal fun walletDeckReplace(ids: List<Long>, oldId: Long, newId: Long): List<Long> =
+    if (oldId !in ids || newId in ids) ids else ids.map { if (it == oldId) newId else it }
+
+/** A user-configurable preview; the complete management list remains below. */
 @Composable
 internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetail: (Long) -> Unit) {
-    val cards = subscriptions.take(3)
+    val cards = subscriptions.take(WALLET_DECK_MAX)
     if (cards.isEmpty()) return
     var selected by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(cards.map { it.id }) { if (selected !in cards.map { it.id }) selected = null }
     val order = walletDeckOrder(cards.map { it.id }, selected)
     val reduced = rememberReduceMotion()
     val density = LocalDensity.current
-    val step = with(density) { 52.dp.toPx() }
+    val reveal = if (cards.size > 4) 48.dp else 56.dp
+    val step = with(density) { reveal.toPx() }
     val maxSpread = with(density) { 20.dp.toPx() }
     var spread by remember { mutableFloatStateOf(0f) }
     val spring = remember { Animatable(0f) }
@@ -85,7 +105,7 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
         spread = (spread + delta * 0.35f).coerceIn(-maxSpread, maxSpread)
     }
     Box(
-        Modifier.fillMaxWidth().height(176.dp + 52.dp * (cards.size - 1))
+        Modifier.fillMaxWidth().height(184.dp + reveal * (cards.size - 1) + 12.dp)
             .draggable(drag, Orientation.Vertical, enabled = cards.size > 1 && !reduced,
                 onDragStarted = { settle?.cancel(); spring.stop() },
                 onDragStopped = { velocity ->
@@ -101,10 +121,10 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
                 val top = position == order.lastIndex
                 val y by animateFloatAsState(position * step, QingMotionTokens.motionGesture.spec(reduced), label = "walletDeckPosition")
                 Box(
-                    Modifier.fillMaxWidth().height(176.dp).zIndex(position.toFloat())
+                    Modifier.fillMaxWidth().height(184.dp).zIndex(position.toFloat())
                         .graphicsLayer { translationY = y + spread * position / (cards.size - 1).coerceAtLeast(1) }
                 ) {
-                    WalletSubscriptionCard(subscription, WalletSubscriptionPalette[paletteIndex % WalletSubscriptionPalette.size]) {
+                    WalletSubscriptionCard(subscription, WalletSubscriptionPalette[paletteIndex % WalletSubscriptionPalette.size], top) {
                         if (top) onOpenDetail(subscription.id) else selected = subscription.id
                     }
                 }
@@ -114,25 +134,38 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
 }
 
 @Composable
-private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Color, onClick: () -> Unit) {
+private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Color, expanded: Boolean, onClick: () -> Unit) {
     val radius = QingRadiusTokens.radiusHero
     val shape = RoundedCornerShape(radius)
     val white = Color.White
     val secondary = white.copy(alpha = 0.92f)
     val cadence = tr(subscriptionCadenceLabel(subscription.cadence))
+    val amount = formatSubscriptionOriginalCurrency(subscription.amountCents, subscription.currency)
+    val date = remember(subscription.nextDueMs, AppLanguage.current()) {
+        java.text.SimpleDateFormat(
+            if (AppLanguage.current() == AppLanguage.ENGLISH) "MMM d" else "M月d日",
+            if (AppLanguage.current() == AppLanguage.ENGLISH) java.util.Locale.ENGLISH else java.util.Locale.CHINA)
+            .format(Date(subscription.nextDueMs))
+    }
     val days = SubscriptionProjection.daysUntilDue(subscription.nextDueMs, System.currentTimeMillis())
     val countdown = when {
         days < 0 -> tr("已逾期")
         days == 0 -> tr("今天扣款")
+        days == 1 -> tr("明天扣款")
         else -> tr("%d 天后扣款").format(days)
     }
+    val material = Brush.linearGradient(listOf(lerp(color, white, 0.045f), color,
+        lerp(color, Color.Black, 0.16f)))
     Column(
-        Modifier.fillMaxSize().qingPressFeedback(QingMotionTokens.cardPressedScale).clip(shape).background(color)
+        Modifier.fillMaxSize().qingPressFeedback(QingMotionTokens.cardPressedScale)
+            .shadow(2.dp, shape, ambientColor = Color.Black.copy(alpha = 0.10f),
+                spotColor = Color.Black.copy(alpha = 0.14f))
+            .clip(shape).background(material)
             .drawWithContent {
                 drawContent()
                 val stroke = 0.5.dp.toPx()
                 clipRect(bottom = radius.toPx()) {
-                    drawRoundRect(white.copy(alpha = 0.10f), topLeft = Offset(stroke / 2, stroke / 2),
+                    drawRoundRect(white.copy(alpha = 0.14f), topLeft = Offset(stroke / 2, stroke / 2),
                         size = Size(size.width - stroke, size.height - stroke),
                         cornerRadius = CornerRadius(radius.toPx()), style = Stroke(stroke))
                 }
@@ -140,27 +173,41 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SubscriptionBadgeAvatar(subscription.name, subscription.active, 28.dp)
-            Text(subscription.name, Modifier.weight(1f), color = white, fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            AutoSizeAmountText(text = formatSubscriptionOriginalCurrency(subscription.amountCents, subscription.currency),
-                style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum", fontSize = 16.sp),
-                modifier = Modifier.widthIn(max = 116.dp), minimumSizeSp = 14f, color = white, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(5.dp))
-        Text(countdown, color = white, fontSize = 21.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Spacer(Modifier.weight(1f))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 48.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SubscriptionBadgeAvatar(subscription.name, subscription.active, 30.dp, wallet = true)
             Column(Modifier.weight(1f)) {
-                Text(tr("支付方式"), color = secondary, fontSize = 12.sp)
-                Text(subscription.paymentChannel.ifBlank { tr("未指定") }, color = white, fontSize = 14.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subscription.name, color = white, fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (expanded) Text(cadence, color = secondary, fontSize = 12.sp, maxLines = 1)
             }
-            Column(Modifier.weight(1f)) {
-                Text(tr("账单周期"), color = secondary, fontSize = 12.sp)
-                Text(cadence, color = white, fontSize = 14.sp, maxLines = 1)
+            if (!expanded) {
+                Column(horizontalAlignment = Alignment.End) {
+                    AutoSizeAmountText(text = amount,
+                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum", fontSize = 16.sp),
+                        modifier = Modifier.widthIn(max = 126.dp), minimumSizeSp = 14f, color = white, fontWeight = FontWeight.SemiBold)
+                    Text(cadence, color = secondary, fontSize = 11.sp, maxLines = 1)
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        if (expanded) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    AutoSizeAmountText(text = amount,
+                        style = MaterialTheme.typography.headlineLarge.copy(fontFeatureSettings = "tnum",
+                            fontSize = 34.sp, letterSpacing = (-0.65).sp),
+                        modifier = Modifier.fillMaxWidth(), minimumSizeSp = 18f, color = white, fontWeight = FontWeight.Bold)
+                    if (subscription.paymentChannel.isNotBlank() && subscription.paymentChannel != "未指定")
+                        Text(subscription.paymentChannel, color = secondary, fontSize = 12.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Column(Modifier.widthIn(max = 112.dp), horizontalAlignment = Alignment.End) {
+                    Text(tr("下次扣款"), color = secondary, fontSize = 12.sp)
+                    Text(date, color = white, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    Text(countdown, color = secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         Spacer(Modifier.height(20.dp))

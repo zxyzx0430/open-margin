@@ -8,6 +8,7 @@ import com.bookkeeping.app.ui.components.QingSegmentedControl
 
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.TextButton
 import com.bookkeeping.app.ui.components.WalletCardSurface
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
@@ -44,6 +45,12 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.ViewAgenda
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -100,6 +107,7 @@ import com.bookkeeping.app.ui.theme.QingText
 import com.bookkeeping.app.ui.theme.QingTextSecondary
 import com.bookkeeping.app.ui.theme.QingWarning
 import com.bookkeeping.app.ui.theme.QingWarningContainer
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -137,6 +145,9 @@ fun SubscriptionsManageScreen(
     }
 
     var walletPreferred by rememberSaveable { mutableStateOf(true) }
+    var searchVisible by rememberSaveable { mutableStateOf(false) }
+    val searchRequester = remember { FocusRequester() }
+    val revealSearch = searchVisible || searchQuery.isNotBlank()
     val talkBack = rememberTouchExploration()
     val walletAvailable = !talkBack && LocalDensity.current.fontScale <= 1.3f
     val showWallet = walletPreferred && walletAvailable
@@ -149,40 +160,50 @@ fun SubscriptionsManageScreen(
         activeSubs.count { SubscriptionProjection.daysUntilDue(it.nextDueMs, nowMs) <= 7 }
     }
 
+    val deckPreferences = LocalContext.current.applicationContext.getSharedPreferences("subscription_wallet_deck", android.content.Context.MODE_PRIVATE)
+    var savedDeck by remember(deckPreferences) {
+        mutableStateOf(deckPreferences.getString("ids", null)?.split(",")?.mapNotNull { it.toLongOrNull() })
+    }
+    val deckAvailable = remember(activeSubs) { activeSubs.sortedBy { it.nextDueMs } }
+    val deckIds = walletDeckMembership(deckAvailable.map { it.id }, savedDeck)
+    val deckCards = deckIds.mapNotNull { id -> deckAvailable.firstOrNull { it.id == id } }
+    var manageDeck by rememberSaveable { mutableStateOf(false) }
+    fun saveDeck(ids: List<Long>) {
+        savedDeck = ids
+        deckPreferences.edit().putString("ids", ids.joinToString(",")).apply()
+    }
     val subscriptionsListState = rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun createSubscription() {
+        editingSubscription = null
+        candidatePrefill = null
+        creatingNew = true
+    }
     Scaffold(
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            QingLargeTitle(tr("全部订阅"), subscriptionsListState, hasLeading = true, actionWidth = 94,
+            QingLargeTitle(tr("全部订阅"), subscriptionsListState, hasLeading = true, actionWidth = 96,
                 leading = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
-                    TextButton(onClick = { walletPreferred = !walletPreferred }, enabled = walletAvailable) {
-                        Text(if (showWallet) tr("切换列表") else tr("切换卡包"), maxLines = 1, softWrap = false)
+                    IconButton(onClick = {
+                        searchVisible = !revealSearch
+                        if (revealSearch) viewModel.setSearchQuery("")
+                        else scope.launch { subscriptionsListState.scrollToItem(0) }
+                    }) {
+                        Icon(if (revealSearch) Icons.Filled.Close else Icons.Outlined.Search,
+                            tr(if (revealSearch) "关闭搜索" else "搜索订阅"))
+                    }
+                    IconButton(onClick = { walletPreferred = !walletPreferred }, enabled = walletAvailable) {
+                        Icon(if (showWallet) Icons.AutoMirrored.Outlined.List else Icons.Outlined.ViewAgenda,
+                            tr(if (showWallet) "切换列表" else "切换卡包"))
                     }
                 },
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    editingSubscription = null
-                    candidatePrefill = null
-                    creatingNew = true
-                },
-                shape = CircleShape,
-                containerColor = QingPrimary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "新建订阅",
-                )
-            }
         },
     ) { innerPadding ->
         LazyColumn(
@@ -190,41 +211,25 @@ fun SubscriptionsManageScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (showWallet && activeSubs.isNotEmpty()) {
-                item(key = "wallet_deck") {
-                    WalletCardDeck(activeSubs.sortedBy { it.nextDueMs }) { detailSubscriptionId = it }
-                    Spacer(Modifier.height(20.dp))
-                }
-            }
-            // Soft Mint Summary Card (matches Open Margin's signature header card)
             item(key = "summary_card") {
-                SubscriptionsSummaryCard(
-                    activeCount = activeSubs.size,
-                    monthlyFixedCents = monthlyFixedCents,
-                    dueSoonCount = dueSoonCount,
-                )
-            }
-
-            if (dirtyCount > 0) {
-                item(key = "dirty_sync_banner") {
-                    DirtySyncBanner(dirtyCount = dirtyCount)
+                Column(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(tr("月均 %s · %d 项在用").format(formatCny(monthlyFixedCents), activeSubs.size),
+                        style = MaterialTheme.typography.bodySmall, color = QingTextSecondary)
+                    if (dirtyCount > 0 || dueSoonCount > 0) {
+                        val status = listOfNotNull(
+                            if (dueSoonCount > 0) tr("%d 项即将到期").format(dueSoonCount) else null,
+                            if (dirtyCount > 0) tr("%d 项待同步，联网后自动同步").format(dirtyCount) else null
+                        ).joinToString(" · ")
+                        Text(status, style = MaterialTheme.typography.labelSmall, color = QingTextSecondary)
+                    }
                 }
             }
-
-            if (recurringCandidates.isNotEmpty()) {
-                item(key = "recurring_candidates_pill") {
-                    RecurringCandidateEntryPill(
-                        count = recurringCandidates.size,
-                        onClick = { showCandidatesSheet = true },
-                    )
-                }
-            }
-
-            // Borderless Soft Search Pill (matches Ledger screen search bar)
+            if (revealSearch) {
             item(key = "search_bar") {
+                LaunchedEffect(searchVisible) { if (searchVisible) searchRequester.requestFocus() }
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(QingRadiusTokens.radiusControl),
@@ -246,7 +251,7 @@ fun SubscriptionsManageScreen(
                         Box(modifier = Modifier.weight(1f)) {
                             if (searchQuery.isEmpty()) {
                                 Text(
-                                    text = "搜索订阅名称、支付渠道或备注",
+                                    text = tr("搜索订阅名称、支付渠道或备注"),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = QingTextSecondary,
                                 )
@@ -257,7 +262,7 @@ fun SubscriptionsManageScreen(
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = QingText),
                                 cursorBrush = SolidColor(QingPrimary),
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().focusRequester(searchRequester),
                             )
                         }
                         if (searchQuery.isNotEmpty()) {
@@ -273,20 +278,41 @@ fun SubscriptionsManageScreen(
                     }
                 }
             }
-
+            }
+            if (showWallet && !revealSearch && activeSubs.isNotEmpty()) {
+                item(key = "wallet_deck") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(tr("卡包"), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium, color = QingTextSecondary)
+                        TextButton(onClick = { manageDeck = true }) {
+                            Text(tr("管理卡片") + " " + deckIds.size + "/" + WALLET_DECK_MAX)
+                        }
+                    }
+                    if (deckCards.isEmpty()) {
+                        TextButton(onClick = { manageDeck = true }) { Text(tr("添加卡片")) }
+                    } else {
+                        WalletCardDeck(deckCards) { detailSubscriptionId = it }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+            item(key = "list_header") {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(tr("所有订阅"), modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = QingText)
+                    IconButton(onClick = { createSubscription() }) {
+                        Icon(Icons.Filled.Add, tr("新建订阅"), tint = QingPrimary)
+                    }
+                }
+            }
             item(key = "filter_chips") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    SubscriptionFilter.entries.forEach { filter ->
-                        LedgerFilterChip(
-                            label = filter.label,
-                            selected = selectedFilter == filter,
-                            onClick = { viewModel.setFilter(filter) },
-                        )
+                val filters = SubscriptionFilter.entries
+                QingSegmentedControl(filters.map { tr(it.label) }, filters.indexOf(selectedFilter),
+                    { viewModel.setFilter(filters[it]) }, Modifier.fillMaxWidth())
+            }
+            if (recurringCandidates.isNotEmpty()) {
+                item(key = "recurring_candidates_pill") {
+                    TextButton(onClick = { showCandidatesSheet = true }) {
+                        Text(tr("%d 项待识别订阅").format(recurringCandidates.size))
                     }
                 }
             }
@@ -347,6 +373,9 @@ fun SubscriptionsManageScreen(
         }
     }
 
+    if (manageDeck) {
+        WalletDeckManageSheet(deckAvailable, deckIds, onChange = ::saveDeck, onDismiss = { manageDeck = false })
+    }
     if (showCandidatesSheet) {
         RecurringCandidatesSheet(
             candidates = recurringCandidates,
@@ -413,69 +442,6 @@ fun SubscriptionsManageScreen(
                 null
             },
         )
-    }
-}
-
-@Composable
-private fun SubscriptionsSummaryCard(
-    activeCount: Int,
-    monthlyFixedCents: Long,
-    dueSoonCount: Int,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = QingMintSoft,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "月均固定",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = QingTextSecondary,
-                )
-                Text(
-                    text = formatCny(monthlyFixedCents),
-                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-                    fontWeight = FontWeight.Bold,
-                    color = QingPrimaryDeep,
-                )
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "在用订阅",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = QingTextSecondary,
-                )
-                Text(
-                    text = "$activeCount 项",
-                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-                    fontWeight = FontWeight.Bold,
-                    color = QingText,
-                )
-            }
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = "7天内到期",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = QingTextSecondary,
-                )
-                Text(
-                    text = "$dueSoonCount 项",
-                    style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
-                    fontWeight = FontWeight.Bold,
-                    color = if (dueSoonCount > 0) QingWarning else QingText,
-                )
-            }
-        }
     }
 }
 
@@ -692,34 +658,6 @@ private fun RecurringCandidatesSheet(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun DirtySyncBanner(dirtyCount: Int) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        color = QingWarningContainer,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.CloudUpload,
-                contentDescription = null,
-                tint = QingWarning,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                text = "$dirtyCount 项待同步，联网后自动同步",
-                style = MaterialTheme.typography.labelMedium,
-                color = QingWarning,
-                fontWeight = FontWeight.Medium,
-            )
         }
     }
 }

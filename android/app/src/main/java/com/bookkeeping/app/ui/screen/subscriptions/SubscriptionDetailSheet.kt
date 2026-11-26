@@ -572,20 +572,21 @@ internal fun SubscriptionBadgeAvatar(
     name: String,
     active: Boolean,
     size: androidx.compose.ui.unit.Dp = 42.dp,
+    wallet: Boolean = false,
 ) {
     val label = name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
     Box(
         modifier = Modifier
             .size(size)
             .clip(RoundedCornerShape(size * 0.30f))
-            .background(if (active) QingMintSoft else QingSurfaceVariant),
+            .background(if (wallet) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.12f) else if (active) QingMintSoft else QingSurfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = if (active) QingPrimaryDeep else QingTextSecondary,
+            color = if (wallet) androidx.compose.ui.graphics.Color.White else if (active) QingPrimaryDeep else QingTextSecondary,
         )
     }
 }
