@@ -44,9 +44,9 @@ class QingV3TokensTest {
 
     @Test fun motionAndMaterialFallback() {
         assertEquals(QingSpringToken(1f, 900f), QingMotionTokens.motionPress)
-        assertEquals(QingSpringToken(1f, 400f), QingMotionTokens.motionStandard)
-        assertEquals(QingSpringToken(0.82f, 360f), QingMotionTokens.motionGesture)
-        assertEquals(QingSpringToken(1f, 600f), QingMotionTokens.motionSnappy)
+        assertEquals(QingSpringToken(0.92f, 400f), QingMotionTokens.motionStandard)
+        assertEquals(QingSpringToken(0.90f, 380f), QingMotionTokens.motionGesture)
+        assertEquals(QingSpringToken(0.94f, 560f), QingMotionTokens.motionSnappy)
         assertTrue(QingMotionTokens.motionPress.spec<Float>(reduceMotion = true) is SnapSpec<*>)
         assertEquals(0.85f, qingChromeOpacity(), 0.001f)
         assertEquals(1f, qingChromeOpacity(reducedTransparency = true), 0.001f)
