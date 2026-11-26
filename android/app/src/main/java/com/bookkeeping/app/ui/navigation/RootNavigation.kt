@@ -8,6 +8,7 @@ import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.navigation.NavController
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
@@ -265,6 +266,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             CompositionLocalProvider(LocalQingChromeOverlap provides chromeOverlap) {
             SharedTransitionLayout {
             val sharedScope = this
+            val iosDecel = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
             NavHost(
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
@@ -272,25 +274,21 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     .background(canvasColor),
                 enterTransition = {
                     if (reducedMotion || targetState.destination.route in tabRoutes) EnterTransition.None
-                    else if (targetState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
-                        fadeIn(tween(DETAIL_TRANSITION_MS))
-                    else slideInHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
+                    else slideInHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { it }
                 },
                 exitTransition = {
-                    if (!reducedMotion && targetState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
-                        fadeOut(tween(DETAIL_TRANSITION_MS), targetAlpha = 0.99f)
-                    else ExitTransition.None
+                    if (reducedMotion || targetState.destination.route in tabRoutes) ExitTransition.None
+                    else slideOutHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { -(it * 0.28f).toInt() } +
+                        fadeOut(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel), targetAlpha = 0.88f)
                 },
                 popEnterTransition = {
-                    if (!reducedMotion && initialState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
-                        fadeIn(tween(DETAIL_TRANSITION_MS), initialAlpha = 0.99f)
-                    else EnterTransition.None
+                    if (reducedMotion || initialState.destination.route in tabRoutes) EnterTransition.None
+                    else slideInHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { -(it * 0.28f).toInt() } +
+                        fadeIn(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel), initialAlpha = 0.88f)
                 },
                 popExitTransition = {
                     if (reducedMotion || initialState.destination.route in tabRoutes) ExitTransition.None
-                    else if (initialState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
-                        fadeOut(tween(DETAIL_TRANSITION_MS))
-                    else slideOutHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
+                    else slideOutHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { it }
                 },
             ) {
                 // No crossfade between top-level tabs. Detail alone has a
@@ -661,6 +659,7 @@ internal sealed class BottomNavItem(val route: String, val label: String, val ic
 }
 
 internal const val DETAIL_TRANSITION_MS = 220
+internal const val IOS_PUSH_TRANSITION_MS = 320
 
 /** Chrome belongs exclusively to the tab surface, including transition frames. */
 internal fun shouldShowMainChrome(route: String?, visibleRoutes: List<String>, tabs: Set<String>): Boolean =

@@ -12,9 +12,9 @@ data class QingSpringToken(val dampingRatio: Float, val stiffness: Float) {
 
 object QingMotionTokens {
     val motionPress = QingSpringToken(1f, 900f)
-    val motionStandard = QingSpringToken(1f, 400f)
-    val motionGesture = QingSpringToken(0.82f, 360f)
-    val motionSnappy = QingSpringToken(1f, 600f)
+    val motionStandard = QingSpringToken(0.92f, 400f)
+    val motionGesture = QingSpringToken(0.90f, 380f)
+    val motionSnappy = QingSpringToken(0.94f, 560f)
     const val cardPressedScale = 0.97f
     const val rowPressedScale = 0.985f
 }
