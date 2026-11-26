@@ -107,14 +107,14 @@ fun QingLargeTitle(
                     color = colors.textPrimary, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 20.dp, end = if (hasLeading) 20.dp else maxOf(20, actionWidth).dp)
                         .then(if (compact) Modifier.clearAndSetSemantics {} else Modifier.semantics { heading() })
-                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction < 0.5f) 1f else 0f } else if (hasLeading) 1f - state.fraction else (1f - state.fraction * 2f).coerceIn(0f, 1f) })
+                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction < 0.5f) 1f else 0f } else 1f - state.fraction })
             }
             Box(Modifier.fillMaxWidth().height(52.dp).then(if (hasLeading) Modifier.background(colors.surfaceCanvas) else Modifier)) {
                 Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary,
                     maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = side)
                         .then(if (compact) Modifier.semantics { heading() } else Modifier.clearAndSetSemantics {})
-                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction >= 0.5f) 1f else 0f } else if (hasLeading) state.fraction else (state.fraction * 2f - 1f).coerceIn(0f, 1f) })
+                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction >= 0.5f) 1f else 0f } else state.fraction })
                 Row(Modifier.align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically, content = leading)
                 Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically, content = actions)
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(0.5.dp)
