@@ -58,7 +58,8 @@ object MerchantIconCatalog {
         Rule(listOf("claude", "anthropic"), "claude", "C", 0xFFC2613A, "ai"),
         Rule(listOf("gemini", "google ai"), "gemini", "G", 0xFF2563EB, "ai"),
         Rule(listOf("cursor", "copilot", "opencode", "code goat", "windsurf", "trae"), "coding_ai", "C", 0xFF2B313B, "code"),
-        Rule(listOf("midjourney", "suno", "runway", "perplexity", "poe", "kimi", "豆包", "通义", "智谱", "deepseek"), "ai_service", "A", 0xFF4F46E5, "ai"),
+        Rule(listOf("deepseek"), "deepseek", "D", 0xFF4D6BFE, "ai"),
+        Rule(listOf("midjourney", "suno", "runway", "perplexity", "poe", "kimi", "豆包", "通义", "智谱"), "ai_service", "A", 0xFF4F46E5, "ai"),
         Rule(listOf("github"), "github", "G", 0xFF24292F, "code"),
         // Streaming Video & Music
         Rule(listOf("youtube", "油管"), "youtube", "Y", 0xFFC81E1E, "video"),
@@ -78,7 +79,8 @@ object MerchantIconCatalog {
         Rule(listOf("onedrive", "microsoft 365", "office 365", "dropbox", "百度网盘", "阿里云盘", "夸克网盘"), "cloud_drive", "云", 0xFF1E6091, "cloud"),
         Rule(listOf("notion", "obsidian", "raycast", "1password", "bitwarden", "figma", "adobe", "photoshop", "wps"), "productivity", "P", 0xFF334155, "productivity"),
         // Infrastructure & Telecom
-        Rule(listOf("vps", "服务器", "云主机", "aws", "cloudflare", "aliyun", "阿里云", "腾讯云", "vultr", "digitalocean", "bandwagon", "搬瓦工", "域名", "domain"), "server", "V", 0xFF2B3540, "server"),
+        Rule(listOf("aliyun", "阿里云"), "aliyun", "阿", 0xFFFF6A00, "server"),
+        Rule(listOf("vps", "服务器", "云主机", "aws", "cloudflare", "腾讯云", "vultr", "digitalocean", "bandwagon", "搬瓦工", "域名", "domain"), "server", "V", 0xFF2B3540, "server"),
         Rule(listOf("话费", "手机", "流量", "移动", "联通", "电信", "港卡", "sim", "esim", "cls", "club sim", "宽带"), "telecom", "卡", 0xFF1E6B5E, "sim"),
         // Shopping, Reading, Fitness & Gaming
         Rule(listOf("88vip", "天猫"), "88vip", "8", 0xFFD95B26, "shopping"),

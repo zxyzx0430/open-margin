@@ -29,6 +29,9 @@ fun brandLogoDrawableRes(key: String?): Int? = when (key) {
     "alipay" -> R.drawable.ic_brand_alipay
     "88vip" -> R.drawable.ic_brand_taobao
     "baidu" -> R.drawable.ic_brand_baidu
+    "aliyun" -> R.drawable.ic_brand_aliyun
+    "meituan" -> R.drawable.ic_brand_meituan
+    "deepseek" -> R.drawable.ic_brand_deepseek
     "productivity" -> R.drawable.ic_brand_notion
     "reading" -> R.drawable.ic_brand_zhihu
     "gaming" -> R.drawable.ic_brand_xbox
