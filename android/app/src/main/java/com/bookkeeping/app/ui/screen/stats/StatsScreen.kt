@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.bookkeeping.app.ui.components.QingSegmentedControl
 
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -195,10 +197,12 @@ fun StatsScreen(
     }
 
     val statsListState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(statsListState)
     Scaffold(
+        modifier = Modifier.nestedScroll(titleCollapse.connection),
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = { QingLargeTitle(tr("统计"), statsListState) },
+        topBar = { QingLargeTitle(tr("统计"), titleCollapse) },
     ) { innerPadding ->
         LazyColumn(
             state = statsListState,

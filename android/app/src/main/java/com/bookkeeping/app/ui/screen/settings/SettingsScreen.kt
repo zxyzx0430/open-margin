@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
@@ -227,6 +229,7 @@ fun SettingsScreen(
     var permissionRefreshKey by remember { mutableStateOf(0) }
     var permissionsExpanded by rememberSaveable { mutableStateOf(false) }
     val settingsListState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(settingsListState)
 
     LaunchedEffect(focusUpdateCard) {
         if (focusUpdateCard) {
@@ -320,9 +323,10 @@ fun SettingsScreen(
     val missingCapabilityNames = AutomationStatus.missingNames(context)
 
     Scaffold(
+        modifier = Modifier.nestedScroll(titleCollapse.connection),
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = { QingLargeTitle(tr("设置"), settingsListState) },
+        topBar = { QingLargeTitle(tr("设置"), titleCollapse) },
     ) { innerPadding ->
         LazyColumn(
             state = settingsListState,

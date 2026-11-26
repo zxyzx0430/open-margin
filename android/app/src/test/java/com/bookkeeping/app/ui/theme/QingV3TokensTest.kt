@@ -115,14 +115,19 @@ class QingV3TokensTest {
         assertEquals(13, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 6L, 5))
         assertEquals(null, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 99L, 5))
     }
-    @Test fun sheetDismissScrimFollowsPanelAndClosesQuickly() {
-        fun alpha(displacement: Float, height: Float) = com.bookkeeping.app.ui.components.qingSheetScrimAlpha(displacement, height)
-        assertEquals(0.32f, alpha(0f, 400f), 0.001f)
-        assertEquals(0.16f, alpha(200f, 400f), 0.001f)
-        assertEquals(0f, alpha(400f, 400f), 0.001f)
-        assertEquals(0f, alpha(800f, 400f), 0.001f)
-        assertEquals(0.32f, alpha(-10f, 400f), 0.001f)
-        assertTrue(com.bookkeeping.app.ui.components.QING_SHEET_CLOSE_MS <= 150)
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test fun sheetGuardPreservesActiveSave() {
+        assertTrue(com.bookkeeping.app.ui.components.qingSheetCanChange(androidx.compose.material3.SheetValue.Hidden, true))
+        assertTrue(!com.bookkeeping.app.ui.components.qingSheetCanChange(androidx.compose.material3.SheetValue.Hidden, false))
+        assertTrue(com.bookkeeping.app.ui.components.qingSheetCanChange(androidx.compose.material3.SheetValue.Expanded, false))
+    }
+    @Test fun titleCollapseConsumesOnlyRemainingTravel() {
+        val (collapsed, consumed) = com.bookkeeping.app.ui.components.titleConsume(0.5f, -80f, 52f)
+        assertEquals(1f, collapsed, 0.001f)
+        assertEquals(-26f, consumed, 0.001f)
+        val (expanded, released) = com.bookkeeping.app.ui.components.titleConsume(0.5f, 80f, 52f)
+        assertEquals(0f, expanded, 0.001f)
+        assertEquals(26f, released, 0.001f)
     }
     @Test fun amountWidthFitSkipsRepeatedOneSpSteps() {
         assertEquals(19.6f, com.bookkeeping.app.ui.components.fitAmountFontSize(28f, 11f, 140, 196), 0.01f)

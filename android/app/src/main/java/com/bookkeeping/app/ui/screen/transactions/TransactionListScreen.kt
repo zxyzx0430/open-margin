@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.layout.Spacer
@@ -240,6 +242,7 @@ fun TransactionListScreen(
     var updateBannerRefresh by remember { mutableIntStateOf(0) }
     val updateInstall = rememberUpdateInstallController()
     val listState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(listState)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -453,7 +456,7 @@ fun TransactionListScreen(
     Scaffold(
         // 气泡不用遮罩，但任何一次按下都收起它：Initial 阶段只观察、不消费，
         // 这一下点击照样落到下面的列表和 FAB 上。
-        modifier = Modifier.pointerInput(Unit) {
+        modifier = Modifier.nestedScroll(titleCollapse.connection).pointerInput(Unit) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 latestDismissVoiceHint()
@@ -462,7 +465,7 @@ fun TransactionListScreen(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            QingLargeTitle(title = tr("清衡"), state = listState, actionWidth = 96, actions = {
+            QingLargeTitle(title = tr("清衡"), state = titleCollapse, actionWidth = 96, actions = {
                     IconButton(onClick = {
                         when {
                             duplicateCandidates.isNotEmpty() -> {

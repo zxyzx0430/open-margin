@@ -29,10 +29,7 @@ fun QingConfirmationSheet(onDismissRequest: () -> Unit,
     title: @Composable (() -> Unit)? = null,
     text: @Composable (() -> Unit)? = null,
     dismissButton: @Composable (() -> Unit)? = null) {
-    ModalBottomSheet(onDismissRequest = onDismissRequest,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
-        containerColor = qingColors.surfaceSheet, dragHandle = { QingSheetGrabber() }) {
+    QingGestureSheet(onDismissRequest = onDismissRequest) {
         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleLarge) { title?.invoke() }

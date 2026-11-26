@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.bookkeeping.app.ui.theme.qingColors
 import com.bookkeeping.app.ui.components.QingSheetGrabber
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -173,6 +175,7 @@ fun SubscriptionsManageScreen(
         deckPreferences.edit().putString("ids", ids.joinToString(",")).apply()
     }
     val subscriptionsListState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(subscriptionsListState)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     fun createSubscription() {
         editingSubscription = null
@@ -180,10 +183,11 @@ fun SubscriptionsManageScreen(
         creatingNew = true
     }
     Scaffold(
+        modifier = Modifier.nestedScroll(titleCollapse.connection),
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            QingLargeTitle(tr("全部订阅"), subscriptionsListState, hasLeading = true, actionWidth = 96,
+            QingLargeTitle(tr("全部订阅"), titleCollapse, hasLeading = true, actionWidth = 96,
                 leading = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("返回"))
