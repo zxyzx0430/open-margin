@@ -218,19 +218,6 @@ fun SubscriptionsManageScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(key = "summary_card") {
-                Column(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(tr("月均 %s · %d 项在用").format(formatCny(monthlyFixedCents), activeSubs.size),
-                        style = MaterialTheme.typography.bodySmall, color = QingTextSecondary)
-                    if (dirtyCount > 0 || dueSoonCount > 0) {
-                        val status = listOfNotNull(
-                            if (dueSoonCount > 0) tr("%d 项即将到期").format(dueSoonCount) else null,
-                            if (dirtyCount > 0) tr("%d 项待同步，联网后自动同步").format(dirtyCount) else null
-                        ).joinToString(" · ")
-                        Text(status, style = MaterialTheme.typography.labelSmall, color = QingTextSecondary)
-                    }
-                }
-            }
             if (revealSearch) {
             item(key = "search_bar") {
                 LaunchedEffect(searchVisible) { if (searchVisible) searchRequester.requestFocus() }
@@ -297,6 +284,19 @@ fun SubscriptionsManageScreen(
                         WalletCardDeck(deckCards) { detailSubscriptionId = it }
                     }
                     Spacer(Modifier.height(4.dp))
+                }
+            }
+            item(key = "summary_card") {
+                Column(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(tr("月均 %s · %d 项在用").format(formatCny(monthlyFixedCents), activeSubs.size),
+                        style = MaterialTheme.typography.bodySmall, color = QingTextSecondary)
+                    if (dirtyCount > 0 || dueSoonCount > 0) {
+                        val status = listOfNotNull(
+                            if (dueSoonCount > 0) tr("%d 项即将到期").format(dueSoonCount) else null,
+                            if (dirtyCount > 0) tr("%d 项待同步，联网后自动同步").format(dirtyCount) else null
+                        ).joinToString(" · ")
+                        Text(status, style = MaterialTheme.typography.labelSmall, color = QingTextSecondary)
+                    }
                 }
             }
             item(key = "list_header") {

@@ -1,5 +1,10 @@
 package com.bookkeeping.app.ui.screen.budget
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import com.bookkeeping.app.ui.components.QingLargeTitle
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
 import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
 
 import androidx.compose.foundation.BorderStroke
@@ -108,12 +113,12 @@ fun BudgetScreen(
     onOpenSubscriptions: (Boolean) -> Unit = {},
     viewModel: BudgetViewModel = hiltViewModel(),
 ) {
-    val budget by viewModel.budget.collectAsState()
-    val expenseByCategory by viewModel.expenseByCategory.collectAsState()
-    val summary by viewModel.summary.collectAsState()
-    val selectedMonth by viewModel.selectedMonth.collectAsState()
-    val previousMonthReference by viewModel.previousMonthExpenseReference.collectAsState()
-    val monthlyLockedSubscriptionCents by viewModel.monthlyLockedSubscriptionCents.collectAsState()
+    val budget by viewModel.budget.collectAsStateWithLifecycle()
+    val expenseByCategory by viewModel.expenseByCategory.collectAsStateWithLifecycle()
+    val summary by viewModel.summary.collectAsStateWithLifecycle()
+    val selectedMonth by viewModel.selectedMonth.collectAsStateWithLifecycle()
+    val previousMonthReference by viewModel.previousMonthExpenseReference.collectAsStateWithLifecycle()
+    val monthlyLockedSubscriptionCents by viewModel.monthlyLockedSubscriptionCents.collectAsStateWithLifecycle()
     val previousMonthExpenseCents = previousMonthReference
         .takeIf { it.targetMonth == selectedMonth }?.amountCents ?: 0L
 
@@ -138,27 +143,16 @@ fun BudgetScreen(
     val isFutureMonth = selectedMonth > currentMonth
     val hasBudget = summary.budgetCents > 0L
 
+    val budgetListState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(budgetListState)
     Scaffold(
+        modifier = Modifier.nestedScroll(titleCollapse.connection),
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        tr("预算"),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                ),
-                windowInsets = WindowInsets(0, 0, 0, 0),
-            )
-        },
+        topBar = { QingLargeTitle(tr("预算"), titleCollapse) },
     ) { innerPadding ->
         LazyColumn(
+            state = budgetListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),

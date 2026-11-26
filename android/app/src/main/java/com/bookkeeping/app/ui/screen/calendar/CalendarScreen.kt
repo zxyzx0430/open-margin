@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.calendar
 
+import com.bookkeeping.app.ui.components.QingSwitch
 import android.util.LruCache
 import androidx.compose.ui.layout.layout
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
@@ -61,7 +62,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -576,7 +576,7 @@ fun CalendarScreen(
                                 )
                             },
                             trailingIcon = {
-                                Switch(
+                                QingSwitch(
                                     checked = highlightEnabled,
                                     onCheckedChange = { enabled ->
                                         heatmap = setCalendarHighlightEnabled(heatmap, enabled)
@@ -632,7 +632,7 @@ fun CalendarScreen(
                                 )
                             },
                             trailingIcon = {
-                                Switch(
+                                QingSwitch(
                                     checked = numberEnabled,
                                     onCheckedChange = { enabled ->
                                         calendarNumberMode = setCalendarNumberEnabled(
