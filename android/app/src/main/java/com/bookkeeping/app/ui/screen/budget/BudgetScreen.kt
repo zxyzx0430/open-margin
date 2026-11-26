@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.budget
 
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -160,7 +162,7 @@ fun BudgetScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "month_selector") {

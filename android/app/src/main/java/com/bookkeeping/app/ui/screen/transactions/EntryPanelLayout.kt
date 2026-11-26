@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.QingGestureSheet
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -49,13 +50,9 @@ internal fun EntryPanelLayout(
 ) {
     // 保存中不允许下滑把面板藏起来：否则写入失败时用户看不到也改不了。
     val latestCanDismiss by rememberUpdatedState(canDismiss)
-    val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true,
-        confirmValueChange = { target -> target != SheetValue.Hidden || latestCanDismiss },
-    )
-    ModalBottomSheet(
+    QingGestureSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
+        canDismiss = latestCanDismiss,
     ) {
         Column(
             modifier = modifier

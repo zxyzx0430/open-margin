@@ -1,5 +1,36 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.ui.platform.LocalLayoutDirection
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import com.bookkeeping.app.ui.components.QingChromeSurface
+import com.bookkeeping.app.ui.components.QingChromeTier
+import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
+import com.bookkeeping.app.ui.theme.LocalQingAppearance
+import com.bookkeeping.app.ui.theme.qingColors
+
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.CompositionLocalProvider
+import com.bookkeeping.app.data.local.entity.TransactionEntity
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -89,7 +120,7 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceCapturePanel
 import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val navController = rememberNavController()
@@ -142,6 +173,12 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     // Resolve the static tab list once at the top of composition. Reading it
     // lazily from inside hierarchy.any could observe a nested data object
     // before its class initializer had assigned INSTANCE (null route crash).
+    var transitionEntry by remember { mutableStateOf<TransactionEntity?>(null) }
+    val reduceMotion = rememberReduceMotion()
+    LaunchedEffect(currentDestination?.route) {
+        val route = currentDestination?.route
+        if (route != BottomNavItem.Transactions.route && route != AppRoutes.TRANSACTION_DETAIL) transitionEntry = null
+    }
     val navItems = BottomNavItem.ALL
     val showBottomBar = currentDestination?.hierarchy?.any { destination ->
         navItems.any { it.route == destination.route }
@@ -169,15 +206,29 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         }
     }
 
+    val chromePreference = LocalQingAppearance.current.chromeTier
+    val chromeTier = rememberEffectiveQingChromeTier(chromePreference)
+    val chromeBackdrop = if (showBottomBar && chromeTier >= QingChromeTier.BLUR) rememberGraphicsLayer() else null
+    val chromeOverlap = if (chromeBackdrop != null && currentDestination?.route in listOf(
+            BottomNavItem.Transactions.route, BottomNavItem.Stats.route, BottomNavItem.Budget.route, BottomNavItem.Settings.route
+        )) 32.dp else 0.dp
+    var backdropOrigin by remember { mutableStateOf(Offset.Zero) }
+    val canvasColor = qingColors.surfaceCanvas
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                if (showBottomBar) Column {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                if (showBottomBar) Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    QingChromeSurface(
+                        modifier = Modifier.fillMaxWidth(),
+                        requestedTier = chromePreference,
+                        backdrop = chromeBackdrop,
+                        backdropOrigin = backdropOrigin,
+                    ) {
                     NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
+                        containerColor = Color.Transparent,
                         tonalElevation = 0.dp,
+                        windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
                     ) {
                         val showLabels = LocalDensity.current.fontScale <= 1.3f
 
@@ -224,28 +275,61 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                             )
                         }
                     }
+                    }
                 }
             }
         ) { innerPadding ->
+            Box(Modifier.fillMaxSize().onGloballyPositioned { backdropOrigin = it.positionInRoot() }
+                .then(if (chromeBackdrop != null) Modifier.drawWithContent {
+                    chromeBackdrop.record {
+                        drawRect(canvasColor)
+                        this@drawWithContent.drawContent()
+                    }
+                    drawLayer(chromeBackdrop)
+                } else Modifier)) {
+            val direction = LocalLayoutDirection.current
+            val bodyPadding = PaddingValues(
+                start = innerPadding.calculateStartPadding(direction), end = innerPadding.calculateEndPadding(direction),
+                top = innerPadding.calculateTopPadding(),
+                bottom = (innerPadding.calculateBottomPadding() - chromeOverlap).coerceAtLeast(0.dp),
+            )
+            CompositionLocalProvider(LocalQingChromeOverlap provides chromeOverlap) {
+            SharedTransitionLayout {
+            val sharedScope = this
             NavHost(
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
                 modifier = Modifier
-                    .padding(innerPadding)
+                    .padding(bodyPadding)
                     .consumeWindowInsets(innerPadding),
             ) {
                 // 叶子页（详情、导入）是瞬时切换的，所以从叶子页返回 tab 时也必须瞬时，
                 // 否则会先淡入一帧空白再出现内容。tab 之间仍然保留默认的淡入淡出。
                 composable(
                     route = BottomNavItem.Transactions.route,
-                    popEnterTransition = { EnterTransition.None },
+                    exitTransition = {
+                        if (targetState.destination.route == AppRoutes.TRANSACTION_DETAIL) {
+                            if (!reduceMotion && transitionEntry != null) fadeOut(tween(220), targetAlpha = 0.99f) else ExitTransition.None
+                        } else null
+                    },
+                    popEnterTransition = {
+                        if (!reduceMotion && transitionEntry != null && initialState.destination.route == AppRoutes.TRANSACTION_DETAIL)
+                            fadeIn(tween(220), initialAlpha = 0.99f) else EnterTransition.None
+                    },
                 ) {
+                    val visibility = this
+                    CompositionLocalProvider(LocalQingLedgerTransition provides transitionEntry?.let {
+                        QingLedgerTransition(sharedScope, visibility, it.id)
+                    }) {
                     TransactionListScreen(
                         viewModel = transactionViewModel,
                         onOpenBillImport = { showBillImportSheet = true },
                         drilldown = pendingLedgerDrilldown,
                         onDrilldownConsumed = { pendingLedgerDrilldown = null },
-                        onOpenDetail = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
+                        onOpenDetail = { id ->
+                            transitionEntry = transactionViewModel.allTransactions.value.firstOrNull { it.id == id }
+                            navController.navigate(AppRoutes.transactionDetail(id))
+                        },
                         onOpenUpdateSettings = {
                             focusUpdateSettings = true
                             navController.navigate(BottomNavItem.Settings.route) {
@@ -268,6 +352,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         voiceRequest = voiceRequest,
                         onVoiceRequestConsumed = { voiceRequest = null },
                     )
+                    }
                 }
                 composable(
                     route = BottomNavItem.Calendar.route,
@@ -353,15 +438,28 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     // 从「分类明细」弹层点进来时，弹层已经关掉、详情还只有很低的透明度，
                     // 露出来的就是统计页 —— 这就是用户看到的「闪一下」。这里改成瞬时切换：
                     // 点下去同一帧就是详情页，返回也是同一帧回到原页面。
-                    enterTransition = { EnterTransition.None },
+                    enterTransition = {
+                        if (!reduceMotion && transitionEntry != null && initialState.destination.route == BottomNavItem.Transactions.route)
+                            fadeIn(tween(220), initialAlpha = 0.99f) else EnterTransition.None
+                    },
                     exitTransition = { ExitTransition.None },
                     popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
-                ) {
+                    popExitTransition = {
+                        if (!reduceMotion && transitionEntry != null && targetState.destination.route == BottomNavItem.Transactions.route)
+                            fadeOut(tween(220), targetAlpha = 0.99f) else ExitTransition.None
+                    },
+                ) { entry ->
+                    val snapshot = transitionEntry?.takeIf { it.id == entry.arguments?.getLong(AppRoutes.TRANSACTION_ID) }
+                    val visibility = this
+                    CompositionLocalProvider(LocalQingLedgerTransition provides snapshot?.let {
+                        QingLedgerTransition(sharedScope, visibility, it.id)
+                    }) {
                     TransactionDetailScreen(
+                        initialEntry = snapshot,
                         onBack = { navController.popBackStack() },
                         onDeleted = { navController.popBackStack() },
                     )
+                    }
                 }
                 composable(
                     route = BottomNavItem.Budget.route,
@@ -433,6 +531,9 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         onUpdateCardFocused = { focusUpdateSettings = false },
                     )
                 }
+            }
+            }
+            }
             }
         }
 

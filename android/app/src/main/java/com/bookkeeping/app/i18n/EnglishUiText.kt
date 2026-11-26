@@ -5,6 +5,23 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "全部订阅" to "All subscriptions",
+        "切换列表" to "Switch to list",
+        "切换卡包" to "Switch to wallet",
+        "已逾期" to "Overdue",
+        "今天扣款" to "Due today",
+        "%d 天后扣款" to "Due in %d days",
+        "支付方式" to "Payment method",
+        "未指定" to "Unspecified",
+        "账单周期" to "Billing period",
+        "每周" to "Weekly",
+        "每月" to "Monthly",
+        "每季" to "Quarterly",
+        "每年" to "Yearly",
+        "活跃订阅" to "Active subscriptions",
+        "即将到期" to "Due soon",
+        "已暂停" to "Paused",
+        "下滑关闭面板" to "Swipe down to dismiss",
         "外观" to "Appearance",
         "收支配色习惯" to "Income and expense colors",
         "红收绿支" to "Red income, green expense",

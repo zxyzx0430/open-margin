@@ -2,6 +2,7 @@ package com.bookkeeping.app.ui.theme
 
 import androidx.compose.animation.core.SnapSpec
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.ui.components.QingChromeTier
@@ -56,6 +57,27 @@ class QingV3TokensTest {
         for (tokens in listOf(QingLightTokens, QingDarkTokens)) {
             assertEquals(tokens.semanticIncome to tokens.semanticExpense, amountColors(tokens, false))
             assertEquals(tokens.semanticExpense to tokens.semanticIncome, amountColors(tokens, true))
+        }
+    }
+    @Test fun materialCapabilityAndReduceMotion() {
+        assertEquals(QingChromeTier.BLUR, effectiveQingChromeTier(QingChromeTier.BLUR, 31, false, hasBackdrop = true))
+        assertEquals(QingChromeTier.ENHANCED, effectiveQingChromeTier(QingChromeTier.ENHANCED, 35, false, hasBackdrop = true))
+        assertEquals(QingChromeTier.TINTED, effectiveQingChromeTier(QingChromeTier.ENHANCED, 30, false, hasBackdrop = true))
+        assertEquals(QingChromeTier.TINTED, effectiveQingChromeTier(QingChromeTier.BLUR, 35, false))
+        assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(QingChromeTier.BLUR, 35, true, hasBackdrop = true))
+        assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(QingChromeTier.BLUR, 35, false, reducedTransparency = true, hasBackdrop = true))
+        assertTrue(reduceMotionForScale(0f))
+        assertTrue(!reduceMotionForScale(0.5f))
+    }
+
+    @Test fun walletPreviewOrderAndPalette() {
+        val ids = listOf(10L, 20L, 30L, 40L)
+        assertEquals(listOf(10L, 20L, 30L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(ids, null))
+        assertEquals(listOf(10L, 30L, 20L), com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(ids, 20L))
+        assertEquals(5, WalletSubscriptionPalette.size)
+        WalletSubscriptionPalette.forEach { color ->
+            val l = androidx.compose.ui.graphics.Color.White.luminance()
+            assertTrue((l + 0.05f) / (color.luminance() + 0.05f) >= 7f)
         }
     }
 }

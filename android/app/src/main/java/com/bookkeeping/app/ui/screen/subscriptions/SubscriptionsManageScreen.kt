@@ -1,5 +1,11 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.material3.TextButton
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -124,6 +130,10 @@ fun SubscriptionsManageScreen(
         detailSubscriptionId?.let { id -> allSubscriptions.firstOrNull { it.id == id } }
     }
 
+    var walletPreferred by rememberSaveable { mutableStateOf(true) }
+    val talkBack = rememberTouchExploration()
+    val walletAvailable = !talkBack && LocalDensity.current.fontScale <= 1.3f
+    val showWallet = walletPreferred && walletAvailable
     val activeSubs = remember(allSubscriptions) { allSubscriptions.filter { it.active } }
     val monthlyFixedCents = remember(activeSubs, fxRates) {
         activeSubs.sumOf { SubscriptionProjection.monthlyEquivalentCnyCents(it, fxRates) }
@@ -140,7 +150,7 @@ fun SubscriptionsManageScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "全部订阅",
+                        text = tr("全部订阅"),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )
@@ -151,6 +161,11 @@ fun SubscriptionsManageScreen(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = tr("返回"),
                         )
+                    }
+                },
+                actions = {
+                    TextButton(onClick = { walletPreferred = !walletPreferred }, enabled = walletAvailable) {
+                        Text(if (showWallet) tr("切换列表") else tr("切换卡包"))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -185,6 +200,12 @@ fun SubscriptionsManageScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (showWallet && activeSubs.isNotEmpty()) {
+                item(key = "wallet_deck") {
+                    WalletCardDeck(activeSubs.sortedBy { it.nextDueMs }) { detailSubscriptionId = it }
+                    Spacer(Modifier.height(20.dp))
+                }
+            }
             // Soft Mint Summary Card (matches Open Margin's signature header card)
             item(key = "summary_card") {
                 SubscriptionsSummaryCard(
@@ -213,7 +234,7 @@ fun SubscriptionsManageScreen(
             item(key = "search_bar") {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(QingRadiusTokens.radiusControl),
                     color = QingSurface,
                 ) {
                     Row(
@@ -290,12 +311,32 @@ fun SubscriptionsManageScreen(
                     )
                 }
             } else {
-                items(filteredSubscriptions, key = { it.id }) { sub ->
-                    SubscriptionCompactCard(
-                        subscription = sub,
-                        fxRates = fxRates,
-                        onClick = { detailSubscriptionId = sub.id },
-                    )
+                val groups = filteredSubscriptions.groupBy {
+                    when {
+                        !it.active -> "paused"
+                        SubscriptionProjection.daysUntilDue(it.nextDueMs, System.currentTimeMillis()) <= 7 -> "due"
+                        else -> "active"
+                    }
+                }
+                listOf("active", "due", "paused").forEach { group ->
+                    val subscriptions = groups[group].orEmpty()
+                    if (subscriptions.isNotEmpty()) item(key = "wallet_group_$group") {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(when(group) {
+                                "active" -> tr("活跃订阅")
+                                "due" -> tr("即将到期")
+                                else -> tr("已暂停")
+                            }, style = MaterialTheme.typography.labelMedium, color = QingTextSecondary)
+                            WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
+                                Column {
+                                    subscriptions.forEachIndexed { index, sub ->
+                                        if (index > 0) HorizontalDivider(Modifier.padding(start = 56.dp), thickness = 0.5.dp, color = QingOutline)
+                                        SubscriptionCompactCard(sub, fxRates) { detailSubscriptionId = sub.id }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -715,15 +756,7 @@ private fun SubscriptionCompactCard(
         SimpleDateFormat("M月d日", Locale.CHINA).format(Date(subscription.nextDueMs))
     }
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .alpha(if (subscription.active) 1f else 0.72f)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(role = Role.Button, onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = QingSurface,
-    ) {
+    Box(Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

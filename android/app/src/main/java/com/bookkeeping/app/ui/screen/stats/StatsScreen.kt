@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
 import com.bookkeeping.app.ui.components.WalletCardSurface
 import com.bookkeeping.app.ui.theme.QingAmountIncome
 import com.bookkeeping.app.ui.theme.QingAmountExpense
@@ -208,7 +210,7 @@ fun StatsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "stats_tab_bar") {

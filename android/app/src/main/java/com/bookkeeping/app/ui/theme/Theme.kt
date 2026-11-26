@@ -148,6 +148,7 @@ fun BookkeepingAppTheme(
     )
     CompositionLocalProvider(
         LocalQingDark provides darkTheme,
+        LocalQingReduceMotion provides observeReduceMotion(),
         LocalQingAppearance provides appearance,
         LocalQingSemanticColors provides QingSemanticColors(
             income = colorScheme.secondary,

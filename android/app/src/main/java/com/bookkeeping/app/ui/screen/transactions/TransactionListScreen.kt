@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
 import com.bookkeeping.app.ui.components.WalletCardSurface
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
@@ -454,6 +456,7 @@ fun TransactionListScreen(
         floatingActionButton = {
             // 气泡压在 FAB 上方，但不能把 FAB 顶走：FAB 始终贴右，气泡往左上展开。
             Layout(
+                modifier = Modifier.padding(bottom = LocalQingChromeOverlap.current),
                 content = {
                     VoiceFab(
                         onTap = {
@@ -503,14 +506,14 @@ fun TransactionListScreen(
                 }
             }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = { SnackbarHost(snackbarHostState, modifier = Modifier.padding(bottom = LocalQingChromeOverlap.current)) },
     ) { innerPadding ->
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "header") {

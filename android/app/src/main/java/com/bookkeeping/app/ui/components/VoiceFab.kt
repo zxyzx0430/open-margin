@@ -1,7 +1,9 @@
 package com.bookkeeping.app.ui.components
 
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import android.os.SystemClock
 import androidx.compose.animation.core.animateFloatAsState
+import com.bookkeeping.app.ui.theme.QingMotionTokens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -100,8 +102,10 @@ fun VoiceFab(
     // 满 0.75 秒已经开录：抬手只结束按压，不结束录音。
     var armed by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
+    val reduceMotion = rememberReduceMotion()
     val pressScale by animateFloatAsState(
-        targetValue = if (pressing) 0.94f else 1f,
+        targetValue = if (pressing) QingMotionTokens.cardPressedScale else 1f,
+        animationSpec = QingMotionTokens.motionPress.spec(reduceMotion),
         label = "voiceFabPressScale",
     )
 

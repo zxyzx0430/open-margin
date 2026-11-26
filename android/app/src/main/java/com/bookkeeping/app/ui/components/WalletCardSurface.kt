@@ -1,5 +1,10 @@
 package com.bookkeeping.app.ui.components
 
+import com.bookkeeping.app.ui.theme.qingPressFeedback
+
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.runtime.remember
+import com.bookkeeping.app.ui.theme.QingMotionTokens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,7 +36,7 @@ import com.bookkeeping.app.ui.theme.qingColors
 /**
  * Opaque V3 card. Static groups have no shadow; interactive objects have a
  * minimal light-mode shadow and a standard accessible click target.
- * P0 deliberately has no custom input interception or press animation.
+ * Press feedback is passive; static groups and content remain opaque.
  */
 @Composable
 fun WalletCardSurface(
@@ -56,16 +61,17 @@ fun WalletCardSurface(
     val edge = if (dark) {
         Modifier.walletTopHighlight(radius, colors.strokeHairline)
     } else Modifier.border(0.5.dp, colors.strokeHairline, shape)
+    val interactionSource = remember { MutableInteractionSource() }
     val interaction = if (onClick != null) {
         Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-            .clickable(role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interactionSource, indication = null, role = Role.Button, onClick = onClick)
     } else Modifier
     val fill = if (hero) {
         Modifier.background(Brush.verticalGradient(if (dark) listOf(QingDarkHeroStart, QingDarkHeroEnd)
             else listOf(colors.surfaceCard, QingLightHeroEnd)))
     } else Modifier.background(colors.surfaceCard)
     Box(
-        modifier = modifier.then(shadow).clip(shape)
+        modifier = modifier.qingPressFeedback(QingMotionTokens.cardPressedScale, enabled = onClick != null).then(shadow).clip(shape)
             .then(fill).then(edge).then(interaction),
         content = content,
     )

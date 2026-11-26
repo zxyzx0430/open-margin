@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.ui.components.QingChromeTier
 import com.bookkeeping.app.ui.theme.LocalQingAppearance
@@ -334,7 +336,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "status_overview") {

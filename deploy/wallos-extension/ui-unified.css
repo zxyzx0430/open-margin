@@ -690,3 +690,22 @@ body.om-ui.dark {
     --om-motion-snappy: 0ms;
   }
 }
+
+/* P2: only low-frequency object press feedback; never submit or keyboard. */
+@media (prefers-reduced-motion: no-preference) {
+  .om-ui :where(.subscription, .subscription-card) { transition: transform var(--om-motion-press); }
+  .om-ui :where(.subscription, .subscription-card):active { transform: scale(0.97); }
+}
+
+/* P4: only the sticky top chrome can use a backdrop; financial cards stay solid. */
+@supports (backdrop-filter: blur(12px)) {
+  @media (prefers-reduced-transparency: no-preference) {
+    .om-ui header.om-header {
+      background: color-mix(in srgb, var(--om-surface) 88%, transparent);
+      backdrop-filter: blur(12px);
+    }
+  }
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .om-ui header.om-header { background: var(--om-surface); backdrop-filter: none; }
+}
