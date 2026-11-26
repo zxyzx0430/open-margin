@@ -110,4 +110,13 @@ class QingV3TokensTest {
         assertEquals(13, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 6L, 5))
         assertEquals(null, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 99L, 5))
     }
+    @Test fun sheetDismissScrimFollowsPanelAndClosesQuickly() {
+        fun alpha(displacement: Float, height: Float) = com.bookkeeping.app.ui.components.qingSheetScrimAlpha(displacement, height)
+        assertEquals(0.32f, alpha(0f, 400f), 0.001f)
+        assertEquals(0.16f, alpha(200f, 400f), 0.001f)
+        assertEquals(0f, alpha(400f, 400f), 0.001f)
+        assertEquals(0f, alpha(800f, 400f), 0.001f)
+        assertEquals(0.32f, alpha(-10f, 400f), 0.001f)
+        assertTrue(com.bookkeeping.app.ui.components.QING_SHEET_CLOSE_MS <= 150)
+    }
 }

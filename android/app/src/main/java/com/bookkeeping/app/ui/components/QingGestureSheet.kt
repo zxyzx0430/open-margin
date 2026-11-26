@@ -1,5 +1,12 @@
 package com.bookkeeping.app.ui.components
 
+import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.drawBehind
+import com.bookkeeping.app.ui.theme.LocalQingDark
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
@@ -33,6 +40,14 @@ import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+internal const val QING_SHEET_CLOSE_MS = 120
+
+/** The scrim follows the visible panel, including an interrupted drag. */
+internal fun qingSheetScrimAlpha(displacement: Float, panelHeight: Float): Float {
+    if (panelHeight <= 0f) return 0.32f
+    return 0.32f * (1f - displacement / panelHeight).coerceIn(0f, 1f)
+}
+
 /** A window-level modal with an interruptible handle spring. No delay on save or selection. */
 @Composable
 fun QingGestureSheet(
@@ -44,15 +59,26 @@ fun QingGestureSheet(
     val latestCanDismiss by rememberUpdatedState(canDismiss)
     val reduced = rememberReduceMotion()
     val colors = qingColors
-    val scope = rememberCoroutineScope()
+    val dark = LocalQingDark.current
     Dialog(
         onDismissRequest = { if (latestCanDismiss) latestDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false,
             dismissOnClickOutside = false, dismissOnBackPress = true, decorFitsSystemWindows = false),
     ) {
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0f) }
-        BoxWithConstraints(Modifier.fillMaxSize().imePadding().navigationBarsPadding()) {
+        val view = LocalView.current
+        val window = (view.parent as? DialogWindowProvider)?.window
+        SideEffect {
+            // This sheet owns the only scrim and motion. No platform window
+            // transition may leave a dim surface behind after composition exits.
+            window?.let {
+                it.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+                it.setDimAmount(0f)
+                it.setWindowAnimations(0)
+                WindowCompat.getInsetsController(it, it.decorView).isAppearanceLightStatusBars = !dark
+            }
+        }
+        val scope = rememberCoroutineScope()
+        BoxWithConstraints(Modifier.fillMaxSize()) {
             val heightPx = with(LocalDensity.current) { maxHeight.toPx() }
             val threshold = with(LocalDensity.current) { 96.dp.toPx() }
             val velocityThreshold = with(LocalDensity.current) { 650.dp.toPx() }
@@ -61,24 +87,48 @@ fun QingGestureSheet(
             var displacement by remember { mutableFloatStateOf(if (reduced) 0f else entryDistance) }
             val animator = remember { Animatable(displacement) }
             var settleJob by remember { mutableStateOf<Job?>(null) }
+            var closing by remember { mutableStateOf(false) }
+            fun dismissNow() {
+                if (!latestCanDismiss) return
+                settleJob?.cancel()
+                latestDismiss()
+            }
             fun settle(target: Float, velocity: Float = 0f, close: Boolean = false) {
                 settleJob?.cancel()
+                closing = close
+                if (close && (reduced || displacement >= target - 1f)) {
+                    if (latestCanDismiss) latestDismiss()
+                    else { displacement = 0f; closing = false }
+                    return
+                }
                 settleJob = scope.launch {
                     animator.snapTo(displacement)
-                    animator.animateTo(target, QingMotionTokens.motionGesture.spec(reduced),
-                        initialVelocity = if (reduced) 0f else velocity) {
+                    val spec = if (close) tween<Float>(QING_SHEET_CLOSE_MS, easing = LinearOutSlowInEasing)
+                        else QingMotionTokens.motionGesture.spec<Float>(reduced)
+                    animator.animateTo(target, spec, initialVelocity = if (reduced || close) 0f else velocity) {
                         displacement = value.coerceAtLeast(0f)
                     }
                     if (close && latestCanDismiss) latestDismiss()
-                    else if (close) settle(0f)
+                    else if (close) {
+                        // A save started mid-drag: restore without allowing dismissal.
+                        closing = false
+                        displacement = 0f
+                    }
                 }
             }
-            LaunchedEffect(reduced) { settle(0f) }
+            LaunchedEffect(reduced) {
+                if (closing && reduced && latestCanDismiss) dismissNow()
+                else settle(0f)
+            }
             val dragState = rememberDraggableState { delta ->
                 displacement = (displacement + delta).coerceIn(0f, heightPx)
             }
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.32f))
-                .clickable(enabled = canDismiss, onClickLabel = tr("关闭"), onClick = latestDismiss))
+            val scrimInteractions = remember { MutableInteractionSource() }
+            Box(Modifier.fillMaxSize()
+                .drawBehind { drawRect(Color.Black.copy(alpha = qingSheetScrimAlpha(displacement, panelHeight))) }
+                .clickable(interactionSource = scrimInteractions, indication = null,
+                    enabled = canDismiss, onClickLabel = tr("关闭"), onClick = ::dismissNow))
+            Box(Modifier.fillMaxSize().imePadding().navigationBarsPadding()) {
             Column(
                 Modifier.align(Alignment.BottomCenter).widthIn(max = 640.dp).fillMaxWidth()
                     .onSizeChanged { panelHeight = it.height.toFloat() }
@@ -88,8 +138,8 @@ fun QingGestureSheet(
             ) {
                 Box(Modifier.fillMaxWidth().height(24.dp)
                     .draggable(dragState, Orientation.Vertical, enabled = canDismiss,
-                        startDragImmediately = displacement > 0f,
-                        onDragStarted = { settleJob?.cancel(); animator.stop() },
+                        startDragImmediately = animator.isRunning,
+                        onDragStarted = { settleJob?.cancel(); closing = false; animator.stop() },
                         onDragStopped = { velocity ->
                             val close = latestCanDismiss && (displacement > threshold || velocity > velocityThreshold)
                             settle(if (close) panelHeight.coerceAtLeast(displacement) else 0f, velocity, close)
@@ -101,6 +151,7 @@ fun QingGestureSheet(
                         .background(colors.textSecondary.copy(alpha = 0.28f)))
                 }
                 content()
+            }
             }
         }
     }
