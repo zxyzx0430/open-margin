@@ -660,7 +660,7 @@ internal data class LedgerUiState(
     val periodTransactions: List<TransactionEntity> = emptyList(),
     val allTransactions: List<TransactionEntity> = emptyList(),
     val load: LedgerLoadState = LedgerLoadState.INITIAL,
-    val reviews: List<DuplicateCandidate> = emptyList(),
+    val reviews: List<TransactionViewModel.DuplicateCandidate> = emptyList(),
     val expense: Long = 0L,
     val income: Long = 0L,
 )
