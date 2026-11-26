@@ -7,23 +7,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.runtime.key
 import androidx.navigation.NavController
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.unit.Velocity
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
-import android.os.SystemClock
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.components.QingSheetGrabber
@@ -53,14 +42,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.rememberGraphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import com.bookkeeping.app.ui.components.QingChromeSurface
-import com.bookkeeping.app.ui.components.QingChromeTier
 import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
 import com.bookkeeping.app.ui.theme.LocalQingAppearance
 import com.bookkeeping.app.ui.theme.qingColors
@@ -267,75 +250,16 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
 
     val chromePreference = LocalQingAppearance.current.chromeTier
     val chromeTier = rememberEffectiveQingChromeTier(chromePreference)
-    val scope = rememberCoroutineScope()
-    val canBlur = showBottomBar && visibleEntries.size <= 1 && chromeTier >= QingChromeTier.BLUR &&
-        activeRoute != BottomNavItem.Calendar.route
-    val blurEnabled by rememberUpdatedState(canBlur)
-    var chromeBusy by remember { mutableStateOf(false) }
-    val lastMotionMs = remember { longArrayOf(0L) }
-    val idleJob = remember { arrayOfNulls<Job>(1) }
-    fun deferChrome() {
-        if (!blurEnabled) return
-        lastMotionMs[0] = SystemClock.uptimeMillis()
-        chromeBusy = true
-        // One timer for an entire gesture/fling, not one coroutine per frame.
-        if (idleJob[0]?.isActive != true) {
-            idleJob[0] = scope.launch {
-                while (true) {
-                    val remaining = 180L - (SystemClock.uptimeMillis() - lastMotionMs[0])
-                    if (remaining <= 0L) break
-                    delay(remaining)
-                }
-                chromeBusy = false
-            }
-        }
-    }
-    val scrollChrome = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available != Offset.Zero) deferChrome()
-                return Offset.Zero
-            }
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                deferChrome()
-                return Velocity.Zero
-            }
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                deferChrome()
-                return Velocity.Zero
-            }
-        }
-    }
-    LaunchedEffect(activeRoute, canBlur) {
-        if (canBlur) deferChrome()
-        else {
-            idleJob[0]?.cancel()
-            chromeBusy = false
-        }
-    }
-    val chromeLayer = if (canBlur) key(activeRoute) { rememberGraphicsLayer() } else null
-    val chromeBackdrop = chromeLayer?.takeUnless { chromeBusy }
     // Full-height page canvas behind floating chrome, independent of blur tier.
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // Keep the underlying tab layout stable throughout the detail transition.
     val chromeOverlap = if (isTabDestination || detailInFlight) 68.dp + navInset else 0.dp
-    var backdropOrigin by remember { mutableStateOf(Offset.Zero) }
     val canvasColor = qingColors.surfaceCanvas
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
         ) { innerPadding ->
-            Box(Modifier.fillMaxSize().nestedScroll(scrollChrome).onGloballyPositioned { backdropOrigin = it.positionInRoot() }
-                .then(if (chromeBackdrop != null) Modifier.drawWithContent {
-                    // Never replay a previously recorded tab after its route has left.
-                    if (navController.currentDestination?.route == activeRoute && activeRoute in tabRoutes) {
-                        chromeBackdrop.record {
-                            drawRect(canvasColor)
-                            this@drawWithContent.drawContent()
-                        }
-                        drawLayer(chromeBackdrop)
-                    } else drawContent()
-                } else Modifier)) {
+            Box(Modifier.fillMaxSize()) {
             val direction = LocalLayoutDirection.current
             val bodyPadding = PaddingValues(
                 start = innerPadding.calculateStartPadding(direction), end = innerPadding.calculateEndPadding(direction),
@@ -598,8 +522,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             QingChromeSurface(
                 modifier = Modifier.fillMaxWidth().height(60.dp),
                 requestedTier = chromePreference,
-                backdrop = chromeBackdrop,
-                backdropOrigin = backdropOrigin,
                 resolvedTier = chromeTier,
             ) {
                 Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
@@ -613,7 +535,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                                     role = Role.Tab, onClick = {
                                         if (navController.currentDestination?.route in tabRoutes &&
                                             navController.currentDestination?.route != item.route) {
-                                            deferChrome()
                                             navController.navigate(item.route) {
                                                 popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                                 launchSingleTop = true

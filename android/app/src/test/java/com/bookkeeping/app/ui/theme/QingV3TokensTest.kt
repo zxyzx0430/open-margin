@@ -8,6 +8,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.ui.components.QingChromeTier
 import com.bookkeeping.app.ui.components.effectiveQingChromeTier
+import com.bookkeeping.app.ui.components.qingChromeOpacity
+import com.bookkeeping.app.ui.components.parseQingChromeTier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -50,7 +52,8 @@ class QingV3TokensTest {
         assertEquals(QingSpringToken(1f, 600f), QingMotionTokens.motionSnappy)
         assertTrue(QingMotionTokens.motionPress.spec<Float>(reduceMotion = true) is SnapSpec<*>)
         QingChromeTier.entries.forEach {
-            assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(it))
+            assertEquals(it, effectiveQingChromeTier(it))
+            assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(it, reducedTransparency = true))
         }
     }
 
@@ -61,12 +64,14 @@ class QingV3TokensTest {
         }
     }
     @Test fun materialCapabilityAndReduceMotion() {
-        assertEquals(QingChromeTier.BLUR, effectiveQingChromeTier(QingChromeTier.BLUR, 31, false, hasBackdrop = true))
-        assertEquals(QingChromeTier.ENHANCED, effectiveQingChromeTier(QingChromeTier.ENHANCED, 35, false, hasBackdrop = true))
-        assertEquals(QingChromeTier.TINTED, effectiveQingChromeTier(QingChromeTier.ENHANCED, 30, false, hasBackdrop = true))
-        assertEquals(QingChromeTier.TINTED, effectiveQingChromeTier(QingChromeTier.BLUR, 35, false))
-        assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(QingChromeTier.BLUR, 35, true, hasBackdrop = true))
-        assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(QingChromeTier.BLUR, 35, false, reducedTransparency = true, hasBackdrop = true))
+        assertEquals(QingChromeTier.TINTED, parseQingChromeTier("BLUR"))
+        assertEquals(QingChromeTier.ENHANCED, parseQingChromeTier(null))
+        assertEquals(QingChromeTier.ENHANCED, parseQingChromeTier("invalid"))
+        assertEquals(QingChromeTier.SOLID, parseQingChromeTier("SOLID"))
+        assertEquals(QingChromeTier.ENHANCED, effectiveQingChromeTier(QingChromeTier.ENHANCED))
+        assertEquals(1f, qingChromeOpacity(QingChromeTier.SOLID), 0.001f)
+        assertEquals(0.86f, qingChromeOpacity(QingChromeTier.TINTED), 0.001f)
+        assertEquals(0.68f, qingChromeOpacity(QingChromeTier.ENHANCED), 0.001f)
         assertTrue(reduceMotionForScale(0f))
         assertTrue(!reduceMotionForScale(0.5f))
     }

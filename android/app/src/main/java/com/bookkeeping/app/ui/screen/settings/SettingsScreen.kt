@@ -1909,7 +1909,7 @@ private fun AppearancePreferencesCard() {
     val effectiveTier = rememberEffectiveQingChromeTier(appearance.chromeTier)
     val tierLabel = when (appearance.chromeTier) {
         QingChromeTier.SOLID -> tr("关闭")
-        QingChromeTier.TINTED, QingChromeTier.BLUR -> tr("标准")
+        QingChromeTier.TINTED -> tr("标准")
         QingChromeTier.ENHANCED -> tr("增强")
     }
     SettingsGroupCard {
@@ -1923,7 +1923,7 @@ private fun AppearancePreferencesCard() {
         SettingsActionRow(
             icon = Icons.Filled.Visibility,
             title = tr("界面材质"),
-            subtitle = if (effectiveTier != appearance.chromeTier && appearance.chromeTier >= QingChromeTier.BLUR)
+            subtitle = if (effectiveTier != appearance.chromeTier)
                 tierLabel + " · " + tr("已自动降级") else tierLabel + " · " + tr("底部导航"),
             onClick = { choosingMaterial = true },
         )
@@ -1934,15 +1934,15 @@ private fun AppearancePreferencesCard() {
             title = { Text(tr("界面材质")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("仅作用于底部导航，账单与其他内容卡保持不透明。滚动时自动使用轻量底膜。"),
+                    Text(tr("仅作用于底部导航。滚动与静止使用同一透底材质，不模糊背景，内容卡保持不透明。"),
                         style = MaterialTheme.typography.bodySmall)
-                    if (effectiveTier != appearance.chromeTier && appearance.chromeTier >= QingChromeTier.BLUR) {
-                        Text(tr("当前设备或辅助功能设置限制了模糊，已使用轻量材质。"),
+                    if (effectiveTier != appearance.chromeTier) {
+                        Text(tr("当前辅助功能设置要求降低透明度，已使用不透明底栏。"),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     listOf(Triple(QingChromeTier.SOLID, "关闭", "不透明底栏，最低渲染开销"),
-                        Triple(QingChromeTier.BLUR, "标准", "轻度背景模糊"),
-                        Triple(QingChromeTier.ENHANCED, "增强", "更明显的透底、模糊和柔光")).forEach { (tier, label, description) ->
+                        Triple(QingChromeTier.TINTED, "标准", "轻度透底，背景保持清晰"),
+                        Triple(QingChromeTier.ENHANCED, "增强", "更明显的清晰透底和柔光")).forEach { (tier, label, description) ->
                         TextButton(onClick = { setQingChromeTier(preferences, tier); choosingMaterial = false },
                             modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.fillMaxWidth()) {

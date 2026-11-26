@@ -3,20 +3,13 @@ package com.bookkeeping.app.ui.components
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.layout.fillMaxSize
 import com.bookkeeping.app.ui.theme.LocalQingDark
-import android.view.View
-import android.app.ActivityManager
 import android.content.Context
 import android.database.ContentObserver
-import android.graphics.Shader
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
-import androidx.annotation.RequiresApi
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -25,44 +18,34 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.RenderEffect
-import androidx.compose.ui.graphics.asComposeRenderEffect
-import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.layer.GraphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
 
-enum class QingChromeTier { SOLID, TINTED, BLUR, ENHANCED }
+enum class QingChromeTier { SOLID, TINTED, ENHANCED }
+
+/** Preserve users' old Standard preference without retaining a blur path. */
+internal fun parseQingChromeTier(stored: String?): QingChromeTier =
+    if (stored == "BLUR") QingChromeTier.TINTED
+    else QingChromeTier.entries.firstOrNull { it.name == stored } ?: QingChromeTier.ENHANCED
 
 fun effectiveQingChromeTier(
     requested: QingChromeTier,
-    sdk: Int = 0,
-    lowRam: Boolean = true,
     reducedTransparency: Boolean = false,
-    hardwareAccelerated: Boolean = true,
-    hasBackdrop: Boolean = false,
-): QingChromeTier = when {
-    requested == QingChromeTier.SOLID || lowRam || reducedTransparency || !hardwareAccelerated -> QingChromeTier.SOLID
-    sdk < 31 || !hasBackdrop || requested == QingChromeTier.TINTED -> QingChromeTier.TINTED
-    else -> requested
+): QingChromeTier = if (reducedTransparency) QingChromeTier.SOLID else requested
+
+internal fun qingChromeOpacity(tier: QingChromeTier): Float = when (tier) {
+    QingChromeTier.SOLID -> 1f
+    QingChromeTier.TINTED -> 0.86f
+    QingChromeTier.ENHANCED -> 0.68f
 }
 
-/** Only a chrome layer is eligible for expensive backdrop capture. */
+/** Observe only accessibility preferences; scrolling never changes material. */
 @Composable
 fun rememberEffectiveQingChromeTier(requested: QingChromeTier): QingChromeTier {
     val context = LocalContext.current
-    val view = LocalView.current
     val resolver = context.contentResolver
-    val memory = remember(context) { context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager }
     val accessibility = remember(context) { context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager }
     // Android has no universal reduce-transparency setting; observe known OEM keys
     // and conservatively fall back for touch exploration as well.
@@ -87,73 +70,35 @@ fun rememberEffectiveQingChromeTier(requested: QingChromeTier): QingChromeTier {
             accessibility.removeTouchExplorationStateChangeListener(listener)
         }
     }
-    var accelerated by remember(view) { mutableStateOf(view.isHardwareAccelerated) }
-    DisposableEffect(view) {
-        val listener = object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) { accelerated = v.isHardwareAccelerated }
-            override fun onViewDetachedFromWindow(v: View) { accelerated = false }
-        }
-        view.addOnAttachStateChangeListener(listener)
-        accelerated = view.isHardwareAccelerated
-        onDispose { view.removeOnAttachStateChangeListener(listener) }
-    }
-    return effectiveQingChromeTier(requested, Build.VERSION.SDK_INT, memory.isLowRamDevice, reduced,
-        accelerated, hasBackdrop = true)
+    return effectiveQingChromeTier(requested, reducedTransparency = reduced)
 }
 
-@RequiresApi(31)
-private fun nativeBlur(radius: Float): RenderEffect =
-    android.graphics.RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.CLAMP).asComposeRenderEffect()
-
-/** The recorded body is sampled at the chrome's actual root coordinates. Only
- * this background canvas receives native RenderEffect; foreground icons/text
- * and all content cards remain sharp and opaque. */
+/** A single translucent surface directly over the live page. No capture,
+ * blur, RenderEffect, or idle/scroll state. Foreground stays fully opaque. */
 @Composable
 fun QingChromeSurface(
     modifier: Modifier = Modifier,
-    requestedTier: QingChromeTier = QingChromeTier.SOLID,
-    backdrop: GraphicsLayer? = null,
-    backdropOrigin: Offset = Offset.Zero,
+    requestedTier: QingChromeTier = QingChromeTier.ENHANCED,
     resolvedTier: QingChromeTier? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val colors = qingColors
-    val capability = resolvedTier ?: rememberEffectiveQingChromeTier(requestedTier)
-    val tier = if (backdrop == null && capability >= QingChromeTier.BLUR) QingChromeTier.TINTED else capability
+    val tier = resolvedTier ?: rememberEffectiveQingChromeTier(requestedTier)
     val shape = RoundedCornerShape(QingRadiusTokens.radiusPill)
-    var origin by remember { mutableStateOf(Offset.Zero) }
-    val blurRadius = with(LocalDensity.current) { (if (tier == QingChromeTier.ENHANCED) 20.dp else 12.dp).toPx() }
-    val blur = remember(tier, blurRadius) {
-        if (Build.VERSION.SDK_INT >= 31 && tier >= QingChromeTier.BLUR) nativeBlur(blurRadius) else null
-    }
-    val opacity = when {
-        backdrop == null && capability == QingChromeTier.ENHANCED -> 0.86f
-        backdrop == null && capability == QingChromeTier.BLUR -> 0.92f
-        else -> when (tier) {
-        QingChromeTier.SOLID -> 1f
-        QingChromeTier.TINTED -> 0.92f
-        QingChromeTier.BLUR -> 0.78f
-        QingChromeTier.ENHANCED -> 0.63f
-        }
-    }
+    val opacity = qingChromeOpacity(tier)
     Box(
-        modifier = modifier.onGloballyPositioned { origin = it.positionInRoot() }
-            .shadow(3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.06f),
+        modifier = modifier.shadow(3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.06f),
                 spotColor = Color.Black.copy(alpha = 0.08f))
             .clip(shape).border(0.5.dp, colors.strokeHairline, shape),
     ) {
-        if (blur != null && backdrop != null) {
-            Canvas(Modifier.matchParentSize().graphicsLayer { renderEffect = blur; clip = true }) {
-                drawRect(colors.surfaceCanvas)
-                val delta = origin - backdropOrigin
-                translate(-delta.x, -delta.y) { drawLayer(backdrop) }
-            }
-        }
         Box(Modifier.matchParentSize().background(colors.surfaceSheet.copy(alpha = opacity)))
-        if (capability == QingChromeTier.ENHANCED) {
+        if (tier == QingChromeTier.ENHANCED) {
             val dark = LocalQingDark.current
-            val shine = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.45f)
-            Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(shine, Color.Transparent, Color.Transparent))))
+            val shine = Color.White.copy(alpha = if (dark) 0.06f else 0.12f)
+            val highlight = remember(shine) {
+                Brush.verticalGradient(listOf(shine, Color.Transparent, Color.Transparent))
+            }
+            Box(Modifier.matchParentSize().background(highlight))
         }
         content()
     }

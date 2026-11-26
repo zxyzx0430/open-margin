@@ -8,6 +8,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import com.bookkeeping.app.ui.components.QingChromeTier
+import com.bookkeeping.app.ui.components.parseQingChromeTier
 
 data class QingAppearance(
     val redIncome: Boolean = false,
@@ -26,9 +27,7 @@ fun rememberQingAppearancePreferences(): SharedPreferences {
 
 fun readQingAppearance(prefs: SharedPreferences): QingAppearance = QingAppearance(
     redIncome = prefs.getBoolean("red_income", false),
-    chromeTier = runCatching {
-        QingChromeTier.valueOf(prefs.getString("chrome_tier", null) ?: QingChromeTier.ENHANCED.name)
-    }.getOrDefault(QingChromeTier.ENHANCED),
+    chromeTier = parseQingChromeTier(prefs.getString("chrome_tier", null)),
 )
 
 fun setQingRedIncome(prefs: SharedPreferences, enabled: Boolean) {
