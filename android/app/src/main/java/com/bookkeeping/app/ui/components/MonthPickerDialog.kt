@@ -52,17 +52,13 @@ fun MonthPickerDialog(
     var year by remember(selectedMonth) {
         mutableIntStateOf(selectedParts?.year ?: Calendar.getInstance().get(Calendar.YEAR))
     }
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier.widthIn(min = 280.dp, max = 560.dp).fillMaxWidth(),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+    QingGestureSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
                 Text(
                     text = tr("选择月份"),
                     style = MaterialTheme.typography.titleLarge,
@@ -149,7 +145,6 @@ fun MonthPickerDialog(
                         Text(tr("取消"))
                     }
                 }
-            }
         }
     }
 }

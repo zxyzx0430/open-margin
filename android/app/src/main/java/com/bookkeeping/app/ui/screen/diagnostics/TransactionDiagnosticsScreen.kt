@@ -394,7 +394,7 @@ fun TransactionDiagnosticsScreen(
     }
 
     if (confirmClearRawText) {
-        AlertDialog(
+        com.bookkeeping.app.ui.components.QingConfirmationSheet(
             onDismissRequest = { confirmClearRawText = false },
             title = { Text(tr("清除所有原始正文？")) },
             text = {
@@ -686,7 +686,7 @@ fun TransactionDiagnosticsScreen(
     }
     feedbackReceipt?.let { receipt ->
         val clipboard = LocalClipboardManager.current
-        AlertDialog(
+        com.bookkeeping.app.ui.components.QingConfirmationSheet(
             onDismissRequest = { feedbackReceipt = null },
             title = { Text(tr("反馈发送成功")) },
             text = {

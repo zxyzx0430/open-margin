@@ -164,12 +164,9 @@ class UpdateInstallController internal constructor(
         val locked = state.stage == UpdateInstallStage.VERIFYING
         val actionBusy = state.stage == UpdateInstallStage.DOWNLOADING ||
             state.stage == UpdateInstallStage.VERIFYING
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { if (!locked) close() },
-            properties = DialogProperties(
-                dismissOnBackPress = !locked,
-                dismissOnClickOutside = !locked,
-            ),
+            canDismiss = !locked,
             title = {
                 val titlePrefix = if (state.stage == UpdateInstallStage.READY) {
                     tr("新版本已下载完成")
