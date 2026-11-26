@@ -19,7 +19,7 @@ data class MerchantSuggestion(
     val displayName: String,
     val spec: MerchantIconSpec,
     val defaultCurrency: String? = null,
-    val defaultCadence: SubscriptionCadence? = null,
+    val defaultCadence: String? = null,
     val searchTerms: List<String> = emptyList(),
 )
 
@@ -108,7 +108,7 @@ object MerchantIconCatalog {
         val displayName: String,
         val ruleKey: String,
         val defaultCurrency: String? = null,
-        val defaultCadence: SubscriptionCadence? = null,
+        val defaultCadence: String? = null,
         val extraTerms: List<String> = emptyList(),
     )
 
