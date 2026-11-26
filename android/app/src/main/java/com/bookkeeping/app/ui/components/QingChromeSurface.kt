@@ -37,8 +37,8 @@ fun effectiveQingChromeTier(
 
 internal fun qingChromeOpacity(tier: QingChromeTier): Float = when (tier) {
     QingChromeTier.SOLID -> 1f
-    QingChromeTier.TINTED -> 0.86f
-    QingChromeTier.ENHANCED -> 0.68f
+    QingChromeTier.TINTED -> 0.92f
+    QingChromeTier.ENHANCED -> 0.85f
 }
 
 /** Observe only accessibility preferences; scrolling never changes material. */

@@ -9,7 +9,7 @@ Baseline: 9fcd5e3, feat/frontend-p0-tokens. Development branch feat/frontend-v4;
 - Day-grouped ledger cards, quieter borders; amount remains complete and single line.
 - Six customizable subscription cards, muted brand colors, directional satin highlight and contact shadow.
 - Income/expense summary first; secondary status foldable, critical notices remain discoverable.
-- Keep always-clear translucent floating bar (no blur), C indicator, direct main tabs, calendar live resize, VoiceFab three gestures, all financial/capture/sync features. Preserve test applicationId and data.
+- Keep always-clear translucent floating bar (no blur), Option A color-only selection, direct main tabs, calendar live resize, VoiceFab three gestures, all financial/capture/sync features. Preserve test applicationId and data.
 - Respect reduce motion, font scaling, screen reader, and light/dark modes.
 
 ## Workstreams / gates
@@ -18,3 +18,7 @@ Baseline: 9fcd5e3, feat/frontend-p0-tokens. Development branch feat/frontend-v4;
 3. Shared title/sheet/navigation/gesture system; no conflicting animation layers.
 4. Refine ledger, calendar, statistics, budget, settings, wallet and detail. Preserve feature discoverability.
 5. Debug + performance variant build, unit tests, CI, screenshot and frame-time A/B on same device. No visual/performance claim without device evidence.
+
+## Follow-up on first V4 device screenshots
+- Root headers use 76dp expanded / 52dp compact with inline actions, no empty action row. Child subscription header retains its populated action row.
+- Navigation selection switches from C underline to A color-only; centered icon/label group, no indicator reserve. Enhanced surface opacity 85%, Standard 92%, Solid 100%. No blur or scroll-dependent changes.

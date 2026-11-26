@@ -175,7 +175,7 @@ fun SubscriptionsManageScreen(
         deckPreferences.edit().putString("ids", ids.joinToString(",")).apply()
     }
     val subscriptionsListState = rememberLazyListState()
-    val titleCollapse = rememberQingTitleCollapseState(subscriptionsListState)
+    val titleCollapse = rememberQingTitleCollapseState(subscriptionsListState, hasLeading = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     fun createSubscription() {
         editingSubscription = null

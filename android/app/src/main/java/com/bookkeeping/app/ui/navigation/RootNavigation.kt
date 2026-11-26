@@ -524,23 +524,18 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                                     }),
                             contentAlignment = Alignment.Center,
                         ) {
+                            // Option A: color alone marks selection. Center the
+                            // complete icon/label group, with no reserved indicator space.
                             Column(
-                                modifier = Modifier.padding(bottom = 5.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
+                                verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
                             ) {
-                                Icon(if (selected) item.icon else item.outlineIcon, null,
+                                Icon(item.outlineIcon, null,
                                     modifier = Modifier.size(23.dp), tint = tint)
-                                Text(tr(item.label), fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                                Text(tr(item.label), fontSize = 11.sp, lineHeight = 14.sp,
+                                    fontWeight = FontWeight.Medium,
                                     color = tint, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.padding(horizontal = 1.dp))
-                            }
-                            // Option C: no nested selection capsule. The indicator
-                            // occupies a fixed overlay, never changing item measurement.
-                            if (selected) {
-                                Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
-                                    .width(16.dp).height(2.dp)
-                                    .background(qingColors.accentPrimary, RoundedCornerShape(1.dp)))
                             }
                         }
                     }

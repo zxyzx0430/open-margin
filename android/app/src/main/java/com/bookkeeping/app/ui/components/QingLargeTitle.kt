@@ -63,10 +63,12 @@ class QingTitleCollapseState internal constructor(
     }
 }
 
+internal fun qingTitleExpandedHeight(hasLeading: Boolean): Int = if (hasLeading) 104 else 76
+
 @Composable
-fun rememberQingTitleCollapseState(list: LazyListState): QingTitleCollapseState {
+fun rememberQingTitleCollapseState(list: LazyListState, hasLeading: Boolean = false): QingTitleCollapseState {
     val reduced = rememberReduceMotion()
-    val travel = with(LocalDensity.current) { 52.dp.toPx() }
+    val travel = with(LocalDensity.current) { (qingTitleExpandedHeight(hasLeading) - 52).dp.toPx() }
     val stored = rememberSaveable { mutableFloatStateOf(if (list.firstVisibleItemIndex > 0) 1f else 0f) }
     val collapse = remember(stored, travel, reduced) { QingTitleCollapseState(stored, travel, reduced) }
     LaunchedEffect(list, collapse) {
@@ -82,7 +84,7 @@ fun rememberQingTitleCollapseState(list: LazyListState): QingTitleCollapseState 
     return collapse
 }
 
-/** Expanded action row + independent large heading (104dp), compact (52dp).
+/** Main pages: 76dp expanded heading with inline actions; child pages with back navigation: 104dp. Compact: 52dp.
  * Fraction is read only during measure/draw except the coarse semantics switch.
  */
 @Composable
@@ -103,16 +105,16 @@ fun QingLargeTitle(
             Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.CenterStart) {
                 Text(title, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.7).sp,
                     color = colors.textPrimary, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 20.dp)
+                    modifier = Modifier.padding(start = 20.dp, end = if (hasLeading) 20.dp else maxOf(20, actionWidth).dp)
                         .then(if (compact) Modifier.clearAndSetSemantics {} else Modifier.semantics { heading() })
-                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction < 0.5f) 1f else 0f } else 1f - state.fraction })
+                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction < 0.5f) 1f else 0f } else if (hasLeading) 1f - state.fraction else (1f - state.fraction * 2f).coerceIn(0f, 1f) })
             }
-            Box(Modifier.fillMaxWidth().height(52.dp).background(colors.surfaceCanvas)) {
+            Box(Modifier.fillMaxWidth().height(52.dp).then(if (hasLeading) Modifier.background(colors.surfaceCanvas) else Modifier)) {
                 Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colors.textPrimary,
                     maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = side)
                         .then(if (compact) Modifier.semantics { heading() } else Modifier.clearAndSetSemantics {})
-                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction >= 0.5f) 1f else 0f } else state.fraction })
+                        .graphicsLayer { alpha = if (state.reduced) { if (state.fraction >= 0.5f) 1f else 0f } else if (hasLeading) state.fraction else (state.fraction * 2f - 1f).coerceIn(0f, 1f) })
                 Row(Modifier.align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically, content = leading)
                 Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically, content = actions)
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(0.5.dp)
@@ -124,10 +126,18 @@ fun QingLargeTitle(
         val rowConstraints = constraints.copy(minHeight = row, maxHeight = row)
         val large = measurables[0].measure(rowConstraints)
         val small = measurables[1].measure(rowConstraints)
-        val remaining = (row * (1f - state.fraction)).roundToInt()
+        val travel = (qingTitleExpandedHeight(hasLeading) - 52).dp.toPx()
+        val remaining = (travel * (1f - state.fraction)).roundToInt()
         layout(constraints.maxWidth, constraints.constrainHeight(row + remaining)) {
-            large.placeRelative(0, remaining)
-            small.placeRelative(0, 0)
+            if (hasLeading) {
+                large.placeRelative(0, remaining)
+                small.placeRelative(0, 0)
+            } else {
+                // No permanently empty action row on root pages.
+                val centerY = remaining / 2
+                large.placeRelative(0, centerY)
+                small.placeRelative(0, centerY)
+            }
         }
     }
 }

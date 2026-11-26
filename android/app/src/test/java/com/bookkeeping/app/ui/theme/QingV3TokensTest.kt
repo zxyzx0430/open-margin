@@ -70,8 +70,8 @@ class QingV3TokensTest {
         assertEquals(QingChromeTier.SOLID, parseQingChromeTier("SOLID"))
         assertEquals(QingChromeTier.ENHANCED, effectiveQingChromeTier(QingChromeTier.ENHANCED))
         assertEquals(1f, qingChromeOpacity(QingChromeTier.SOLID), 0.001f)
-        assertEquals(0.86f, qingChromeOpacity(QingChromeTier.TINTED), 0.001f)
-        assertEquals(0.68f, qingChromeOpacity(QingChromeTier.ENHANCED), 0.001f)
+        assertEquals(0.92f, qingChromeOpacity(QingChromeTier.TINTED), 0.001f)
+        assertEquals(0.85f, qingChromeOpacity(QingChromeTier.ENHANCED), 0.001f)
         assertTrue(reduceMotionForScale(0f))
         assertTrue(!reduceMotionForScale(0.5f))
     }
@@ -121,6 +121,11 @@ class QingV3TokensTest {
         assertTrue(!com.bookkeeping.app.ui.components.qingSheetCanChange(androidx.compose.material3.SheetValue.Hidden, false))
         assertTrue(com.bookkeeping.app.ui.components.qingSheetCanChange(androidx.compose.material3.SheetValue.Expanded, false))
     }
+    @Test fun rootTitleDoesNotReserveEmptyActionRow() {
+        assertEquals(76, com.bookkeeping.app.ui.components.qingTitleExpandedHeight(false))
+        assertEquals(104, com.bookkeeping.app.ui.components.qingTitleExpandedHeight(true))
+    }
+
     @Test fun titleCollapseConsumesOnlyRemainingTravel() {
         val (collapsed, consumed) = com.bookkeeping.app.ui.components.titleConsume(0.5f, -80f, 52f)
         assertEquals(1f, collapsed, 0.001f)
