@@ -1,5 +1,26 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.components.QingSheetGrabber
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.automirrored.outlined.List
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.Settings
+import com.bookkeeping.app.ui.theme.qingPressFeedback
+import com.bookkeeping.app.ui.theme.QingMotionTokens
+
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.calculateEndPadding
@@ -218,63 +239,41 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                if (showBottomBar) Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp)) {
+                if (showBottomBar) Column(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                ) {
                     QingChromeSurface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
                         requestedTier = chromePreference,
                         backdrop = chromeBackdrop,
                         backdropOrigin = backdropOrigin,
                     ) {
-                    NavigationBar(
-                        containerColor = Color.Transparent,
-                        tonalElevation = 0.dp,
-                        windowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
-                    ) {
-                        val showLabels = LocalDensity.current.fontScale <= 1.3f
-
-                        navItems.forEach { item ->
-                            val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
-                            val label: (@Composable () -> Unit)? = if (showLabels) {
-                                {
-                                    Text(
-                                        text = tr(item.label),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                        Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            navItems.forEach { item ->
+                                val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                                val tint = if (selected) qingColors.accentPrimary else qingColors.textSecondary.copy(alpha = 0.72f)
+                                Column(
+                                    Modifier.weight(1f).height(60.dp)
+                                        .qingPressFeedback(QingMotionTokens.cardPressedScale)
+                                        .selectable(selected = selected, role = Role.Tab, onClick = {
+                                            navController.navigate(item.route) {
+                                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
+                                        }),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Icon(if (selected) item.icon else item.outlineIcon, null,
+                                        modifier = Modifier.size(23.dp), tint = tint)
+                                    Text(tr(item.label), fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                                        color = tint, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 1.dp))
                                 }
-                            } else {
-                                null
                             }
-                            NavigationBarItem(
-                                selected = selected,
-                                onClick = {
-                                    navController.navigate(item.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                icon = {
-                                    Icon(
-                                        item.icon,
-                                        contentDescription = tr(item.label),
-                                        modifier = Modifier.size(24.dp),
-                                    )
-                                },
-                                label = label,
-                                alwaysShowLabel = showLabels,
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                            )
                         }
-                    }
                     }
                 }
             }
@@ -540,6 +539,9 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         if (showBillImportSheet) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
+                containerColor = qingColors.surfaceSheet,
+                shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
+                dragHandle = { QingSheetGrabber() },
                 onDismissRequest = {
                     if (!billImportViewModel.state.value.importing) {
                         showBillImportSheet = false
@@ -611,12 +613,12 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     }
 }
 
-internal sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector) {
-    data object Transactions : BottomNavItem("transactions", "账单", Icons.AutoMirrored.Filled.List)
-    data object Calendar : BottomNavItem("calendar", "日历", Icons.Outlined.CalendarMonth)
-    data object Stats : BottomNavItem("stats", "统计", Icons.Filled.PieChart)
-    data object Budget : BottomNavItem("budget", "预算", Icons.Filled.AccountBalanceWallet)
-    data object Settings : BottomNavItem("settings", "设置", Icons.Filled.Settings)
+internal sealed class BottomNavItem(val route: String, val label: String, val icon: ImageVector, val outlineIcon: ImageVector) {
+    data object Transactions : BottomNavItem("transactions", "账单", Icons.AutoMirrored.Filled.List, Icons.AutoMirrored.Outlined.List)
+    data object Calendar : BottomNavItem("calendar", "日历", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth)
+    data object Stats : BottomNavItem("stats", "统计", Icons.Filled.PieChart, Icons.Outlined.PieChart)
+    data object Budget : BottomNavItem("budget", "预算", Icons.Filled.AccountBalanceWallet, Icons.Outlined.AccountBalanceWallet)
+    data object Settings : BottomNavItem("settings", "设置", Icons.Filled.Settings, Icons.Outlined.Settings)
 
     companion object {
         val ALL = listOf(Transactions, Calendar, Stats, Budget, Settings)

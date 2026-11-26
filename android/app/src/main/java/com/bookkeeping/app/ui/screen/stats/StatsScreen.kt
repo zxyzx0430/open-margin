@@ -1,5 +1,11 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.ui.components.QingSegmentedControl
+
+import androidx.compose.foundation.lazy.rememberLazyListState
+
+import com.bookkeeping.app.ui.components.QingLargeTitle
+
 import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
 
 import com.bookkeeping.app.ui.components.WalletCardSurface
@@ -186,27 +192,14 @@ fun StatsScreen(
         )
     }
 
+    val statsListState = rememberLazyListState()
     Scaffold(
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = QingBackground,
-                    titleContentColor = QingText,
-                ),
-                title = {
-                    Text(
-                        text = tr("统计"),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
-            )
-        },
+        topBar = { QingLargeTitle(tr("统计"), statsListState) },
     ) { innerPadding ->
         LazyColumn(
+            state = statsListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
@@ -451,78 +444,10 @@ fun StatsScreen(
 }
 
 @Composable
-private fun StatsTabBar(
-    selected: StatsTab,
-    onSelect: (StatsTab) -> Unit,
-) {
-    val shape = RoundedCornerShape(14.dp)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        color = QingSurface,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .selectableGroup()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatsTabSegment(
-                text = tr("支出"),
-                selected = selected == StatsTab.EXPENSE,
-                onClick = { onSelect(StatsTab.EXPENSE) },
-                modifier = Modifier.weight(1f),
-            )
-            StatsTabSegment(
-                text = tr("收入"),
-                selected = selected == StatsTab.INCOME,
-                onClick = { onSelect(StatsTab.INCOME) },
-                modifier = Modifier.weight(1f),
-            )
-            StatsTabSegment(
-                text = bilingual("订阅", "Subscriptions"),
-                selected = selected == StatsTab.SUBSCRIPTION,
-                onClick = { onSelect(StatsTab.SUBSCRIPTION) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatsTabSegment(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val pillShape = RoundedCornerShape(10.dp)
-    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
-    Box(
-        modifier = modifier
-            .heightIn(min = 38.dp)
-            .clip(pillShape)
-            .background(if (selected) QingPrimary else Color.Transparent)
-            .selectable(
-                selected = selected,
-                role = Role.Tab,
-                onClick = onClick,
-            )
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = foreground,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+private fun StatsTabBar(selected: StatsTab, onSelect: (StatsTab) -> Unit) {
+    val options = listOf(StatsTab.EXPENSE, StatsTab.INCOME, StatsTab.SUBSCRIPTION)
+    QingSegmentedControl(listOf(tr("支出"), tr("收入"), tr("订阅")), options.indexOf(selected),
+        { onSelect(options[it]) }, Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -570,71 +495,10 @@ private fun CompactPeriodFilterBar(
 }
 
 @Composable
-private fun CompactPeriodPillGroup(
-    selected: StatsPeriod,
-    onSelect: (StatsPeriod) -> Unit,
-) {
-    val containerShape = RoundedCornerShape(50)
-    Surface(
-        shape = containerShape,
-        color = QingSurface,
-    ) {
-        Row(
-            modifier = Modifier
-                .selectableGroup()
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CompactPeriodOption(
-                text = bilingual("日", "Day"),
-                selected = selected == StatsPeriod.DAY,
-                onClick = { onSelect(StatsPeriod.DAY) },
-            )
-            CompactPeriodOption(
-                text = bilingual("月", "Mo"),
-                selected = selected == StatsPeriod.MONTH,
-                onClick = { onSelect(StatsPeriod.MONTH) },
-            )
-            CompactPeriodOption(
-                text = bilingual("年", "Yr"),
-                selected = selected == StatsPeriod.YEAR,
-                onClick = { onSelect(StatsPeriod.YEAR) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun CompactPeriodOption(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(50)
-    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
-    Box(
-        modifier = Modifier
-            .heightIn(min = 32.dp)
-            .clip(shape)
-            .background(if (selected) QingPrimary else Color.Transparent)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp, vertical = 5.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            color = foreground,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
+private fun CompactPeriodPillGroup(selected: StatsPeriod, onSelect: (StatsPeriod) -> Unit) {
+    val options = listOf(StatsPeriod.DAY, StatsPeriod.MONTH, StatsPeriod.YEAR)
+    QingSegmentedControl(listOf(tr("日"), tr("月"), tr("年")), options.indexOf(selected),
+        { onSelect(options[it]) }, Modifier.width(132.dp))
 }
 
 @Composable

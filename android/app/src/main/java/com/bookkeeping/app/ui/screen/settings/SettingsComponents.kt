@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+
 import androidx.compose.foundation.layout.heightIn
 import com.bookkeeping.app.ui.components.WalletCardSurface
 import com.bookkeeping.app.ui.theme.qingColors
@@ -23,7 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.selection.toggleable
@@ -153,13 +156,14 @@ fun SettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .toggleable(
                 value = checked,
                 role = Role.Switch,
-                onValueChange = onCheckedChange,
+                onValueChange = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onCheckedChange(it) },
             )
             .heightIn(min = 52.dp)
             .padding(vertical = 8.dp),
@@ -174,7 +178,7 @@ fun SettingsSwitchRow(
             SettingsRowTitle(title)
             SettingsRowSubtitle(subtitle)
         }
-        Switch(checked = checked, onCheckedChange = null)
+        QingSwitch(checked = checked, onCheckedChange = null)
     }
 }
 

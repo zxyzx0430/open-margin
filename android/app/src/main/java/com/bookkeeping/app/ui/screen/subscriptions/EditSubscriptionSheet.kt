@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
+import com.bookkeeping.app.ui.components.QingSheetGrabber
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,7 +34,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -204,10 +207,11 @@ fun EditSubscriptionSheet(
     }
 
     ModalBottomSheet(
+        dragHandle = { QingSheetGrabber() },
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = QingSurface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = qingColors.surfaceSheet,
+        shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
     ) {
         Column(
             modifier = Modifier
@@ -672,10 +676,10 @@ fun EditSubscriptionSheet(
     }
 
     if (showDeleteConfirm && existing != null) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("彻底删除订阅？") },
-            text = { Text("确定彻底删除「${existing.name}」？删除后将从提醒与同步队列中移除，已记入账本的历史流水会保留。") },
+            title = { Text(tr("彻底删除订阅？")) },
+            text = { Text(tr("确定彻底删除「%s」？删除后将从提醒与同步队列中移除，已记入账本的历史流水会保留。").format(existing.name)) },
             confirmButton = {
                 TextButton(
                     onClick = {

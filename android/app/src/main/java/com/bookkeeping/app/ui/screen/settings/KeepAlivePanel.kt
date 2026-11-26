@@ -18,7 +18,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -161,7 +161,7 @@ private fun KeepAliveSwitchRow(enabled: Boolean, onToggle: (Boolean) -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = enabled, onCheckedChange = onToggle)
+        QingSwitch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 

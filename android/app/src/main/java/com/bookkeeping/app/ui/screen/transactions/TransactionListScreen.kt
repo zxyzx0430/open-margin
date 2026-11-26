@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+
+import com.bookkeeping.app.ui.components.QingLargeTitle
+
 import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
 
 import com.bookkeeping.app.ui.components.WalletCardSurface
@@ -418,11 +422,11 @@ fun TransactionListScreen(
         items.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents } to
             items.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
     }
-    val duplicatesIndex = 5 +
+    val duplicatesIndex = 4 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
         (if (siteUpdateBanner != null) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0)
-    val dayGroupsStartIndex = 6 +
+    val dayGroupsStartIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
         (if (siteUpdateBanner != null) 1 else 0) +
         (if (captureReview.pending.isNotEmpty()) 1 else 0) +
@@ -453,6 +457,38 @@ fun TransactionListScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            QingLargeTitle(title = tr("清衡"), state = listState, actionWidth = 96, actions = {
+                    IconButton(onClick = {
+                        when {
+                            duplicateCandidates.isNotEmpty() -> {
+                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                            }
+                            captureReview.pending.isNotEmpty() -> {
+                                captureReviewViewModel.refresh()
+                                showCaptureReview = true
+                            }
+                            else -> openAppNotificationSettings(context)
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Outlined.NotificationsNone,
+                            contentDescription = if (
+                                duplicateCandidates.isNotEmpty() ||
+                                captureReview.pending.isNotEmpty()
+                            ) tr("待确认提醒") else tr("通知设置"),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    IconButton(onClick = onOpenBillImport) {
+                        Icon(
+                            imageVector = Icons.Outlined.FileDownload,
+                            contentDescription = tr("导入账单"),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+            })
+        },
         floatingActionButton = {
             // 气泡压在 FAB 上方，但不能把 FAB 顶走：FAB 始终贴右，气泡往左上展开。
             Layout(
@@ -516,49 +552,6 @@ fun TransactionListScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item(key = "header") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = tr("清衡"),
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = {
-                        when {
-                            duplicateCandidates.isNotEmpty() -> {
-                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
-                            }
-                            captureReview.pending.isNotEmpty() -> {
-                                captureReviewViewModel.refresh()
-                                showCaptureReview = true
-                            }
-                            else -> openAppNotificationSettings(context)
-                        }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Outlined.NotificationsNone,
-                            contentDescription = if (
-                                duplicateCandidates.isNotEmpty() ||
-                                captureReview.pending.isNotEmpty()
-                            ) tr("待确认提醒") else tr("通知设置"),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    IconButton(onClick = onOpenBillImport) {
-                        Icon(
-                            imageVector = Icons.Outlined.FileDownload,
-                            contentDescription = tr("导入账单"),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
-            }
-
             item(key = "status") {
                 Row(
                     modifier = Modifier
@@ -874,7 +867,7 @@ fun TransactionListScreen(
     }
 
     pendingDelete?.let { entry ->
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { pendingDelete = null },
             title = { Text(tr("删除这笔交易？")) },
             text = {

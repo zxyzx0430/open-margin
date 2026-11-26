@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import com.bookkeeping.app.ui.components.QingGestureSheet
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -29,7 +30,6 @@ import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.Remove
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,7 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -460,10 +460,10 @@ fun SubscriptionDetailSheet(
     }
 
     if (showDeleteConfirm && onDelete != null) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除订阅？") },
-            text = { Text("删除「${subscription.name}」后将不再显示在续费排期中，历史账单记录不受影响。") },
+            title = { Text(tr("删除订阅？")) },
+            text = { Text(tr("删除「%s」后将不再显示在续费排期中，历史账单记录不受影响。").format(subscription.name)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -510,7 +510,7 @@ private fun DetailSwitchRow(
             )
         }
         Spacer(Modifier.width(12.dp))
-        Switch(
+        QingSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
         )

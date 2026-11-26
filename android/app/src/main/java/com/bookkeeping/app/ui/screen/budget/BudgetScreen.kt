@@ -162,7 +162,7 @@ fun BudgetScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp + LocalQingChromeOverlap.current),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 24.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "month_selector") {

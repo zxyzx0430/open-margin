@@ -5,6 +5,11 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "彻底删除订阅？" to "Permanently delete subscription?",
+        "删除订阅？" to "Delete subscription?",
+        "确定彻底删除「%s」？删除后将从提醒与同步队列中移除，已记入账本的历史流水会保留。" to "Permanently delete %s? Reminders and sync queue entries will be removed. Existing ledger transactions will be preserved.",
+        "删除「%s」后将不再显示在续费排期中，历史账单记录不受影响。" to "After deleting %s, it will no longer appear in the renewal schedule. Existing ledger transactions are unaffected.",
+        "订阅" to "Subscriptions",
         "全部订阅" to "All subscriptions",
         "切换列表" to "Switch to list",
         "切换卡包" to "Switch to wallet",

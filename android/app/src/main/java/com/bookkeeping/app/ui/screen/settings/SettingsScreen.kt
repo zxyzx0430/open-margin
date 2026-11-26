@@ -1,5 +1,12 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
+import com.bookkeeping.app.ui.components.QingSheetGrabber
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+
+import com.bookkeeping.app.ui.components.QingLargeTitle
+
 import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
 
 import androidx.compose.ui.unit.sp
@@ -50,7 +57,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.FilterChip
@@ -314,29 +321,14 @@ fun SettingsScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        tr("设置"),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                ),
-                windowInsets = WindowInsets(0, 0, 0, 0),
-            )
-        },
+        topBar = { QingLargeTitle(tr("设置"), settingsListState) },
     ) { innerPadding ->
         LazyColumn(
             state = settingsListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp + LocalQingChromeOverlap.current),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "status_overview") {
@@ -520,6 +512,9 @@ fun SettingsScreen(
                 confirmValueChange = { !importViewModel.state.value.importing },
             )
             ModalBottomSheet(
+                containerColor = qingColors.surfaceSheet,
+                shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
+                dragHandle = { QingSheetGrabber() },
                 onDismissRequest = { dismissImportExportSheet() },
                 sheetState = importSheetState,
             ) {
@@ -1265,7 +1260,7 @@ private fun SuccessNotificationCard(enabled: Boolean, onToggle: (Boolean) -> Uni
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = enabled, onCheckedChange = onToggle)
+                QingSwitch(checked = enabled, onCheckedChange = onToggle)
             }
             HorizontalDivider()
             Text(
@@ -1931,7 +1926,7 @@ private fun AppearancePreferencesCard() {
         )
     }
     if (choosingMaterial) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { choosingMaterial = false },
             title = { Text(tr("界面材质")) },
             text = {

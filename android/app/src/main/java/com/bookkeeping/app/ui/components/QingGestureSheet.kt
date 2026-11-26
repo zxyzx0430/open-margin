@@ -82,7 +82,7 @@ fun QingGestureSheet(
                     .clip(RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero))
                     .background(colors.surfaceSheet),
             ) {
-                Box(Modifier.fillMaxWidth().height(32.dp)
+                Box(Modifier.fillMaxWidth().height(24.dp)
                     .draggable(dragState, Orientation.Vertical, enabled = canDismiss,
                         startDragImmediately = displacement > 0f,
                         onDragStarted = { settleJob?.cancel(); animator.stop() },
@@ -92,9 +92,9 @@ fun QingGestureSheet(
                         })
                     .semantics { contentDescription = tr("下滑关闭面板") },
                     contentAlignment = Alignment.Center) {
-                    Box(Modifier.width(32.dp).height(4.dp)
+                    Box(Modifier.width(36.dp).height(4.dp)
                         .clip(RoundedCornerShape(QingRadiusTokens.radiusPill))
-                        .background(colors.textSecondary.copy(alpha = 0.4f)))
+                        .background(colors.textSecondary.copy(alpha = 0.28f)))
                 }
                 content()
             }

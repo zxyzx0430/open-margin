@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import com.bookkeeping.app.ui.navigation.qingLedgerShared
 
 import com.bookkeeping.app.ui.components.MerchantAvatar
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -790,7 +790,7 @@ private fun DeleteTransactionDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    QingConfirmationSheet(
         onDismissRequest = onDismiss,
         title = { Text(tr("删除这笔交易？")) },
         text = {

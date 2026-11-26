@@ -265,7 +265,7 @@ function finance_render_panel(string $view,array $model,string $dashboardPayment
       </div>
 
       <?php if($view==='stats'): ?>
-        <div class="finance-tabbar" role="tablist" aria-label="统计视图">
+        <div class="finance-tabbar om-segmented" role="tablist" aria-label="统计视图">
           <button type="button" class="finance-tab is-current" data-finance-tab="overview">综合财务</button>
           <button type="button" class="finance-tab" data-finance-tab="categories">消费分析</button>
           <button type="button" class="finance-tab" data-finance-tab="subscriptions">订阅分析</button>
@@ -297,7 +297,7 @@ function finance_render_panel(string $view,array $model,string $dashboardPayment
         <?php endif; ?>
         <?php if($view==='dashboard' && $dashboardPaymentsHtml!==''): ?><div class="om-home-workspace"><?php endif; ?>
         <div class="finance-chart-section"><div class="finance-line">
-          <strong>消费趋势</strong><div class="finance-switch"><button type="button" data-finance-range="7">7 天</button><button type="button" class="is-current" data-finance-range="30">整月</button></div>
+          <strong>消费趋势</strong><div class="finance-switch om-segmented"><button type="button" data-finance-range="7">7 天</button><button type="button" class="is-current" data-finance-range="30">整月</button></div>
         </div><div class="finance-chart" role="group" aria-label="人民币实际消费每日金额柱状图与日期选择"></div></div>
         <?php if($view==='dashboard' && $dashboardPaymentsHtml!=='') { echo $dashboardPaymentsHtml; echo '</div>'; } ?>
       </div>

@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.theme
 
+import com.bookkeeping.app.ui.components.largeTitleProgress
 import androidx.compose.animation.core.SnapSpec
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -79,5 +80,14 @@ class QingV3TokensTest {
             val l = androidx.compose.ui.graphics.Color.White.luminance()
             assertTrue((l + 0.05f) / (color.luminance() + 0.05f) >= 7f)
         }
+    }
+    @org.junit.Test
+    fun largeTitleCollapseAndReducedMotion() {
+        org.junit.Assert.assertEquals(0f, largeTitleProgress(0, 0, 42f, false), 0.001f)
+        org.junit.Assert.assertEquals(0.5f, largeTitleProgress(0, 21, 42f, false), 0.001f)
+        org.junit.Assert.assertEquals(1f, largeTitleProgress(0, 42, 42f, false), 0.001f)
+        org.junit.Assert.assertEquals(1f, largeTitleProgress(1, 0, 42f, false), 0.001f)
+        org.junit.Assert.assertEquals(0f, largeTitleProgress(0, 41, 42f, true), 0.001f)
+        org.junit.Assert.assertEquals(1f, largeTitleProgress(0, 42, 42f, true), 0.001f)
     }
 }

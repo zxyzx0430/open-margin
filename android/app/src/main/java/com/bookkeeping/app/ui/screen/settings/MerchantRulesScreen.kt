@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
+import com.bookkeeping.app.ui.components.QingSheetGrabber
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,7 +36,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -50,7 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -242,7 +245,7 @@ fun MerchantRulesScreen(
     }
 
     if (confirmingClear) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { confirmingClear = false },
             title = { Text(tr("清除全部分类记忆？")) },
             text = { Text(tr("自定义规则和自动学习结果会一起删除，无法恢复。")) },
@@ -405,9 +408,11 @@ private fun OtherCategoryCleanupSheet(
     val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
     ModalBottomSheet(
+        shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
+        dragHandle = { QingSheetGrabber() },
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = qingColors.surfaceSheet,
     ) {
         Column(
             modifier = Modifier
@@ -579,9 +584,11 @@ private fun OtherGroupCategorizeSheet(
     }
 
     ModalBottomSheet(
+        shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
+        dragHandle = { QingSheetGrabber() },
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = qingColors.surfaceSheet,
     ) {
         Column(
             modifier = Modifier
@@ -676,7 +683,7 @@ private fun OtherGroupCategorizeSheet(
                             style = MaterialTheme.typography.titleSmall,
                         )
                     }
-                    Switch(checked = rememberRule, onCheckedChange = null)
+                    QingSwitch(checked = rememberRule, onCheckedChange = null)
                 }
             }
 
@@ -686,13 +693,12 @@ private fun OtherGroupCategorizeSheet(
                     .padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                OutlinedButton(
+                TextButton(
                     onClick = onDismiss,
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Text(tr("取消"))
                 }
@@ -932,9 +938,11 @@ private fun MerchantRuleSheet(
     }
 
     ModalBottomSheet(
+        shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
+        dragHandle = { QingSheetGrabber() },
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = qingColors.surfaceSheet,
     ) {
         Column(
             modifier = Modifier
@@ -1039,7 +1047,7 @@ private fun MerchantRuleSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = applyToHistory, onCheckedChange = null)
+                QingSwitch(checked = applyToHistory, onCheckedChange = null)
             }
 
             Row(
@@ -1070,7 +1078,7 @@ private fun MerchantRuleSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = paused, onCheckedChange = null)
+                QingSwitch(checked = paused, onCheckedChange = null)
             }
 
             Row(
@@ -1078,14 +1086,13 @@ private fun MerchantRuleSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (entry != null) {
-                    OutlinedButton(
+                    TextButton(
                         onClick = { confirmingDelete = true },
                         modifier = Modifier
                             .weight(1f)
                             .height(46.dp),
                         shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                        colors = ButtonDefaults.outlinedButtonColors(
+                        colors = ButtonDefaults.textButtonColors(
                             contentColor = MaterialTheme.colorScheme.error,
                         ),
                     ) {
@@ -1110,7 +1117,7 @@ private fun MerchantRuleSheet(
     }
 
     if (confirmingDelete && entry != null) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { confirmingDelete = false },
             title = { Text(tr("删除这条规则？")) },
             text = { Text(tr("删除后这个商户不再自动套用分类。")) },

@@ -709,3 +709,87 @@ body.om-ui.dark {
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
   .om-ui header.om-header { background: var(--om-surface); backdrop-filter: none; }
 }
+
+/* P5 system controls: 36px segmented track, 7px indicator and borderless switch. */
+.om-ui .om-segmented {
+  position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  height: 36px; padding: 3px; box-sizing: border-box; border-radius: 10px;
+  background: var(--om-surface-elevated, #f0f2f0); isolation: isolate;
+}
+.om-ui .om-segmented > :is(button, a, label) {
+  position: relative; z-index: 1; display: grid; place-items: center; min-width: 0;
+  padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--om-ink);
+  font-weight: 500; white-space: nowrap; text-decoration: none;
+}
+.om-ui .om-segmented::before {
+  content: ""; position: absolute; inset: 3px auto 3px 3px;
+  width: calc((100% - 6px) / var(--om-segment-count, 3)); border-radius: 7px;
+  background: var(--om-surface, #fff); box-shadow: 0 1px 2px rgba(21,25,24,.06);
+  transform: translateX(calc(100% * var(--om-segment-index, 0)));
+  transition: transform var(--om-motion-standard);
+}
+.om-ui .om-segmented:has(> :nth-child(2):is(.active,.is-current,[aria-selected=true],[aria-pressed=true])) { --om-segment-index: 1; }
+.om-ui .om-segmented:has(> :nth-child(3):is(.active,.is-current,[aria-selected=true],[aria-pressed=true])) { --om-segment-index: 2; }
+.om-ui .om-segmented:has(> :nth-child(4):is(.active,.is-current,[aria-selected=true],[aria-pressed=true])) { --om-segment-index: 3; }
+.om-ui .om-segmented:has(> :nth-child(2):last-child) { --om-segment-count: 2; }
+.om-ui .om-segmented:has(> :nth-child(4):last-child) { --om-segment-count: 4; }
+.om-ui input.om-switch[type=checkbox] {
+  appearance: none; -webkit-appearance: none; position: relative;
+  width: 50px; height: 30px; border: 0; border-radius: 999px;
+  background: #e2e6e4; cursor: pointer; vertical-align: middle;
+}
+.om-ui input.om-switch[type=checkbox]::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 26px; height: 26px;
+  background: white; border-radius: 50%; box-shadow: 0 1px 2px rgba(21,25,24,.10);
+  transition: transform var(--om-motion-snappy);
+}
+.om-ui input.om-switch[type=checkbox]:checked { background: var(--om-primary); }
+.om-ui input.om-switch[type=checkbox]:checked::before { transform: translateX(20px); }
+.om-ui input.om-switch[type=checkbox]:focus-visible { outline: 2px solid var(--om-primary); outline-offset: 3px; }
+.om-ui input.om-switch[type=checkbox]:disabled { opacity: .5; cursor: default; }
+@media (prefers-color-scheme: dark) {
+  .om-ui .om-segmented::before { background: #2a312e; box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+  .om-ui input.om-switch[type=checkbox]:not(:checked) { background: #2d3531; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .om-ui .om-segmented::before, .om-ui input.om-switch[type=checkbox]::before { transition: none; }
+}
+
+/* Existing component selectors are deliberately overridden, not duplicated. */
+.om-ui .finance-native .finance-tabbar.om-segmented,
+.om-ui .finance-native .finance-switch.om-segmented,
+.om-ui .om-settings-tabs.om-segmented {
+  display: inline-grid; gap: 0; flex-wrap: nowrap; height: 36px; padding: 3px;
+  border: 0; border-radius: 10px; background: var(--om-surface-elevated);
+}
+.om-ui .finance-native .om-segmented > button,
+.om-ui .om-settings-tabs.om-segmented > button {
+  background: transparent; border: 0; box-shadow: none; border-radius: 7px;
+  color: var(--om-secondary); padding: 0 8px; min-width: 0;
+}
+.om-ui .finance-native .om-segmented > button.is-current,
+.om-ui .om-settings-tabs.om-segmented > button[aria-selected=true] {
+  color: var(--om-ink); background: transparent; box-shadow: none;
+}
+body.om-ui.dark .om-segmented::before {
+  background: #2a312e; box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+body.om-ui.dark input.om-switch[type=checkbox]:not(:checked) { background: #2d3531; }
+/* Upstream settings switches retain their native input and label interaction. */
+.om-ui .om-settings-page label.switch:has(> input[type=checkbox]) {
+  width: 50px; height: 30px;
+}
+.om-ui .om-settings-page label.switch > .slider {
+  border: 0; border-radius: 999px; background: #e2e6e4;
+}
+.om-ui .om-settings-page label.switch > .slider::before {
+  width: 26px; height: 26px; left: 2px; bottom: 2px; border-radius: 50%;
+  background: white; box-shadow: 0 1px 2px rgba(21,25,24,.1);
+  transition: transform var(--om-motion-snappy);
+}
+.om-ui .om-settings-page label.switch > input:checked + .slider { background: var(--om-primary); }
+.om-ui .om-settings-page label.switch > input:checked + .slider::before { transform: translateX(20px); }
+body.om-ui.dark .om-settings-page label.switch > input:not(:checked) + .slider { background: #2d3531; }
+@media(prefers-reduced-motion: reduce) {
+  .om-ui .om-settings-page label.switch > .slider::before { transition: none; }
+}

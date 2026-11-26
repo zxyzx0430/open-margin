@@ -63,6 +63,16 @@
     root.classList.add("om-settings-page");
     const sections = [...root.children].filter(child => child.classList.contains("account-section"));
     if (!sections.length) return;
+    // Only settings toggles; leave unrelated forms and checkboxes elsewhere unchanged.
+    root.querySelectorAll('input[type="checkbox"]').forEach(input => {
+      if (input.getAttribute("role") === "switch" || input.matches('.switch input, .toggle input') ||
+          input.closest('.account-section')) {
+        if (!input.closest('.switch, .toggle') || getComputedStyle(input).display !== "none") {
+          input.classList.add("om-switch");
+          input.setAttribute("role", "switch");
+        }
+      }
+    });
     heading("设置", root);
     const groups = [
       { id: "finance", title: "财务管理", items: [0, 1, 2, 4, 5, 9] },
@@ -71,7 +81,7 @@
       { id: "advanced", title: "高级设置", items: [6, 7, 8, 12] }
     ];
     const tabbar = document.createElement("div");
-    tabbar.className = "om-settings-tabs";
+    tabbar.className = "om-settings-tabs om-segmented";
     tabbar.setAttribute("role", "tablist");
     tabbar.setAttribute("aria-label", "设置分类");
     const views = new Map();

@@ -1,5 +1,11 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import com.bookkeeping.app.ui.theme.qingColors
+import com.bookkeeping.app.ui.components.QingSheetGrabber
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.bookkeeping.app.ui.components.QingLargeTitle
+import com.bookkeeping.app.ui.components.QingSegmentedControl
+
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.TextButton
@@ -143,36 +149,22 @@ fun SubscriptionsManageScreen(
         activeSubs.count { SubscriptionProjection.daysUntilDue(it.nextDueMs, nowMs) <= 7 }
     }
 
+    val subscriptionsListState = rememberLazyListState()
     Scaffold(
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = tr("全部订阅"),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
-                navigationIcon = {
+            QingLargeTitle(tr("全部订阅"), subscriptionsListState, hasLeading = true, actionWidth = 94,
+                leading = {
                     IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = tr("返回"),
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, tr("返回"))
                     }
                 },
                 actions = {
                     TextButton(onClick = { walletPreferred = !walletPreferred }, enabled = walletAvailable) {
-                        Text(if (showWallet) tr("切换列表") else tr("切换卡包"))
+                        Text(if (showWallet) tr("切换列表") else tr("切换卡包"), maxLines = 1, softWrap = false)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = QingBackground,
-                    titleContentColor = QingText,
-                ),
-                windowInsets = WindowInsets(0, 0, 0, 0),
             )
         },
         floatingActionButton = {
@@ -194,6 +186,7 @@ fun SubscriptionsManageScreen(
         },
     ) { innerPadding ->
         LazyColumn(
+            state = subscriptionsListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
@@ -548,10 +541,11 @@ private fun RecurringCandidatesSheet(
     val dateFmt = remember { SimpleDateFormat("M月d日", Locale.CHINA) }
 
     ModalBottomSheet(
+        dragHandle = { QingSheetGrabber() },
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = QingSurface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = qingColors.surfaceSheet,
+        shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
     ) {
         Column(
             modifier = Modifier
