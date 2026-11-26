@@ -1,15 +1,24 @@
 package com.bookkeeping.app.ui.components
 
+import kotlin.math.roundToInt
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.layout.LastBaseline
+import androidx.compose.ui.layout.FirstBaseline
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -53,6 +62,10 @@ object AmountTextSizing {
  *
  * 只改字号、沿用 [style] 的行高，所以字号变化不会撑高卡片或改变排版。
  */
+/** Measure against the actual parent constraints. Ordinary amounts take the
+ * direct text path; unusually wide amounts are fitted during the same layout,
+ * without an onTextLayout state write or extra composition frame.
+ */
 @Composable
 fun AutoSizeAmountText(
     text: String,
@@ -65,35 +78,60 @@ fun AutoSizeAmountText(
 ) {
     val base = if (style.fontSize.isSp) style.fontSize.value else 16f
     val floor = minimumSizeSp.coerceAtMost(base)
-    val initialSp = AmountTextSizing.fontSizeSp(base, text.length).coerceAtLeast(floor)
-    var fontSizeSp by remember(text, base, floor) { mutableFloatStateOf(initialSp) }
+    val initial = AmountTextSizing.fontSizeSp(base, text.length).coerceAtLeast(floor)
     val measurer = LocalAmountTextMeasurer.current ?: rememberTextMeasurer(cacheSize = 4)
-    Text(
-        text = text,
-        modifier = modifier,
-        color = color,
-        style = style.copy(fontSize = fontSizeSp.sp, fontFeatureSettings = "tnum"),
-        fontWeight = fontWeight,
-        textAlign = textAlign,
-        maxLines = 1,
-        softWrap = false,
-        overflow = TextOverflow.Clip,
-        onTextLayout = { result ->
-            if ((result.didOverflowWidth || result.hasVisualOverflow) &&
-                fontSizeSp > floor
-            ) {
-                val unconstrained = measurer.measure(
-                    text = androidx.compose.ui.text.AnnotatedString(text),
-                    style = result.layoutInput.style,
-                    maxLines = 1, softWrap = false,
-                    constraints = Constraints(),
-                ).size.width
-                fontSizeSp = fitAmountFontSize(fontSizeSp, floor, result.layoutInput.constraints.maxWidth, unconstrained)
-            }
-        },
+    val resolvedColor = if (color != Color.Unspecified) color
+        else if (style.color != Color.Unspecified) style.color else LocalContentColor.current
+    val textStyle = style.copy(
+        fontSize = initial.sp,
+        fontFeatureSettings = "tnum",
+        fontWeight = fontWeight ?: style.fontWeight,
+        textAlign = textAlign ?: style.textAlign,
     )
+    val annotated = remember(text) { AnnotatedString(text) }
+    val cache = remember(annotated, textStyle, floor, measurer) { AmountLayoutResult() }
+    Layout(
+        content = {},
+        modifier = modifier.semantics { this.text = annotated }.drawWithContent {
+            cache.result?.let { drawText(it, color = resolvedColor) }
+        },
+    ) { _, constraints ->
+        val width = constraints.maxWidth
+        fun measure(sp: Float, bounds: Constraints) = measurer.measure(
+            text = annotated,
+            style = textStyle.copy(fontSize = sp.sp),
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+            constraints = bounds,
+        )
+        var font = initial
+        var result = measure(font, constraints)
+        // A normal value is measured once. An overflow is corrected in this
+        // measure phase, not in a later recomposition.
+        if (result.didOverflowWidth && width > 0 && width != Constraints.Infinity) {
+            val natural = measure(font, Constraints()).size.width
+            font = fitAmountFontSize(font, floor, width, natural)
+            result = measure(font, constraints)
+            // Never use ellipsis for monetary values. Extremely constrained
+            // layouts may need a size below the preferred floor.
+            if (result.didOverflowWidth) {
+                val naturalFloor = measure(font, Constraints()).size.width.coerceAtLeast(1)
+                font = (font * width.toFloat() / naturalFloor * 0.97f).coerceIn(1f, font)
+                result = measure(font, constraints)
+            }
+        }
+        cache.result = result
+        layout(
+            constraints.constrainWidth(result.size.width),
+            constraints.constrainHeight(result.size.height),
+            alignmentLines = mapOf(FirstBaseline to result.firstBaseline.roundToInt(),
+                LastBaseline to result.lastBaseline.roundToInt()),
+        ) {}
+    }
 }
 
+private class AmountLayoutResult(var result: TextLayoutResult? = null)
 
 internal fun fitAmountFontSize(current: Float, floor: Float, available: Int, intrinsic: Int): Float {
     if (intrinsic <= 0 || available <= 0) return floor
