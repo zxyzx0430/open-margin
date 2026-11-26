@@ -1,7 +1,58 @@
-# 清衡 · Open Margin 设计规范（Design System v2.0）
+# 清衡 · Open Margin 设计规范（Design System v3.0）
 
 > **适用范围**：Android 客户端（Jetpack Compose）、后续 iOS 客户端（SwiftUI）、官网下载页（`zxyzx.me`）、Windows 安装向导与桌面 Web 端。
 > **核心用途**：作为全项目唯一视觉与交互标准（Single Source of Truth），供开发者与所有 AI 编程助手（Antigravity / Claude Code / Codex 等）在设计和改版 UI 时强制遵循，彻底消除「想到哪写到哪」导致的反复返工。
+
+
+## V3 normative contract (P0 infrastructure)
+
+Source: [P0-P4 construction document](https://docs.google.com/document/d/1CSNzBqGUkAUkWruDeP9xDDN7-KZBGY5vA4aIan24lKU/edit), sections 1-8.
+The values in this section and the construction document override all V2 values below.
+Existing V2 consumers remain unchanged in P0; page migrations happen only in their assigned phases.
+
+| Android role | Web variable | Light | Dark |
+| --- | --- | --- | --- |
+| surfaceCanvas | --om-surface-canvas | #F6F5F4 | #0B0D0C |
+| surfaceCard | --om-surface-card | #FFFFFF | #141716 |
+| surfaceElevated | --om-surface-elevated | #F0F2F0 | #1C211F |
+| surfaceSheet | --om-surface-sheet | #FFFFFF | #222825 |
+| textPrimary | --om-text-primary | #151918 | #ECF2EE |
+| textSecondary | --om-text-secondary | #5E605F | #A3B3AB |
+| accentPrimary | --om-primary | #24705C | #8FD9BC |
+| accentContainer | --om-primary-container | #E8F5EE | #0E5336 |
+| semanticIncome | --om-income | #1F7A55 | #6ED0A5 |
+| semanticExpense | --om-expense | #B23A3A | #FF8A80 |
+| semanticWarning | --om-warning | #8A5A12 | #FBBF24 |
+| strokeHairline | --om-stroke-hairline | rgba(21,25,24,0.07) | rgba(255,255,255,0.08) |
+
+Use qingColors, QingRadiusTokens, QingTypeTokens and QingMotionTokens.
+Radius: badge 8dp, control 14dp, card 22dp, hero 28dp, pill 999dp (same values in px on Web).
+Nested radius = max(8dp, outer radius - padding). Page-specific exceptions only as explicitly defined in section 8.2 of the construction document.
+Hero 34sp bold tnum (-0.025em); title 18-22sp semibold (-0.015em); body 15-16sp; secondary 12-13sp medium (+0.015em).
+Receipt amount 36sp; all new amounts/percentages use tnum or tabular-nums; new amount floor 14sp, single line. Existing 11sp AutoSizeAmountText floor is a legacy behavior, to be migrated and tested in P1.
+
+Static groups: opaque, zero shadow, 0.5dp hairline. Interactive objects: light 1-2dp shadow with alpha <= 0.06, dark no black shadow and 0.5dp top highlight at 8% white. WalletCardSurface encapsulates these roles.
+QingChromeSurface reserves tiers SOLID/TINTED/BLUR/ENHANCED, always solid before P4. No blur, dependencies or animation installed in P0.
+
+| Motion | dampingRatio | stiffness | Web |
+| --- | --- | --- | --- |
+| press | 1.0 | 900 | 100ms cubic-bezier(0.22,1,0.36,1) |
+| standard | 1.0 | 400 | 220ms cubic-bezier(0.22,1,0.36,1) |
+| gesture | 0.82 | 360 | 500ms cubic-bezier(0.32,0.72,0,1) |
+| snappy | 1.0 | 600 | 160ms cubic-bezier(0.22,1,0.36,1) |
+
+Press scales 0.97 cards / 0.985 rows. P2 wires reduced motion, haptics and interruptibility. No decorative animation on high-frequency actions. P3 must retain explicit route transition protections until locally replaced and verified.
+Main card padding >=18dp, hero 20dp, row vertical 12-14dp, card gap 14-16dp; Web max width 1120px.
+Only defined hero gradients are allowed (#FFFFFF to #F4FAF7, #17211E to #121716); do not add them until P1.
+P3 subscription palette: #1B4D3E, #1E2226, #23303D, #332D29, #263830; white/light text >=7:1, 0.5dp 10% white highlight.
+Never use individual transaction frames, random badge colors, thick shadows, unnecessary centering or glass content.
+Preserve five tabs, VoiceFab state machine, UI test tags, translations, business data flow and existing high-frequency action steps. No new runtime dependencies.
+For exact per-page pixel values, all seven redlines and device acceptance gates, the linked construction document is mandatory.
+P0 cannot be accepted without baseline screenshots, two-device performance and all regressions passing.
+
+## V2 baseline reference (not normative for migrated pages)
+
+The existing implementation notes below document the pre-P1 behavior. When a value conflicts with the V3 contract or construction document, V3 takes precedence. Preserve nonvisual behavior, category palette and safety/accessibility contracts.
 
 ---
 
@@ -189,7 +240,7 @@
 
 - **全端统一清衡青绿体系**：
   - Android 客户端（`#24705C` / `#F6F5F4`）与官网下载页（`zxyzx.me`，`#1B5E43` / `#F6F7F4`）已对齐。
-  - **历史遗留待统一**：Windows 一键部署向导（`deploy/windows/setup/web/styles.css`）与 Wallos 桌面端扩展（`deploy/wallos-extension/ui-unified.css`）目前仍沿用早期蓝色主色 `#426de5`。**今后所有新增或翻新的 Web / 桌面 / iOS 页面，一律采用清衡青绿主色与暖灰白卡体系，不再新增蓝紫色页面**。
+  - Wallos desktop extension (ui-unified.css) already uses #24705C / #F6F5F4. Windows setup remains outside P0; do not introduce new blue/purple brand surfaces.
 - **Web 金额排版**：所有 KPI 与账单金额样式必须开启 `font-variant-numeric: tabular-nums` 保证数字纵向对齐。
 
 ---

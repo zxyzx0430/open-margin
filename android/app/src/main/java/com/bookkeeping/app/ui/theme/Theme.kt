@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 data class QingSemanticColors(
@@ -132,4 +133,16 @@ fun BookkeepingAppTheme(
             content = content,
         )
     }
+}
+
+/** Canonical radii for V3 components; legacy Material shapes remain untouched in P0. */
+object QingRadiusTokens {
+    val radiusBadge = 8.dp
+    val radiusControl = 14.dp
+    val radiusCard = 22.dp
+    val radiusHero = 28.dp
+    val radiusPill = 999.dp
+
+    fun innerRadius(outer: Dp, padding: Dp): Dp =
+        (outer - padding).coerceAtLeast(radiusBadge)
 }

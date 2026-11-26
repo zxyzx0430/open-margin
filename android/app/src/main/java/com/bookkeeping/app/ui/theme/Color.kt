@@ -56,3 +56,52 @@ val QingIncome: Color @Composable get() = MaterialTheme.colorScheme.secondary
 val QingWarning: Color @Composable get() = if (LocalQingDark.current) Color(0xFFF0C36A) else QingWarningBase
 val QingWarningContainer: Color @Composable get() = if (LocalQingDark.current) Color(0xFF4A3510) else QingWarningContainerBase
 val QingErrorContainer: Color @Composable get() = MaterialTheme.colorScheme.errorContainer
+
+/** V3 palette. Existing Material roles stay frozen until the page migration. */
+data class QingColorTokens(
+    val surfaceCanvas: Color,
+    val surfaceCard: Color,
+    val surfaceElevated: Color,
+    val surfaceSheet: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val accentPrimary: Color,
+    val accentContainer: Color,
+    val semanticIncome: Color,
+    val semanticExpense: Color,
+    val semanticWarning: Color,
+    val strokeHairline: Color,
+)
+
+val QingLightTokens = QingColorTokens(
+    surfaceCanvas = QingBackgroundBase,
+    surfaceCard = Color.White,
+    surfaceElevated = QingSurfaceVariantBase,
+    surfaceSheet = Color.White,
+    textPrimary = QingTextBase,
+    textSecondary = QingTextSecondaryBase,
+    accentPrimary = QingPrimaryBase,
+    accentContainer = QingPrimaryContainerBase,
+    semanticIncome = QingIncomeBase,
+    semanticExpense = QingExpenseBase,
+    semanticWarning = QingWarningBase,
+    strokeHairline = QingTextBase.copy(alpha = 0.07f),
+)
+
+val QingDarkTokens = QingColorTokens(
+    surfaceCanvas = Color(0xFF0B0D0C),
+    surfaceCard = Color(0xFF141716),
+    surfaceElevated = Color(0xFF1C211F),
+    surfaceSheet = Color(0xFF222825),
+    textPrimary = Color(0xFFECF2EE),
+    textSecondary = Color(0xFFA3B3AB),
+    accentPrimary = QingDarkPrimaryBase,
+    accentContainer = QingPrimaryDeepBase,
+    semanticIncome = Color(0xFF6ED0A5),
+    semanticExpense = ColorExpenseDark,
+    semanticWarning = Color(0xFFFBBF24),
+    strokeHairline = Color.White.copy(alpha = 0.08f),
+)
+
+val qingColors: QingColorTokens
+    @Composable get() = if (LocalQingDark.current) QingDarkTokens else QingLightTokens

@@ -8,7 +8,7 @@ body.om-ui {
   /* Brand & Semantic Tokens (Light Mode Default) */
   --om-primary: #24705C;
   --om-primary-deep: #0E5336;
-  --om-primary-container: #E8F5EE;
+  --om-legacy-primary-container: #E8F5EE;
   --om-mint: #97E0B9;
   --om-mint-soft: #DCF0E7;
 
@@ -23,13 +23,13 @@ body.om-ui {
 
   --om-expense: #B23A3A;
   --om-expense-bg: #FDECEC;
-  --om-income: #1F7A55;
+  --om-legacy-income: #1F7A55;
   --om-income-bg: #E8F5EE;
-  --om-warning: #8A5A12;
+  --om-legacy-warning: #8A5A12;
   --om-warning-bg: #FFF4DE;
 
   --om-radius: 16px;
-  --om-radius-sm: 10px;
+  --om-legacy-radius-sm: 10px;
   --om-radius-pill: 999px;
   --om-gap: 16px;
   --om-shadow: 0 1px 3px rgba(14, 83, 54, 0.04), 0 1px 2px rgba(21, 25, 24, 0.03);
@@ -55,7 +55,7 @@ body.om-ui {
 body.om-ui.dark {
   --om-primary: #8FD9BC;
   --om-primary-deep: #5CB896;
-  --om-primary-container: #1B332A;
+  --om-legacy-primary-container: #1B332A;
   --om-mint: #5CB896;
   --om-mint-soft: #1F3B30;
 
@@ -70,9 +70,9 @@ body.om-ui.dark {
 
   --om-expense: #FF8A80;
   --om-expense-bg: #4A1A18;
-  --om-income: #8FD9BC;
+  --om-legacy-income: #8FD9BC;
   --om-income-bg: #1B332A;
-  --om-warning: #F0C36A;
+  --om-legacy-warning: #F0C36A;
   --om-warning-bg: #4A3510;
   --om-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
 
@@ -84,7 +84,7 @@ body.om-ui.dark {
   body.om-ui.automatic {
     --om-primary: #8FD9BC;
     --om-primary-deep: #5CB896;
-    --om-primary-container: #1B332A;
+    --om-legacy-primary-container: #1B332A;
     --om-mint: #5CB896;
     --om-mint-soft: #1F3B30;
 
@@ -99,9 +99,9 @@ body.om-ui.dark {
 
     --om-expense: #FF8A80;
     --om-expense-bg: #4A1A18;
-    --om-income: #8FD9BC;
+    --om-legacy-income: #8FD9BC;
     --om-income-bg: #1B332A;
-    --om-warning: #F0C36A;
+    --om-legacy-warning: #F0C36A;
     --om-warning-bg: #4A3510;
     --om-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
 
@@ -203,7 +203,7 @@ body.om-ui {
 }
 
 .om-ui .om-top-link.active {
-  background: var(--om-primary-container);
+  background: var(--om-legacy-primary-container);
   color: var(--om-primary-deep);
   font-weight: 650;
 }
@@ -228,7 +228,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui .om-user-nav .dropdown-content {
-  border-radius: var(--om-radius-sm);
+  border-radius: var(--om-legacy-radius-sm);
   border: 1px solid var(--om-border);
   background: var(--om-surface);
   box-shadow: var(--om-shadow-hover);
@@ -284,7 +284,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui :where(.button, input[type="submit"]) {
-  border-radius: var(--om-radius-sm);
+  border-radius: var(--om-legacy-radius-sm);
   background-color: var(--om-primary);
   color: #FFFFFF;
   font-weight: 600;
@@ -297,7 +297,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui :where(.button.secondary-button) {
-  border-radius: var(--om-radius-sm);
+  border-radius: var(--om-legacy-radius-sm);
   background: var(--om-surface);
   color: var(--om-ink);
   border: 1px solid var(--om-border);
@@ -309,7 +309,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui :where(input[type="text"], input[type="number"], input[type="password"], input[type="email"], input[type="date"], input[type="search"], select, textarea) {
-  border-radius: var(--om-radius-sm);
+  border-radius: var(--om-legacy-radius-sm);
   border-color: var(--om-field-border);
   background: var(--om-surface);
   color: var(--om-ink);
@@ -468,7 +468,7 @@ body.om-ui.dark .finance-native .finance-tab.is-current {
   width: auto;
   height: auto;
   min-height: 92px;
-  border-radius: var(--om-radius-sm);
+  border-radius: var(--om-legacy-radius-sm);
 }
 .om-ui .wallos-ledger .ledger-search-form { margin: 10px 0 16px; }
 .om-ui .wallos-ledger .ledger-entry { margin-bottom: 10px; }
@@ -518,7 +518,7 @@ body.om-ui.dark .finance-native .finance-tab.is-current {
 }
 
 .om-ui .om-settings-tab[aria-selected="true"] {
-  background: var(--om-primary-container);
+  background: var(--om-legacy-primary-container);
   color: var(--om-primary-deep);
 }
 
@@ -571,7 +571,7 @@ body.om-ui.dark .om-settings-tab[aria-selected="true"] {
   border-color: var(--om-border);
   box-shadow: var(--om-shadow);
 }
-.om-ui .om-subscriptions-page :where(.button, .view-toggle-button) { border-radius: var(--om-radius-sm); }
+.om-ui .om-subscriptions-page :where(.button, .view-toggle-button) { border-radius: var(--om-legacy-radius-sm); }
 
 /* About Page */
 .om-ui .om-about-page > .account-section { margin-block: 16px; }
@@ -629,4 +629,62 @@ body.om-ui.dark .om-settings-tab[aria-selected="true"] {
 
 @media (prefers-reduced-motion: reduce) {
   .om-ui * { scroll-behavior: auto !important; transition: none !important; }
+}
+
+/* V3 canonical tokens (P0 only). Legacy consumers remain unchanged until P1/P3. */
+:root,
+body.om-ui {
+  --om-surface-canvas: #F6F5F4;
+  --om-surface-card: #FFFFFF;
+  --om-surface-elevated: #F0F2F0;
+  --om-surface-sheet: #FFFFFF;
+  --om-text-primary: #151918;
+  --om-text-secondary: #5E605F;
+  --om-primary-container: #E8F5EE;
+  --om-income: #1F7A55;
+  --om-warning: #8A5A12;
+  --om-stroke-hairline: rgba(21,25,24,0.07);
+  --om-radius-sm: 8px;
+  --om-radius-md: 14px;
+  --om-radius-lg: 22px;
+  --om-radius-xl: 28px;
+  --om-motion-press: 100ms cubic-bezier(0.22,1,0.36,1);
+  --om-motion-standard: 220ms cubic-bezier(0.22,1,0.36,1);
+  --om-motion-gesture: 500ms cubic-bezier(0.32,0.72,0,1);
+  --om-motion-snappy: 160ms cubic-bezier(0.22,1,0.36,1);
+  --om-numeric-variant: tabular-nums;
+}
+body.om-ui.dark {
+  --om-surface-canvas: #0B0D0C;
+  --om-surface-card: #141716;
+  --om-surface-elevated: #1C211F;
+  --om-surface-sheet: #222825;
+  --om-text-primary: #ECF2EE;
+  --om-text-secondary: #A3B3AB;
+  --om-primary-container: #0E5336;
+  --om-income: #6ED0A5;
+  --om-warning: #FBBF24;
+  --om-stroke-hairline: rgba(255,255,255,0.08);
+}
+@media (prefers-color-scheme: dark) {
+  body.om-ui.automatic {
+    --om-surface-canvas: #0B0D0C;
+    --om-surface-card: #141716;
+    --om-surface-elevated: #1C211F;
+    --om-surface-sheet: #222825;
+    --om-text-primary: #ECF2EE;
+    --om-text-secondary: #A3B3AB;
+    --om-primary-container: #0E5336;
+    --om-income: #6ED0A5;
+    --om-warning: #FBBF24;
+    --om-stroke-hairline: rgba(255,255,255,0.08);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root, body.om-ui {
+    --om-motion-press: 0ms;
+    --om-motion-standard: 0ms;
+    --om-motion-gesture: 0ms;
+    --om-motion-snappy: 0ms;
+  }
 }

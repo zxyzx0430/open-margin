@@ -4,6 +4,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 val Typography = Typography(
@@ -91,4 +92,26 @@ object QingType {
     val primaryKpi = Typography.headlineMedium
     val secondaryKpi = Typography.titleMedium
     val metricLabel = Typography.labelSmall
+}
+
+/** Opt-in V3 roles; do not migrate existing page typography in P0. */
+object QingTypeTokens {
+    val heroAmount = TextStyle(
+        fontSize = 34.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.025).em, fontFeatureSettings = "tnum",
+    )
+    val receiptAmount = heroAmount.copy(fontSize = 36.sp)
+    val title = TextStyle(
+        fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.015).em,
+    )
+    val body = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp)
+    val supporting = TextStyle(
+        fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.015.em,
+    )
+    val rowAmount = body.copy(
+        fontSize = 16.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum",
+    )
+    val minimumAmountSize = 14.sp
+    fun numeric(style: TextStyle): TextStyle = style.copy(fontFeatureSettings = "tnum")
 }
