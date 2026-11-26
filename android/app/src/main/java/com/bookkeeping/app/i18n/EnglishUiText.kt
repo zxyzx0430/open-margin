@@ -1769,6 +1769,12 @@ internal object EnglishUiText {
         "截图无法解码，本次未能识别" to "Screenshot could not be decoded",
         "系统截屏失败，未能完成页面识别" to "System screenshot capture failed",
         "待确认队列存储已满或写入失败，候选未保存" to "Pending queue is full or failed to save; candidate dropped",
+        "本月已超支" to "Over budget this month",
+        "本月剩余" to "Remaining this month",
+        "剩" to "Left",
+        "含周期续费" to "Includes recurring",
+        "按当前节奏预计超支" to "Projected overspend at current pace",
+        "按当前节奏预计结余" to "Projected balance at current pace",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(

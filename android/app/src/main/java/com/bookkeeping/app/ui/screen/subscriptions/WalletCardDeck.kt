@@ -180,7 +180,7 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 48.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 52.dp).padding(top = if (expanded) 0.dp else 4.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SubscriptionBadgeAvatar(subscription.name, subscription.active, 30.dp, wallet = true)
             Column(Modifier.weight(1f)) {

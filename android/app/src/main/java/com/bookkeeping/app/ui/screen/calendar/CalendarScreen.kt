@@ -1581,8 +1581,6 @@ private fun CalendarListDrawer(
                 val measured = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
                 layout(measured.width, measured.height) { measured.placeRelative(0, 0) }
             }
-            .shadow(1.dp, drawerShape, ambientColor = Color.Black.copy(alpha = 0.04f),
-                spotColor = Color.Black.copy(alpha = 0.06f))
             .clip(drawerShape)
             .background(MaterialTheme.colorScheme.surface),
     ) {

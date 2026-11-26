@@ -362,18 +362,6 @@ fun SubscriptionsManageScreen(
                     }
                 }
             }
-
-            item(key = "footer_disclaimer") {
-                Text(
-                    text = "订阅仅用于排期提醒，实际支出以账单流水为准，不会重复计入总支出",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp, bottom = 12.dp),
-                )
-            }
         }
     }
 

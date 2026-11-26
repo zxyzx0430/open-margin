@@ -604,6 +604,8 @@ fun TransactionListScreen(
                 }
             }
 
+            val showStatusRow = status.captureTone != StatusTone.POSITIVE || status.syncTone != StatusTone.POSITIVE
+            if (showStatusRow) {
             ledgerSectionItem(key = "status") {
                 Column {
                     Row(
@@ -660,6 +662,7 @@ fun TransactionListScreen(
                     }
                 }
                 }
+            }
             }
 
             if (!notificationListenerEnabled || !pageRecognitionEnabled) {

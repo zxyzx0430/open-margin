@@ -181,9 +181,8 @@ fun SubscriptionDetailSheet(
             // Amount + cycle + matched history card
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = QingPrimaryContainer.copy(alpha = 0.72f),
-                border = BorderStroke(1.dp, QingPrimary.copy(alpha = 0.14f)),
+                shape = RoundedCornerShape(22.dp),
+                color = QingPrimaryContainer.copy(alpha = 0.55f),
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -260,9 +259,8 @@ fun SubscriptionDetailSheet(
             // Direct toggles
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(22.dp),
                 color = QingSurfaceVariant.copy(alpha = 0.45f),
-                border = BorderStroke(1.dp, QingOutline),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     DetailSwitchRow(
@@ -381,13 +379,12 @@ fun SubscriptionDetailSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedButton(
+                TextButton(
                     onClick = onEdit,
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp),
                     shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, QingOutline),
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Edit,
@@ -399,7 +396,7 @@ fun SubscriptionDetailSheet(
                 }
 
                 if (subscription.active) {
-                    OutlinedButton(
+                    TextButton(
                         onClick = {
                             onDeactivate()
                             onDismiss()
@@ -408,7 +405,6 @@ fun SubscriptionDetailSheet(
                             .weight(1f)
                             .height(44.dp),
                         shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, QingOutline),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.PauseCircleOutline,
@@ -419,7 +415,7 @@ fun SubscriptionDetailSheet(
                         Text("停用")
                     }
                 } else if (onReactivate != null) {
-                    OutlinedButton(
+                    TextButton(
                         onClick = {
                             onReactivate()
                             onDismiss()
@@ -428,7 +424,6 @@ fun SubscriptionDetailSheet(
                             .weight(1f)
                             .height(44.dp),
                         shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, QingPrimary.copy(alpha = 0.45f)),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.PlayCircleOutline,

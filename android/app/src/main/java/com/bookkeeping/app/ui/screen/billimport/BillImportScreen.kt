@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.billimport
 
+import com.bookkeeping.app.ui.components.QingSwitch
+
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -616,7 +618,7 @@ private fun BackupSectionCard(
                         color = QingTextSecondary,
                     )
                 }
-                Switch(
+                QingSwitch(
                     checked = includeEvidence,
                     onCheckedChange = onIncludeEvidenceChanged,
                     enabled = !disabled,
