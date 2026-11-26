@@ -32,6 +32,7 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.MerchantAvatar
+import com.bookkeeping.app.ui.components.categoryDisplayName
 import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
@@ -114,7 +115,7 @@ fun LedgerTransactionRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = transaction.merchant.ifBlank { tr(category.displayName) },
+                text = transaction.merchant.ifBlank { tr(categoryDisplayName(transaction.category)) },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
@@ -130,7 +131,7 @@ fun LedgerTransactionRow(
                 }
                 Text(
                     text = transactionSubtitle(
-                        categoryLabel = tr(category.displayName),
+                        categoryLabel = tr(categoryDisplayName(transaction.category)),
                         sourceLabel = ledgerTransactionSourceLabel(transaction.source),
                         account = transaction.account,
                         timeText = timeText,

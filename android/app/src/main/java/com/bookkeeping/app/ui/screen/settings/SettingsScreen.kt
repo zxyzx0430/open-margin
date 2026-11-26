@@ -84,7 +84,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.bookkeeping.app.billexport.BillExport
 import com.bookkeeping.app.ui.components.rememberUpdateInstallController
+import com.bookkeeping.app.backup.webdav.WebDavPrefs
 import com.bookkeeping.app.ui.screen.billimport.BillImportExportSheet
+import com.bookkeeping.app.ui.screen.billimport.WebDavBackupSheet
 import com.bookkeeping.app.ui.screen.billimport.BillImportViewModel
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureService
 import com.bookkeeping.app.notification.accessibility.AccessibilityCaptureHealth
@@ -116,7 +118,9 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Store
+import com.bookkeeping.app.data.category.CategoryCatalog
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
@@ -206,6 +210,12 @@ fun SettingsScreen(
     var detailDialog by remember { mutableStateOf<String?>(null) }
     var showExportGuide by remember { mutableStateOf(false) }
     var showImportExportSheet by remember { mutableStateOf(false) }
+    var showCategoryManager by remember { mutableStateOf(false) }
+    var showWebDavBackup by remember { mutableStateOf(false) }
+    var webDavSnap by remember { mutableStateOf(WebDavPrefs(context).read()) }
+    val categoryCatalog = remember(context) { CategoryCatalog.get(context) }
+    val allCatalogCategories by categoryCatalog.categories.collectAsState()
+    val activeCategoryCount = remember(allCatalogCategories) { allCatalogCategories.count { !it.isDeleted } }
     var exportFeedback by remember { mutableStateOf<String?>(null) }
     var exportInProgress by remember { mutableStateOf(false) }
     var permissionRefreshKey by remember { mutableStateOf(0) }
@@ -387,6 +397,13 @@ fun SettingsScreen(
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
+                        icon = Icons.Filled.Category,
+                        title = tr("分类管理"),
+                        subtitle = tr("已启用 %d 个分类 · 可自定义或删除").format(activeCategoryCount),
+                        onClick = { showCategoryManager = true },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
                         icon = Icons.Filled.Notifications,
                         title = tr("自动记账向导"),
                         subtitle = tr("通知权限与页面识别的 4 步开启向导"),
@@ -422,6 +439,20 @@ fun SettingsScreen(
             }
             item {
                 SettingsGroupCard {
+                    SettingsActionRow(
+                        icon = Icons.Filled.Cloud,
+                        title = tr("WebDAV 网盘自动备份"),
+                        subtitle = when {
+                            webDavSnap.lastBackupMs > 0L -> tr("上次备份：%s").format(
+                                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                    .format(Date(webDavSnap.lastBackupMs)),
+                            )
+                            webDavSnap.isConfigured -> tr("已配置 · 点击管理备份与恢复")
+                            else -> tr("支持坚果云、群晖 NAS、Alist 自动防丢")
+                        },
+                        onClick = { showWebDavBackup = true },
+                    )
+                    SettingsRowDivider()
                     SettingsActionRow(
                         icon = Icons.Filled.FileUpload,
                         title = tr("导入 / 导出账单"),
@@ -502,6 +533,23 @@ fun SettingsScreen(
                 )
             }
 
+        }
+
+        if (showWebDavBackup) {
+            WebDavBackupSheet(
+                onDismiss = {
+                    showWebDavBackup = false
+                    webDavSnap = WebDavPrefs(context).read()
+                },
+            )
+        }
+
+        if (showCategoryManager) {
+            CategoryManagerSheet(
+                onDismiss = { showCategoryManager = false },
+                countByCategory = viewModel::countByCategory,
+                reassignCategory = viewModel::reassignCategory,
+            )
         }
 
         if (showImportExportSheet) {

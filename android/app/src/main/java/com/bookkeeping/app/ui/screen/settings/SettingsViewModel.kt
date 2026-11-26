@@ -110,6 +110,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { prefs.disableCategoryLearning(merchant, disabled) }
     }
 
+    suspend fun countByCategory(categoryKey: String): Int = withContext(Dispatchers.IO) {
+        repository.countByCategory(categoryKey)
+    }
+
+    suspend fun reassignCategory(sourceKey: String, targetKey: String): Int = withContext(Dispatchers.IO) {
+        repository.reassignCategory(sourceKey, targetKey)
+    }
+
     fun setKeepAlive(enabled: Boolean) {
         viewModelScope.launch {
             prefs.setKeepAliveEnabled(enabled)

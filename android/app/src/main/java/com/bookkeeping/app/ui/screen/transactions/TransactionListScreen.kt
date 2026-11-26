@@ -902,11 +902,13 @@ fun TransactionListScreen(
             onDiagnostic = { input, stage, result, details ->
                 viewModel.recordDiagnostic(input, stage, result, details)
             },
-            onConfirm = { amount, type, category, merchant, note, timestampMs, account, diagnosticInput ->
-                viewModel.addTransaction(
+            countByCategory = viewModel::countByCategory,
+            reassignCategory = viewModel::reassignCategory,
+            onConfirm = { amount, type, categoryKey, merchant, note, timestampMs, account, diagnosticInput ->
+                viewModel.addTransactionWithKey(
                     amountCents = amount,
                     type = type,
-                    category = category,
+                    categoryKey = categoryKey,
                     merchant = merchant,
                     note = note,
                     timestampMs = timestampMs,

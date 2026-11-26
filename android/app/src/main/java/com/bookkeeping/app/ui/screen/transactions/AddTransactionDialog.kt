@@ -64,7 +64,13 @@ import com.bookkeeping.app.data.MoneyAmount
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnosticInput
 import com.bookkeeping.app.data.diagnostics.TransactionDiagnostics
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.ui.platform.LocalContext
+import com.bookkeeping.app.data.category.CategoryCatalog
+import com.bookkeeping.app.data.category.CategoryDefinition
 import com.bookkeeping.app.data.local.entity.TransactionCategory
+import com.bookkeeping.app.ui.components.categoryDisplayName
+import com.bookkeeping.app.ui.screen.settings.CategoryManagerSheet
 import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.tr
@@ -115,7 +121,7 @@ private data class PendingSave(
     val amountCents: Long,
     val type: TransactionType,
     val currency: String,
-    val category: TransactionCategory,
+    val categoryKey: String,
     val merchant: String,
     val note: String,
     val timestamp: Long,
@@ -135,7 +141,7 @@ fun AddTransactionDialog(
     onConfirm: suspend (
         amountCents: Long,
         type: TransactionType,
-        category: TransactionCategory,
+        categoryKey: String,
         merchant: String,
         note: String,
         timestamp: Long,
@@ -154,6 +160,8 @@ fun AddTransactionDialog(
         diagnosticInput: TransactionDiagnosticInput,
         precision: TimePrecision,
     ) -> DuplicateCandidate?)? = null,
+    countByCategory: suspend (String) -> Int = { 0 },
+    reassignCategory: suspend (String, String) -> Int = { _, _ -> 0 },
     onDiagnostic: suspend (
         input: TransactionDiagnosticInput,
         stage: String,
@@ -174,9 +182,15 @@ fun AddTransactionDialog(
         mutableStateOf(runCatching { TransactionType.valueOf(initial?.type ?: "EXPENSE") }
             .getOrDefault(TransactionType.EXPENSE))
     }
+    val context = LocalContext.current
+    val categoryCatalog = remember(context) { CategoryCatalog.get(context) }
+    val allCatalogCategories by categoryCatalog.categories.collectAsState()
+    val activeCategories = remember(allCatalogCategories) {
+        allCatalogCategories.filter { !it.isDeleted }
+    }
+    var showCategoryManager by remember { mutableStateOf(false) }
     var selectedCategory by remember(initial?.id) {
-        mutableStateOf(runCatching { TransactionCategory.valueOf(initial?.category ?: "FOOD") }
-            .getOrDefault(TransactionCategory.OTHER))
+        mutableStateOf(initial?.category?.takeIf { it.isNotBlank() } ?: TransactionCategory.FOOD.name)
     }
     var merchant by remember(initial?.id) { mutableStateOf(initial?.merchant ?: "") }
     var note by remember(initial?.id) { mutableStateOf(initial?.note ?: "") }
@@ -267,7 +281,7 @@ fun AddTransactionDialog(
             }
         }
         if (!typeTouched) prefill.type?.let { selectedType = it }
-        if (!categoryTouched) prefill.category?.let { selectedCategory = it }
+        if (!categoryTouched) prefill.category?.let { selectedCategory = it.name }
         if (!merchantTouched) {
             merchant = prefill.merchant ?: if (previous?.merchant != null) "" else merchant
         }
@@ -300,7 +314,7 @@ fun AddTransactionDialog(
                 onConfirm(
                     payload.amountCents,
                     payload.type,
-                    payload.category,
+                    payload.categoryKey,
                     payload.merchant,
                     payload.note,
                     payload.timestamp,
@@ -438,7 +452,7 @@ fun AddTransactionDialog(
             }
             QuickEntryPreviewField.CATEGORY -> {
                 categoryTouched = true
-                selectedCategory = TransactionCategory.OTHER
+                selectedCategory = TransactionCategory.OTHER.name
             }
             QuickEntryPreviewField.MERCHANT -> {
                 merchantTouched = true
@@ -453,16 +467,28 @@ fun AddTransactionDialog(
 
     val isExpense = selectedType == TransactionType.EXPENSE
     val accentColor = if (isExpense) QingExpense else QingIncome
-    val commonBase = if (isExpense) COMMON_EXPENSE_CATEGORIES else COMMON_INCOME_CATEGORIES
-    val topCategories = remember(selectedType, selectedCategory) {
-        if (selectedCategory in commonBase) {
+    val activeIds = remember(activeCategories) { activeCategories.map { it.id }.toSet() }
+    val commonBase = remember(isExpense, activeIds, activeCategories) {
+        val preferred = (if (isExpense) COMMON_EXPENSE_CATEGORIES else COMMON_INCOME_CATEGORIES)
+            .map { it.name }
+            .filter { it in activeIds }
+        (preferred + activeCategories.map { it.id }).distinct().take(4)
+    }
+    val topCategoryIds = remember(commonBase, selectedCategory, activeIds) {
+        val current = if (selectedCategory in activeIds) selectedCategory else commonBase.firstOrNull() ?: TransactionCategory.OTHER.name
+        if (current in commonBase) {
             commonBase
         } else {
-            listOf(selectedCategory) + commonBase.take(3)
+            (listOf(current) + commonBase).distinct().take(4)
         }
     }
-    val extraCategories = remember(topCategories) {
-        TransactionCategory.entries.filterNot { it in topCategories }
+    val topCategories = remember(topCategoryIds, activeCategories) {
+        val byId = activeCategories.associateBy { it.id }
+        topCategoryIds.mapNotNull { byId[it] }
+    }
+    val extraCategories = remember(topCategoryIds, activeCategories) {
+        val topSet = topCategoryIds.toSet()
+        activeCategories.filterNot { it.id in topSet }
     }
 
     EntryPanelLayout(
@@ -475,12 +501,12 @@ fun AddTransactionDialog(
                 onSelect = { nextType ->
                     selectedType = nextType
                     typeTouched = true
-                    if (nextType == TransactionType.EXPENSE && selectedCategory == TransactionCategory.SALARY) {
-                        selectedCategory = TransactionCategory.FOOD
+                    if (nextType == TransactionType.EXPENSE && selectedCategory == TransactionCategory.SALARY.name) {
+                        selectedCategory = if (TransactionCategory.FOOD.name in activeIds) TransactionCategory.FOOD.name else TransactionCategory.OTHER.name
                         categoryTouched = true
                         quickEntryPreview = quickEntryPreview?.copy(category = null)
-                    } else if (nextType == TransactionType.INCOME && selectedCategory == TransactionCategory.FOOD) {
-                        selectedCategory = TransactionCategory.SALARY
+                    } else if (nextType == TransactionType.INCOME && selectedCategory == TransactionCategory.FOOD.name) {
+                        selectedCategory = if (TransactionCategory.SALARY.name in activeIds) TransactionCategory.SALARY.name else TransactionCategory.OTHER.name
                         categoryTouched = true
                         quickEntryPreview = quickEntryPreview?.copy(category = null)
                     }
@@ -640,9 +666,9 @@ fun AddTransactionDialog(
                     topCategories.forEach { cat ->
                         CategoryTile(
                             category = cat,
-                            selected = selectedCategory == cat,
+                            selected = selectedCategory == cat.id,
                             onClick = {
-                                selectedCategory = cat
+                                selectedCategory = cat.id
                                 categoryTouched = true
                                 quickEntryPreview = quickEntryPreview?.copy(category = null)
                             },
@@ -657,25 +683,33 @@ fun AddTransactionDialog(
                 }
                 AnimatedVisibility(visible = categoryMenuExpanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        extraCategories.chunked(5).forEach { rowCats ->
+                        val gridItems: List<CategoryDefinition?> = extraCategories + listOf<CategoryDefinition?>(null)
+                        gridItems.chunked(5).forEach { rowItems ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                rowCats.forEach { cat ->
-                                    CategoryTile(
-                                        category = cat,
-                                        selected = selectedCategory == cat,
-                                        onClick = {
-                                            selectedCategory = cat
-                                            categoryTouched = true
-                                            quickEntryPreview = quickEntryPreview?.copy(category = null)
-                                            categoryMenuExpanded = false
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                    )
+                                rowItems.forEach { item ->
+                                    if (item != null) {
+                                        CategoryTile(
+                                            category = item,
+                                            selected = selectedCategory == item.id,
+                                            onClick = {
+                                                selectedCategory = item.id
+                                                categoryTouched = true
+                                                quickEntryPreview = quickEntryPreview?.copy(category = null)
+                                                categoryMenuExpanded = false
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    } else {
+                                        ManageCategoriesTile(
+                                            onClick = { showCategoryManager = true },
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
                                 }
-                                repeat(5 - rowCats.size) {
+                                repeat(5 - rowItems.size) {
                                     Spacer(Modifier.weight(1f))
                                 }
                             }
@@ -828,6 +862,19 @@ fun AddTransactionDialog(
         )
     }
 
+    if (showCategoryManager) {
+        CategoryManagerSheet(
+            onDismiss = { showCategoryManager = false },
+            countByCategory = countByCategory,
+            reassignCategory = reassignCategory,
+            onCategoryCreated = { newId ->
+                selectedCategory = newId
+                categoryTouched = true
+                categoryMenuExpanded = false
+            },
+        )
+    }
+
     if (showDatePicker) {
         com.bookkeeping.app.ui.components.LedgerDateTimePickerDialog(
             initialTimestampMs = timestamp,
@@ -886,7 +933,7 @@ private fun TransactionTypeSegmentedPill(
 
 @Composable
 private fun CategoryTile(
-    category: TransactionCategory,
+    category: CategoryDefinition,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -903,12 +950,54 @@ private fun CategoryTile(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            CategoryIcon(category = category, size = 24.dp)
+            CategoryIcon(categoryKey = category.id, size = 24.dp)
             Text(
-                text = tr(category.displayName),
+                text = tr(category.name),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 color = if (selected) QingPrimary else QingText,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ManageCategoriesTile(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = QingSurfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, QingOutline.copy(alpha = 0.6f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Tune,
+                    contentDescription = null,
+                    tint = QingPrimary,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Text(
+                text = tr("管理"),
+                style = MaterialTheme.typography.labelSmall,
+                color = QingPrimary,
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Ellipsis,

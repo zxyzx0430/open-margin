@@ -241,4 +241,20 @@ interface TransactionDao {
 
     @Query("UPDATE transactions SET evidenceImageName = NULL WHERE evidenceImageName IS NOT NULL")
     suspend fun clearAllEvidenceImageNames()
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE syncDeleted = 0 AND category = :category")
+    suspend fun countByCategory(category: String): Int
+
+    @Query("""UPDATE transactions
+              SET category = :targetCategory,
+                  syncDirty = 1,
+                  syncModifiedMs = :nowMs,
+                  syncMutationId = :mutationId
+              WHERE syncDeleted = 0 AND category = :sourceCategory""")
+    suspend fun reassignCategory(
+        sourceCategory: String,
+        targetCategory: String,
+        nowMs: Long,
+        mutationId: String,
+    ): Int
 }

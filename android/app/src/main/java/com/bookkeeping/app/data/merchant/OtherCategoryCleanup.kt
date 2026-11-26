@@ -20,7 +20,10 @@ internal data class OtherMerchantGroup(
     val rows: List<TransactionEntity>,
 )
 
-internal fun otherMerchantGroups(rows: List<TransactionEntity>): List<OtherMerchantGroup> =
+internal fun otherMerchantGroups(
+    rows: List<TransactionEntity>,
+    minCount: Int = 2,
+): List<OtherMerchantGroup> =
     rows.filter { !it.syncDeleted && it.category == TransactionCategory.OTHER.name }
         .groupBy {
             if (isCleanupSingletonMerchant(it.merchant)) {
@@ -37,6 +40,7 @@ internal fun otherMerchantGroups(rows: List<TransactionEntity>): List<OtherMerch
                 rows = group,
             )
         }
+        .filter { it.rows.size >= minCount }
         .sortedWith(
             compareByDescending<OtherMerchantGroup> { it.rows.size }
                 .thenByDescending { group -> group.rows.maxOf { it.timestamp } }

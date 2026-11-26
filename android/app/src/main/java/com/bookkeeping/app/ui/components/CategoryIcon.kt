@@ -31,6 +31,29 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun CategoryIcon(
+    categoryKey: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 42.dp,
+) {
+    val visual = categoryVisual(categoryKey)
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.34f))
+            .background(visual.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = visual.icon,
+            contentDescription = null,
+            tint = visual.foreground,
+            modifier = Modifier.size(size * 0.48f),
+        )
+    }
+}
+
+@Composable
+fun CategoryIcon(
     category: TransactionCategory,
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
@@ -60,6 +83,7 @@ fun MerchantAvatar(
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
     merchantIconPath: String? = null,
+    categoryKey: String? = null,
 ) {
     val localIcon by produceState<ImageBitmap?>(initialValue = null, merchantIconPath) {
         value = merchantIconPath?.let { path ->
@@ -83,7 +107,11 @@ fun MerchantAvatar(
     }
     val spec = MerchantIconCatalog.forTransaction(merchant, merchantIconKey)
     if (spec == null) {
-        CategoryIcon(category = category, modifier = modifier, size = size)
+        if (!categoryKey.isNullOrBlank()) {
+            CategoryIcon(categoryKey = categoryKey, modifier = modifier, size = size)
+        } else {
+            CategoryIcon(category = category, modifier = modifier, size = size)
+        }
         return
     }
     val color = Color(spec.colorArgb)

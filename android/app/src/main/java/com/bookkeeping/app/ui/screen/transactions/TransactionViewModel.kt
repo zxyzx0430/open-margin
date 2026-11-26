@@ -371,6 +371,42 @@ class TransactionViewModel @Inject constructor(
         )
     }
 
+    suspend fun addTransactionWithKey(
+        amountCents: Long,
+        type: TransactionType,
+        categoryKey: String,
+        merchant: String,
+        note: String,
+        timestampMs: Long = System.currentTimeMillis(),
+        account: String? = null,
+        diagnosticInput: TransactionDiagnosticInput = TransactionDiagnosticInput(),
+    ): Long = viewModelScope.async {
+        val entity = TransactionEntity(
+            amountCents = amountCents,
+            type = type.name,
+            category = categoryKey,
+            merchant = merchant,
+            note = note,
+            account = account?.trim()?.ifBlank { null },
+            source = TransactionSource.MANUAL.name,
+            timestamp = timestampMs,
+        )
+        val id = repository.insert(entity, diagnosticInput = diagnosticInput)
+        if (merchant.isNotBlank()) {
+            val builtIn = TransactionCategory.entries.firstOrNull { it.name == categoryKey }
+            if (builtIn != null) {
+                settings.recordCategoryLearning(merchant, builtIn)
+            }
+        }
+        id
+    }.await()
+
+    suspend fun countByCategory(categoryKey: String): Int =
+        repository.countByCategory(categoryKey)
+
+    suspend fun reassignCategory(sourceKey: String, targetKey: String): Int =
+        repository.reassignCategory(sourceKey, targetKey)
+
     suspend fun addTransaction(
         amountCents: Long,
         type: TransactionType,
