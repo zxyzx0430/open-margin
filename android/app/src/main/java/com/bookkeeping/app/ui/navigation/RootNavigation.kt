@@ -46,8 +46,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import com.bookkeeping.app.ui.components.QingChromeSurface
-import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
-import com.bookkeeping.app.ui.theme.LocalQingAppearance
 import com.bookkeeping.app.ui.theme.qingColors
 
 import androidx.compose.runtime.CompositionLocalProvider
@@ -250,8 +248,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         }
     }
 
-    val chromePreference = LocalQingAppearance.current.chromeTier
-    val chromeTier = rememberEffectiveQingChromeTier(chromePreference)
     // Full-height page canvas behind floating chrome, independent of blur tier.
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // Keep the underlying tab layout stable throughout the detail transition.
@@ -501,8 +497,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         ) {
             QingChromeSurface(
                 modifier = Modifier.fillMaxWidth().height(60.dp),
-                requestedTier = chromePreference,
-                resolvedTier = chromeTier,
             ) {
                 Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
                     verticalAlignment = Alignment.CenterVertically) {

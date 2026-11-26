@@ -2,7 +2,6 @@ package com.bookkeeping.app.ui.screen.settings
 
 import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
 import com.bookkeeping.app.ui.components.QingSheetGrabber
@@ -13,11 +12,9 @@ import com.bookkeeping.app.ui.components.QingLargeTitle
 import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
 
 import androidx.compose.ui.unit.sp
-import com.bookkeeping.app.ui.components.QingChromeTier
 import com.bookkeeping.app.ui.theme.LocalQingAppearance
 import com.bookkeeping.app.ui.theme.rememberQingAppearancePreferences
 import com.bookkeeping.app.ui.theme.setQingRedIncome
-import com.bookkeeping.app.ui.theme.setQingChromeTier
 import com.bookkeeping.app.i18n.tr
 import android.Manifest
 import android.content.Context
@@ -1909,56 +1906,12 @@ private fun AboutUpdateCard(
 private fun AppearancePreferencesCard() {
     val preferences = rememberQingAppearancePreferences()
     val appearance = LocalQingAppearance.current
-    var choosingMaterial by remember { mutableStateOf(false) }
-    val effectiveTier = rememberEffectiveQingChromeTier(appearance.chromeTier)
-    val tierLabel = when (appearance.chromeTier) {
-        QingChromeTier.SOLID -> tr("关闭")
-        QingChromeTier.TINTED -> tr("标准")
-        QingChromeTier.ENHANCED -> tr("增强")
-    }
     SettingsGroupCard {
         SettingsActionRow(
             icon = Icons.Filled.Visibility,
             title = tr("收支配色习惯"),
             subtitle = if (appearance.redIncome) tr("红收绿支") else tr("绿收红支"),
             onClick = { setQingRedIncome(preferences, !appearance.redIncome) },
-        )
-        SettingsRowDivider()
-        SettingsActionRow(
-            icon = Icons.Filled.Visibility,
-            title = tr("界面材质"),
-            subtitle = if (effectiveTier != appearance.chromeTier)
-                tierLabel + " · " + tr("已自动降级") else tierLabel + " · " + tr("底部导航"),
-            onClick = { choosingMaterial = true },
-        )
-    }
-    if (choosingMaterial) {
-        QingConfirmationSheet(
-            onDismissRequest = { choosingMaterial = false },
-            title = { Text(tr("界面材质")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(tr("仅作用于底部导航。滚动与静止使用同一透底材质，不模糊背景，内容卡保持不透明。"),
-                        style = MaterialTheme.typography.bodySmall)
-                    if (effectiveTier != appearance.chromeTier) {
-                        Text(tr("当前辅助功能设置要求降低透明度，已使用不透明底栏。"),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    listOf(Triple(QingChromeTier.SOLID, "关闭", "不透明底栏，最低渲染开销"),
-                        Triple(QingChromeTier.TINTED, "标准", "轻度透底，背景保持清晰"),
-                        Triple(QingChromeTier.ENHANCED, "增强", "更明显的清晰透底和柔光")).forEach { (tier, label, description) ->
-                        TextButton(onClick = { setQingChromeTier(preferences, tier); choosingMaterial = false },
-                            modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.fillMaxWidth()) {
-                                Text(tr(label), color = if (appearance.chromeTier == tier) QingPrimary else MaterialTheme.colorScheme.onSurface)
-                                Text(tr(description), style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { choosingMaterial = false }) { Text(tr("取消")) } },
         )
     }
 }

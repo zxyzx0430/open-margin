@@ -6,10 +6,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bookkeeping.app.ui.components.QingChromeTier
-import com.bookkeeping.app.ui.components.effectiveQingChromeTier
 import com.bookkeeping.app.ui.components.qingChromeOpacity
-import com.bookkeeping.app.ui.components.parseQingChromeTier
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -51,10 +48,8 @@ class QingV3TokensTest {
         assertEquals(QingSpringToken(0.82f, 360f), QingMotionTokens.motionGesture)
         assertEquals(QingSpringToken(1f, 600f), QingMotionTokens.motionSnappy)
         assertTrue(QingMotionTokens.motionPress.spec<Float>(reduceMotion = true) is SnapSpec<*>)
-        QingChromeTier.entries.forEach {
-            assertEquals(it, effectiveQingChromeTier(it))
-            assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(it, reducedTransparency = true))
-        }
+        assertEquals(0.85f, qingChromeOpacity(), 0.001f)
+        assertEquals(1f, qingChromeOpacity(reducedTransparency = true), 0.001f)
     }
 
     @Test fun amountColorPreferenceDoesNotMutateStatusPalette() {
@@ -64,14 +59,6 @@ class QingV3TokensTest {
         }
     }
     @Test fun materialCapabilityAndReduceMotion() {
-        assertEquals(QingChromeTier.TINTED, parseQingChromeTier("BLUR"))
-        assertEquals(QingChromeTier.ENHANCED, parseQingChromeTier(null))
-        assertEquals(QingChromeTier.ENHANCED, parseQingChromeTier("invalid"))
-        assertEquals(QingChromeTier.SOLID, parseQingChromeTier("SOLID"))
-        assertEquals(QingChromeTier.ENHANCED, effectiveQingChromeTier(QingChromeTier.ENHANCED))
-        assertEquals(1f, qingChromeOpacity(QingChromeTier.SOLID), 0.001f)
-        assertEquals(0.92f, qingChromeOpacity(QingChromeTier.TINTED), 0.001f)
-        assertEquals(0.85f, qingChromeOpacity(QingChromeTier.ENHANCED), 0.001f)
         assertTrue(reduceMotionForScale(0f))
         assertTrue(!reduceMotionForScale(0.5f))
     }
@@ -138,7 +125,8 @@ class QingV3TokensTest {
         assertEquals(19.6f, com.bookkeeping.app.ui.components.fitAmountFontSize(28f, 11f, 140, 196), 0.01f)
         assertEquals(11f, com.bookkeeping.app.ui.components.fitAmountFontSize(28f, 11f, 10, 196), 0.01f)
     }
-    @Test fun newAppearanceDefaultsToEnhancedMaterial() {
-        assertEquals(QingChromeTier.ENHANCED, QingAppearance().chromeTier)
+    @Test fun navigationMaterialIsNotAnAppearancePreference() {
+        assertEquals(QingAppearance(redIncome = false), QingAppearance())
+        assertEquals(0.85f, qingChromeOpacity(), 0.001f)
     }
 }

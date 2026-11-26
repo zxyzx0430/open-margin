@@ -23,27 +23,14 @@ import androidx.compose.ui.unit.dp
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
 
-enum class QingChromeTier { SOLID, TINTED, ENHANCED }
+/** One product material. Only system accessibility can request opacity. */
+internal const val QING_CHROME_OPACITY = 0.85f
 
-/** Preserve users' old Standard preference without retaining a blur path. */
-internal fun parseQingChromeTier(stored: String?): QingChromeTier =
-    if (stored == "BLUR") QingChromeTier.TINTED
-    else QingChromeTier.entries.firstOrNull { it.name == stored } ?: QingChromeTier.ENHANCED
+internal fun qingChromeOpacity(reducedTransparency: Boolean = false): Float =
+    if (reducedTransparency) 1f else QING_CHROME_OPACITY
 
-fun effectiveQingChromeTier(
-    requested: QingChromeTier,
-    reducedTransparency: Boolean = false,
-): QingChromeTier = if (reducedTransparency) QingChromeTier.SOLID else requested
-
-internal fun qingChromeOpacity(tier: QingChromeTier): Float = when (tier) {
-    QingChromeTier.SOLID -> 1f
-    QingChromeTier.TINTED -> 0.92f
-    QingChromeTier.ENHANCED -> 0.85f
-}
-
-/** Observe only accessibility preferences; scrolling never changes material. */
 @Composable
-fun rememberEffectiveQingChromeTier(requested: QingChromeTier): QingChromeTier {
+private fun rememberChromeReducedTransparency(): Boolean {
     val context = LocalContext.current
     val resolver = context.contentResolver
     val accessibility = remember(context) { context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager }
@@ -70,7 +57,7 @@ fun rememberEffectiveQingChromeTier(requested: QingChromeTier): QingChromeTier {
             accessibility.removeTouchExplorationStateChangeListener(listener)
         }
     }
-    return effectiveQingChromeTier(requested, reducedTransparency = reduced)
+    return reduced
 }
 
 /** A single translucent surface directly over the live page. No capture,
@@ -78,21 +65,19 @@ fun rememberEffectiveQingChromeTier(requested: QingChromeTier): QingChromeTier {
 @Composable
 fun QingChromeSurface(
     modifier: Modifier = Modifier,
-    requestedTier: QingChromeTier = QingChromeTier.ENHANCED,
-    resolvedTier: QingChromeTier? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val colors = qingColors
-    val tier = resolvedTier ?: rememberEffectiveQingChromeTier(requestedTier)
+    val reducedTransparency = rememberChromeReducedTransparency()
     val shape = RoundedCornerShape(QingRadiusTokens.radiusPill)
-    val opacity = qingChromeOpacity(tier)
+    val opacity = qingChromeOpacity(reducedTransparency)
     Box(
         modifier = modifier.shadow(3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.06f),
                 spotColor = Color.Black.copy(alpha = 0.08f))
             .clip(shape).border(0.5.dp, colors.strokeHairline, shape),
     ) {
         Box(Modifier.matchParentSize().background(colors.surfaceSheet.copy(alpha = opacity)))
-        if (tier == QingChromeTier.ENHANCED) {
+        if (!reducedTransparency) {
             val dark = LocalQingDark.current
             val shine = Color.White.copy(alpha = if (dark) 0.06f else 0.12f)
             val highlight = remember(shine) {

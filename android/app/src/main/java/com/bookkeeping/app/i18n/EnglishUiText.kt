@@ -5,13 +5,7 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
-        "已自动降级" to "Reduced automatically",
         "底部导航" to "Bottom navigation",
-        "仅作用于底部导航。滚动与静止使用同一透底材质，不模糊背景，内容卡保持不透明。" to "Only affects bottom navigation. The same clear translucent material is used while scrolling or idle; content cards stay opaque.",
-        "当前辅助功能设置要求降低透明度，已使用不透明底栏。" to "Accessibility settings reduce transparency; the navigation bar is opaque.",
-        "不透明底栏，最低渲染开销" to "Opaque navigation, lowest rendering cost",
-        "轻度透底，背景保持清晰" to "Subtle transparency, sharp background",
-        "更明显的清晰透底和柔光" to "Clearer transparency with a soft highlight",
         "卡包" to "Wallet",
         "管理卡片" to "Manage cards",
         "添加卡片" to "Add card",
@@ -58,7 +52,6 @@ internal object EnglishUiText {
         "收支配色习惯" to "Income and expense colors",
         "红收绿支" to "Red income, green expense",
         "绿收红支" to "Green income, red expense",
-        "界面材质" to "Interface material",
         "标准" to "Standard",
         "增强" to "Enhanced",
         "当前系统：" to "Current system: ",
