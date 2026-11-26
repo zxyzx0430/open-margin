@@ -570,7 +570,10 @@ internal fun SubscriptionBadgeAvatar(
     wallet: Boolean = false,
 ) {
     val spec = remember(name) { com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(name) }
-    val vector = remember(spec?.systemIcon) { com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon) }
+    val vector = remember(spec?.key, spec?.systemIcon) {
+        com.bookkeeping.app.ui.components.brandLogoVector(spec?.key)
+            ?: com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon)
+    }
     val brandColor = spec?.colorArgb?.let { androidx.compose.ui.graphics.Color(it) }
     val label = spec?.initials ?: name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
     val bgColor = when {

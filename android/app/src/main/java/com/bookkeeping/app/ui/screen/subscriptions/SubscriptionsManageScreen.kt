@@ -281,7 +281,10 @@ fun SubscriptionsManageScreen(
                     if (deckCards.isEmpty()) {
                         TextButton(onClick = { manageDeck = true }) { Text(tr("添加卡片")) }
                     } else {
-                        WalletCardDeck(deckCards) { detailSubscriptionId = it }
+                        WalletCardDeck(
+                            subscriptions = deckCards,
+                            onReorder = ::saveDeck,
+                        ) { detailSubscriptionId = it }
                     }
                     Spacer(Modifier.height(4.dp))
                 }

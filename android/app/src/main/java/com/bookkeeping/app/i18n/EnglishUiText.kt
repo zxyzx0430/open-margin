@@ -1781,6 +1781,7 @@ internal object EnglishUiText {
         "云闪付" to "UnionPay",
         "京东白条" to "JD Baitiao",
         "Apple Pay" to "Apple Pay",
+        "订阅日期" to "Started",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(

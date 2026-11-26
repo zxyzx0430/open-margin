@@ -79,8 +79,8 @@ private fun MerchantSuggestionChip(
 ) {
     val colors = qingColors
     val brandColor = Color(suggestion.spec.colorArgb)
-    val vector = remember(suggestion.spec.systemIcon) {
-        merchantSystemIcon(suggestion.spec.systemIcon)
+    val vector = remember(suggestion.spec.key, suggestion.spec.systemIcon) {
+        brandLogoVector(suggestion.spec.key) ?: merchantSystemIcon(suggestion.spec.systemIcon)
     }
     Surface(
         modifier = Modifier

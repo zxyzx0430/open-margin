@@ -1,38 +1,56 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
-import com.bookkeeping.app.ui.theme.qingPressFeedback
-
 import android.content.Context
 import android.view.accessibility.AccessibilityManager
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,18 +58,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.bookkeeping.app.data.local.entity.SubscriptionEntity
+import com.bookkeeping.app.data.merchant.MerchantIconCatalog
 import com.bookkeeping.app.data.subscription.SubscriptionProjection
+import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.theme.QingMotionTokens
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.WalletSubscriptionPalette
+import com.bookkeeping.app.ui.theme.qingPressFeedback
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
-import com.bookkeeping.app.i18n.AppLanguage
+import java.util.Locale
 
 @Composable
 internal fun rememberTouchExploration(): Boolean {
@@ -84,49 +103,143 @@ internal fun walletDeckAdd(ids: List<Long>, id: Long): List<Long> =
 internal fun walletDeckReplace(ids: List<Long>, oldId: Long, newId: Long): List<Long> =
     if (oldId !in ids || newId in ids) ids else ids.map { if (it == oldId) newId else it }
 
-/** A user-configurable preview; the complete management list remains below. */
+/**
+ * Subfolio-style in-place accordion card deck.
+ * - Default expanded card is the bottommost card.
+ * - Tapping a collapsed card expands it in place, smoothly pushing cards below down.
+ * - Tapping the already-expanded card opens its detail sheet.
+ * - Long-pressing and dragging vertically reorders cards in the deck.
+ */
 @Composable
-internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetail: (Long) -> Unit) {
+internal fun WalletCardDeck(
+    subscriptions: List<SubscriptionEntity>,
+    onReorder: (List<Long>) -> Unit = {},
+    onOpenDetail: (Long) -> Unit,
+) {
     val cards = subscriptions.take(WALLET_DECK_MAX)
     if (cards.isEmpty()) return
-    var selected by rememberSaveable { mutableStateOf<Long?>(null) }
-    LaunchedEffect(cards.map { it.id }) { if (selected !in cards.map { it.id }) selected = null }
-    val order = walletDeckOrder(cards.map { it.id }, selected)
+
+    val byId = remember(cards) { cards.associateBy { it.id } }
+    var localOrder by remember(cards.map { it.id }) { mutableStateOf(cards.map { it.id }) }
+    var expandedId by rememberSaveable { mutableStateOf<Long?>(null) }
+    LaunchedEffect(localOrder) {
+        if (expandedId !in localOrder) expandedId = localOrder.lastOrNull()
+    }
+    val activeExpandedId = expandedId?.takeIf { it in localOrder } ?: localOrder.lastOrNull()
+    val expandedIndex = localOrder.indexOf(activeExpandedId).coerceAtLeast(0)
+
     val reduced = rememberReduceMotion()
     val density = LocalDensity.current
-    val reveal = if (cards.size > 4) 48.dp else 56.dp
-    val step = with(density) { reveal.toPx() }
-    val maxSpread = with(density) { 20.dp.toPx() }
-    var spread by remember { mutableFloatStateOf(0f) }
-    val spring = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-    var settle by remember { mutableStateOf<Job?>(null) }
-    val drag = rememberDraggableState { delta ->
-        spread = (spread + delta * 0.35f).coerceIn(-maxSpread, maxSpread)
-    }
+    val haptic = LocalHapticFeedback.current
+    val reveal = 54.dp
+    val expandedHeight = 186.dp
+    val revealPx = with(density) { reveal.toPx() }
+    val expandedPx = with(density) { expandedHeight.toPx() }
+    val maxCardY = with(density) { (reveal * (localOrder.size - 1).coerceAtLeast(0)).toPx() }
+
+    var draggingId by remember { mutableStateOf<Long?>(null) }
+    var dragStartY by remember { mutableFloatStateOf(0f) }
+    var dragDeltaY by remember { mutableFloatStateOf(0f) }
+
     Box(
-        Modifier.fillMaxWidth().height(184.dp + reveal * (cards.size - 1) + 20.dp),
+        Modifier
+            .fillMaxWidth()
+            .height(expandedHeight + reveal * (localOrder.size - 1).coerceAtLeast(0) + 12.dp),
     ) {
-        cards.forEachIndexed { paletteIndex, subscription ->
-            key(subscription.id) {
-                val position = order.indexOf(subscription.id)
-                val top = position == order.lastIndex
-                val y by animateFloatAsState(position * step, QingMotionTokens.motionGesture.spec(reduced), label = "walletDeckPosition")
+        localOrder.forEachIndexed { index, subId ->
+            val subscription = byId[subId] ?: return@forEachIndexed
+            key(subId) {
+                val isExpanded = subId == activeExpandedId
+                val isDragging = draggingId == subId
+                val targetY = index * revealPx +
+                    if (index > expandedIndex) (expandedPx - revealPx) else 0f
+                val animatedY by animateFloatAsState(
+                    targetValue = targetY,
+                    animationSpec = QingMotionTokens.motionGesture.spec(reduced),
+                    label = "walletAccordionY",
+                )
+                val yOffset = if (isDragging) {
+                    (dragStartY + dragDeltaY).coerceIn(0f, maxCardY + (expandedPx - revealPx))
+                } else {
+                    animatedY
+                }
+                val dragScale by animateFloatAsState(
+                    targetValue = if (isDragging) 1.03f else 1f,
+                    animationSpec = QingMotionTokens.motionSnappy.spec(reduced),
+                    label = "walletDragScale",
+                )
+                val brandColor = remember(subscription.name, index) {
+                    MerchantIconCatalog.forMerchant(subscription.name)?.colorArgb?.let { Color(it) }
+                        ?: WalletSubscriptionPalette[index % WalletSubscriptionPalette.size]
+                }
+                val reorderModifier = if (localOrder.size > 1) {
+                    Modifier.pointerInput(localOrder, expandedIndex) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                val idx = localOrder.indexOf(subId).coerceAtLeast(0)
+                                draggingId = subId
+                                dragStartY = idx * revealPx +
+                                    if (idx > expandedIndex) (expandedPx - revealPx) else 0f
+                                dragDeltaY = 0f
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragDeltaY += dragAmount.y
+                                val currentY = dragStartY + dragDeltaY
+                                val currentIdx = localOrder.indexOf(subId)
+                                if (currentIdx != -1) {
+                                    val targetIdx = ((currentY + revealPx * 0.45f) / revealPx)
+                                        .toInt()
+                                        .coerceIn(0, localOrder.lastIndex)
+                                    if (targetIdx != currentIdx) {
+                                        val mutable = localOrder.toMutableList()
+                                        val moved = mutable.removeAt(currentIdx)
+                                        mutable.add(targetIdx, moved)
+                                        localOrder = mutable
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                }
+                            },
+                            onDragEnd = {
+                                val finalOrder = localOrder
+                                draggingId = null
+                                dragDeltaY = 0f
+                                onReorder(finalOrder)
+                            },
+                            onDragCancel = {
+                                draggingId = null
+                                dragDeltaY = 0f
+                            },
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+
                 Box(
-                    Modifier.fillMaxWidth().height(184.dp).zIndex(position.toFloat())
-                        .graphicsLayer { translationY = y + spread * position / (cards.size - 1).coerceAtLeast(1) }
+                    Modifier
+                        .fillMaxWidth()
+                        .height(expandedHeight)
+                        .zIndex(if (isDragging) 100f else index.toFloat())
+                        .graphicsLayer {
+                            translationY = yOffset
+                            scaleX = dragScale
+                            scaleY = dragScale
+                        }
+                        .then(reorderModifier),
                 ) {
-                    val deckDrag = if (top && cards.size > 1 && !reduced) Modifier.draggable(
-                        drag, Orientation.Vertical,
-                        onDragStarted = { settle?.cancel(); spring.stop() },
-                        onDragStopped = { velocity ->
-                            settle = scope.launch {
-                                spring.snapTo(spread)
-                                spring.animateTo(0f, QingMotionTokens.motionGesture.spec(false), initialVelocity = (velocity * 0.35f).coerceIn(-maxSpread * 10f, maxSpread * 10f)) { spread = value.coerceIn(-maxSpread, maxSpread) }
-                            }
-                        }) else Modifier
-                    WalletSubscriptionCard(subscription, WalletSubscriptionPalette[paletteIndex % WalletSubscriptionPalette.size], top, deckDrag) {
-                        if (top) onOpenDetail(subscription.id) else selected = subscription.id
+                    WalletSubscriptionCard(
+                        subscription = subscription,
+                        color = brandColor,
+                        expanded = isExpanded,
+                        elevated = isDragging,
+                    ) {
+                        if (isExpanded) {
+                            onOpenDetail(subscription.id)
+                        } else {
+                            expandedId = subscription.id
+                        }
                     }
                 }
             }
@@ -135,18 +248,27 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
 }
 
 @Composable
-private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Color, expanded: Boolean, deckDrag: Modifier, onClick: () -> Unit) {
+private fun WalletSubscriptionCard(
+    subscription: SubscriptionEntity,
+    color: Color,
+    expanded: Boolean,
+    elevated: Boolean,
+    onClick: () -> Unit,
+) {
     val radius = QingRadiusTokens.radiusHero
     val shape = RoundedCornerShape(radius)
     val white = Color.White
-    val secondary = white.copy(alpha = 0.92f)
+    val secondary = white.copy(alpha = 0.84f)
     val cadence = tr(subscriptionCadenceLabel(subscription.cadence))
     val amount = formatSubscriptionOriginalCurrency(subscription.amountCents, subscription.currency)
-    val date = remember(subscription.nextDueMs, AppLanguage.current()) {
-        java.text.SimpleDateFormat(
-            if (AppLanguage.current() == AppLanguage.ENGLISH) "MMM d" else "M月d日",
-            if (AppLanguage.current() == AppLanguage.ENGLISH) java.util.Locale.ENGLISH else java.util.Locale.CHINA)
+    val isEnglish = AppLanguage.current() == AppLanguage.ENGLISH
+    val dueDateText = remember(subscription.nextDueMs, isEnglish) {
+        SimpleDateFormat("yyyy.MM.dd", if (isEnglish) Locale.ENGLISH else Locale.CHINA)
             .format(Date(subscription.nextDueMs))
+    }
+    val startDateText = remember(subscription.startMs, isEnglish) {
+        SimpleDateFormat("yyyy.MM.dd", if (isEnglish) Locale.ENGLISH else Locale.CHINA)
+            .format(Date(subscription.startMs))
     }
     val days = SubscriptionProjection.daysUntilDue(subscription.nextDueMs, System.currentTimeMillis())
     val countdown = when {
@@ -157,72 +279,134 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
     }
     val material = remember(color) {
         Brush.linearGradient(
-            0f to lerp(color, white, 0.20f),
-            0.42f to color,
-            1f to lerp(color, Color.Black, 0.22f),
+            0f to lerp(color, white, 0.16f),
+            0.46f to color,
+            1f to lerp(color, Color.Black, 0.24f),
         )
     }
+
     Column(
-        Modifier.fillMaxSize().then(deckDrag).qingPressFeedback(QingMotionTokens.cardPressedScale)
-            .shadow(if (expanded) 6.dp else 3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.16f),
-                spotColor = Color.Black.copy(alpha = 0.24f))
-            .clip(shape).background(material)
+        Modifier
+            .fillMaxSize()
+            .qingPressFeedback(QingMotionTokens.cardPressedScale)
+            .shadow(
+                elevation = when {
+                    elevated -> 14.dp
+                    expanded -> 8.dp
+                    else -> 4.dp
+                },
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.20f),
+                spotColor = Color.Black.copy(alpha = 0.28f),
+            )
+            .clip(shape)
+            .background(material)
             .drawWithContent {
+                // Diagonal metallic/satin sheen across the card face
+                drawRect(
+                    Brush.linearGradient(
+                        0.0f to Color.Transparent,
+                        0.38f to white.copy(alpha = 0.05f),
+                        0.52f to white.copy(alpha = 0.20f),
+                        0.66f to white.copy(alpha = 0.04f),
+                        1.0f to Color.Transparent,
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height),
+                    ),
+                )
                 drawRect(
                     Brush.radialGradient(
-                        colors = listOf(white.copy(alpha = 0.20f), Color.Transparent),
-                        center = Offset(size.width * 0.86f, size.height * 0.12f),
-                        radius = size.maxDimension * 0.72f,
+                        colors = listOf(white.copy(alpha = 0.16f), Color.Transparent),
+                        center = Offset(size.width * 0.85f, size.height * 0.15f),
+                        radius = size.maxDimension * 0.68f,
                     ),
                 )
                 drawContent()
                 val stroke = 0.75.dp.toPx()
                 clipRect(bottom = radius.toPx()) {
-                    drawRoundRect(white.copy(alpha = 0.24f), topLeft = Offset(stroke / 2, stroke / 2),
+                    drawRoundRect(
+                        color = white.copy(alpha = 0.26f),
+                        topLeft = Offset(stroke / 2, stroke / 2),
                         size = Size(size.width - stroke, size.height - stroke),
-                        cornerRadius = CornerRadius(radius.toPx()), style = Stroke(stroke))
+                        cornerRadius = CornerRadius(radius.toPx()),
+                        style = Stroke(stroke),
+                    )
                 }
             }
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 52.dp).padding(top = if (expanded) 0.dp else 4.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SubscriptionBadgeAvatar(subscription.name, subscription.active, 30.dp, wallet = true)
-            Column(Modifier.weight(1f)) {
-                Text(subscription.name, color = white, fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (expanded) Text(cadence, color = secondary, fontSize = 12.sp, maxLines = 1)
-            }
-            if (!expanded) {
-                Column(horizontalAlignment = Alignment.End) {
-                    AutoSizeAmountText(text = amount,
-                        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum", fontSize = 16.sp),
-                        modifier = Modifier.widthIn(max = 126.dp), minimumSizeSp = 14f, color = white, fontWeight = FontWeight.SemiBold)
-                    Text(cadence, color = secondary, fontSize = 11.sp, maxLines = 1)
-                }
+        // Exposed top strip (图 3 风格: 左图标 + 名称 + 周期小字，右侧留白)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            SubscriptionBadgeAvatar(subscription.name, subscription.active, 32.dp, wallet = true)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = subscription.name,
+                    color = white,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = cadence,
+                    color = secondary,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
             }
         }
+
         Spacer(Modifier.weight(1f))
-        if (expanded) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Bottom) {
-                Column(Modifier.weight(1f)) {
-                    AutoSizeAmountText(text = amount,
-                        style = MaterialTheme.typography.headlineLarge.copy(fontFeatureSettings = "tnum",
-                            fontSize = 34.sp, letterSpacing = (-0.65).sp),
-                        modifier = Modifier.fillMaxWidth(), minimumSizeSp = 18f, color = white, fontWeight = FontWeight.Bold)
-                    if (subscription.paymentChannel.isNotBlank() && subscription.paymentChannel != "未指定")
-                        Text(subscription.paymentChannel, color = secondary, fontSize = 12.sp,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    AutoSizeAmountText(
+                        text = amount,
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            fontFeatureSettings = "tnum",
+                            fontSize = 32.sp,
+                            letterSpacing = (-0.65).sp,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                        minimumSizeSp = 18f,
+                        color = white,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "${tr("订阅日期")} $startDateText",
+                        color = secondary,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Column(Modifier.widthIn(max = 112.dp), horizontalAlignment = Alignment.End) {
-                    Text(tr("下次扣款"), color = secondary, fontSize = 12.sp)
-                    Text(date, color = white, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                Column(
+                    modifier = Modifier.widthIn(max = 120.dp),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    Text(tr("下次扣款"), color = secondary, fontSize = 11.sp, maxLines = 1)
+                    Text(dueDateText, color = white, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     Text(countdown, color = secondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
-        Spacer(Modifier.height(20.dp))
     }
 }
