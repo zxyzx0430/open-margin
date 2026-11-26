@@ -3,6 +3,7 @@ package com.bookkeeping.app.ui.screen.subscriptions
 import android.content.Context
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -217,10 +218,16 @@ internal fun WalletCardDeck(
                     Modifier
                 }
 
+                val cardHeight by animateDpAsState(
+                    targetValue = if (isExpanded || index < expandedIndex) expandedHeight else 68.dp,
+                    animationSpec = QingMotionTokens.motionGesture.spec(reduced),
+                    label = "walletCardHeight",
+                )
+
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(expandedHeight)
+                        .height(cardHeight)
                         .zIndex(if (isDragging) 100f else index.toFloat())
                         .graphicsLayer {
                             translationY = yOffset
@@ -279,9 +286,9 @@ private fun WalletSubscriptionCard(
     }
     val material = remember(color) {
         Brush.linearGradient(
-            0f to lerp(color, white, 0.16f),
-            0.46f to color,
-            1f to lerp(color, Color.Black, 0.24f),
+            0f to lerp(color, white, 0.14f),
+            0.48f to color,
+            1f to lerp(color, Color.Black, 0.20f),
         )
     }
 
@@ -296,29 +303,17 @@ private fun WalletSubscriptionCard(
                     else -> 4.dp
                 },
                 shape = shape,
-                ambientColor = Color.Black.copy(alpha = 0.20f),
-                spotColor = Color.Black.copy(alpha = 0.28f),
+                ambientColor = Color.Black.copy(alpha = 0.18f),
+                spotColor = Color.Black.copy(alpha = 0.24f),
             )
             .clip(shape)
             .background(material)
             .drawWithContent {
-                // Diagonal metallic/satin sheen across the card face
-                drawRect(
-                    Brush.linearGradient(
-                        0.0f to Color.Transparent,
-                        0.38f to white.copy(alpha = 0.05f),
-                        0.52f to white.copy(alpha = 0.20f),
-                        0.66f to white.copy(alpha = 0.04f),
-                        1.0f to Color.Transparent,
-                        start = Offset(0f, 0f),
-                        end = Offset(size.width, size.height),
-                    ),
-                )
                 drawRect(
                     Brush.radialGradient(
-                        colors = listOf(white.copy(alpha = 0.16f), Color.Transparent),
-                        center = Offset(size.width * 0.85f, size.height * 0.15f),
-                        radius = size.maxDimension * 0.68f,
+                        colors = listOf(white.copy(alpha = 0.14f), Color.Transparent),
+                        center = Offset(size.width * 0.85f, size.height * 0.14f),
+                        radius = size.maxDimension * 0.65f,
                     ),
                 )
                 drawContent()

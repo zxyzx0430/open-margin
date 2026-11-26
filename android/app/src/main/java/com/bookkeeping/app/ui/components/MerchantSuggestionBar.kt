@@ -108,8 +108,8 @@ private fun MerchantSuggestionChip(
                     Icon(
                         painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
                         contentDescription = null,
-                        tint = brandColor,
-                        modifier = Modifier.size(13.dp),
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(14.dp),
                     )
                 } else if (vector != null) {
                     Icon(

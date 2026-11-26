@@ -600,8 +600,8 @@ internal fun SubscriptionBadgeAvatar(
             Icon(
                 painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
                 contentDescription = null,
-                tint = fgColor,
-                modifier = Modifier.size(size * 0.58f),
+                tint = androidx.compose.ui.graphics.Color.Unspecified,
+                modifier = Modifier.size(size * 0.62f),
             )
         } else if (vector != null) {
             Icon(

@@ -54,9 +54,10 @@ object MerchantIconCatalog {
         Rule(listOf("学费", "教育", "书店"), "education", "学", 0xFFD99A2B, "education"),
         // AI & Developer Tools
         Rule(listOf("chatgpt", "openai", "gpt"), "chatgpt", "G", 0xFF23272E, "ai"),
+        Rule(listOf("codex"), "codex", "C", 0xFF23272E, "ai"),
         Rule(listOf("claude", "anthropic"), "claude", "C", 0xFFC2613A, "ai"),
         Rule(listOf("gemini", "google ai"), "gemini", "G", 0xFF2563EB, "ai"),
-        Rule(listOf("cursor", "copilot", "codex", "opencode", "code goat", "windsurf", "trae"), "coding_ai", "C", 0xFF2B313B, "code"),
+        Rule(listOf("cursor", "copilot", "opencode", "code goat", "windsurf", "trae"), "coding_ai", "C", 0xFF2B313B, "code"),
         Rule(listOf("midjourney", "suno", "runway", "perplexity", "poe", "kimi", "豆包", "通义", "智谱", "deepseek"), "ai_service", "A", 0xFF4F46E5, "ai"),
         Rule(listOf("github"), "github", "G", 0xFF24292F, "code"),
         // Streaming Video & Music
