@@ -96,6 +96,7 @@ fun CategoryManagerSheet(
     var pendingDelete by remember { mutableStateOf<Pair<CategoryDefinition, Int>?>(null) }
     var targetReassignId by remember { mutableStateOf(TransactionCategory.OTHER.name) }
     var busy by remember { mutableStateOf(false) }
+    var operationError by remember { mutableStateOf<String?>(null) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -208,10 +209,17 @@ fun CategoryManagerSheet(
                                         if (busy) return@IconButton
                                         busy = true
                                         scope.launch {
-                                            val count = runCatching { countByCategory(cat.id) }.getOrDefault(0)
-                                            targetReassignId = TransactionCategory.OTHER.name
-                                            pendingDelete = cat to count
-                                            busy = false
+                                            try {
+                                                val count = countByCategory(cat.id)
+                                                targetReassignId = TransactionCategory.OTHER.name
+                                                pendingDelete = cat to count
+                                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                                throw e
+                                            } catch (e: Exception) {
+                                                operationError = e.message ?: "Failed to count transactions"
+                                            } finally {
+                                                busy = false
+                                            }
                                         }
                                     },
                                     enabled = !busy,
@@ -289,7 +297,7 @@ fun CategoryManagerSheet(
             },
             onConfirm = { name, iconKey, colorArgb ->
                 if (editing == null) {
-                    catalog.addCustomCategory(name, iconKey, colorArgb).map { created ->
+                    catalog.addCustomCategory(name, iconKey, colorArgb).onSuccess { created ->
                         showCreateDialog = false
                         onCategoryCreated(created.id)
                     }
@@ -306,6 +314,17 @@ fun CategoryManagerSheet(
                     }
                     result
                 }
+            },
+        )
+    }
+
+    operationError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { operationError = null },
+            title = { Text(tr("操作失败")) },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { operationError = null }) { Text(tr("确定")) }
             },
         )
     }
@@ -362,12 +381,18 @@ fun CategoryManagerSheet(
                     onClick = {
                         busy = true
                         scope.launch {
-                            if (count > 0) {
-                                runCatching { reassignCategory(cat.id, targetReassignId) }
+                            try {
+                                reassignCategory(cat.id, targetReassignId)
+                                catalog.deleteCategory(cat.id).getOrThrow()
+                                pendingDelete = null
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                pendingDelete = null
+                                operationError = e.message ?: "Failed to move transactions"
+                            } finally {
+                                busy = false
                             }
-                            catalog.deleteCategory(cat.id)
-                            busy = false
-                            pendingDelete = null
                         }
                     },
                 ) {

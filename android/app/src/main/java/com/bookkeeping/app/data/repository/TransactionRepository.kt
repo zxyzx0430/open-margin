@@ -138,6 +138,33 @@ class TransactionRepository @Inject constructor(
 
     fun observeAll(): Flow<List<TransactionEntity>> = dao.observeAll()
 
+    suspend fun countByCategory(categoryKey: String): Int = dao.countByCategory(categoryKey)
+
+    suspend fun reassignCategory(sourceKey: String, targetKey: String): Int {
+        require(sourceKey != targetKey)
+        require(sourceKey.isNotBlank() && targetKey.isNotBlank())
+        val updates = database.withTransaction {
+            val now = System.currentTimeMillis()
+            val matched = dao.currentActive()
+                .filter { it.category == sourceKey }
+                .map { markCategorized(it, targetKey, now, UUID.randomUUID().toString()) }
+            if (matched.isNotEmpty()) dao.updateAll(matched)
+            matched
+        }
+        if (updates.isNotEmpty()) {
+            withContext(NonCancellable) {
+                requestSyncForTransactions(
+                    updates.map {
+                        TransactionDiagnosticInput(
+                            callSite = "TransactionRepository.reassignCategory",
+                        ) to it
+                    },
+                )
+            }
+        }
+        return updates.size
+    }
+
     suspend fun categorizeOther(
         merchant: String,
         singleId: Long?,

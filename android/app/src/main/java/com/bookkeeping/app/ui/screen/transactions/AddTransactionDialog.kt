@@ -39,6 +39,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -334,7 +335,7 @@ fun AddTransactionDialog(
                 id = savedId,
                 amountCents = payload.amountCents,
                 type = payload.type.name,
-                category = payload.category.name,
+                category = payload.categoryKey,
                 merchant = payload.merchant,
                 note = payload.note,
                 account = payload.account.trim().ifBlank { null },
@@ -363,7 +364,7 @@ fun AddTransactionDialog(
                 amountCents = typed,
                 type = selectedType,
                 currency = entryCurrency,
-                category = selectedCategory,
+                categoryKey = selectedCategory,
                 merchant = merchant,
                 note = note,
                 timestamp = timestamp,
@@ -397,7 +398,7 @@ fun AddTransactionDialog(
                             TransactionEntity(
                                 amountCents = payload.amountCents,
                                 type = payload.type.name,
-                                category = payload.category.name,
+                                category = payload.categoryKey,
                                 merchant = payload.merchant,
                                 note = payload.note,
                                 source = initial?.source ?: "MANUAL",
