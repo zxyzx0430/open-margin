@@ -1,5 +1,14 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.runtime.key
+import androidx.navigation.NavController
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
@@ -147,13 +156,26 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceCapturePanel
 import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val navController = rememberNavController()
     var pendingLedgerDrilldown by remember { mutableStateOf<StatsLedgerDrilldown?>(null) }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
+    // A destination listener is synchronous with navigate/pop. The Compose
+    // back-stack snapshot alone can lag an incoming detail frame.
+    var liveRoute by remember(navController) { mutableStateOf(navController.currentDestination?.route) }
+    DisposableEffect(navController) {
+        val listener = NavController.OnDestinationChangedListener { _, destination, _ ->
+            liveRoute = destination.route
+        }
+        navController.addOnDestinationChangedListener(listener)
+        onDispose { navController.removeOnDestinationChangedListener(listener) }
+    }
+    val visibleEntries by navController.visibleEntries.collectAsState()
+    val visibleRoutes = visibleEntries.mapNotNull { it.destination.route }
+    val reducedMotion = rememberReduceMotion()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val onboarding: OnboardingViewModel = hiltViewModel()
@@ -201,14 +223,21 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     // lazily from inside hierarchy.any could observe a nested data object
     // before its class initializer had assigned INSTANCE (null route crash).
     var transitionEntry by remember { mutableStateOf<TransactionEntity?>(null) }
+    var ledgerSharedOrigin by remember { mutableStateOf(false) }
     LaunchedEffect(currentDestination?.route) {
         val route = currentDestination?.route
         if (route != BottomNavItem.Transactions.route && route != AppRoutes.TRANSACTION_DETAIL) transitionEntry = null
     }
     val navItems = BottomNavItem.ALL
-    val showBottomBar = navItems.any { it.route == currentDestination?.route }
+    val activeRoute = liveRoute ?: currentDestination?.route
+    val tabRoutes = remember(navItems) { navItems.map { it.route }.toSet() }
+    val isTabDestination = activeRoute in tabRoutes
+    val detailInFlight = activeRoute == AppRoutes.TRANSACTION_DETAIL ||
+        AppRoutes.TRANSACTION_DETAIL in visibleRoutes
+    val showBottomBar = shouldShowMainChrome(activeRoute, visibleRoutes, tabRoutes)
     fun openTransaction(id: Long) {
         if (navController.currentDestination?.route == AppRoutes.TRANSACTION_DETAIL) return
+        ledgerSharedOrigin = navController.currentDestination?.route == BottomNavItem.Transactions.route
         transitionEntry = transactionViewModel.allTransactions.value.firstOrNull { it.id == id }
         navController.navigate(AppRoutes.transactionDetail(id)) { launchSingleTop = true }
     }
@@ -238,8 +267,8 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val chromePreference = LocalQingAppearance.current.chromeTier
     val chromeTier = rememberEffectiveQingChromeTier(chromePreference)
     val scope = rememberCoroutineScope()
-    val canBlur = showBottomBar && chromeTier >= QingChromeTier.BLUR &&
-        currentDestination?.route != BottomNavItem.Calendar.route
+    val canBlur = showBottomBar && visibleEntries.size <= 1 && chromeTier >= QingChromeTier.BLUR &&
+        activeRoute != BottomNavItem.Calendar.route
     val blurEnabled by rememberUpdatedState(canBlur)
     var chromeBusy by remember { mutableStateOf(false) }
     val lastMotionMs = remember { longArrayOf(0L) }
@@ -276,18 +305,19 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             }
         }
     }
-    LaunchedEffect(currentDestination?.route, canBlur) {
+    LaunchedEffect(activeRoute, canBlur) {
         if (canBlur) deferChrome()
         else {
             idleJob[0]?.cancel()
             chromeBusy = false
         }
     }
-    val chromeLayer = if (canBlur) rememberGraphicsLayer() else null
+    val chromeLayer = if (canBlur) key(activeRoute) { rememberGraphicsLayer() } else null
     val chromeBackdrop = chromeLayer?.takeUnless { chromeBusy }
     // Full-height page canvas behind floating chrome, independent of blur tier.
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val chromeOverlap = if (showBottomBar) 68.dp + navInset else 0.dp
+    // Keep the underlying tab layout stable throughout the detail transition.
+    val chromeOverlap = if (isTabDestination || detailInFlight) 68.dp + navInset else 0.dp
     var backdropOrigin by remember { mutableStateOf(Offset.Zero) }
     val canvasColor = qingColors.surfaceCanvas
     Box(modifier = Modifier.fillMaxSize()) {
@@ -296,33 +326,51 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         ) { innerPadding ->
             Box(Modifier.fillMaxSize().nestedScroll(scrollChrome).onGloballyPositioned { backdropOrigin = it.positionInRoot() }
                 .then(if (chromeBackdrop != null) Modifier.drawWithContent {
-                    chromeBackdrop.record {
-                        drawRect(canvasColor)
-                        this@drawWithContent.drawContent()
-                    }
-                    drawLayer(chromeBackdrop)
+                    // Never replay a previously recorded tab after its route has left.
+                    if (navController.currentDestination?.route == activeRoute && activeRoute in tabRoutes) {
+                        chromeBackdrop.record {
+                            drawRect(canvasColor)
+                            this@drawWithContent.drawContent()
+                        }
+                        drawLayer(chromeBackdrop)
+                    } else drawContent()
                 } else Modifier)) {
             val direction = LocalLayoutDirection.current
             val bodyPadding = PaddingValues(
                 start = innerPadding.calculateStartPadding(direction), end = innerPadding.calculateEndPadding(direction),
                 top = innerPadding.calculateTopPadding(),
-                bottom = if (showBottomBar) 0.dp else innerPadding.calculateBottomPadding(),
+                bottom = if (isTabDestination || detailInFlight) 0.dp else innerPadding.calculateBottomPadding(),
             )
             CompositionLocalProvider(LocalQingChromeOverlap provides chromeOverlap) {
+            SharedTransitionLayout {
+            val sharedScope = this
             NavHost(
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
                 modifier = Modifier.fillMaxSize().padding(bodyPadding).consumeWindowInsets(innerPadding)
                     .background(canvasColor),
                 enterTransition = { EnterTransition.None },
-                exitTransition = { ExitTransition.None },
-                popEnterTransition = { EnterTransition.None },
+                exitTransition = {
+                    if (!reducedMotion && targetState.destination.route == AppRoutes.TRANSACTION_DETAIL)
+                        slideOutHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { -it / 16 }
+                    else ExitTransition.None
+                },
+                popEnterTransition = {
+                    if (!reducedMotion && initialState.destination.route == AppRoutes.TRANSACTION_DETAIL)
+                        slideInHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { -it / 16 }
+                    else EnterTransition.None
+                },
                 popExitTransition = { ExitTransition.None },
             ) {
-                // One opaque destination per frame; never cross-fade whole pages.
+                // No crossfade between top-level tabs. Detail alone has a
+                // hierarchical transition and non-nested shared content.
                 composable(
                     route = BottomNavItem.Transactions.route,
                 ) {
+                    val visibility = this
+                    CompositionLocalProvider(LocalQingLedgerTransition provides transitionEntry?.takeIf { ledgerSharedOrigin }?.let {
+                        QingLedgerTransition(sharedScope, visibility, it.id)
+                    }) {
                     TransactionListScreen(
                         viewModel = transactionViewModel,
                         onOpenBillImport = { showBillImportSheet = true },
@@ -351,6 +399,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         voiceRequest = voiceRequest,
                         onVoiceRequestConsumed = { voiceRequest = null },
                     )
+                    }
                 }
                 composable(
                     route = BottomNavItem.Calendar.route,
@@ -432,20 +481,34 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     arguments = listOf(
                         navArgument(AppRoutes.TRANSACTION_ID) { type = NavType.LongType },
                     ),
-                    // Keep leaf navigation atomic. The receipt itself has a short
-                    // independent layer animation, never a shared list-row overlay.
-                    enterTransition = { EnterTransition.None },
+                    // Opaque page motion, not an alpha blend of two pages.
+                    enterTransition = {
+                        if (reducedMotion) EnterTransition.None
+                        else slideInHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
+                    },
                     exitTransition = { ExitTransition.None },
                     popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
+                    popExitTransition = {
+                        if (reducedMotion) ExitTransition.None
+                        else slideOutHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
+                    },
                 ) { entry ->
                     val snapshot = transitionEntry?.takeIf { it.id == entry.arguments?.getLong(AppRoutes.TRANSACTION_ID) }
-                    TransactionDetailScreen(
-                        initialEntry = snapshot,
-                        transactionViewModel = transactionViewModel,
-                        onBack = { navController.popBackStack() },
-                        onDeleted = { navController.popBackStack() },
-                    )
+                    val visibility = this
+                    val shared = snapshot?.takeIf { ledgerSharedOrigin }
+                    Box(Modifier.fillMaxSize().background(canvasColor).padding(bottom = navInset)) {
+                        CompositionLocalProvider(LocalQingChromeOverlap provides 0.dp,
+                            LocalQingLedgerTransition provides shared?.let {
+                                QingLedgerTransition(sharedScope, visibility, it.id)
+                            }) {
+                            TransactionDetailScreen(
+                                initialEntry = snapshot,
+                                transactionViewModel = transactionViewModel,
+                                onBack = { navController.popBackStack() },
+                                onDeleted = { navController.popBackStack() },
+                            )
+                        }
+                    }
                 }
                 composable(
                     route = BottomNavItem.Budget.route,
@@ -520,10 +583,16 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             }
             }
             }
+            }
         }
 
         if (showBottomBar) Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+                .drawWithContent {
+                    // Last-line guard against a stale draw during a destination change.
+                    if (navController.currentDestination?.route in tabRoutes) drawContent()
+                }
         ) {
             QingChromeSurface(
                 modifier = Modifier.fillMaxWidth().height(60.dp),
@@ -543,7 +612,8 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                                 .background(if (selected) qingColors.accentContainer.copy(alpha = 0.65f) else Color.Transparent)
                                 .selectable(selected = selected, interactionSource = null, indication = null,
                                     role = Role.Tab, onClick = {
-                                    if (navController.currentDestination?.route != item.route) {
+                                    if (navController.currentDestination?.route in tabRoutes &&
+                                        navController.currentDestination?.route != item.route) {
                                         deferChrome()
                                         navController.navigate(item.route) {
                                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -654,3 +724,9 @@ internal sealed class BottomNavItem(val route: String, val label: String, val ic
         val ALL = listOf(Transactions, Calendar, Stats, Budget, Settings)
     }
 }
+
+internal const val DETAIL_TRANSITION_MS = 220
+
+/** Chrome belongs exclusively to the tab surface, including transition frames. */
+internal fun shouldShowMainChrome(route: String?, visibleRoutes: List<String>, tabs: Set<String>): Boolean =
+    route in tabs && visibleRoutes.all { it in tabs }

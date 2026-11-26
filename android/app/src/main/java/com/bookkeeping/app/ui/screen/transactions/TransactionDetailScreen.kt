@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.navigation.qingLedgerShared
+import com.bookkeeping.app.ui.navigation.LocalQingLedgerTransition
 import com.bookkeeping.app.ui.components.QingConfirmationSheet
 
 import com.bookkeeping.app.ui.components.MerchantAvatar
@@ -404,6 +406,7 @@ private fun DetailContent(
 }
 
 /** 金额主视觉区：大字金额 + 分类图标 / 商户 / 时间，单独一张浅色卡片。 */
+@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 private fun AmountHero(
     entry: TransactionEntity,
@@ -413,9 +416,10 @@ private fun AmountHero(
     val income = entry.type == TransactionType.INCOME.name
     val reduced = rememberReduceMotion()
     val offsetPx = with(LocalDensity.current) { 8.dp.toPx() }
-    val progress = remember(entry.id) { Animatable(if (animateReceipt && !reduced) 0f else 1f) }
+    val usesShared = LocalQingLedgerTransition.current?.id == entry.id
+    val progress = remember(entry.id) { Animatable(if (animateReceipt && !reduced && !usesShared) 0f else 1f) }
     LaunchedEffect(entry.id, reduced) {
-        if (reduced) progress.snapTo(1f)
+        if (reduced || usesShared) progress.snapTo(1f)
         else progress.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
     }
     Column(
@@ -425,16 +429,18 @@ private fun AmountHero(
         }.padding(top = 24.dp, bottom = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        MerchantAvatar(merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
+        MerchantAvatar(modifier = Modifier.qingLedgerShared(entry.id, "icon"),
+            merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
             merchantIconPath = entry.merchantIconPath, category = category, size = 48.dp, cornerRadius = 14.dp)
         Spacer(Modifier.height(10.dp))
         Text(entry.merchant.ifBlank { tr(category.displayName) },
+            modifier = Modifier.qingLedgerShared(entry.id, "merchant"),
             style = QingTypeTokens.title.copy(fontSize = 18.sp), textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         AutoSizeAmountText(
             text = transactionAmount(entry),
             style = QingTypeTokens.receiptAmount,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.qingLedgerShared(entry.id, "amount"),
             color = if (income) QingAmountIncome else QingAmountExpense,
             textAlign = TextAlign.Center,
             minimumSizeSp = 14f,
