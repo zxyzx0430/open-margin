@@ -211,7 +211,7 @@ fun TransactionDetailScreenContent(
             ) {
                 val syncLabel = entry?.let(::transactionSyncLabel)
                 if (!syncLabel.isNullOrBlank()) {
-                    StatusChip(text = syncLabel, tone = StatusTone.INFO)
+                    StatusChip(text = syncLabel, tone = StatusTone.NEUTRAL)
                 } else {
                     Spacer(Modifier.width(1.dp))
                 }
