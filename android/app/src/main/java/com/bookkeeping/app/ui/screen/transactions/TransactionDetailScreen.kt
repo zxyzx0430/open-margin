@@ -1,7 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
 import com.bookkeeping.app.ui.components.QingConfirmationSheet
-import com.bookkeeping.app.ui.navigation.qingLedgerShared
 
 import com.bookkeeping.app.ui.components.MerchantAvatar
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
@@ -47,6 +46,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -108,16 +113,14 @@ fun TransactionDetailScreen(
 ) {
     val transaction by detailViewModel.transaction.collectAsState()
     val allTransactions by transactionViewModel.allTransactions.collectAsState()
-    var allowSnapshot by remember(initialEntry?.id) { mutableStateOf(initialEntry != null) }
-    LaunchedEffect(transaction, initialEntry) {
-        if (transaction == null) delay(300)
-        allowSnapshot = false
-    }
+    val displayedEntry = if (transaction.loaded) transaction.entry else initialEntry
     TransactionDetailScreenContent(
-        entry = transaction ?: initialEntry?.takeIf { allowSnapshot },
+        entry = displayedEntry,
         onBack = onBack,
         onDeleted = onDeleted,
         historyTransactions = allTransactions,
+        animateReceipt = initialEntry != null,
+        loadingEntry = !transaction.loaded && initialEntry == null,
         onSaveMerchantRuleWithHistory = { merchant, category, update -> transactionViewModel.saveMerchantRule(merchant, category, update) },
         onSave = { current, fields -> transactionViewModel.saveTransaction(current, fields) },
         onToggleExclude = { current ->
@@ -153,13 +156,15 @@ fun TransactionDetailScreenContent(
     onUpdateEventTime: (TransactionEntity, Long) -> Unit,
     historyTransactions: List<TransactionEntity> = emptyList(),
     onSaveMerchantRuleWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
+    animateReceipt: Boolean = false,
+    loadingEntry: Boolean = false,
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
     // 真被删掉的记录 300ms 后照样给出提示。
     var missingConfirmed by remember { mutableStateOf(false) }
-    LaunchedEffect(entry) {
-        if (entry == null) {
+    LaunchedEffect(entry, loadingEntry) {
+        if (entry == null && !loadingEntry) {
             delay(300)
             missingConfirmed = true
         } else {
@@ -225,6 +230,7 @@ fun TransactionDetailScreenContent(
             } else {
                 DetailContent(
                     entry = entry,
+                    animateReceipt = animateReceipt,
                     onEditTime = { editingTimeInline = true },
                     onConfirmEventTime = { onConfirmEventTime(entry) },
                     onPreviewEvidence = { path -> previewEvidencePath = path },
@@ -337,7 +343,7 @@ private fun DetailHeader(
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
     }
 }
 
@@ -348,6 +354,7 @@ private fun DetailContent(
     onConfirmEventTime: () -> Unit,
     onPreviewEvidence: (String) -> Unit,
     modifier: Modifier = Modifier,
+    animateReceipt: Boolean = false,
 ) {
     val context = LocalContext.current
     val category = runCatching { TransactionCategory.valueOf(entry.category) }
@@ -363,7 +370,7 @@ private fun DetailContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        AmountHero(entry = entry, category = category)
+        AmountHero(entry = entry, category = category, animateReceipt = animateReceipt)
         FieldCard(
             rows = buildList<Pair<String, String>> {
                 add(tr("收支类型") to transactionTypeLabel(entry.type))
@@ -395,22 +402,33 @@ private fun DetailContent(
 private fun AmountHero(
     entry: TransactionEntity,
     category: TransactionCategory,
+    animateReceipt: Boolean,
 ) {
     val income = entry.type == TransactionType.INCOME.name
+    val reduced = rememberReduceMotion()
+    val offsetPx = with(LocalDensity.current) { 8.dp.toPx() }
+    val progress = remember(entry.id) { Animatable(if (animateReceipt && !reduced) 0f else 1f) }
+    LaunchedEffect(entry.id, reduced) {
+        if (reduced) progress.snapTo(1f)
+        else progress.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
+    }
     Column(
-        modifier = Modifier.fillMaxWidth().qingLedgerShared(entry.id, "bounds", bounds = true).padding(top = 24.dp, bottom = 10.dp),
+        modifier = Modifier.fillMaxWidth().graphicsLayer {
+            translationY = offsetPx * (1f - progress.value)
+            alpha = 0.96f + 0.04f * progress.value
+        }.padding(top = 24.dp, bottom = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        MerchantAvatar(modifier = Modifier.qingLedgerShared(entry.id, "icon"), merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
+        MerchantAvatar(merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
             merchantIconPath = entry.merchantIconPath, category = category, size = 48.dp, cornerRadius = 14.dp)
         Spacer(Modifier.height(10.dp))
-        Text(entry.merchant.ifBlank { tr(category.displayName) }, modifier = Modifier.qingLedgerShared(entry.id, "merchant"),
+        Text(entry.merchant.ifBlank { tr(category.displayName) },
             style = QingTypeTokens.title.copy(fontSize = 18.sp), textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         AutoSizeAmountText(
             text = transactionAmount(entry),
             style = QingTypeTokens.receiptAmount,
-            modifier = Modifier.fillMaxWidth().qingLedgerShared(entry.id, "amount"),
+            modifier = Modifier.fillMaxWidth(),
             color = if (income) QingAmountIncome else QingAmountExpense,
             textAlign = TextAlign.Center,
             minimumSizeSp = 14f,

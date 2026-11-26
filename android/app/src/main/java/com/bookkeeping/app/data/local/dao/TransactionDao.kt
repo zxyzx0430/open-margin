@@ -53,6 +53,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM transactions WHERE id = :id AND syncDeleted = 0")
+    fun observeById(id: Long): Flow<TransactionEntity?>
+
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 AND category = 'OTHER'")
     suspend fun currentOther(): List<TransactionEntity>
 

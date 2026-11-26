@@ -2,7 +2,6 @@ package com.bookkeeping.app.ui.screen.transactions
 
 import com.bookkeeping.app.ui.theme.qingPressFeedback
 
-import com.bookkeeping.app.ui.navigation.qingLedgerShared
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.bookkeeping.app.ui.theme.QingMotionTokens
@@ -101,7 +100,6 @@ fun LedgerTransactionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .qingLedgerShared(transaction.id, "bounds", bounds = true)
             .qingPressFeedback(QingMotionTokens.rowPressedScale)
             .heightIn(min = 56.dp)
             .background(
@@ -115,7 +113,6 @@ fun LedgerTransactionRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         MerchantAvatar(
-            modifier = Modifier.qingLedgerShared(transaction.id, "icon"),
             merchant = transaction.merchant,
             merchantIconKey = transaction.merchantIconKey,
             merchantIconPath = transaction.merchantIconPath,
@@ -129,7 +126,6 @@ fun LedgerTransactionRow(
         ) {
             Text(
                 text = transaction.merchant.ifBlank { tr(category.displayName) },
-                modifier = Modifier.qingLedgerShared(transaction.id, "merchant"),
                 style = QingTypeTokens.body,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -182,7 +178,7 @@ fun LedgerTransactionRow(
         AutoSizeAmountText(
             text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
             style = QingTypeTokens.rowAmount,
-            modifier = Modifier.widthIn(min = 80.dp).qingLedgerShared(transaction.id, "amount"),
+            modifier = Modifier.widthIn(min = 80.dp),
             minimumSizeSp = 14f,
             fontWeight = FontWeight.SemiBold,
             color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,

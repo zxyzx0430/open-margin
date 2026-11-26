@@ -137,6 +137,7 @@ class TransactionRepository @Inject constructor(
     private val duplicateMutex = Mutex()
 
     fun observeAll(): Flow<List<TransactionEntity>> = dao.observeAll()
+    fun observeById(id: Long): Flow<TransactionEntity?> = dao.observeById(id)
 
     suspend fun categorizeOther(
         merchant: String,

@@ -43,14 +43,8 @@ import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
 import com.bookkeeping.app.ui.theme.LocalQingAppearance
 import com.bookkeeping.app.ui.theme.qingColors
 
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.CompositionLocalProvider
 import com.bookkeeping.app.data.local.entity.TransactionEntity
-import com.bookkeeping.app.ui.theme.rememberReduceMotion
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -141,7 +135,7 @@ import com.bookkeeping.app.ui.screen.transactions.VoiceCapturePanel
 import com.bookkeeping.app.ui.screen.transactions.VoiceEntryRequest
 
 // 根 NavHost：底部 tab 切换
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val navController = rememberNavController()
@@ -195,15 +189,17 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     // lazily from inside hierarchy.any could observe a nested data object
     // before its class initializer had assigned INSTANCE (null route crash).
     var transitionEntry by remember { mutableStateOf<TransactionEntity?>(null) }
-    val reduceMotion = rememberReduceMotion()
     LaunchedEffect(currentDestination?.route) {
         val route = currentDestination?.route
         if (route != BottomNavItem.Transactions.route && route != AppRoutes.TRANSACTION_DETAIL) transitionEntry = null
     }
     val navItems = BottomNavItem.ALL
-    val showBottomBar = currentDestination?.hierarchy?.any { destination ->
-        navItems.any { it.route == destination.route }
-    } == true
+    val showBottomBar = navItems.any { it.route == currentDestination?.route }
+    fun openTransaction(id: Long) {
+        if (navController.currentDestination?.route == AppRoutes.TRANSACTION_DETAIL) return
+        transitionEntry = transactionViewModel.allTransactions.value.firstOrNull { it.id == id }
+        navController.navigate(AppRoutes.transactionDetail(id)) { launchSingleTop = true }
+    }
     // 长按 FAB 达到录音阈值就打开面板；开着的时候禁掉 FAB 的新按压。
     var voiceSheetOpen by remember { mutableStateOf(false) }
     // 面板交回的文本。账单页消费后置回 null。
@@ -293,42 +289,26 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 bottom = (innerPadding.calculateBottomPadding() - chromeOverlap).coerceAtLeast(0.dp),
             )
             CompositionLocalProvider(LocalQingChromeOverlap provides chromeOverlap) {
-            SharedTransitionLayout {
-            val sharedScope = this
             NavHost(
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
-                modifier = Modifier
-                    .padding(bodyPadding)
-                    .consumeWindowInsets(innerPadding),
+                modifier = Modifier.padding(bodyPadding).consumeWindowInsets(innerPadding),
             ) {
                 // 叶子页（详情、导入）是瞬时切换的，所以从叶子页返回 tab 时也必须瞬时，
                 // 否则会先淡入一帧空白再出现内容。tab 之间仍然保留默认的淡入淡出。
                 composable(
                     route = BottomNavItem.Transactions.route,
                     exitTransition = {
-                        if (targetState.destination.route == AppRoutes.TRANSACTION_DETAIL) {
-                            if (!reduceMotion && transitionEntry != null) fadeOut(tween(220), targetAlpha = 0.99f) else ExitTransition.None
-                        } else null
+                        if (targetState.destination.route == AppRoutes.TRANSACTION_DETAIL) ExitTransition.None else null
                     },
-                    popEnterTransition = {
-                        if (!reduceMotion && transitionEntry != null && initialState.destination.route == AppRoutes.TRANSACTION_DETAIL)
-                            fadeIn(tween(220), initialAlpha = 0.99f) else EnterTransition.None
-                    },
+                    popEnterTransition = { EnterTransition.None },
                 ) {
-                    val visibility = this
-                    CompositionLocalProvider(LocalQingLedgerTransition provides transitionEntry?.let {
-                        QingLedgerTransition(sharedScope, visibility, it.id)
-                    }) {
                     TransactionListScreen(
                         viewModel = transactionViewModel,
                         onOpenBillImport = { showBillImportSheet = true },
                         drilldown = pendingLedgerDrilldown,
                         onDrilldownConsumed = { pendingLedgerDrilldown = null },
-                        onOpenDetail = { id ->
-                            transitionEntry = transactionViewModel.allTransactions.value.firstOrNull { it.id == id }
-                            navController.navigate(AppRoutes.transactionDetail(id))
-                        },
+                        onOpenDetail = ::openTransaction,
                         onOpenUpdateSettings = {
                             focusUpdateSettings = true
                             navController.navigate(BottomNavItem.Settings.route) {
@@ -351,16 +331,13 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         voiceRequest = voiceRequest,
                         onVoiceRequestConsumed = { voiceRequest = null },
                     )
-                    }
                 }
                 composable(
                     route = BottomNavItem.Calendar.route,
                     popEnterTransition = { EnterTransition.None },
                 ) {
                     CalendarScreen(
-                        onOpenDetail = { id ->
-                            navController.navigate(AppRoutes.transactionDetail(id))
-                        },
+                        onOpenDetail = ::openTransaction,
                         onOpenSubscriptions = { pendingCancel ->
                             navController.navigate(AppRoutes.subscriptions(pendingCancel))
                         },
@@ -379,7 +356,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                                 restoreState = true
                             }
                         },
-                        onOpenTransaction = { id -> navController.navigate(AppRoutes.transactionDetail(id)) },
+                        onOpenTransaction = ::openTransaction,
                         onOpenOtherCleanup = { navController.navigate(AppRoutes.MERCHANT_RULES_CLEANUP) },
                         onOpenSubscriptions = { pendingCancel ->
                             navController.navigate(AppRoutes.subscriptions(pendingCancel))
@@ -433,32 +410,20 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     arguments = listOf(
                         navArgument(AppRoutes.TRANSACTION_ID) { type = NavType.LongType },
                     ),
-                    // 详情是叶子页。navigation-compose 默认是 700ms 交叉淡入淡出，
-                    // 从「分类明细」弹层点进来时，弹层已经关掉、详情还只有很低的透明度，
-                    // 露出来的就是统计页 —— 这就是用户看到的「闪一下」。这里改成瞬时切换：
-                    // 点下去同一帧就是详情页，返回也是同一帧回到原页面。
-                    enterTransition = {
-                        if (!reduceMotion && transitionEntry != null && initialState.destination.route == BottomNavItem.Transactions.route)
-                            fadeIn(tween(220), initialAlpha = 0.99f) else EnterTransition.None
-                    },
+                    // Keep leaf navigation atomic. The receipt itself has a short
+                    // independent layer animation, never a shared list-row overlay.
+                    enterTransition = { EnterTransition.None },
                     exitTransition = { ExitTransition.None },
                     popEnterTransition = { EnterTransition.None },
-                    popExitTransition = {
-                        if (!reduceMotion && transitionEntry != null && targetState.destination.route == BottomNavItem.Transactions.route)
-                            fadeOut(tween(220), targetAlpha = 0.99f) else ExitTransition.None
-                    },
+                    popExitTransition = { ExitTransition.None },
                 ) { entry ->
                     val snapshot = transitionEntry?.takeIf { it.id == entry.arguments?.getLong(AppRoutes.TRANSACTION_ID) }
-                    val visibility = this
-                    CompositionLocalProvider(LocalQingLedgerTransition provides snapshot?.let {
-                        QingLedgerTransition(sharedScope, visibility, it.id)
-                    }) {
                     TransactionDetailScreen(
                         initialEntry = snapshot,
+                        transactionViewModel = transactionViewModel,
                         onBack = { navController.popBackStack() },
                         onDeleted = { navController.popBackStack() },
                     )
-                    }
                 }
                 composable(
                     route = BottomNavItem.Budget.route,
@@ -530,7 +495,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         onUpdateCardFocused = { focusUpdateSettings = false },
                     )
                 }
-            }
             }
             }
             }
