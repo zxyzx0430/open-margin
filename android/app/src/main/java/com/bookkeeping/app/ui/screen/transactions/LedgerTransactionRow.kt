@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import com.bookkeeping.app.ui.theme.qingPressFeedback
 
 
@@ -73,6 +76,8 @@ fun LedgerTransactionRow(
     val sourceTag = ledgerTransactionSourceTag(transaction)
     val bringIntoViewRequester = remember(transaction.id) { BringIntoViewRequester() }
     val highlightAlpha = remember(transaction.id) { Animatable(0f) }
+    val reduced = rememberReduceMotion()
+    val highlightColor = MaterialTheme.colorScheme.primaryContainer
 
     LaunchedEffect(scrollTargetTransactionId) {
         if (scrollTargetTransactionId == transaction.id) {
@@ -84,7 +89,7 @@ fun LedgerTransactionRow(
         if (highlightedTransactionId == transaction.id) {
             highlightAlpha.snapTo(0.32f)
             delay(1_100L)
-            highlightAlpha.animateTo(0f, animationSpec = tween(durationMillis = 500))
+            if (reduced) highlightAlpha.snapTo(0f) else highlightAlpha.animateTo(0f, animationSpec = tween(durationMillis = 250))
             onHighlightFinished(transaction.id)
         } else {
             highlightAlpha.snapTo(0f)
@@ -102,10 +107,10 @@ fun LedgerTransactionRow(
             .fillMaxWidth()
             .qingPressFeedback(QingMotionTokens.rowPressedScale)
             .heightIn(min = 56.dp)
-            .background(
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = highlightAlpha.value),
-                shape = RoundedCornerShape(14.dp),
-            )
+            .drawBehind {
+                if (highlightAlpha.value > 0f) drawRoundRect(highlightColor.copy(alpha = highlightAlpha.value),
+                    cornerRadius = CornerRadius(14.dp.toPx()))
+            }
             .bringIntoViewRequester(bringIntoViewRequester)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 12.dp),

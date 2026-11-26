@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.calendar
 
+import androidx.compose.ui.layout.layout
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
+import androidx.compose.animation.core.snap
 import com.bookkeeping.app.ui.theme.QingAmountIncome
 import com.bookkeeping.app.ui.theme.QingAmountExpense
 import com.bookkeeping.app.ui.components.MonthPickerDialog
@@ -874,12 +877,14 @@ private fun MonthHeader(
 ) {
     // 翻月反馈：月份标题 150ms 淡入 + 轻微放大，让用户看出「刚翻了一页」。
     // 第一次组合不播（否则每次进页面都闪一下），之后每次换月才从 0 起跳。
+    val reduced = rememberReduceMotion()
     var hasShownMonth by remember { mutableStateOf(false) }
     val flipProgress = remember(monthKey) {
-        Animatable(if (hasShownMonth) 0f else 1f)
+        Animatable(if (hasShownMonth && !reduced) 0f else 1f)
     }
-    LaunchedEffect(monthKey) {
-        if (hasShownMonth) {
+    LaunchedEffect(monthKey, reduced) {
+        if (reduced) { flipProgress.snapTo(1f); hasShownMonth = true }
+        else if (hasShownMonth) {
             flipProgress.animateTo(1f, tween(durationMillis = 150))
         } else {
             hasShownMonth = true
@@ -1537,6 +1542,7 @@ private fun CalendarListDrawer(
 ) {
     val english = AppLanguage.current() == AppLanguage.ENGLISH
     val density = LocalDensity.current
+    val reduceMotion = rememberReduceMotion()
     val heightAnimation = remember { Animatable(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
     var dragFraction by remember { mutableStateOf(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
     var dragging by remember { mutableStateOf(false) }
@@ -1547,8 +1553,7 @@ private fun CalendarListDrawer(
             CALENDAR_DRAWER_EXPANDED_FRACTION,
         )
     }
-    val visibleFraction = if (dragging) dragFraction else heightAnimation.value
-    val dayAmount = if (start == end) calendarDrawerDayAmount(transactions) else null
+    val dayAmount = remember(start, end, transactions) { if (start == end) calendarDrawerDayAmount(transactions) else null }
     val dayAmountLabel = dayAmount?.let {
         val typeLabel = tr(
             if (it.type == TransactionType.EXPENSE) "支出" else "收入",
@@ -1567,7 +1572,12 @@ private fun CalendarListDrawer(
 
     Box(
         modifier = modifier
-            .height(availableHeight * visibleFraction)
+            .layout { measurable, constraints ->
+                val fraction = if (dragging) dragFraction else heightAnimation.value
+                val h = (availableHeightPx * fraction).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+                val measured = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                layout(measured.width, measured.height) { measured.placeRelative(0, 0) }
+            }
             .shadow(1.dp, drawerShape, ambientColor = Color.Black.copy(alpha = 0.04f),
                 spotColor = Color.Black.copy(alpha = 0.06f))
             .clip(drawerShape)
@@ -1614,7 +1624,7 @@ private fun CalendarListDrawer(
                                     dragging = false
                                     heightAnimation.animateTo(
                                         targetFraction,
-                                        tween(durationMillis = 180),
+                                        if (reduceMotion) snap() else tween(durationMillis = 180),
                                     )
                                 }
                             }

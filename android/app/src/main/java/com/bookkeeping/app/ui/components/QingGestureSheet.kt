@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 
@@ -55,7 +56,9 @@ fun QingGestureSheet(
             val heightPx = with(LocalDensity.current) { maxHeight.toPx() }
             val threshold = with(LocalDensity.current) { 96.dp.toPx() }
             val velocityThreshold = with(LocalDensity.current) { 650.dp.toPx() }
-            var displacement by remember { mutableFloatStateOf(if (reduced) 0f else heightPx) }
+            val entryDistance = with(LocalDensity.current) { 96.dp.toPx() }
+            var panelHeight by remember { mutableFloatStateOf(0f) }
+            var displacement by remember { mutableFloatStateOf(if (reduced) 0f else entryDistance) }
             val animator = remember { Animatable(displacement) }
             var settleJob by remember { mutableStateOf<Job?>(null) }
             fun settle(target: Float, velocity: Float = 0f, close: Boolean = false) {
@@ -78,6 +81,7 @@ fun QingGestureSheet(
                 .clickable(enabled = canDismiss, onClickLabel = tr("关闭"), onClick = latestDismiss))
             Column(
                 Modifier.align(Alignment.BottomCenter).widthIn(max = 640.dp).fillMaxWidth()
+                    .onSizeChanged { panelHeight = it.height.toFloat() }
                     .graphicsLayer { translationY = displacement }
                     .clip(RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero))
                     .background(colors.surfaceSheet),
@@ -88,7 +92,7 @@ fun QingGestureSheet(
                         onDragStarted = { settleJob?.cancel(); animator.stop() },
                         onDragStopped = { velocity ->
                             val close = latestCanDismiss && (displacement > threshold || velocity > velocityThreshold)
-                            settle(if (close) heightPx else 0f, velocity, close)
+                            settle(if (close) panelHeight.coerceAtLeast(displacement) else 0f, velocity, close)
                         })
                     .semantics { contentDescription = tr("下滑关闭面板") },
                     contentAlignment = Alignment.Center) {

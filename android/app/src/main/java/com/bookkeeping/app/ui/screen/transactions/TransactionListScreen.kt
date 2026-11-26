@@ -1,5 +1,16 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
+
 import com.bookkeeping.app.ui.components.QingConfirmationSheet
 
 import com.bookkeeping.app.ui.components.QingLargeTitle
@@ -422,24 +433,26 @@ fun TransactionListScreen(
         items.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents } to
             items.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
     }
-    val duplicatesIndex = 4 +
+    val hasCaptureReviewSection = captureReview.pending.isNotEmpty() ||
+                (captureReview.ignored.isNotEmpty() && !captureReview.ignoredBannerDismissed) ||
+                captureReview.storageWarningKinds.isNotEmpty() ||
+                captureReview.intakeFailureNotice != null
+    val duplicatesIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
         (if (siteUpdateBanner != null) 1 else 0) +
-        (if (captureReview.pending.isNotEmpty()) 1 else 0)
-    val dayGroupsStartIndex = 5 +
-        (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
-        (if (siteUpdateBanner != null) 1 else 0) +
-        (if (captureReview.pending.isNotEmpty()) 1 else 0) +
-        (if (duplicateCandidates.isNotEmpty()) 1 else 0)
+        (if (hasCaptureReviewSection) 1 else 0)
+    val dayGroupsStartIndex = duplicatesIndex + (if (duplicateCandidates.isNotEmpty()) 1 else 0)
+    val reduceMotion = rememberReduceMotion()
 
     LaunchedEffect(scrollTargetTransactionId, visibleDayGroups, ledgerLoadState, dayGroupsStartIndex) {
         val targetId = scrollTargetTransactionId ?: return@LaunchedEffect
         if (ledgerLoadState != LedgerLoadState.READY) return@LaunchedEffect
-        val groupIndex = visibleDayGroups.indexOfFirst { (_, dayItems) ->
-            dayItems.any { it.id == targetId }
-        }
-        if (groupIndex >= 0) {
-            listState.animateScrollToItem(dayGroupsStartIndex + groupIndex)
+        val targetIndex = ledgerLazyRowIndex(visibleDayGroups.map { it.value.map { row -> row.id } }, targetId, dayGroupsStartIndex)
+        if (targetIndex != null) {
+            // A far-away record should not animate through dozens of days.
+            if (reduceMotion || kotlin.math.abs(listState.firstVisibleItemIndex - targetIndex) > 20)
+                listState.scrollToItem(targetIndex)
+            else listState.animateScrollToItem(targetIndex)
         }
     }
 
@@ -462,7 +475,7 @@ fun TransactionListScreen(
                     IconButton(onClick = {
                         when {
                             duplicateCandidates.isNotEmpty() -> {
-                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                                scope.launch { if (reduceMotion) listState.scrollToItem(duplicatesIndex) else listState.animateScrollToItem(duplicatesIndex) }
                             }
                             captureReview.pending.isNotEmpty() -> {
                                 captureReviewViewModel.refresh()
@@ -550,9 +563,9 @@ fun TransactionListScreen(
                 .fillMaxSize()
                 .padding(innerPadding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp + LocalQingChromeOverlap.current),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            item(key = "status") {
+            ledgerSectionItem(key = "status") {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -583,7 +596,7 @@ fun TransactionListScreen(
                     if (duplicateCandidates.isNotEmpty()) {
                         Box(
                             modifier = Modifier.clickable {
-                                scope.launch { listState.animateScrollToItem(duplicatesIndex) }
+                                scope.launch { if (reduceMotion) listState.scrollToItem(duplicatesIndex) else listState.animateScrollToItem(duplicatesIndex) }
                             },
                         ) {
                             StatusChip(
@@ -597,7 +610,7 @@ fun TransactionListScreen(
             }
 
             if (!notificationListenerEnabled || !pageRecognitionEnabled) {
-                item(key = "notification_banner") {
+                ledgerSectionItem(key = "notification_banner") {
                     PermissionBanner(
                         title = tr("自动记账设置未完成"),
                         body = tr("缺少通知使用权或页面识别；点击补全后，再到设置页做一次检查。"),
@@ -618,8 +631,8 @@ fun TransactionListScreen(
             }
 
             if (siteUpdateBanner != null) {
-                item(key = "site_update_banner") {
-                    val banner = siteUpdateBanner ?: return@item
+                ledgerSectionItem(key = "site_update_banner") {
+                    val banner = siteUpdateBanner ?: return@ledgerSectionItem
                     SiteUpdateBanner(
                         versionName = banner.versionName,
                         summaryNote = banner.summaryNote,
@@ -651,12 +664,8 @@ fun TransactionListScreen(
                 }
             }
 
-            if (captureReview.pending.isNotEmpty() ||
-                (captureReview.ignored.isNotEmpty() && !captureReview.ignoredBannerDismissed) ||
-                captureReview.storageWarningKinds.isNotEmpty() ||
-                captureReview.intakeFailureNotice != null
-            ) {
-                item(key = "capture_review") {
+            if (hasCaptureReviewSection) {
+                ledgerSectionItem(key = "capture_review") {
                     CaptureReviewCard(
                         count = captureReview.pending.size,
                         ignoredCount = captureReview.ignored.size,
@@ -673,7 +682,7 @@ fun TransactionListScreen(
                 }
             }
 
-            item(key = "period") {
+            ledgerSectionItem(key = "period") {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -698,7 +707,7 @@ fun TransactionListScreen(
                 }
             }
 
-            item(key = "summary") {
+            ledgerSectionItem(key = "summary") {
                 if (ledgerLoadState == LedgerLoadState.READY) {
                     MonthlySummaryCard(
                         expenseCents = if (defaultMonthHero) currentMonthTotals.first else shownExpense,
@@ -711,14 +720,14 @@ fun TransactionListScreen(
                 }
             }
 
-            item(key = "search") {
+            ledgerSectionItem(key = "search") {
                 TransactionSearchBar(
                     query = searchQuery,
                     onQueryChange = viewModel::setSearchQuery,
                 )
             }
 
-            item(key = "filters") {
+            ledgerSectionItem(key = "filters") {
                 LedgerFilterRow(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -775,7 +784,7 @@ fun TransactionListScreen(
             }
 
             if (duplicateCandidates.isNotEmpty()) {
-                item(key = "duplicates") {
+                ledgerSectionItem(key = "duplicates") {
                     DuplicateReviewCard(
                         candidates = duplicateCandidates,
                         expanded = duplicateListExpanded,
@@ -788,7 +797,7 @@ fun TransactionListScreen(
             }
 
             if (ledgerLoadState != LedgerLoadState.READY) {
-                item(key = "loading") {
+                ledgerSectionItem(key = "loading") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -799,7 +808,7 @@ fun TransactionListScreen(
                     }
                 }
             } else if (visibleTransactions.isEmpty()) {
-                item(key = "empty") {
+                ledgerSectionItem(key = "empty") {
                     LedgerEmptyState(
                         filterActive = filterActive,
                         hasAnyTransactions = hasAnyTransactions,
@@ -816,9 +825,10 @@ fun TransactionListScreen(
                     )
                 }
             } else {
-                items(visibleDayGroups, key = { it.key }) { (dayKey, dayItems) ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        val valid = dayItems.filter {
+                visibleDayGroups.forEach { (dayKey, dayItems) ->
+                    item(key = dayKey, contentType = "dayHeader") {
+                        Column {
+                        val valid = remember(dayItems) { dayItems.filter {
                             it.currency == "CNY" &&
                                 it.duplicateOfId == null &&
                                 it.remoteReviewStatus !in setOf(
@@ -827,7 +837,7 @@ fun TransactionListScreen(
                                     "refund",
                                     "possible_duplicate",
                                 )
-                        }
+                        } }
                         val expense = valid
                             .filter { it.type == "EXPENSE" && it.category != "TRANSFER" }
                             .sumOf { it.amountCents }
@@ -843,9 +853,16 @@ fun TransactionListScreen(
                             hasForeignOnly = foreignOnly,
                             excludedCount = dayItems.size - valid.size,
                         )
-                        DayCard(
-                            items = dayItems,
-                            onOpenDetail = onOpenDetail,
+                            Spacer(Modifier.height(2.dp))
+                        }
+                    }
+                    items(dayItems.size, key = { index -> "transaction:"+dayItems[index].id },
+                        contentType = { "transaction" }) { index ->
+                        val transaction = dayItems[index]
+                        LedgerDayCardRow(
+                            transaction = transaction,
+                            first = index == 0,
+                            last = index == dayItems.lastIndex,
                             scrollTargetTransactionId = scrollTargetTransactionId,
                             highlightedTransactionId = highlightedTransactionId,
                             onScrollTargetReached = { id ->
@@ -855,10 +872,9 @@ fun TransactionListScreen(
                                 }
                             },
                             onHighlightFinished = { id ->
-                                if (highlightedTransactionId == id) {
-                                    highlightedTransactionId = null
-                                }
+                                if (highlightedTransactionId == id) highlightedTransactionId = null
                             },
+                            onClick = { onOpenDetail(transaction.id) },
                         )
                     }
                 }
@@ -1118,36 +1134,83 @@ private fun DayTotalRow(
     }
 }
 
+/** One lazy item per transaction; adjacent surfaces still form one day card. */
+private fun LazyListScope.ledgerSectionItem(key: String, content: @Composable LazyItemScope.() -> Unit) {
+    item(key = key) {
+        val lazyScope = this
+        Column {
+            content(lazyScope)
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+internal fun ledgerLazyRowIndex(groups: List<List<Long>>, id: Long, start: Int): Int? {
+    var offset = start
+    for (group in groups) {
+        val index = group.indexOf(id)
+        if (index >= 0) return offset + 1 + index
+        offset += 1 + group.size
+    }
+    return null
+}
+
 @Composable
-private fun DayCard(
-    items: List<TransactionEntity>,
-    onOpenDetail: (Long) -> Unit,
+private fun LedgerDayCardRow(
+    transaction: TransactionEntity,
+    first: Boolean,
+    last: Boolean,
     scrollTargetTransactionId: Long?,
     highlightedTransactionId: Long?,
     onScrollTargetReached: (Long) -> Unit,
     onHighlightFinished: (Long) -> Unit,
+    onClick: () -> Unit,
 ) {
-    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
-            items.forEachIndexed { index, transaction ->
-                LedgerTransactionRow(
-                    transaction = transaction,
-                    timeText = timeOnlyFormat.format(Date(transaction.timestamp)),
-                    scrollTargetTransactionId = scrollTargetTransactionId,
-                    highlightedTransactionId = highlightedTransactionId,
-                    onScrollTargetReached = onScrollTargetReached,
-                    onHighlightFinished = onHighlightFinished,
-                    onClick = { onOpenDetail(transaction.id) },
-                )
-                if (index != items.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        thickness = 0.5.dp,
-                        color = qingColors.strokeHairline,
-                    )
+    val radius = QingRadiusTokens.radiusCard
+    val shape = RoundedCornerShape(topStart = if (first) radius else 0.dp,
+        topEnd = if (first) radius else 0.dp, bottomStart = if (last) radius else 0.dp,
+        bottomEnd = if (last) radius else 0.dp)
+    val colors = qingColors
+    val dark = com.bookkeeping.app.ui.theme.LocalQingDark.current
+    val timeText = remember(transaction.timestamp) { timeOnlyFormat.format(Date(transaction.timestamp)) }
+    Column {
+        Column(Modifier.fillMaxWidth().clip(shape).background(colors.surfaceCard)
+            .drawWithContent {
+                drawContent()
+                val stroke = 0.5.dp.toPx()
+                // Seamless group outline: never frame internal edges.
+                val r = radius.toPx().coerceAtMost(size.width / 2f).coerceAtMost(size.height / 2f)
+                val topY = if (first) r else 0f
+                val bottomY = if (last) size.height-r else size.height
+                if (!dark) {
+                    drawLine(colors.strokeHairline, Offset(stroke/2, topY), Offset(stroke/2, bottomY), stroke)
+                    drawLine(colors.strokeHairline, Offset(size.width-stroke/2, topY), Offset(size.width-stroke/2, bottomY), stroke)
+                }
+                if (first) clipRect(bottom = r+stroke) {
+                    drawRoundRect(colors.strokeHairline, Offset(stroke/2, stroke/2),
+                        Size(size.width-stroke, size.height-stroke),
+                        androidx.compose.ui.geometry.CornerRadius(r), style = Stroke(stroke))
+                }
+                if (last && !dark) clipRect(top = size.height-r-stroke) {
+                    drawRoundRect(colors.strokeHairline, Offset(stroke/2, stroke/2),
+                        Size(size.width-stroke, size.height-stroke),
+                        androidx.compose.ui.geometry.CornerRadius(r), style = Stroke(stroke))
                 }
             }
+            .padding(horizontal = 16.dp).padding(top = if (first) 2.dp else 0.dp, bottom = if (last) 2.dp else 0.dp)) {
+            LedgerTransactionRow(
+                transaction = transaction,
+                timeText = timeText,
+                scrollTargetTransactionId = scrollTargetTransactionId,
+                highlightedTransactionId = highlightedTransactionId,
+                onScrollTargetReached = onScrollTargetReached,
+                onHighlightFinished = onHighlightFinished,
+                onClick = onClick,
+            )
+            if (!last) HorizontalDivider(Modifier.padding(start = 56.dp), thickness = 0.5.dp,
+                color = colors.strokeHairline)
         }
+        if (last) Spacer(Modifier.height(10.dp))
     }
 }
 

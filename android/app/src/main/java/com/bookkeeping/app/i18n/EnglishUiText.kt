@@ -5,6 +5,13 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "已自动降级" to "Reduced automatically",
+        "底部导航" to "Bottom navigation",
+        "仅作用于底部导航，账单与其他内容卡保持不透明。滚动时自动使用轻量底膜。" to "Applies to bottom navigation only. Content cards stay opaque. Uses a lightweight tint while scrolling.",
+        "当前设备或辅助功能设置限制了模糊，已使用轻量材质。" to "Blur is limited by your device or accessibility settings. A lightweight material is used.",
+        "不透明底栏，最低渲染开销" to "Opaque navigation, lowest rendering cost",
+        "轻度背景模糊" to "Light backdrop blur",
+        "更明显的透底、模糊和柔光" to "More visible translucency, blur and soft highlight",
         "卡包" to "Wallet",
         "管理卡片" to "Manage cards",
         "添加卡片" to "Add card",

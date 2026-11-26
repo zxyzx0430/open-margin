@@ -60,13 +60,15 @@ fun Modifier.qingPressFeedback(pressedScale: Float, enabled: Boolean = true): Mo
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             pressed = true
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             try {
                 do {
                     val event = awaitPointerEvent(PointerEventPass.Final)
                     val change = event.changes.firstOrNull { it.id == down.id }
-                    if (change == null || !change.pressed ||
-                        (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                    if (change == null || (change.position - down.position).getDistance() > viewConfiguration.touchSlop ||
+                        (change.pressed && change.isConsumed)) {
+                        pressed = false
+                    } else if (!change.pressed) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         pressed = false
                     }
                 } while (pressed)

@@ -105,15 +105,7 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
         spread = (spread + delta * 0.35f).coerceIn(-maxSpread, maxSpread)
     }
     Box(
-        Modifier.fillMaxWidth().height(184.dp + reveal * (cards.size - 1) + 12.dp)
-            .draggable(drag, Orientation.Vertical, enabled = cards.size > 1 && !reduced,
-                onDragStarted = { settle?.cancel(); spring.stop() },
-                onDragStopped = { velocity ->
-                    settle = scope.launch {
-                        spring.snapTo(spread)
-                        spring.animateTo(0f, QingMotionTokens.motionGesture.spec(false), initialVelocity = velocity * 0.35f) { spread = value }
-                    }
-                }),
+        Modifier.fillMaxWidth().height(184.dp + reveal * (cards.size - 1) + 20.dp),
     ) {
         cards.forEachIndexed { paletteIndex, subscription ->
             key(subscription.id) {
@@ -124,7 +116,16 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
                     Modifier.fillMaxWidth().height(184.dp).zIndex(position.toFloat())
                         .graphicsLayer { translationY = y + spread * position / (cards.size - 1).coerceAtLeast(1) }
                 ) {
-                    WalletSubscriptionCard(subscription, WalletSubscriptionPalette[paletteIndex % WalletSubscriptionPalette.size], top) {
+                    val deckDrag = if (top && cards.size > 1 && !reduced) Modifier.draggable(
+                        drag, Orientation.Vertical,
+                        onDragStarted = { settle?.cancel(); spring.stop() },
+                        onDragStopped = { velocity ->
+                            settle = scope.launch {
+                                spring.snapTo(spread)
+                                spring.animateTo(0f, QingMotionTokens.motionGesture.spec(false), initialVelocity = (velocity * 0.35f).coerceIn(-maxSpread * 10f, maxSpread * 10f)) { spread = value.coerceIn(-maxSpread, maxSpread) }
+                            }
+                        }) else Modifier
+                    WalletSubscriptionCard(subscription, WalletSubscriptionPalette[paletteIndex % WalletSubscriptionPalette.size], top, deckDrag) {
                         if (top) onOpenDetail(subscription.id) else selected = subscription.id
                     }
                 }
@@ -134,7 +135,7 @@ internal fun WalletCardDeck(subscriptions: List<SubscriptionEntity>, onOpenDetai
 }
 
 @Composable
-private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Color, expanded: Boolean, onClick: () -> Unit) {
+private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Color, expanded: Boolean, deckDrag: Modifier, onClick: () -> Unit) {
     val radius = QingRadiusTokens.radiusHero
     val shape = RoundedCornerShape(radius)
     val white = Color.White
@@ -154,8 +155,8 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
         days == 1 -> tr("明天扣款")
         else -> tr("%d 天后扣款").format(days)
     }
-    val material = Brush.linearGradient(listOf(lerp(color, white, 0.045f), color,
-        lerp(color, Color.Black, 0.16f)))
+    val material = remember(color) { Brush.linearGradient(listOf(lerp(color, white, 0.045f), color,
+        lerp(color, Color.Black, 0.16f))) }
     Column(
         Modifier.fillMaxSize().qingPressFeedback(QingMotionTokens.cardPressedScale)
             .shadow(2.dp, shape, ambientColor = Color.Black.copy(alpha = 0.10f),
@@ -173,7 +174,7 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 48.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 48.dp).then(deckDrag), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SubscriptionBadgeAvatar(subscription.name, subscription.active, 30.dp, wallet = true)
             Column(Modifier.weight(1f)) {

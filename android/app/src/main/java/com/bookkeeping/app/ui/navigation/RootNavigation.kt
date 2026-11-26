@@ -1,5 +1,18 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.core.tween
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import android.os.SystemClock
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.components.QingSheetGrabber
@@ -225,8 +238,57 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
 
     val chromePreference = LocalQingAppearance.current.chromeTier
     val chromeTier = rememberEffectiveQingChromeTier(chromePreference)
-    val chromeBackdrop = if (showBottomBar && chromeTier >= QingChromeTier.BLUR) rememberGraphicsLayer() else null
-    val chromeOverlap = if (chromeBackdrop != null && currentDestination?.route in listOf(
+    val reducedMotion = rememberReduceMotion()
+    val scope = rememberCoroutineScope()
+    val canBlur = showBottomBar && chromeTier >= QingChromeTier.BLUR &&
+        currentDestination?.route != BottomNavItem.Calendar.route
+    val blurEnabled by rememberUpdatedState(canBlur)
+    var chromeBusy by remember { mutableStateOf(false) }
+    val lastMotionMs = remember { longArrayOf(0L) }
+    val idleJob = remember { arrayOfNulls<Job>(1) }
+    fun deferChrome() {
+        if (!blurEnabled) return
+        lastMotionMs[0] = SystemClock.uptimeMillis()
+        chromeBusy = true
+        // One timer for an entire gesture/fling, not one coroutine per frame.
+        if (idleJob[0]?.isActive != true) {
+            idleJob[0] = scope.launch {
+                while (true) {
+                    val remaining = 180L - (SystemClock.uptimeMillis() - lastMotionMs[0])
+                    if (remaining <= 0L) break
+                    delay(remaining)
+                }
+                chromeBusy = false
+            }
+        }
+    }
+    val scrollChrome = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available != Offset.Zero) deferChrome()
+                return Offset.Zero
+            }
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                deferChrome()
+                return Velocity.Zero
+            }
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                deferChrome()
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(currentDestination?.route, canBlur) {
+        if (canBlur) deferChrome()
+        else {
+            idleJob[0]?.cancel()
+            chromeBusy = false
+        }
+    }
+    val chromeLayer = if (canBlur) rememberGraphicsLayer() else null
+    val chromeBackdrop = chromeLayer?.takeUnless { chromeBusy }
+    // Geometry never changes as the user scrolls or the renderer falls back.
+    val chromeOverlap = if (showBottomBar && currentDestination?.route in listOf(
             BottomNavItem.Transactions.route, BottomNavItem.Stats.route, BottomNavItem.Budget.route, BottomNavItem.Settings.route
         )) 32.dp else 0.dp
     var backdropOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -243,6 +305,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                         requestedTier = chromePreference,
                         backdrop = chromeBackdrop,
                         backdropOrigin = backdropOrigin,
+                        resolvedTier = chromeTier,
                     ) {
                         Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
                             verticalAlignment = Alignment.CenterVertically) {
@@ -274,7 +337,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
             }
         ) { innerPadding ->
-            Box(Modifier.fillMaxSize().onGloballyPositioned { backdropOrigin = it.positionInRoot() }
+            Box(Modifier.fillMaxSize().nestedScroll(scrollChrome).onGloballyPositioned { backdropOrigin = it.positionInRoot() }
                 .then(if (chromeBackdrop != null) Modifier.drawWithContent {
                     chromeBackdrop.record {
                         drawRect(canvasColor)
@@ -293,9 +356,12 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
                 modifier = Modifier.padding(bodyPadding).consumeWindowInsets(innerPadding),
+                enterTransition = { if (reducedMotion) EnterTransition.None else fadeIn(tween(120), initialAlpha = 0.94f) },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None },
             ) {
-                // 叶子页（详情、导入）是瞬时切换的，所以从叶子页返回 tab 时也必须瞬时，
-                // 否则会先淡入一帧空白再出现内容。tab 之间仍然保留默认的淡入淡出。
+                // Leaf routes switch atomically; ordinary tabs use a short incoming fade.
                 composable(
                     route = BottomNavItem.Transactions.route,
                     exitTransition = {

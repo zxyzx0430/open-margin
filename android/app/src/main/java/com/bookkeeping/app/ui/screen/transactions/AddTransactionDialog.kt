@@ -1,6 +1,5 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -655,7 +654,7 @@ fun AddTransactionDialog(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                AnimatedVisibility(visible = categoryMenuExpanded) {
+                if (categoryMenuExpanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         extraCategories.chunked(5).forEach { rowCats ->
                             Row(

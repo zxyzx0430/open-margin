@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.ui.components.rememberEffectiveQingChromeTier
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
 import com.bookkeeping.app.ui.components.QingSheetGrabber
@@ -1905,6 +1906,7 @@ private fun AppearancePreferencesCard() {
     val preferences = rememberQingAppearancePreferences()
     val appearance = LocalQingAppearance.current
     var choosingMaterial by remember { mutableStateOf(false) }
+    val effectiveTier = rememberEffectiveQingChromeTier(appearance.chromeTier)
     val tierLabel = when (appearance.chromeTier) {
         QingChromeTier.SOLID -> tr("关闭")
         QingChromeTier.TINTED, QingChromeTier.BLUR -> tr("标准")
@@ -1921,7 +1923,8 @@ private fun AppearancePreferencesCard() {
         SettingsActionRow(
             icon = Icons.Filled.Visibility,
             title = tr("界面材质"),
-            subtitle = tierLabel,
+            subtitle = if (effectiveTier != appearance.chromeTier && appearance.chromeTier >= QingChromeTier.BLUR)
+                tierLabel + " · " + tr("已自动降级") else tierLabel + " · " + tr("底部导航"),
             onClick = { choosingMaterial = true },
         )
     }
@@ -1930,12 +1933,23 @@ private fun AppearancePreferencesCard() {
             onDismissRequest = { choosingMaterial = false },
             title = { Text(tr("界面材质")) },
             text = {
-                Column {
-                    listOf(QingChromeTier.SOLID to tr("关闭"),
-                        QingChromeTier.BLUR to tr("标准"),
-                        QingChromeTier.ENHANCED to tr("增强")).forEach { (tier, label) ->
-                        TextButton(onClick = { setQingChromeTier(preferences, tier); choosingMaterial = false }) {
-                            Text(label, color = if (appearance.chromeTier == tier) QingPrimary else MaterialTheme.colorScheme.onSurface)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(tr("仅作用于底部导航，账单与其他内容卡保持不透明。滚动时自动使用轻量底膜。"),
+                        style = MaterialTheme.typography.bodySmall)
+                    if (effectiveTier != appearance.chromeTier && appearance.chromeTier >= QingChromeTier.BLUR) {
+                        Text(tr("当前设备或辅助功能设置限制了模糊，已使用轻量材质。"),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    listOf(Triple(QingChromeTier.SOLID, "关闭", "不透明底栏，最低渲染开销"),
+                        Triple(QingChromeTier.BLUR, "标准", "轻度背景模糊"),
+                        Triple(QingChromeTier.ENHANCED, "增强", "更明显的透底、模糊和柔光")).forEach { (tier, label, description) ->
+                        TextButton(onClick = { setQingChromeTier(preferences, tier); choosingMaterial = false },
+                            modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Text(tr(label), color = if (appearance.chromeTier == tier) QingPrimary else MaterialTheme.colorScheme.onSurface)
+                                Text(tr(description), style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }

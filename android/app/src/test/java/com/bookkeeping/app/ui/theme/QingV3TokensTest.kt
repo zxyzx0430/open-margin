@@ -102,4 +102,12 @@ class QingV3TokensTest {
         assertEquals(six, com.bookkeeping.app.ui.screen.subscriptions.walletDeckMembership(available, available))
         assertEquals(6, com.bookkeeping.app.ui.screen.subscriptions.walletDeckOrder(available, 2L).size)
     }
+    @Test fun ledgerRowLazyIndexAccountsForDayHeaders() {
+        val groups = listOf(listOf(1L, 2L, 3L), listOf(4L, 5L), listOf(6L))
+        assertEquals(6, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 1L, 5))
+        assertEquals(8, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 3L, 5))
+        assertEquals(10, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 4L, 5))
+        assertEquals(13, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 6L, 5))
+        assertEquals(null, com.bookkeeping.app.ui.screen.transactions.ledgerLazyRowIndex(groups, 99L, 5))
+    }
 }

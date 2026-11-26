@@ -1,5 +1,10 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.fillMaxSize
+import com.bookkeeping.app.ui.theme.LocalQingDark
+import android.view.View
 import android.app.ActivityManager
 import android.content.Context
 import android.database.ContentObserver
@@ -81,8 +86,18 @@ fun rememberEffectiveQingChromeTier(requested: QingChromeTier): QingChromeTier {
             accessibility.removeTouchExplorationStateChangeListener(listener)
         }
     }
+    var accelerated by remember(view) { mutableStateOf(view.isHardwareAccelerated) }
+    DisposableEffect(view) {
+        val listener = object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) { accelerated = v.isHardwareAccelerated }
+            override fun onViewDetachedFromWindow(v: View) { accelerated = false }
+        }
+        view.addOnAttachStateChangeListener(listener)
+        accelerated = view.isHardwareAccelerated
+        onDispose { view.removeOnAttachStateChangeListener(listener) }
+    }
     return effectiveQingChromeTier(requested, Build.VERSION.SDK_INT, memory.isLowRamDevice, reduced,
-        view.isHardwareAccelerated, hasBackdrop = true)
+        accelerated, hasBackdrop = true)
 }
 
 @RequiresApi(31)
@@ -98,10 +113,11 @@ fun QingChromeSurface(
     requestedTier: QingChromeTier = QingChromeTier.SOLID,
     backdrop: GraphicsLayer? = null,
     backdropOrigin: Offset = Offset.Zero,
+    resolvedTier: QingChromeTier? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     val colors = qingColors
-    val capability = rememberEffectiveQingChromeTier(requestedTier)
+    val capability = resolvedTier ?: rememberEffectiveQingChromeTier(requestedTier)
     val tier = if (backdrop == null && capability >= QingChromeTier.BLUR) QingChromeTier.TINTED else capability
     val shape = RoundedCornerShape(QingRadiusTokens.radiusPill)
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -111,9 +127,9 @@ fun QingChromeSurface(
     }
     val opacity = when (tier) {
         QingChromeTier.SOLID -> 1f
-        QingChromeTier.TINTED -> 0.96f
-        QingChromeTier.BLUR -> 0.88f
-        QingChromeTier.ENHANCED -> 0.84f
+        QingChromeTier.TINTED -> 0.92f
+        QingChromeTier.BLUR -> 0.78f
+        QingChromeTier.ENHANCED -> 0.63f
     }
     Box(
         modifier = modifier.onGloballyPositioned { origin = it.positionInRoot() }
@@ -127,6 +143,11 @@ fun QingChromeSurface(
             }
         }
         Box(Modifier.matchParentSize().background(colors.surfaceSheet.copy(alpha = opacity)))
+        if (tier == QingChromeTier.ENHANCED) {
+            val dark = LocalQingDark.current
+            val shine = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.45f)
+            Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(shine, Color.Transparent, Color.Transparent))))
+        }
         content()
     }
 }

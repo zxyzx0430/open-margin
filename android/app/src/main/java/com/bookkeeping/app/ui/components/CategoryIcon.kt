@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.components
 
+import android.util.LruCache
+import java.io.File
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -53,6 +55,10 @@ fun CategoryIcon(
     }
 }
 
+private val merchantBitmapCache = object : LruCache<String, ImageBitmap>(4 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
+}
+
 @Composable
 fun MerchantAvatar(
     merchant: String,
@@ -66,8 +72,12 @@ fun MerchantAvatar(
     val localIcon by produceState<ImageBitmap?>(initialValue = null, merchantIconPath) {
         value = merchantIconPath?.let { path ->
             withContext(Dispatchers.IO) {
-                val options = BitmapFactory.Options().apply { inSampleSize = 3 }
-                BitmapFactory.decodeFile(path, options)?.asImageBitmap()
+                val file = File(path)
+                val key = path + ":" + file.lastModified() + ":" + file.length()
+                merchantBitmapCache.get(key) ?: runCatching {
+                    val options = BitmapFactory.Options().apply { inSampleSize = 3 }
+                    BitmapFactory.decodeFile(path, options)?.asImageBitmap()?.also { merchantBitmapCache.put(key, it) }
+                }.getOrNull()
             }
         }
     }
