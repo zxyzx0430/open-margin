@@ -570,21 +570,20 @@ internal fun SubscriptionBadgeAvatar(
     wallet: Boolean = false,
 ) {
     val spec = remember(name) { com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(name) }
-    val vector = remember(spec?.key, spec?.systemIcon) {
-        com.bookkeeping.app.ui.components.brandLogoVector(spec?.key)
-            ?: com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon)
-    }
+    val brandDrawable = remember(spec?.key) { com.bookkeeping.app.ui.components.brandLogoDrawableRes(spec?.key) }
+    val vector = remember(spec?.systemIcon) { com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon) }
     val brandColor = spec?.colorArgb?.let { androidx.compose.ui.graphics.Color(it) }
     val label = spec?.initials ?: name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
+    val hasGraphic = brandDrawable != null || vector != null
     val bgColor = when {
-        wallet && vector != null -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.94f)
+        wallet && hasGraphic -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.94f)
         wallet -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)
         brandColor != null && active -> brandColor.copy(alpha = 0.14f)
         active -> QingMintSoft
         else -> QingSurfaceVariant
     }
     val fgColor = when {
-        wallet && vector != null -> brandColor ?: QingPrimaryDeep
+        wallet && hasGraphic -> brandColor ?: QingPrimaryDeep
         wallet -> androidx.compose.ui.graphics.Color.White
         brandColor != null && active -> brandColor
         active -> QingPrimaryDeep
@@ -597,7 +596,14 @@ internal fun SubscriptionBadgeAvatar(
             .background(bgColor),
         contentAlignment = Alignment.Center,
     ) {
-        if (vector != null) {
+        if (brandDrawable != null) {
+            Icon(
+                painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
+                contentDescription = null,
+                tint = fgColor,
+                modifier = Modifier.size(size * 0.58f),
+            )
+        } else if (vector != null) {
             Icon(
                 imageVector = vector,
                 contentDescription = null,

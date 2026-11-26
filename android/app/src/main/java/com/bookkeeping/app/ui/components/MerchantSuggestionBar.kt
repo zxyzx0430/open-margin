@@ -79,8 +79,11 @@ private fun MerchantSuggestionChip(
 ) {
     val colors = qingColors
     val brandColor = Color(suggestion.spec.colorArgb)
-    val vector = remember(suggestion.spec.key, suggestion.spec.systemIcon) {
-        brandLogoVector(suggestion.spec.key) ?: merchantSystemIcon(suggestion.spec.systemIcon)
+    val brandDrawable = remember(suggestion.spec.key) {
+        brandLogoDrawableRes(suggestion.spec.key)
+    }
+    val vector = remember(suggestion.spec.systemIcon) {
+        merchantSystemIcon(suggestion.spec.systemIcon)
     }
     Surface(
         modifier = Modifier
@@ -101,7 +104,14 @@ private fun MerchantSuggestionChip(
                     .background(brandColor.copy(alpha = 0.14f)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (vector != null) {
+                if (brandDrawable != null) {
+                    Icon(
+                        painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
+                        contentDescription = null,
+                        tint = brandColor,
+                        modifier = Modifier.size(13.dp),
+                    )
+                } else if (vector != null) {
                     Icon(
                         imageVector = vector,
                         contentDescription = null,
