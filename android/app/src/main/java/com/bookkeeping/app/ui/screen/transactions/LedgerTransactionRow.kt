@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -71,44 +72,56 @@ fun LedgerTransactionRow(
     statusBadge: Pair<String, StatusTone>? = null,
     onClick: () -> Unit,
 ) {
-    val category = remember(transaction.category) {
-        runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
-    }
-    val type = remember(transaction.type) {
-        runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE)
-    }
-    val sourceTag = ledgerTransactionSourceTag(transaction)
-    val isScrollTarget = scrollTargetTransactionId == transaction.id
-    val bringIntoViewRequester = if (isScrollTarget) remember(transaction.id) { BringIntoViewRequester() } else null
-    val highlightAlpha = remember(transaction.id) { mutableFloatStateOf(0f) }
+    val model = remember(transaction, timeText) { LedgerRowUiModel.from(transaction, timeText) }
+    LedgerTransactionRow(
+        model, scrollTargetTransactionId, highlightedTransactionId,
+        onScrollTargetReached, onHighlightFinished, extraNote, statusBadge, onClick,
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun LedgerTransactionRow(
+    model: LedgerRowUiModel,
+    scrollTargetTransactionId: Long? = null,
+    highlightedTransactionId: Long? = null,
+    onScrollTargetReached: (Long) -> Unit = {},
+    onHighlightFinished: (Long) -> Unit = {},
+    extraNote: String? = null,
+    statusBadge: Pair<String, StatusTone>? = null,
+    onClick: () -> Unit,
+) {
+    val category = model.category
+    val type = model.type
+    val sourceTag = tr(model.sourceTagKey)
+    val isScrollTarget = scrollTargetTransactionId == model.id
+    val bringIntoViewRequester = if (isScrollTarget) remember(model.id) { BringIntoViewRequester() } else null
+    val highlightAlpha = remember(model.id) { mutableFloatStateOf(0f) }
     val reduced = rememberReduceMotion()
     val highlightColor = MaterialTheme.colorScheme.primaryContainer
 
     if (bringIntoViewRequester != null) {
-        LaunchedEffect(transaction.id) {
+        LaunchedEffect(model.id) {
             bringIntoViewRequester.bringIntoView()
-            onScrollTargetReached(transaction.id)
+            onScrollTargetReached(model.id)
         }
     }
-    if (highlightedTransactionId == transaction.id) {
-        LaunchedEffect(transaction.id, reduced) {
+    if (highlightedTransactionId == model.id) {
+        LaunchedEffect(model.id, reduced) {
             highlightAlpha.floatValue = 0.32f
             try {
                 delay(1_100L)
                 if (!reduced) Animatable(0.32f).animateTo(0f, tween(250)) {
                     highlightAlpha.floatValue = value
                 }
-                onHighlightFinished(transaction.id)
+                onHighlightFinished(model.id)
             } finally {
                 highlightAlpha.floatValue = 0f
             }
         }
     }
     val haptics = LocalHapticFeedback.current
-    val amount = remember(transaction.currency, transaction.amountCents) {
-        if (transaction.currency == "CNY") formatCny(transaction.amountCents)
-        else transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
-    }
+    val amount = model.amount
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -127,9 +140,9 @@ fun LedgerTransactionRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         MerchantAvatar(
-            merchant = transaction.merchant,
-            merchantIconKey = transaction.merchantIconKey,
-            merchantIconPath = transaction.merchantIconPath,
+            merchant = model.merchant,
+            merchantIconKey = model.merchantIconKey,
+            merchantIconPath = model.merchantIconPath,
             category = category,
             size = 40.dp,
             cornerRadius = 12.dp,
@@ -139,7 +152,7 @@ fun LedgerTransactionRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = transaction.merchant.ifBlank { tr(category.displayName) },
+                text = model.merchant.ifBlank { tr(category.displayName) },
                 style = QingTypeTokens.body,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -150,15 +163,15 @@ fun LedgerTransactionRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 SoftBadge(text = sourceTag, tone = StatusTone.NEUTRAL)
-                if (transaction.eventTimeNeedsConfirmation) {
+                if (model.eventTimeNeedsConfirmation) {
                     SoftBadge(text = tr("时间待确认"), tone = StatusTone.WARNING)
                 }
                 Text(
                     text = transactionSubtitle(
                         categoryLabel = tr(category.displayName),
-                        sourceLabel = ledgerTransactionSourceLabel(transaction.source),
-                        account = transaction.account,
-                        timeText = timeText,
+                        sourceLabel = ledgerTransactionSourceLabel(model.source),
+                        account = model.account,
+                        timeText = model.timeText,
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -202,15 +215,17 @@ fun LedgerTransactionRow(
 }
 
 /** 来源标注：每笔都显示一个来源，优先看扫描/导入前缀，其次看来源字段。 */
-internal fun ledgerTransactionSourceTag(transaction: TransactionEntity): String {
+internal fun ledgerTransactionSourceTag(transaction: TransactionEntity): String = tr(ledgerSourceTagKey(transaction))
+
+private fun ledgerSourceTagKey(transaction: TransactionEntity): String {
     val prefix = LEDGER_SOURCE_TAG.find(transaction.note)?.groupValues?.getOrNull(1)
     return when {
-        transaction.captureKind != null || prefix == "扫描" -> tr("扫描")
-        prefix == "导入" -> tr("导入")
-        transaction.source == "BANK_SMS" -> tr("短信")
-        transaction.source == "ALIPAY" || transaction.source == "WECHAT" -> tr("通知")
-        transaction.source == "MANUAL" -> tr("手动")
-        else -> tr("其他来源")
+        transaction.captureKind != null || prefix == "扫描" -> "扫描"
+        prefix == "导入" -> "导入"
+        transaction.source == "BANK_SMS" -> "短信"
+        transaction.source == "ALIPAY" || transaction.source == "WECHAT" -> "通知"
+        transaction.source == "MANUAL" -> "手动"
+        else -> "其他来源"
     }
 }
 
@@ -222,4 +237,41 @@ internal fun ledgerTransactionSourceLabel(source: String): String = when (source
     "BANK_SMS" -> tr("银行短信")
     "MANUAL" -> tr("手动")
     else -> tr("其他来源")
+}
+
+/** Presentation-only value: no sync metadata, database notes, or evidence bytes.
+ * Construct on Default for the ledger. Translation still happens at draw time.
+ */
+@Immutable
+internal data class LedgerRowUiModel(
+    val id: Long,
+    val merchant: String,
+    val merchantIconKey: String?,
+    val merchantIconPath: String?,
+    val category: TransactionCategory,
+    val type: TransactionType,
+    val source: String,
+    val sourceTagKey: String,
+    val account: String,
+    val timeText: String,
+    val eventTimeNeedsConfirmation: Boolean,
+    val amount: String,
+) {
+    companion object {
+        fun from(transaction: TransactionEntity, timeText: String): LedgerRowUiModel = LedgerRowUiModel(
+            id = transaction.id,
+            merchant = transaction.merchant,
+            merchantIconKey = transaction.merchantIconKey,
+            merchantIconPath = transaction.merchantIconPath,
+            category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER),
+            type = runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE),
+            source = transaction.source,
+            sourceTagKey = ledgerSourceTagKey(transaction),
+            account = transaction.account,
+            timeText = timeText,
+            eventTimeNeedsConfirmation = transaction.eventTimeNeedsConfirmation,
+            amount = if (transaction.currency == "CNY") formatCny(transaction.amountCents)
+                else transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0),
+        )
+    }
 }

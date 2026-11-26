@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.remember
 import android.util.LruCache
 import java.io.File
@@ -56,8 +57,9 @@ fun CategoryIcon(
     }
 }
 
-private val merchantBitmapCache = object : LruCache<String, ImageBitmap>(4 * 1024 * 1024) {
-    override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
+private data class CachedMerchantBitmap(val stamp: Long, val bytes: Long, val bitmap: ImageBitmap)
+private val merchantBitmapCache = object : LruCache<String, CachedMerchantBitmap>(4 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: CachedMerchantBitmap): Int = value.bitmap.width * value.bitmap.height * 4
 }
 
 @Composable
@@ -70,20 +72,41 @@ fun MerchantAvatar(
     merchantIconPath: String? = null,
     cornerRadius: Dp = size * 0.34f,
 ) {
+    val filesDir = LocalContext.current.filesDir
     val localIcon = if (!merchantIconPath.isNullOrBlank()) {
-        val loaded by androidx.compose.runtime.key(merchantIconPath) { produceState<ImageBitmap?>(initialValue = null, merchantIconPath) {
-            value = null
-            val path = merchantIconPath
-            value = withContext(Dispatchers.IO) {
-                val file = File(path)
-                val key = path + ":" + file.lastModified() + ":" + file.length()
-                merchantBitmapCache.get(key) ?: runCatching {
-                    val options = BitmapFactory.Options().apply { inSampleSize = 3 }
-                    BitmapFactory.decodeFile(path, options)?.asImageBitmap()?.also { merchantBitmapCache.put(key, it) }
-                }.getOrNull()
+        val path = remember(merchantIconPath, filesDir) {
+            val file = File(merchantIconPath)
+            if (file.isAbsolute) file.absolutePath
+            else if (file.name == merchantIconPath) File(File(filesDir, "merchant_icons"), file.name).absolutePath
+            else null
+        }
+        if (path == null) null else {
+            val loaded by androidx.compose.runtime.key(path) {
+                produceState<ImageBitmap?>(merchantBitmapCache.get(path)?.bitmap, path) {
+                    // A cache hit is visible on the first frame, while file metadata
+                    // and decoding stay off the main thread. Never clear to null first.
+                    value = withContext(Dispatchers.IO) {
+                        val file = File(path)
+                        if (!file.isFile) {
+                            merchantBitmapCache.remove(path)
+                            null
+                        } else {
+                            val stamp = file.lastModified()
+                            val bytes = file.length()
+                            val cached = merchantBitmapCache.get(path)
+                            if (cached != null && cached.stamp == stamp && cached.bytes == bytes) cached.bitmap
+                            else runCatching {
+                                val options = BitmapFactory.Options().apply { inSampleSize = 3 }
+                                BitmapFactory.decodeFile(path, options)?.asImageBitmap()?.also {
+                                    merchantBitmapCache.put(path, CachedMerchantBitmap(stamp, bytes, it))
+                                }
+                            }.getOrNull()
+                        }
+                    }
+                }
             }
-        } }
-        loaded
+            loaded
+        }
     } else null
     val iconBitmap = localIcon
     if (iconBitmap != null) {

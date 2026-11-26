@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -203,26 +204,28 @@ fun TransactionListScreen(
     voiceRequest: VoiceEntryRequest? = null,
     onVoiceRequestConsumed: () -> Unit = {},
 ) {
-    val ledgerRows by viewModel.groupedLedgerRows.collectAsState()
+    val ui by viewModel.ledgerUiState.collectAsStateWithLifecycle()
+    val filters by viewModel.ledgerFilterUiState.collectAsStateWithLifecycle()
+    val ledgerRows = ui.rows
     val transactions = ledgerRows.transactions
-    val ledgerLoadState by viewModel.ledgerLoadState.collectAsState()
-    val allTransactions by viewModel.allTransactions.collectAsState()
-    val captureReview by captureReviewViewModel.state.collectAsState()
-    val periodExpense by viewModel.periodExpenseCents.collectAsState()
-    val periodIncome by viewModel.periodIncomeCents.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val typeFilter by viewModel.typeFilter.collectAsState()
-    val categoryFilter by viewModel.categoryFilter.collectAsState()
-    val accountFilter by viewModel.accountFilter.collectAsState()
-    val timeFilter by viewModel.timeFilter.collectAsState()
-    val budgetMonth by viewModel.selectedMonth.collectAsState()
+    val ledgerLoadState = ui.load
+    val allTransactions = ui.allTransactions
+    val captureReview by captureReviewViewModel.state.collectAsStateWithLifecycle()
+    val periodExpense = ui.expense
+    val periodIncome = ui.income
+    val searchQuery = filters.query
+    val typeFilter = filters.type
+    val categoryFilter = filters.category
+    val accountFilter = filters.account
+    val timeFilter = filters.time
+    val budgetMonth = filters.month
     val budgetContext = LocalContext.current.applicationContext
     val heroMonth = if (timeFilter == LedgerTimeFilter.ALL) BudgetMonth.currentKey() else budgetMonth
     val budgetFlow = remember(budgetContext, heroMonth) { BudgetPreferences(budgetContext).observe(heroMonth) }
-    val monthlyBudget by budgetFlow.collectAsState(initial = BudgetSettings())
-    val periodTransactions by viewModel.periodTransactions.collectAsState()
-    val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
-    val duplicateCandidates by viewModel.ledgerReviewRows.collectAsState()
+    val monthlyBudget by budgetFlow.collectAsStateWithLifecycle(initialValue = BudgetSettings())
+    val periodTransactions = ui.periodTransactions
+    val hasAnyTransactions = ui.allTransactions.isNotEmpty()
+    val duplicateCandidates = ui.reviews
 
     var showAddDialog by remember { mutableStateOf(false) }
     // 新建表单顶部「一句话记账」的预填：语音 Final 或空（点 FAB 手填）。
@@ -413,18 +416,13 @@ fun TransactionListScreen(
     val visibleDayGroups = if (exactDateFilter == null) ledgerRows.groups else remember(visibleTransactions) {
         visibleTransactions.groupBy { dayKey(it.timestamp) }.entries.toList()
     }
-    val shownExpense = if (exactDateFilter == null) periodExpense else {
-        exactDateTransactions.filter {
-            it.isLedgerTotalsCandidate() &&
-                it.type == TransactionType.EXPENSE.name &&
-                it.category != TransactionCategory.TRANSFER.name
-        }.sumOf { it.amountCents }
+    val exactTotals = remember(exactDateTransactions) {
+        val valid = exactDateTransactions.filter { it.isLedgerTotalsCandidate() }
+        valid.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents } to
+            valid.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
     }
-    val shownIncome = if (exactDateFilter == null) periodIncome else {
-        exactDateTransactions.filter {
-            it.isLedgerTotalsCandidate() && it.type == TransactionType.INCOME.name
-        }.sumOf { it.amountCents }
-    }
+    val shownExpense = if (exactDateFilter == null) periodExpense else exactTotals.first
+    val shownIncome = if (exactDateFilter == null) periodIncome else exactTotals.second
     val defaultMonthHero = timeFilter == LedgerTimeFilter.ALL && exactDateFilter == null && activeDrilldown == null
     val currentMonthTotals by androidx.compose.runtime.key(heroMonth) {
         produceState<Pair<Long, Long>?>(null, allTransactions, heroMonth) {
@@ -874,8 +872,11 @@ fun TransactionListScreen(
                     items(dayItems.size, key = { index -> "transaction:"+dayItems[index].id },
                         contentType = { "transaction" }) { index ->
                         val transaction = dayItems[index]
+                        val model = ledgerRows.presentations[transaction.id] ?: remember(transaction) {
+                            LedgerRowUiModel.from(transaction, timeOnlyFormat.format(Date(transaction.timestamp)))
+                        }
                         LedgerDayCardRow(
-                            transaction = transaction,
+                            model = model,
                             first = index == 0,
                             last = index == dayItems.lastIndex,
                             scrollTargetTransactionId = scrollTargetTransactionId,
@@ -1172,7 +1173,7 @@ internal fun ledgerLazyRowIndex(groups: List<List<Long>>, id: Long, start: Int):
 
 @Composable
 private fun LedgerDayCardRow(
-    transaction: TransactionEntity,
+    model: LedgerRowUiModel,
     first: Boolean,
     last: Boolean,
     scrollTargetTransactionId: Long?,
@@ -1187,14 +1188,12 @@ private fun LedgerDayCardRow(
         bottomEnd = if (last) radius else 0.dp)
     val colors = qingColors
     val dark = com.bookkeeping.app.ui.theme.LocalQingDark.current
-    val timeText = remember(transaction.timestamp) { timeOnlyFormat.format(Date(transaction.timestamp)) }
     Column {
-        Column(Modifier.fillMaxWidth().qingLedgerContainer(transaction.id)
+        Column(Modifier.fillMaxWidth().qingLedgerContainer(model.id)
             .then(if (first || last) Modifier.clip(shape) else Modifier).background(colors.surfaceCard, shape)
             .padding(horizontal = 16.dp).padding(top = if (first) 2.dp else 0.dp, bottom = if (last) 2.dp else 0.dp)) {
             LedgerTransactionRow(
-                transaction = transaction,
-                timeText = timeText,
+                model = model,
                 scrollTargetTransactionId = scrollTargetTransactionId,
                 highlightedTransactionId = highlightedTransactionId,
                 onScrollTargetReached = onScrollTargetReached,
