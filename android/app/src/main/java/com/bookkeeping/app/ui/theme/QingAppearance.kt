@@ -11,7 +11,7 @@ import com.bookkeeping.app.ui.components.QingChromeTier
 
 data class QingAppearance(
     val redIncome: Boolean = false,
-    val chromeTier: QingChromeTier = QingChromeTier.SOLID,
+    val chromeTier: QingChromeTier = QingChromeTier.ENHANCED,
 )
 
 val LocalQingAppearance = compositionLocalOf { QingAppearance() }
@@ -27,8 +27,8 @@ fun rememberQingAppearancePreferences(): SharedPreferences {
 fun readQingAppearance(prefs: SharedPreferences): QingAppearance = QingAppearance(
     redIncome = prefs.getBoolean("red_income", false),
     chromeTier = runCatching {
-        QingChromeTier.valueOf(prefs.getString("chrome_tier", null) ?: "SOLID")
-    }.getOrDefault(QingChromeTier.SOLID),
+        QingChromeTier.valueOf(prefs.getString("chrome_tier", null) ?: QingChromeTier.ENHANCED.name)
+    }.getOrDefault(QingChromeTier.ENHANCED),
 )
 
 fun setQingRedIncome(prefs: SharedPreferences, enabled: Boolean) {

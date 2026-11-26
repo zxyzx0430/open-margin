@@ -1165,7 +1165,7 @@ private fun LedgerDayCardRow(
     val dark = com.bookkeeping.app.ui.theme.LocalQingDark.current
     val timeText = remember(transaction.timestamp) { timeOnlyFormat.format(Date(transaction.timestamp)) }
     Column {
-        Column(Modifier.fillMaxWidth().clip(shape).background(colors.surfaceCard)
+        Column(Modifier.fillMaxWidth().then(if (first || last) Modifier.clip(shape) else Modifier).background(colors.surfaceCard, shape)
             .drawWithContent {
                 drawContent()
                 val stroke = 0.5.dp.toPx()

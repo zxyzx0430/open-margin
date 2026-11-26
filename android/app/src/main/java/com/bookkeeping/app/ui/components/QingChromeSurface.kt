@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.fillMaxSize
@@ -125,14 +126,20 @@ fun QingChromeSurface(
     val blur = remember(tier, blurRadius) {
         if (Build.VERSION.SDK_INT >= 31 && tier >= QingChromeTier.BLUR) nativeBlur(blurRadius) else null
     }
-    val opacity = when (tier) {
+    val opacity = when {
+        backdrop == null && capability == QingChromeTier.ENHANCED -> 0.86f
+        backdrop == null && capability == QingChromeTier.BLUR -> 0.92f
+        else -> when (tier) {
         QingChromeTier.SOLID -> 1f
         QingChromeTier.TINTED -> 0.92f
         QingChromeTier.BLUR -> 0.78f
         QingChromeTier.ENHANCED -> 0.63f
+        }
     }
     Box(
         modifier = modifier.onGloballyPositioned { origin = it.positionInRoot() }
+            .shadow(3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.06f),
+                spotColor = Color.Black.copy(alpha = 0.08f))
             .clip(shape).border(0.5.dp, colors.strokeHairline, shape),
     ) {
         if (blur != null && backdrop != null) {
@@ -143,7 +150,7 @@ fun QingChromeSurface(
             }
         }
         Box(Modifier.matchParentSize().background(colors.surfaceSheet.copy(alpha = opacity)))
-        if (tier == QingChromeTier.ENHANCED) {
+        if (capability == QingChromeTier.ENHANCED) {
             val dark = LocalQingDark.current
             val shine = if (dark) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.45f)
             Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(shine, Color.Transparent, Color.Transparent))))

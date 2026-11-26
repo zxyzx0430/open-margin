@@ -1,8 +1,9 @@
 package com.bookkeeping.app.ui.navigation
 
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.core.tween
-import com.bookkeeping.app.ui.theme.rememberReduceMotion
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -31,8 +32,6 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.outlined.PieChart
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Settings
-import com.bookkeeping.app.ui.theme.qingPressFeedback
-import com.bookkeeping.app.ui.theme.QingMotionTokens
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -238,7 +237,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
 
     val chromePreference = LocalQingAppearance.current.chromeTier
     val chromeTier = rememberEffectiveQingChromeTier(chromePreference)
-    val reducedMotion = rememberReduceMotion()
     val scope = rememberCoroutineScope()
     val canBlur = showBottomBar && chromeTier >= QingChromeTier.BLUR &&
         currentDestination?.route != BottomNavItem.Calendar.route
@@ -287,55 +285,14 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     }
     val chromeLayer = if (canBlur) rememberGraphicsLayer() else null
     val chromeBackdrop = chromeLayer?.takeUnless { chromeBusy }
-    // Geometry never changes as the user scrolls or the renderer falls back.
-    val chromeOverlap = if (showBottomBar && currentDestination?.route in listOf(
-            BottomNavItem.Transactions.route, BottomNavItem.Stats.route, BottomNavItem.Budget.route, BottomNavItem.Settings.route
-        )) 32.dp else 0.dp
+    // Full-height page canvas behind floating chrome, independent of blur tier.
+    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val chromeOverlap = if (showBottomBar) 68.dp + navInset else 0.dp
     var backdropOrigin by remember { mutableStateOf(Offset.Zero) }
     val canvasColor = qingColors.surfaceCanvas
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                if (showBottomBar) Column(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
-                ) {
-                    QingChromeSurface(
-                        modifier = Modifier.fillMaxWidth().height(60.dp),
-                        requestedTier = chromePreference,
-                        backdrop = chromeBackdrop,
-                        backdropOrigin = backdropOrigin,
-                        resolvedTier = chromeTier,
-                    ) {
-                        Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            navItems.forEach { item ->
-                                val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
-                                val tint = if (selected) qingColors.accentPrimary else qingColors.textSecondary.copy(alpha = 0.72f)
-                                Column(
-                                    Modifier.weight(1f).height(60.dp)
-                                        .qingPressFeedback(QingMotionTokens.cardPressedScale)
-                                        .selectable(selected = selected, role = Role.Tab, onClick = {
-                                            navController.navigate(item.route) {
-                                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                                launchSingleTop = true
-                                                restoreState = true
-                                            }
-                                        }),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                ) {
-                                    Icon(if (selected) item.icon else item.outlineIcon, null,
-                                        modifier = Modifier.size(23.dp), tint = tint)
-                                    Text(tr(item.label), fontSize = 10.sp, fontWeight = FontWeight.Medium,
-                                        color = tint, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(horizontal = 1.dp))
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         ) { innerPadding ->
             Box(Modifier.fillMaxSize().nestedScroll(scrollChrome).onGloballyPositioned { backdropOrigin = it.positionInRoot() }
                 .then(if (chromeBackdrop != null) Modifier.drawWithContent {
@@ -349,25 +306,22 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             val bodyPadding = PaddingValues(
                 start = innerPadding.calculateStartPadding(direction), end = innerPadding.calculateEndPadding(direction),
                 top = innerPadding.calculateTopPadding(),
-                bottom = (innerPadding.calculateBottomPadding() - chromeOverlap).coerceAtLeast(0.dp),
+                bottom = if (showBottomBar) 0.dp else innerPadding.calculateBottomPadding(),
             )
             CompositionLocalProvider(LocalQingChromeOverlap provides chromeOverlap) {
             NavHost(
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
-                modifier = Modifier.padding(bodyPadding).consumeWindowInsets(innerPadding),
-                enterTransition = { if (reducedMotion) EnterTransition.None else fadeIn(tween(120), initialAlpha = 0.94f) },
+                modifier = Modifier.fillMaxSize().padding(bodyPadding).consumeWindowInsets(innerPadding)
+                    .background(canvasColor),
+                enterTransition = { EnterTransition.None },
                 exitTransition = { ExitTransition.None },
                 popEnterTransition = { EnterTransition.None },
                 popExitTransition = { ExitTransition.None },
             ) {
-                // Leaf routes switch atomically; ordinary tabs use a short incoming fade.
+                // One opaque destination per frame; never cross-fade whole pages.
                 composable(
                     route = BottomNavItem.Transactions.route,
-                    exitTransition = {
-                        if (targetState.destination.route == AppRoutes.TRANSACTION_DETAIL) ExitTransition.None else null
-                    },
-                    popEnterTransition = { EnterTransition.None },
                 ) {
                     TransactionListScreen(
                         viewModel = transactionViewModel,
@@ -402,12 +356,14 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     route = BottomNavItem.Calendar.route,
                     popEnterTransition = { EnterTransition.None },
                 ) {
-                    CalendarScreen(
-                        onOpenDetail = ::openTransaction,
-                        onOpenSubscriptions = { pendingCancel ->
-                            navController.navigate(AppRoutes.subscriptions(pendingCancel))
-                        },
-                    )
+                    Box(Modifier.fillMaxSize().background(canvasColor).padding(bottom = chromeOverlap)) {
+                        CalendarScreen(
+                            onOpenDetail = ::openTransaction,
+                            onOpenSubscriptions = { pendingCancel ->
+                                navController.navigate(AppRoutes.subscriptions(pendingCancel))
+                            },
+                        )
+                    }
                 }
                 composable(
                     route = BottomNavItem.Stats.route,
@@ -563,6 +519,50 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
             }
             }
+            }
+        }
+
+        if (showBottomBar) Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+        ) {
+            QingChromeSurface(
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                requestedTier = chromePreference,
+                backdrop = chromeBackdrop,
+                backdropOrigin = backdropOrigin,
+                resolvedTier = chromeTier,
+            ) {
+                Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    navItems.forEach { item ->
+                        val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                        val tint = if (selected) qingColors.accentPrimary else qingColors.textSecondary.copy(alpha = 0.72f)
+                        Column(
+                            Modifier.weight(1f).padding(horizontal = 3.dp, vertical = 5.dp)
+                                .height(50.dp).clip(RoundedCornerShape(25.dp))
+                                .background(if (selected) qingColors.accentContainer.copy(alpha = 0.65f) else Color.Transparent)
+                                .selectable(selected = selected, interactionSource = null, indication = null,
+                                    role = Role.Tab, onClick = {
+                                    if (navController.currentDestination?.route != item.route) {
+                                        deferChrome()
+                                        navController.navigate(item.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                        }
+                                    }
+                                }),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(if (selected) item.icon else item.outlineIcon, null,
+                                modifier = Modifier.size(23.dp), tint = tint)
+                            Text(tr(item.label), fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                                color = tint, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 1.dp))
+                        }
+                    }
+                }
             }
         }
 

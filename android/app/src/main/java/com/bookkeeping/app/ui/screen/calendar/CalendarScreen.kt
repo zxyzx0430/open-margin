@@ -524,6 +524,7 @@ fun CalendarScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             // 顶部状态栏留白由外层 Scaffold 的 innerPadding 负责，这里再加会翻倍
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {

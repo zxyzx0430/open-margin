@@ -123,4 +123,7 @@ class QingV3TokensTest {
         assertEquals(19.6f, com.bookkeeping.app.ui.components.fitAmountFontSize(28f, 11f, 140, 196), 0.01f)
         assertEquals(11f, com.bookkeeping.app.ui.components.fitAmountFontSize(28f, 11f, 10, 196), 0.01f)
     }
+    @Test fun newAppearanceDefaultsToEnhancedMaterial() {
+        assertEquals(QingChromeTier.ENHANCED, QingAppearance().chromeTier)
+    }
 }

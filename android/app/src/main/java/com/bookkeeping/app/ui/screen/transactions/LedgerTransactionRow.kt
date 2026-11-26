@@ -1,9 +1,16 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
-import com.bookkeeping.app.ui.theme.qingPressFeedback
 
 
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -74,45 +81,61 @@ fun LedgerTransactionRow(
     val type = runCatching { TransactionType.valueOf(transaction.type) }
         .getOrDefault(TransactionType.EXPENSE)
     val sourceTag = ledgerTransactionSourceTag(transaction)
-    val bringIntoViewRequester = remember(transaction.id) { BringIntoViewRequester() }
-    val highlightAlpha = remember(transaction.id) { Animatable(0f) }
+    val isScrollTarget = scrollTargetTransactionId == transaction.id
+    val bringIntoViewRequester = if (isScrollTarget) remember(transaction.id) { BringIntoViewRequester() } else null
+    val highlightAlpha = remember(transaction.id) { mutableFloatStateOf(0f) }
     val reduced = rememberReduceMotion()
     val highlightColor = MaterialTheme.colorScheme.primaryContainer
 
-    LaunchedEffect(scrollTargetTransactionId) {
-        if (scrollTargetTransactionId == transaction.id) {
+    if (bringIntoViewRequester != null) {
+        LaunchedEffect(transaction.id) {
             bringIntoViewRequester.bringIntoView()
             onScrollTargetReached(transaction.id)
         }
     }
-    LaunchedEffect(highlightedTransactionId) {
-        if (highlightedTransactionId == transaction.id) {
-            highlightAlpha.snapTo(0.32f)
-            delay(1_100L)
-            if (reduced) highlightAlpha.snapTo(0f) else highlightAlpha.animateTo(0f, animationSpec = tween(durationMillis = 250))
-            onHighlightFinished(transaction.id)
-        } else {
-            highlightAlpha.snapTo(0f)
+    if (highlightedTransactionId == transaction.id) {
+        LaunchedEffect(transaction.id, reduced) {
+            highlightAlpha.floatValue = 0.32f
+            try {
+                delay(1_100L)
+                if (!reduced) Animatable(0.32f).animateTo(0f, tween(250)) {
+                    highlightAlpha.floatValue = value
+                }
+                onHighlightFinished(transaction.id)
+            } finally {
+                highlightAlpha.floatValue = 0f
+            }
         }
     }
-
     val interactionSource = remember { MutableInteractionSource() }
-    val amount = if (transaction.currency == "CNY") {
-        formatCny(transaction.amountCents)
-    } else {
-        transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
+    val pressed = interactionSource.collectIsPressedAsState()
+    val scaleState = animateFloatAsState(
+        targetValue = if (pressed.value && !reduced) QingMotionTokens.rowPressedScale else 1f,
+        animationSpec = QingMotionTokens.motionPress.spec(reduced),
+        label = "ledgerTapScale",
+    )
+    val haptics = LocalHapticFeedback.current
+    val amount = remember(transaction.currency, transaction.amountCents) {
+        if (transaction.currency == "CNY") formatCny(transaction.amountCents)
+        else transaction.currency + " " + "%.2f".format(Locale.CHINA, transaction.amountCents / 100.0)
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .qingPressFeedback(QingMotionTokens.rowPressedScale)
+            .drawWithContent {
+                val factor = scaleState.value
+                if (factor == 1f) drawContent() else scale(factor, factor) { this@drawWithContent.drawContent() }
+            }
             .heightIn(min = 56.dp)
             .drawBehind {
-                if (highlightAlpha.value > 0f) drawRoundRect(highlightColor.copy(alpha = highlightAlpha.value),
+                if (highlightAlpha.floatValue > 0f) drawRoundRect(highlightColor.copy(alpha = highlightAlpha.floatValue),
                     cornerRadius = CornerRadius(14.dp.toPx()))
             }
-            .bringIntoViewRequester(bringIntoViewRequester)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .then(if (bringIntoViewRequester != null) Modifier.bringIntoViewRequester(bringIntoViewRequester) else Modifier)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onClick()
+            })
             .padding(horizontal = 4.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
