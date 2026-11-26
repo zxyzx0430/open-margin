@@ -37,5 +37,30 @@ class WebDavClientTest {
         assertEquals("open-margin-backup-20261124-100000.zip", zips.first().name)
         assertEquals(102400L, zips.first().sizeBytes)
         assertTrue(zips.first().modifiedMs > 0L)
+        assertTrue(zips.first().url.startsWith("https://dav.jianguoyun.com/dav/"))
+        assertTrue(zips.first().url.contains("%E6%B8%85"))
+
+    }
+
+    @Test
+    fun ignoresLinksOutsideConfiguredCollection() {
+        val xml = """
+            <D:multistatus xmlns:D="DAV:">
+              <D:response><D:href>https://other.example/dav/backup.zip</D:href></D:response>
+              <D:response><D:href>/elsewhere/backup.zip</D:href></D:response>
+              <D:response><D:href>/dav/subdir/backup.zip</D:href></D:response>
+              <D:response><D:href>/dav/good.zip</D:href></D:response>
+            </D:multistatus>
+        """.trimIndent()
+        val files = WebDavClient.parsePropfindXml("https://example.com/dav/", xml)
+        assertEquals(listOf("good.zip"), files.map { it.name })
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsDtd() {
+        WebDavClient.parsePropfindXml(
+            "https://example.com/dav/",
+            """<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><x>&e;</x>""",
+        )
     }
 }

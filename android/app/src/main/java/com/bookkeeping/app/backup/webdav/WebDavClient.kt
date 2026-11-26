@@ -1,7 +1,8 @@
 package com.bookkeeping.app.backup.webdav
 
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import org.w3c.dom.Element
+import org.xml.sax.InputSource
+import javax.xml.parsers.DocumentBuilderFactory
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.StringReader
@@ -151,7 +152,7 @@ class WebDavClient(
             throw mapHttpError(result.first, "读取网盘备份列表失败")
         }
         return parsePropfindXml(base, result.second)
-            .filter { it.name.endsWith(".zip", ignoreCase = true) && !it.name.endsWith(".tmp", ignoreCase = true) }
+            .filter { Regex("open-margin-backup-[0-9]{8}-[0-9]{6}\\.zip").matches(it.name) }
             .sortedByDescending { it.modifiedMs }
     }
 
@@ -279,66 +280,51 @@ class WebDavClient(
 
         internal fun parsePropfindXml(baseUrl: String, xml: String): List<WebDavBackupFile> {
             if (xml.isBlank()) return emptyList()
-            val factory = XmlPullParserFactory.newInstance().apply { isNamespaceAware = true }
-            val parser = factory.newPullParser()
-            parser.setInput(StringReader(xml))
-
-            val baseUri = URI(baseUrl)
-            val results = mutableListOf<WebDavBackupFile>()
-            var currentTag = ""
-            var href: String? = null
-            var contentLength = 0L
-            var lastModifiedMs = 0L
-            var inResponse = false
-
-            var event = parser.eventType
-            while (event != XmlPullParser.END_DOCUMENT) {
-                when (event) {
-                    XmlPullParser.START_TAG -> {
-                        val local = parser.name?.lowercase(Locale.ROOT).orEmpty()
-                        if (local == "response") {
-                            inResponse = true
-                            href = null
-                            contentLength = 0L
-                            lastModifiedMs = 0L
-                        } else if (inResponse) {
-                            currentTag = local
-                        }
-                    }
-                    XmlPullParser.TEXT -> {
-                        if (inResponse) {
-                            val text = parser.text?.trim().orEmpty()
-                            when (currentTag) {
-                                "href" -> if (text.isNotEmpty()) href = text
-                                "getcontentlength" -> contentLength = text.toLongOrNull() ?: contentLength
-                                "getlastmodified" -> parseHttpDate(text)?.let { lastModifiedMs = it }
-                            }
-                        }
-                    }
-                    XmlPullParser.END_TAG -> {
-                        val local = parser.name?.lowercase(Locale.ROOT).orEmpty()
-                        if (local == "response" && inResponse) {
-                            val rawHref = href
-                            if (!rawHref.isNullOrBlank() && !rawHref.endsWith("/")) {
-                                val resolved = runCatching { baseUri.resolve(rawHref).toString() }.getOrDefault(rawHref)
-                                val name = rawHref.trimEnd('/').substringAfterLast('/')
-                                if (name.isNotBlank()) {
-                                    results += WebDavBackupFile(
-                                        name = name,
-                                        url = resolved,
-                                        sizeBytes = contentLength,
-                                        modifiedMs = lastModifiedMs,
-                                    )
-                                }
-                            }
-                            inResponse = false
-                        }
-                        currentTag = ""
-                    }
-                }
-                event = parser.next()
+            // JAXP works both on Android and in JVM tests. Reject DTDs before parsing.
+            require(!xml.contains("<!DOCTYPE", ignoreCase = true)) { "DTD is not allowed" }
+            val factory = DocumentBuilderFactory.newInstance().apply {
+                isNamespaceAware = true
+                isExpandEntityReferences = false
             }
-            return results
+            val builder = factory.newDocumentBuilder()
+            builder.setEntityResolver { _, _ -> throw org.xml.sax.SAXException("External entities are not allowed") }
+            val document = builder.parse(InputSource(StringReader(xml)))
+            val baseUri = URI(baseUrl.replace(" ", "%20")).normalize()
+            val basePath = baseUri.path.trimEnd('/') + "/"
+            val responses = document.getElementsByTagNameNS("DAV:", "response")
+            val results = mutableListOf<WebDavBackupFile>()
+            fun Element.value(tag: String): String =
+                getElementsByTagNameNS("DAV:", tag).item(0)?.textContent?.trim().orEmpty()
+            for (i in 0 until responses.length) {
+                val response = responses.item(i) as? Element ?: continue
+                val href = response.value("href")
+                if (href.isBlank()) continue
+                val resolved = runCatching {
+                    baseUri.resolve(href.replace(" ", "%20")).normalize()
+                }.getOrNull() ?: continue
+                // Do not send credentials or delete files outside the configured collection.
+                if (!resolved.scheme.equals(baseUri.scheme, ignoreCase = true) ||
+                    !resolved.host.equals(baseUri.host, ignoreCase = true) ||
+                    resolved.port != baseUri.port ||
+                    resolved.userInfo != null || resolved.query != null || resolved.fragment != null
+                ) continue
+                val path = resolved.path ?: continue
+                if (!path.startsWith(basePath)) continue
+                val name = path.removePrefix(basePath)
+                if (name.isBlank() || '/' in name || name == "." || name == "..") continue
+                val propstats = response.getElementsByTagNameNS("DAV:", "propstat")
+                var contentLength = 0L
+                var modifiedMs = 0L
+                for (j in 0 until propstats.length) {
+                    val stat = propstats.item(j) as? Element ?: continue
+                    val status = stat.value("status")
+                    if (status.isNotBlank() && !Regex("HTTP/[^ ]+ 2[0-9][0-9]( |$)").containsMatchIn(status)) continue
+                    stat.value("getcontentlength").toLongOrNull()?.let { contentLength = it }
+                    parseHttpDate(stat.value("getlastmodified"))?.let { modifiedMs = it }
+                }
+                results += WebDavBackupFile(name, resolved.toASCIIString(), contentLength, modifiedMs)
+            }
+            return results.sortedByDescending { it.modifiedMs }
         }
 
         private fun parseHttpDate(raw: String): Long? {
