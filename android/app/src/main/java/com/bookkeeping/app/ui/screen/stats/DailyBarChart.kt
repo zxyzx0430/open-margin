@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingMint
-import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimary
 import com.bookkeeping.app.ui.theme.QingPrimaryDeep
 import com.bookkeeping.app.ui.theme.QingSurface
@@ -50,7 +49,6 @@ fun DailyBarChart(
     var selectedDay by remember(dailyTotals) {
         mutableIntStateOf(dailyTotals.maxByOrNull { it.totalCents }?.day ?: -1)
     }
-    val outlineColor = QingOutline
     val labelColor = QingTextSecondary
     val tooltipColor = QingPrimaryDeep
     val tooltipTextColor = QingSurface
@@ -66,7 +64,7 @@ fun DailyBarChart(
             .semantics { contentDescription = chartDescription }
             .pointerInput(dailyTotals) {
                 detectTapGestures { position ->
-                    val leftPad = 34.dp.toPx()
+                    val leftPad = 4.dp.toPx()
                     val rightPad = 4.dp.toPx()
                     val chartWidth = size.width.toFloat() - leftPad - rightPad
                     if (chartWidth <= 0f || dailyTotals.isEmpty()) return@detectTapGestures
@@ -79,7 +77,7 @@ fun DailyBarChart(
                 }
             },
     ) {
-        val leftPad = 34.dp.toPx()
+        val leftPad = 4.dp.toPx()
         val rightPad = 4.dp.toPx()
         val topPad = 22.dp.toPx()
         val bottomPad = 18.dp.toPx()
@@ -87,40 +85,11 @@ fun DailyBarChart(
         val chartHeight = (size.height - topPad - bottomPad).coerceAtLeast(1f)
         val slot = chartWidth / dailyTotals.size
         val barWidth = (slot * 0.62f).coerceAtLeast(2f)
-        val gridPaint = Paint().apply {
-            color = outlineColor.toArgb()
-            strokeWidth = 1.dp.toPx()
-            isAntiAlias = true
-        }
-        val textPaint = Paint().apply {
-            color = labelColor.toArgb()
-            textSize = 9.sp.toPx()
-            isAntiAlias = true
-            textAlign = Paint.Align.RIGHT
-        }
         val dayPaint = Paint().apply {
             color = labelColor.toArgb()
             textSize = 9.sp.toPx()
             isAntiAlias = true
             textAlign = Paint.Align.CENTER
-        }
-
-        // Horizontal gridlines with amount labels.
-        for (i in 0..4) {
-            val y = topPad + chartHeight * (i / 4f)
-            drawLine(
-                color = outlineColor.copy(alpha = 0.7f),
-                start = Offset(leftPad, y),
-                end = Offset(leftPad + chartWidth, y),
-                strokeWidth = gridPaint.strokeWidth,
-            )
-            val value = maxCents * (4 - i) / 4
-            drawContext.canvas.nativeCanvas.drawText(
-                "¥${value / 100}",
-                leftPad - 5.dp.toPx(),
-                y + 3.dp.toPx(),
-                textPaint,
-            )
         }
 
         dailyTotals.forEachIndexed { index, item ->
@@ -131,7 +100,7 @@ fun DailyBarChart(
             )
             val top = topPad + chartHeight - barHeight
             if (barHeight > 0f) {
-                val radius = min(barWidth / 2f, barHeight / 2f)
+                val radius = min(6.dp.toPx(), min(barWidth / 2f, barHeight / 2f))
                 drawRoundRect(
                     color = if (item.day == selectedDay) selectedColor else barColor,
                     topLeft = Offset(x, top),

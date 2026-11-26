@@ -1,5 +1,11 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import androidx.compose.ui.unit.sp
+import com.bookkeeping.app.ui.components.QingChromeTier
+import com.bookkeeping.app.ui.theme.LocalQingAppearance
+import com.bookkeeping.app.ui.theme.rememberQingAppearancePreferences
+import com.bookkeeping.app.ui.theme.setQingRedIncome
+import com.bookkeeping.app.ui.theme.setQingChromeTier
 import com.bookkeeping.app.i18n.tr
 import android.Manifest
 import android.content.Context
@@ -383,7 +389,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("记账与采集")) }
+            item { SettingsAppearanceSectionHeader(tr("记账与采集")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -407,7 +413,7 @@ fun SettingsScreen(
             }
             item { ScreenshotCaptureCard() }
 
-            item { SectionHeader(tr("数据与同步")) }
+            item { SettingsAppearanceSectionHeader(tr("数据与同步")) }
             item {
                 SyncOverviewGroup(
                     enabled = syncEnabled,
@@ -441,7 +447,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("偏好设置")) }
+            item { SettingsAppearanceSectionHeader(tr("偏好设置")) }
             item {
                 SettingsGroupCard {
                     SettingsSwitchRow(
@@ -469,8 +475,10 @@ fun SettingsScreen(
                 }
             }
             item { LanguageCard() }
+            item { SettingsAppearanceSectionHeader(tr("外观")) }
+            item { AppearancePreferencesCard() }
 
-            item { SectionHeader(tr("诊断与关于")) }
+            item { SettingsAppearanceSectionHeader(tr("诊断与关于")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -1893,4 +1901,55 @@ private fun AboutUpdateCard(
     }
 
     updateInstall.Dialog()
+}
+
+@Composable
+private fun AppearancePreferencesCard() {
+    val preferences = rememberQingAppearancePreferences()
+    val appearance = LocalQingAppearance.current
+    var choosingMaterial by remember { mutableStateOf(false) }
+    val tierLabel = when (appearance.chromeTier) {
+        QingChromeTier.SOLID -> tr("关闭")
+        QingChromeTier.TINTED, QingChromeTier.BLUR -> tr("标准")
+        QingChromeTier.ENHANCED -> tr("增强")
+    }
+    SettingsGroupCard {
+        SettingsActionRow(
+            icon = Icons.Filled.Visibility,
+            title = tr("收支配色习惯"),
+            subtitle = if (appearance.redIncome) tr("红收绿支") else tr("绿收红支"),
+            onClick = { setQingRedIncome(preferences, !appearance.redIncome) },
+        )
+        SettingsRowDivider()
+        SettingsActionRow(
+            icon = Icons.Filled.Visibility,
+            title = tr("界面材质"),
+            subtitle = tierLabel,
+            onClick = { choosingMaterial = true },
+        )
+    }
+    if (choosingMaterial) {
+        AlertDialog(
+            onDismissRequest = { choosingMaterial = false },
+            title = { Text(tr("界面材质")) },
+            text = {
+                Column {
+                    listOf(QingChromeTier.SOLID to tr("关闭"),
+                        QingChromeTier.BLUR to tr("标准"),
+                        QingChromeTier.ENHANCED to tr("增强")).forEach { (tier, label) ->
+                        TextButton(onClick = { setQingChromeTier(preferences, tier); choosingMaterial = false }) {
+                            Text(label, color = if (appearance.chromeTier == tier) QingPrimary else MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { choosingMaterial = false }) { Text(tr("取消")) } },
+        )
+    }
+}
+
+@Composable
+private fun SettingsAppearanceSectionHeader(text: String) {
+    Text(text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp))
 }

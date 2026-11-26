@@ -14,7 +14,7 @@
 
 /* Semantic metric highlights */
 .om-home .finance-metric[data-finance-detail="expense"] strong { color: var(--om-expense, #B23A3A); }
-.om-home .finance-metric[data-finance-detail="income"] strong { color: var(--om-legacy-income, #1F7A55); }
+.om-home .finance-metric[data-finance-detail="income"] strong { color: var(--om-income, #1F7A55); }
 .om-home .finance-metric strong[data-finance-value="net_cents"] { color: var(--om-accent); }
 
 /* 2-Column Core Workspace (Chart Left + Upcoming Payments Right) */
@@ -159,7 +159,7 @@
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--om-line);
-  border-radius: var(--om-legacy-radius-sm, 10px);
+  border-radius: var(--om-radius-md, 10px);
   background: var(--om-surface-low, #F7F8F7);
   color: var(--om-text);
   text-align: left;
@@ -203,7 +203,7 @@
 .om-home .finance-native .finance-trend-selected > span { display: none; }
 .om-home .finance-native .finance-trend-detail {
   border: 1px solid var(--om-line);
-  border-radius: var(--om-legacy-radius-sm, 10px);
+  border-radius: var(--om-radius-md, 10px);
   padding: 6px 12px;
   background: var(--om-bg);
   color: var(--om-accent);

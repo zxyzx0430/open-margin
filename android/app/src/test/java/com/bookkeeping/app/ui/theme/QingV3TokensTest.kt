@@ -51,4 +51,11 @@ class QingV3TokensTest {
             assertEquals(QingChromeTier.SOLID, effectiveQingChromeTier(it))
         }
     }
+
+    @Test fun amountColorPreferenceDoesNotMutateStatusPalette() {
+        for (tokens in listOf(QingLightTokens, QingDarkTokens)) {
+            assertEquals(tokens.semanticIncome to tokens.semanticExpense, amountColors(tokens, false))
+            assertEquals(tokens.semanticExpense to tokens.semanticIncome, amountColors(tokens, true))
+        }
+    }
 }

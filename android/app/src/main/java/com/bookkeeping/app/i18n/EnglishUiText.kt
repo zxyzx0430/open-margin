@@ -5,6 +5,13 @@ package com.bookkeeping.app.i18n
  */
 internal object EnglishUiText {
     private val english: Map<String, String> = mapOf(
+        "外观" to "Appearance",
+        "收支配色习惯" to "Income and expense colors",
+        "红收绿支" to "Red income, green expense",
+        "绿收红支" to "Green income, red expense",
+        "界面材质" to "Interface material",
+        "标准" to "Standard",
+        "增强" to "Enhanced",
         "当前系统：" to "Current system: ",
         "打开自启动管理" to "Open auto-start settings",
         "打开后台耗电设置" to "Open background battery settings",

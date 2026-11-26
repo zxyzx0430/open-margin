@@ -15,11 +15,15 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.bookkeeping.app.ui.theme.QingLightHeroEnd
+import com.bookkeeping.app.ui.theme.QingDarkHeroStart
+import com.bookkeeping.app.ui.theme.QingDarkHeroEnd
 import com.bookkeeping.app.ui.theme.LocalQingDark
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
@@ -56,9 +60,13 @@ fun WalletCardSurface(
         Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .clickable(role = Role.Button, onClick = onClick)
     } else Modifier
+    val fill = if (hero) {
+        Modifier.background(Brush.verticalGradient(if (dark) listOf(QingDarkHeroStart, QingDarkHeroEnd)
+            else listOf(colors.surfaceCard, QingLightHeroEnd)))
+    } else Modifier.background(colors.surfaceCard)
     Box(
         modifier = modifier.then(shadow).clip(shape)
-            .background(colors.surfaceCard).then(edge).then(interaction),
+            .then(fill).then(edge).then(interaction),
         content = content,
     )
 }

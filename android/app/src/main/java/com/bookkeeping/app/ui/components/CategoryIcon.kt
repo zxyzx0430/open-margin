@@ -34,12 +34,13 @@ fun CategoryIcon(
     category: TransactionCategory,
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
+    cornerRadius: Dp = size * 0.34f,
 ) {
     val visual = categoryVisual(category)
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.34f))
+            .clip(RoundedCornerShape(cornerRadius))
             .background(visual.background),
         contentAlignment = Alignment.Center,
     ) {
@@ -60,6 +61,7 @@ fun MerchantAvatar(
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
     merchantIconPath: String? = null,
+    cornerRadius: Dp = size * 0.34f,
 ) {
     val localIcon by produceState<ImageBitmap?>(initialValue = null, merchantIconPath) {
         value = merchantIconPath?.let { path ->
@@ -77,13 +79,13 @@ fun MerchantAvatar(
             contentScale = ContentScale.Crop,
             modifier = modifier
                 .size(size)
-                .clip(RoundedCornerShape(size * 0.34f)),
+                .clip(RoundedCornerShape(cornerRadius)),
         )
         return
     }
     val spec = MerchantIconCatalog.forTransaction(merchant, merchantIconKey)
     if (spec == null) {
-        CategoryIcon(category = category, modifier = modifier, size = size)
+        CategoryIcon(category = category, modifier = modifier, size = size, cornerRadius = cornerRadius)
         return
     }
     val color = Color(spec.colorArgb)
@@ -95,7 +97,7 @@ fun MerchantAvatar(
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.34f))
+            .clip(RoundedCornerShape(cornerRadius))
             .background(displayColor.copy(alpha = 0.13f)),
         contentAlignment = Alignment.Center,
     ) {

@@ -1,5 +1,12 @@
 package com.bookkeeping.app.ui.theme
 
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import android.content.SharedPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -102,11 +109,11 @@ private val QingDarkColors = darkColorScheme(
 )
 
 private val QingShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    extraSmall = RoundedCornerShape(QingRadiusTokens.radiusBadge),
+    small = RoundedCornerShape(QingRadiusTokens.radiusControl),
+    medium = RoundedCornerShape(QingRadiusTokens.radiusControl),
+    large = RoundedCornerShape(QingRadiusTokens.radiusCard),
+    extraLarge = RoundedCornerShape(QingRadiusTokens.radiusHero),
 )
 
 @Composable
@@ -115,14 +122,38 @@ fun BookkeepingAppTheme(
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = if (darkTheme) QingDarkColors else QingLightColors
+    val tokens = if (darkTheme) QingDarkTokens else QingLightTokens
+    val prefs = rememberQingAppearancePreferences()
+    var appearance by remember(prefs) { mutableStateOf(readQingAppearance(prefs)) }
+    DisposableEffect(prefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            appearance = readQingAppearance(prefs)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    val colorScheme = (if (darkTheme) QingDarkColors else QingLightColors).copy(
+        background = tokens.surfaceCanvas, onBackground = tokens.textPrimary,
+        surface = tokens.surfaceCard, onSurface = tokens.textPrimary,
+        surfaceVariant = tokens.surfaceElevated, onSurfaceVariant = tokens.textSecondary,
+        primary = tokens.accentPrimary, primaryContainer = tokens.accentContainer,
+        secondary = tokens.semanticIncome, error = tokens.semanticExpense,
+        surfaceContainerLowest = tokens.surfaceCanvas,
+        surfaceContainerLow = tokens.surfaceCard,
+        surfaceContainer = tokens.surfaceCard,
+        surfaceContainerHigh = tokens.surfaceElevated,
+        surfaceContainerHighest = tokens.surfaceSheet,
+        surfaceDim = tokens.surfaceCanvas, surfaceBright = tokens.surfaceSheet,
+        outlineVariant = tokens.strokeHairline,
+    )
     CompositionLocalProvider(
         LocalQingDark provides darkTheme,
+        LocalQingAppearance provides appearance,
         LocalQingSemanticColors provides QingSemanticColors(
             income = colorScheme.secondary,
             expenseText = colorScheme.error,
             warningContainer = if (darkTheme) Color(0xFF4A3510) else QingWarningContainerBase,
-            warningText = if (darkTheme) Color(0xFFF0C36A) else QingWarningBase,
+            warningText = tokens.semanticWarning,
             errorContainer = colorScheme.errorContainer,
         ),
     ) {

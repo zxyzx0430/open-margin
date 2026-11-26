@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.foundation.layout.heightIn
+import com.bookkeeping.app.ui.theme.QingTypeTokens
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -35,7 +39,6 @@ import com.bookkeeping.app.ui.components.MerchantAvatar
 import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -62,7 +65,6 @@ fun LedgerTransactionRow(
         .getOrDefault(TransactionCategory.OTHER)
     val type = runCatching { TransactionType.valueOf(transaction.type) }
         .getOrDefault(TransactionType.EXPENSE)
-    val semantic = LocalQingSemanticColors.current
     val sourceTag = ledgerTransactionSourceTag(transaction)
     val bringIntoViewRequester = remember(transaction.id) { BringIntoViewRequester() }
     val highlightAlpha = remember(transaction.id) { Animatable(0f) }
@@ -92,13 +94,14 @@ fun LedgerTransactionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 56.dp)
             .background(
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = highlightAlpha.value),
                 shape = RoundedCornerShape(14.dp),
             )
             .bringIntoViewRequester(bringIntoViewRequester)
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 11.dp),
+            .padding(horizontal = 4.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -107,7 +110,8 @@ fun LedgerTransactionRow(
             merchantIconKey = transaction.merchantIconKey,
             merchantIconPath = transaction.merchantIconPath,
             category = category,
-            size = 42.dp,
+            size = 40.dp,
+            cornerRadius = 12.dp,
         )
         Column(
             modifier = Modifier.weight(1f),
@@ -115,8 +119,8 @@ fun LedgerTransactionRow(
         ) {
             Text(
                 text = transaction.merchant.ifBlank { tr(category.displayName) },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
+                style = QingTypeTokens.body,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -166,10 +170,11 @@ fun LedgerTransactionRow(
         }
         AutoSizeAmountText(
             text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
-            style = MaterialTheme.typography.titleMedium,
+            style = QingTypeTokens.rowAmount,
             modifier = Modifier.widthIn(min = 80.dp),
+            minimumSizeSp = 14f,
             fontWeight = FontWeight.SemiBold,
-            color = if (type == TransactionType.INCOME) semantic.income else semantic.expenseText,
+            color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,
             textAlign = TextAlign.End,
         )
     }

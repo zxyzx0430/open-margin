@@ -1,5 +1,13 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
+import com.bookkeeping.app.data.budget.BudgetMonth
+import com.bookkeeping.app.data.budget.BudgetPreferences
+import com.bookkeeping.app.data.budget.BudgetSettings
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -183,6 +191,11 @@ fun TransactionListScreen(
     val categoryFilter by viewModel.categoryFilter.collectAsState()
     val accountFilter by viewModel.accountFilter.collectAsState()
     val timeFilter by viewModel.timeFilter.collectAsState()
+    val budgetMonth by viewModel.selectedMonth.collectAsState()
+    val budgetContext = LocalContext.current.applicationContext
+    val heroMonth = if (timeFilter == LedgerTimeFilter.ALL) BudgetMonth.currentKey() else budgetMonth
+    val budgetFlow = remember(budgetContext, heroMonth) { BudgetPreferences(budgetContext).observe(heroMonth) }
+    val monthlyBudget by budgetFlow.collectAsState(initial = BudgetSettings())
     val periodTransactions by viewModel.periodTransactions.collectAsState()
     val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
     val duplicateCandidates = remember(allTransactions) {
@@ -395,6 +408,13 @@ fun TransactionListScreen(
         exactDateTransactions.filter {
             it.isLedgerTotalsCandidate() && it.type == TransactionType.INCOME.name
         }.sumOf { it.amountCents }
+    }
+    val defaultMonthHero = timeFilter == LedgerTimeFilter.ALL && exactDateFilter == null && activeDrilldown == null
+    val currentMonthTotals = remember(allTransactions, heroMonth) {
+        val (start, end) = BudgetMonth.range(heroMonth)
+        val items = allTransactions.filter { !it.syncDeleted && it.timestamp >= start && it.timestamp < end && it.isLedgerTotalsCandidate() }
+        items.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents } to
+            items.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
     }
     val duplicatesIndex = 5 +
         (if (!notificationListenerEnabled || !pageRecognitionEnabled) 1 else 0) +
@@ -685,8 +705,10 @@ fun TransactionListScreen(
             item(key = "summary") {
                 if (ledgerLoadState == LedgerLoadState.READY) {
                     MonthlySummaryCard(
-                        expenseCents = shownExpense,
-                        incomeCents = shownIncome,
+                        expenseCents = if (defaultMonthHero) currentMonthTotals.first else shownExpense,
+                        incomeCents = if (defaultMonthHero) currentMonthTotals.second else shownIncome,
+                        monthly = defaultMonthHero || (timeFilter == LedgerTimeFilter.MONTH && exactDateFilter == null),
+                        budgetCents = monthlyBudget.monthlyTotalCents,
                     )
                 } else {
                     LoadingMonthlySummaryCard()
@@ -958,7 +980,7 @@ private fun TransactionSearchBar(
         onValueChange = onQueryChange,
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(QingRadiusTokens.radiusControl),
         leadingIcon = {
             Icon(
                 imageVector = Icons.Outlined.Search,
@@ -1037,14 +1059,14 @@ private fun TransactionDayHeader(
                     DayTotalRow(
                         label = tr("支出"),
                         amountCents = expenseCents,
-                        color = semantic.expenseText,
+                        color = QingAmountExpense,
                     )
                 }
                 if (incomeCents > 0L) {
                     DayTotalRow(
                         label = tr("收入"),
                         amountCents = incomeCents,
-                        color = semantic.income,
+                        color = QingAmountIncome,
                     )
                 }
                 if (expenseCents <= 0L && incomeCents <= 0L) {
@@ -1109,13 +1131,8 @@ private fun DayCard(
     onScrollTargetReached: (Long) -> Unit,
     onHighlightFinished: (Long) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp)) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
             items.forEachIndexed { index, transaction ->
                 LedgerTransactionRow(
                     transaction = transaction,
@@ -1128,8 +1145,9 @@ private fun DayCard(
                 )
                 if (index != items.lastIndex) {
                     HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.padding(start = 56.dp),
+                        thickness = 0.5.dp,
+                        color = qingColors.strokeHairline,
                     )
                 }
             }

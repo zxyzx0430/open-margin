@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.screen.calendar
 
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
 import com.bookkeeping.app.ui.components.MonthPickerDialog
 
 import android.content.Context
@@ -113,7 +115,6 @@ import com.bookkeeping.app.ui.screen.subscriptions.SubscriptionHistoryStats
 import com.bookkeeping.app.ui.screen.subscriptions.formatSmartCny
 import com.bookkeeping.app.ui.screen.subscriptions.subscriptionCadenceLabel
 import com.bookkeeping.app.ui.screen.transactions.LedgerTransactionRow
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import com.bookkeeping.app.ui.theme.QingMintSoft
 import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimary
@@ -930,7 +931,7 @@ private fun MonthHeader(
 
 @Composable
 private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
-    val semantic = LocalQingSemanticColors.current
+
     val expense = transactions
         .filter { StatsTransactionPolicy.matches(it, TransactionType.EXPENSE) }
         .sumOf { it.amountCents }
@@ -943,12 +944,12 @@ private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
             .fillMaxWidth()
             .padding(bottom = 4.dp),
     ) {
-        CalendarMetric(tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f))
-        CalendarMetric(tr("收入"), formatCny(income), semantic.income, Modifier.weight(1f))
+        CalendarMetric(tr("支出"), formatCny(expense), QingAmountExpense, Modifier.weight(1f))
+        CalendarMetric(tr("收入"), formatCny(income), QingAmountIncome, Modifier.weight(1f))
         CalendarMetric(
             tr("结余"),
             (if (net >= 0) "+" else "−") + formatCny(abs(net)),
-            if (net >= 0) semantic.income else semantic.expenseText,
+            if (net >= 0) QingAmountIncome else QingAmountExpense,
             Modifier.weight(1f),
         )
     }
@@ -1396,16 +1397,16 @@ private fun CalendarMonthGrid(
                                     ),
                                 )
                             }
-                            val semantic = LocalQingSemanticColors.current
+
                             val numberColor = when {
                                 isEdge -> MaterialTheme.colorScheme.onPrimary
                                 inRange -> MaterialTheme.colorScheme.onPrimaryContainer
-                                calendarNumberMode == CalendarNumberMode.EXPENSE -> semantic.expenseText
-                                calendarNumberMode == CalendarNumberMode.INCOME -> semantic.income
+                                calendarNumberMode == CalendarNumberMode.EXPENSE -> QingAmountExpense
+                                calendarNumberMode == CalendarNumberMode.INCOME -> QingAmountIncome
                                 calendarNumberMode == CalendarNumberMode.NET -> if ((selectedAmount ?: 0L) >= 0L) {
-                                    semantic.income
+                                    QingAmountIncome
                                 } else {
-                                    semantic.expenseText
+                                    QingAmountExpense
                                 }
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
@@ -1561,7 +1562,7 @@ private fun CalendarListDrawer(
         singleDaySummary = dayAmountLabel,
     )
     val rangeTotals = remember(transactions) { calendarSelectionTotals(transactions) }
-    val semantic = LocalQingSemanticColors.current
+
     val drawerShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
 
     Box(
@@ -1663,20 +1664,20 @@ private fun CalendarListDrawer(
                     CalendarMetric(
                         tr("支出"),
                         formatCny(rangeTotals.expenseCents),
-                        semantic.expenseText,
+                        QingAmountExpense,
                         Modifier.weight(1f),
                     )
                     CalendarMetric(
                         tr("收入"),
                         formatCny(rangeTotals.incomeCents),
-                        semantic.income,
+                        QingAmountIncome,
                         Modifier.weight(1f),
                     )
                     CalendarMetric(
                         if (english) "Net" else tr("结余"),
                         (if (rangeTotals.netCents >= 0) "+" else "−") +
                             formatCny(abs(rangeTotals.netCents)),
-                        if (rangeTotals.netCents >= 0) semantic.income else semantic.expenseText,
+                        if (rangeTotals.netCents >= 0) QingAmountIncome else QingAmountExpense,
                         Modifier.weight(1f),
                     )
                 }
@@ -1861,7 +1862,7 @@ private fun SelectionSummary(
     onClear: () -> Unit,
     showHeading: Boolean = true,
 ) {
-    val semantic = LocalQingSemanticColors.current
+
     val hasSelection = start != null && end != null
     val source = if (hasSelection) transactions else monthFallback
     val includedExpenses = source.filter {
@@ -1931,17 +1932,17 @@ private fun SelectionSummary(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CalendarMetric(
-                    tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f),
+                    tr("支出"), formatCny(expense), QingAmountExpense, Modifier.weight(1f),
                 )
                 CalendarMetric(
-                    tr("收入"), formatCny(income), semantic.income, Modifier.weight(1f),
+                    tr("收入"), formatCny(income), QingAmountIncome, Modifier.weight(1f),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CalendarMetric(
                     tr("结余"),
                     (if (net >= 0) "+" else "−") + formatCny(abs(net)),
-                    if (net >= 0) semantic.income else semantic.expenseText,
+                    if (net >= 0) QingAmountIncome else QingAmountExpense,
                     Modifier.weight(1f),
                 )
                 CalendarMetric(

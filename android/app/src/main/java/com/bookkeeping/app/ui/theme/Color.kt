@@ -53,7 +53,7 @@ val QingTextSecondary: Color @Composable get() = MaterialTheme.colorScheme.onSur
 val QingOutline: Color @Composable get() = MaterialTheme.colorScheme.outlineVariant
 val QingExpense: Color @Composable get() = MaterialTheme.colorScheme.error
 val QingIncome: Color @Composable get() = MaterialTheme.colorScheme.secondary
-val QingWarning: Color @Composable get() = if (LocalQingDark.current) Color(0xFFF0C36A) else QingWarningBase
+val QingWarning: Color @Composable get() = qingColors.semanticWarning
 val QingWarningContainer: Color @Composable get() = if (LocalQingDark.current) Color(0xFF4A3510) else QingWarningContainerBase
 val QingErrorContainer: Color @Composable get() = MaterialTheme.colorScheme.errorContainer
 
@@ -105,3 +105,8 @@ val QingDarkTokens = QingColorTokens(
 
 val qingColors: QingColorTokens
     @Composable get() = if (LocalQingDark.current) QingDarkTokens else QingLightTokens
+
+/** The two hero gradients are the only approved decorative gradients. */
+val QingLightHeroEnd = Color(0xFFF4FAF7)
+val QingDarkHeroStart = Color(0xFF17211E)
+val QingDarkHeroEnd = Color(0xFF121716)

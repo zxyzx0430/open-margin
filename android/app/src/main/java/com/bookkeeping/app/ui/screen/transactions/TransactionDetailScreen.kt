@@ -1,5 +1,14 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.components.MerchantAvatar
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
+import com.bookkeeping.app.ui.components.SoftBadge
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.QingTypeTokens
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -356,13 +365,11 @@ private fun DetailContent(
                 add(tr("来源") to transactionSourceLabel(entry.source))
                 add(tr("发生时间") to transactionTime(entry.timestamp))
             },
+            note = entry.note,
             showTimeNeedsConfirmation = entry.eventTimeNeedsConfirmation,
             onConfirmEventTime = onConfirmEventTime,
             onEditTime = onEditTime,
         )
-        if (entry.note.isNotBlank()) {
-            NoteCard(note = entry.note)
-        }
         if (evidencePath != null) {
             EvidenceImageCard(
                 path = evidencePath,
@@ -383,53 +390,25 @@ private fun AmountHero(
 ) {
     val income = entry.type == TransactionType.INCOME.name
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-            .padding(horizontal = 16.dp, vertical = 20.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
+        MerchantAvatar(merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
+            merchantIconPath = entry.merchantIconPath, category = category, size = 48.dp, cornerRadius = 14.dp)
+        Spacer(Modifier.height(10.dp))
+        Text(entry.merchant.ifBlank { tr(category.displayName) },
+            style = QingTypeTokens.title.copy(fontSize = 18.sp), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(6.dp))
+        AutoSizeAmountText(
             text = transactionAmount(entry),
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontSize = 34.sp,
-                lineHeight = 42.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
-            color = if (income) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.error
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            style = QingTypeTokens.receiptAmount,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (income) QingAmountIncome else QingAmountExpense,
+            textAlign = TextAlign.Center,
+            minimumSizeSp = 14f,
         )
         Spacer(Modifier.height(10.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            CategoryIcon(category = category, size = 20.dp)
-            Text(
-                text = entry.merchant.ifBlank { tr(category.displayName) },
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Text(
-                text = "·",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = transactionTimeCompact(entry.timestamp),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
+        SoftBadge(text = tr("来源") + ": " + ledgerTransactionSourceTag(entry), tone = StatusTone.NEUTRAL)
     }
 }
 
@@ -443,29 +422,26 @@ private fun AmountHero(
 @Composable
 private fun FieldCard(
     rows: List<Pair<String, String>>,
+    note: String,
     showTimeNeedsConfirmation: Boolean,
     onConfirmEventTime: () -> Unit,
     onEditTime: () -> Unit,
 ) {
     val semantic = LocalQingSemanticColors.current
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp)) {
             rows.forEachIndexed { index, (label, value) ->
                 val isTimeRow = index == rows.lastIndex && showTimeNeedsConfirmation
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 44.dp)
+                        .heightIn(min = 48.dp)
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = label,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -494,7 +470,7 @@ private fun FieldCard(
                     }
                 }
                 if (index != rows.lastIndex) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
                 }
             }
             if (showTimeNeedsConfirmation) {
@@ -543,6 +519,14 @@ private fun FieldCard(
                             .clickable(role = Role.Button, onClick = onEditTime)
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                     )
+                }
+            }
+            if (note.isNotBlank()) {
+                HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
+                Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                    Text(tr("备注"), fontSize = 14.sp, color = qingColors.textSecondary)
+                    Spacer(Modifier.height(6.dp))
+                    Text(note, fontSize = 15.sp, color = qingColors.textPrimary)
                 }
             }
         }
@@ -738,8 +722,8 @@ private fun DetailActionBar(
 
 private enum class ActionButtonStyle { TONAL, PRIMARY, DANGER_OUTLINED }
 
-private val ACTION_BUTTON_HEIGHT = 46.dp
-private val ACTION_BUTTON_SHAPE = RoundedCornerShape(12.dp)
+private val ACTION_BUTTON_HEIGHT = 48.dp
+private val ACTION_BUTTON_SHAPE = RoundedCornerShape(QingRadiusTokens.radiusControl)
 private val ACTION_BUTTON_GAP = 12.dp
 private val ACTION_ROW_GAP = 10.dp
 private val ACTION_BOTTOM_GAP = 12.dp
@@ -770,7 +754,7 @@ private fun ActionButton(
             .background(container)
             .then(
                 if (style == ActionButtonStyle.DANGER_OUTLINED) {
-                    Modifier.border(1.dp, MaterialTheme.colorScheme.error, ACTION_BUTTON_SHAPE)
+                    Modifier
                 } else {
                     Modifier
                 }

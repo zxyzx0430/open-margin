@@ -8,32 +8,32 @@ body.om-ui {
   /* Brand & Semantic Tokens (Light Mode Default) */
   --om-primary: #24705C;
   --om-primary-deep: #0E5336;
-  --om-legacy-primary-container: #E8F5EE;
+
   --om-mint: #97E0B9;
   --om-mint-soft: #DCF0E7;
 
-  --om-bg: #F6F5F4;
-  --om-surface: #FFFFFF;
+  --om-bg: var(--om-surface-canvas);
+  --om-surface: var(--om-surface-card);
   --om-surface-low: #F7F8F7;
-  --om-surface-variant: #F0F2F0;
-  --om-ink: #151918;
-  --om-secondary: #5E605F;
-  --om-border: #E2E5E2;
+  --om-surface-variant: var(--om-surface-elevated);
+  --om-ink: var(--om-text-primary);
+  --om-secondary: var(--om-text-secondary);
+  --om-border: var(--om-stroke-hairline);
   --om-field-border: #C4CCC7;
 
   --om-expense: #B23A3A;
   --om-expense-bg: #FDECEC;
-  --om-legacy-income: #1F7A55;
+
   --om-income-bg: #E8F5EE;
-  --om-legacy-warning: #8A5A12;
+
   --om-warning-bg: #FFF4DE;
 
-  --om-radius: 16px;
-  --om-legacy-radius-sm: 10px;
+  --om-radius: var(--om-radius-lg);
+
   --om-radius-pill: 999px;
   --om-gap: 16px;
-  --om-shadow: 0 1px 3px rgba(14, 83, 54, 0.04), 0 1px 2px rgba(21, 25, 24, 0.03);
-  --om-shadow-hover: 0 6px 18px rgba(14, 83, 54, 0.08);
+  --om-shadow: 0 2px 10px rgba(21,25,24,0.04);
+  --om-shadow-hover: var(--om-shadow);
 
   /* Authoritative Bridge to Wallos Native Variables */
   --main-color: var(--om-primary) !important;
@@ -55,26 +55,26 @@ body.om-ui {
 body.om-ui.dark {
   --om-primary: #8FD9BC;
   --om-primary-deep: #5CB896;
-  --om-legacy-primary-container: #1B332A;
+
   --om-mint: #5CB896;
   --om-mint-soft: #1F3B30;
 
-  --om-bg: #101412;
-  --om-surface: #18201D;
+  --om-bg: var(--om-surface-canvas);
+  --om-surface: var(--om-surface-card);
   --om-surface-low: #141A17;
-  --om-surface-variant: #25302B;
-  --om-ink: #E8F0EB;
-  --om-secondary: #A9BDB3;
-  --om-border: #2C3A34;
+  --om-surface-variant: var(--om-surface-elevated);
+  --om-ink: var(--om-text-primary);
+  --om-secondary: var(--om-text-secondary);
+  --om-border: var(--om-stroke-hairline);
   --om-field-border: #4A5C54;
 
   --om-expense: #FF8A80;
   --om-expense-bg: #4A1A18;
-  --om-legacy-income: #8FD9BC;
+
   --om-income-bg: #1B332A;
-  --om-legacy-warning: #F0C36A;
+
   --om-warning-bg: #4A3510;
-  --om-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+  --om-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 
   --main-color-rgb: 143, 217, 188 !important;
   --accent-color-rgb: 92, 184, 150 !important;
@@ -84,26 +84,26 @@ body.om-ui.dark {
   body.om-ui.automatic {
     --om-primary: #8FD9BC;
     --om-primary-deep: #5CB896;
-    --om-legacy-primary-container: #1B332A;
+
     --om-mint: #5CB896;
     --om-mint-soft: #1F3B30;
 
-    --om-bg: #101412;
-    --om-surface: #18201D;
+    --om-bg: var(--om-surface-canvas);
+    --om-surface: var(--om-surface-card);
     --om-surface-low: #141A17;
-    --om-surface-variant: #25302B;
-    --om-ink: #E8F0EB;
-    --om-secondary: #A9BDB3;
-    --om-border: #2C3A34;
+    --om-surface-variant: var(--om-surface-elevated);
+    --om-ink: var(--om-text-primary);
+    --om-secondary: var(--om-text-secondary);
+    --om-border: var(--om-stroke-hairline);
     --om-field-border: #4A5C54;
 
     --om-expense: #FF8A80;
     --om-expense-bg: #4A1A18;
-    --om-legacy-income: #8FD9BC;
+
     --om-income-bg: #1B332A;
-    --om-legacy-warning: #F0C36A;
+
     --om-warning-bg: #4A3510;
-    --om-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+    --om-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
 
     --main-color-rgb: 143, 217, 188 !important;
     --accent-color-rgb: 92, 184, 150 !important;
@@ -116,11 +116,13 @@ body.om-ui {
   color: var(--om-ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
 }
 
 .om-ui .contain {
   box-sizing: border-box;
-  max-width: 1160px;
+  max-width: 1120px;
+  margin-inline: auto;
 }
 
 .om-ui [hidden] { display: none !important; }
@@ -203,7 +205,7 @@ body.om-ui {
 }
 
 .om-ui .om-top-link.active {
-  background: var(--om-legacy-primary-container);
+  background: var(--om-primary-container);
   color: var(--om-primary-deep);
   font-weight: 650;
 }
@@ -228,7 +230,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui .om-user-nav .dropdown-content {
-  border-radius: var(--om-legacy-radius-sm);
+  border-radius: var(--om-radius-md);
   border: 1px solid var(--om-border);
   background: var(--om-surface);
   box-shadow: var(--om-shadow-hover);
@@ -284,7 +286,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui :where(.button, input[type="submit"]) {
-  border-radius: var(--om-legacy-radius-sm);
+  border-radius: var(--om-radius-md);
   background-color: var(--om-primary);
   color: #FFFFFF;
   font-weight: 600;
@@ -297,7 +299,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui :where(.button.secondary-button) {
-  border-radius: var(--om-legacy-radius-sm);
+  border-radius: var(--om-radius-md);
   background: var(--om-surface);
   color: var(--om-ink);
   border: 1px solid var(--om-border);
@@ -309,7 +311,7 @@ body.om-ui.dark .om-top-link.active {
 }
 
 .om-ui :where(input[type="text"], input[type="number"], input[type="password"], input[type="email"], input[type="date"], input[type="search"], select, textarea) {
-  border-radius: var(--om-legacy-radius-sm);
+  border-radius: var(--om-radius-md);
   border-color: var(--om-field-border);
   background: var(--om-surface);
   color: var(--om-ink);
@@ -468,7 +470,7 @@ body.om-ui.dark .finance-native .finance-tab.is-current {
   width: auto;
   height: auto;
   min-height: 92px;
-  border-radius: var(--om-legacy-radius-sm);
+  border-radius: var(--om-radius-md);
 }
 .om-ui .wallos-ledger .ledger-search-form { margin: 10px 0 16px; }
 .om-ui .wallos-ledger .ledger-entry { margin-bottom: 10px; }
@@ -518,7 +520,7 @@ body.om-ui.dark .finance-native .finance-tab.is-current {
 }
 
 .om-ui .om-settings-tab[aria-selected="true"] {
-  background: var(--om-legacy-primary-container);
+  background: var(--om-primary-container);
   color: var(--om-primary-deep);
 }
 
@@ -571,7 +573,7 @@ body.om-ui.dark .om-settings-tab[aria-selected="true"] {
   border-color: var(--om-border);
   box-shadow: var(--om-shadow);
 }
-.om-ui .om-subscriptions-page :where(.button, .view-toggle-button) { border-radius: var(--om-legacy-radius-sm); }
+.om-ui .om-subscriptions-page :where(.button, .view-toggle-button) { border-radius: var(--om-radius-md); }
 
 /* About Page */
 .om-ui .om-about-page > .account-section { margin-block: 16px; }

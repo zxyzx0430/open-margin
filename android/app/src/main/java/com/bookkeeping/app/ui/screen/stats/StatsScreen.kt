@@ -1,5 +1,10 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
+import com.bookkeeping.app.ui.theme.QingTypeTokens
+import com.bookkeeping.app.ui.theme.qingColors
 import android.graphics.Paint
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -453,7 +458,6 @@ private fun StatsTabBar(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         color = QingSurface,
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Row(
             modifier = Modifier
@@ -572,7 +576,6 @@ private fun CompactPeriodPillGroup(
     Surface(
         shape = containerShape,
         color = QingSurface,
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Row(
             modifier = Modifier
@@ -638,7 +641,6 @@ private fun CollapsedAccountDistributionHint() {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = QingSurface,
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Row(
             modifier = Modifier
@@ -675,7 +677,7 @@ private fun AccountDistributionCard(
     onToggleExpanded: () -> Unit,
     onAccountClick: (String) -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(22.dp)
     val hasMore = accountStats.size > AccountAggregation.DEFAULT_VISIBLE_LIMIT
     val visibleStats = if (expanded || !hasMore) {
         accountStats
@@ -690,7 +692,6 @@ private fun AccountDistributionCard(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -819,9 +820,8 @@ private fun SubscriptionEmptyGuideCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier
@@ -922,7 +922,7 @@ private fun SubscriptionSummaryCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(QingPrimaryContainer)
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1005,9 +1005,8 @@ private fun SubscriptionStructureGrid(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1147,9 +1146,8 @@ private fun SubscriptionRankingCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1243,9 +1241,8 @@ private fun SubscriptionBreakdownCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1317,9 +1314,8 @@ private fun SubscriptionForecastCard(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1540,14 +1536,12 @@ private fun StatsSummaryCard(
         income -> tr("本月总收入")
         else -> tr("本月总支出")
     }
-    val totalColor = if (income) QingIncome else QingExpense
-    val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
+    val totalColor = if (income) QingAmountIncome else QingAmountExpense
+    val mutedOnContainer = qingColors.textSecondary
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(QingPrimaryContainer)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 4.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
@@ -1557,7 +1551,7 @@ private fun StatsSummaryCard(
         )
         AutoSizeAmountText(
             text = formatCny(totalCents),
-            style = MaterialTheme.typography.headlineMedium,
+            style = QingTypeTokens.heroAmount,
             color = totalColor,
             fontWeight = FontWeight.Bold,
         )
@@ -1575,7 +1569,7 @@ private fun StatsSummaryCard(
                 AutoSizeAmountText(
                     text = formatCny(dailyAverageCents),
                     style = MaterialTheme.typography.titleMedium,
-                    color = QingPrimaryDeep,
+                    color = qingColors.textPrimary,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Start,
                 )
@@ -1587,7 +1581,7 @@ private fun StatsSummaryCard(
                 AutoSizeAmountText(
                     text = (if (balanceCents >= 0) "+" else "−") + formatCny(abs(balanceCents)),
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (balanceCents >= 0) QingIncome else QingExpense,
+                    color = if (balanceCents >= 0) QingAmountIncome else QingAmountExpense,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Start,
                 )
@@ -1665,9 +1659,8 @@ private fun DayStatsSummaryCard(
         formatCny(abs(summary.balanceCents))
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = QingPrimaryContainer),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
@@ -1680,13 +1673,13 @@ private fun DayStatsSummaryCard(
                 DaySummaryMetric(
                     label = tr("当日支出"),
                     value = if (summary.isLoaded) formatCny(summary.expenseCents) else "—",
-                    color = QingExpense,
+                    color = QingAmountExpense,
                     modifier = Modifier.weight(1f),
                 )
                 DaySummaryMetric(
                     label = tr("当日收入"),
                     value = if (summary.isLoaded) formatCny(summary.incomeCents) else "—",
-                    color = QingIncome,
+                    color = QingAmountIncome,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -1697,7 +1690,7 @@ private fun DayStatsSummaryCard(
                 DaySummaryMetric(
                     label = tr("当日结余"),
                     value = if (summary.isLoaded) balance else "—",
-                    color = if (summary.balanceCents >= 0) QingIncome else QingExpense,
+                    color = if (summary.balanceCents >= 0) QingAmountIncome else QingAmountExpense,
                     modifier = Modifier.weight(1f),
                 )
                 DaySummaryMetric(
@@ -1770,15 +1763,9 @@ private fun CategoryDonutCard(
     var selectedCategory by remember(stats) { mutableStateOf<TransactionCategory?>(null) }
     // 分类明细已经合并进图例，所以图例一次性展示全部，不再折叠。
     val visibleStats = stats
-    val shape = RoundedCornerShape(20.dp)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SectionHeader(tr("分类占比"))
@@ -1793,7 +1780,6 @@ private fun CategoryDonutCard(
                 selectedCategory = selectedCategory,
                 onSliceClick = { selectedCategory = it },
             )
-            HorizontalDivider(color = QingOutline)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 visibleStats.forEach { stat ->
                     CategoryLegendRow(
@@ -1829,8 +1815,8 @@ private fun CategoryLegendRow(stat: CategoryStat, selected: Boolean, onClick: ()
     ) {
         Box(
             modifier = Modifier
-                .size(12.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .size(8.dp)
+                .clip(RoundedCornerShape(50))
                 .background(categoryColor(stat.category)),
         )
         Text(
@@ -1869,15 +1855,9 @@ private fun DailyTrendCard(
     var selectedDay by remember(dailyTotals, monthKey) {
         mutableIntStateOf(dailyTotals.maxByOrNull { it.totalCents }?.day ?: 1)
     }
-    val shape = RoundedCornerShape(20.dp)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -1972,14 +1952,13 @@ private fun MonthlyTrendCard(
     type: TransactionType,
 ) {
     if (monthlyTotals.isEmpty()) return
-    val shape = RoundedCornerShape(20.dp)
-    val amountColor = if (type == TransactionType.INCOME) QingIncome else QingExpense
+    val shape = RoundedCornerShape(22.dp)
+    val amountColor = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense
     val maxCents = monthlyTotals.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -2062,12 +2041,11 @@ private fun EmptyStatsCard(
     period: StatsPeriod,
     onOpenLedger: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(22.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Row(
             modifier = Modifier
@@ -2207,7 +2185,7 @@ private fun CategoryDetailDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(22.dp),
                     colors = CardDefaults.cardColors(containerColor = QingSurface),
                     border = BorderStroke(1.dp, QingOutline),
                 ) {
@@ -2225,7 +2203,7 @@ private fun CategoryDetailDialog(
                             text = formatCny(total),
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
+                            color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,
                         )
                     }
                 }
@@ -2369,7 +2347,7 @@ private fun DayDetailDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(22.dp),
                     colors = CardDefaults.cardColors(containerColor = QingSurface),
                     border = BorderStroke(1.dp, QingOutline),
                 ) {
@@ -2383,7 +2361,7 @@ private fun DayDetailDialog(
                             text = formatCny(total),
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
+                            color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,
                         )
                     }
                 }
@@ -2449,7 +2427,7 @@ private fun DayDetailDialog(
                                         formatCny(transaction.amountCents),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (type == TransactionType.EXPENSE) QingExpense else QingIncome,
+                                    color = if (type == TransactionType.EXPENSE) QingAmountExpense else QingAmountIncome,
                                 )
                             }
                         }
@@ -2504,7 +2482,7 @@ private fun CategoryDetailTransactionRow(
             text = (if (type == TransactionType.EXPENSE) "−" else "+") +
                 formatCny(transaction.amountCents),
             style = MaterialTheme.typography.titleSmall,
-            color = if (type == TransactionType.EXPENSE) QingExpense else QingIncome,
+            color = if (type == TransactionType.EXPENSE) QingAmountExpense else QingAmountIncome,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -2522,7 +2500,6 @@ private fun CompactMonthPickerButton(
             .heightIn(min = 38.dp)
             .clip(shape)
             .background(QingSurface)
-            .border(1.dp, QingOutline, shape)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2566,8 +2543,7 @@ private fun CompactDateStepper(
         modifier = Modifier
             .heightIn(min = 38.dp)
             .clip(shape)
-            .background(QingSurface)
-            .border(1.dp, QingOutline, shape),
+            .background(QingSurface),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(
@@ -2622,8 +2598,7 @@ private fun CompactYearStepper(
         modifier = Modifier
             .heightIn(min = 38.dp)
             .clip(shape)
-            .background(QingSurface)
-            .border(1.dp, QingOutline, shape),
+            .background(QingSurface),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(

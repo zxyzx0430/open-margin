@@ -55,15 +55,17 @@ fun AutoSizeAmountText(
     color: Color = Color.Unspecified,
     fontWeight: FontWeight? = null,
     textAlign: TextAlign? = null,
+    minimumSizeSp: Float = AmountTextSizing.MIN_FONT_SIZE_SP,
 ) {
     val base = if (style.fontSize.isSp) style.fontSize.value else 16f
-    val initialSp = AmountTextSizing.fontSizeSp(base, text.length)
-    var fontSizeSp by remember(text, base) { mutableFloatStateOf(initialSp) }
+    val floor = minimumSizeSp.coerceAtMost(base)
+    val initialSp = AmountTextSizing.fontSizeSp(base, text.length).coerceAtLeast(floor)
+    var fontSizeSp by remember(text, base, floor) { mutableFloatStateOf(initialSp) }
     Text(
         text = text,
         modifier = modifier,
         color = color,
-        style = style.copy(fontSize = fontSizeSp.sp),
+        style = style.copy(fontSize = fontSizeSp.sp, fontFeatureSettings = "tnum"),
         fontWeight = fontWeight,
         textAlign = textAlign,
         maxLines = 1,
@@ -71,9 +73,9 @@ fun AutoSizeAmountText(
         overflow = TextOverflow.Clip,
         onTextLayout = { result ->
             if ((result.didOverflowWidth || result.hasVisualOverflow) &&
-                fontSizeSp > AmountTextSizing.MIN_FONT_SIZE_SP
+                fontSizeSp > floor
             ) {
-                fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(AmountTextSizing.MIN_FONT_SIZE_SP)
+                fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(floor)
             }
         },
     )
