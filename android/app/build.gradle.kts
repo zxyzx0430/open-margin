@@ -45,6 +45,12 @@ android {
             // Different Actions runners produce different debug signing keys.
             // Keep the original installed app/data untouched during migration.
             applicationIdSuffix = ".sync3"
+            // Opt-in performance preview retains the test package/signing key.
+            // Do not change the default debug/CI instrumentation variant.
+            if (providers.gradleProperty("openMarginPerformancePreview").orNull == "true") {
+                isDebuggable = false
+                signingConfig = signingConfigs.getByName("debug")
+            }
             resValue("string", "app_name", "清衡测试")
             resValue("string", "page_recognition_service_label", "清衡测试 · 页面识别")
             resValue("string", "accessibility_fallback_service_label", "清衡测试 · 转账红包兜底")

@@ -197,7 +197,8 @@ fun TransactionListScreen(
     voiceRequest: VoiceEntryRequest? = null,
     onVoiceRequestConsumed: () -> Unit = {},
 ) {
-    val transactions by viewModel.displayedTransactions.collectAsState()
+    val ledgerRows by viewModel.groupedLedgerRows.collectAsState()
+    val transactions = ledgerRows.transactions
     val ledgerLoadState by viewModel.ledgerLoadState.collectAsState()
     val allTransactions by viewModel.allTransactions.collectAsState()
     val captureReview by captureReviewViewModel.state.collectAsState()
@@ -215,17 +216,7 @@ fun TransactionListScreen(
     val monthlyBudget by budgetFlow.collectAsState(initial = BudgetSettings())
     val periodTransactions by viewModel.periodTransactions.collectAsState()
     val hasAnyTransactions by viewModel.hasAnyTransactions.collectAsState()
-    val duplicateCandidates = remember(allTransactions) {
-        val byId = allTransactions.associateBy { it.id }
-        allTransactions
-            .filter { CaptureMergePolicy.needsManualReview(it) }
-            .map { candidate ->
-                TransactionViewModel.DuplicateCandidate(
-                    candidate = candidate,
-                    original = candidate.duplicateOfId?.let(byId::get),
-                )
-            }
-    }
+    val duplicateCandidates by viewModel.ledgerReviewRows.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
     // 新建表单顶部「一句话记账」的预填：语音 Final 或空（点 FAB 手填）。
@@ -382,7 +373,7 @@ fun TransactionListScreen(
         accountFilter == null &&
         timeFilter == LedgerTimeFilter.ALL
     val filterActive = !noChips || exactDateFilter != null
-    val categoryTotals = remember(periodTransactions, typeFilter) {
+    val categoryTotals = if (showCategorySheet) remember(periodTransactions, typeFilter) {
         periodTransactions
             .filter { transaction ->
                 transaction.isLedgerTotalsCandidate() &&
@@ -399,7 +390,7 @@ fun TransactionListScreen(
                     amountCents = list.sumOf { it.amountCents },
                 )
             }
-    }
+    } else emptyMap()
     val periodLabel = activeDrilldown?.let(::drilldownPeriodLabel) ?: tr("全部账单")
     val exactDateTransactions = remember(periodTransactions, exactDateFilter) {
         exactDateFilter?.let { (start, end) ->
@@ -411,7 +402,7 @@ fun TransactionListScreen(
             transactions.filter { it.timestamp >= start && it.timestamp < end }
         } ?: transactions
     }
-    val visibleDayGroups = remember(visibleTransactions) {
+    val visibleDayGroups = if (exactDateFilter == null) ledgerRows.groups else remember(visibleTransactions) {
         visibleTransactions.groupBy { dayKey(it.timestamp) }.entries.toList()
     }
     val shownExpense = if (exactDateFilter == null) periodExpense else {

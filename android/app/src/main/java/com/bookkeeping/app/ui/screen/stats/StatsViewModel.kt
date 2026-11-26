@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.shareIn
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.budget.BudgetCalculations
@@ -393,50 +397,44 @@ class StatsViewModel @Inject constructor(
         .map { yearOf(it) }
         .stateIn(
             viewModelScope,
-            SharingStarted.WhileSubscribed(5_000),
+            SharingStarted.WhileSubscribed(30_000),
             yearOf(BudgetMonth.currentKey()),
         )
 
     private val _statsLoaded = MutableStateFlow(false)
     val statsLoaded: StateFlow<Boolean> = _statsLoaded
 
-    // 选中日期/月/年的分类聚合列表（金额降序）
-    val categoryStats: StateFlow<List<CategoryStat>> =
-        combine(_selectedMonth, _selectedDate, _period) { month, date, period ->
-            Triple(month, date, period)
-        }
-            .flatMapLatest { (month, date, period) ->
-                _statsLoaded.value = false
-                val (start, end) = rangeFor(month, date, period)
-                combine(
-                    repository.observeBetween(start, end),
-                    _viewingType,
-                ) { transactions, type ->
-                    _statsLoaded.value = true
-                    StatsAggregation.categoryStats(transactions, type)
-                }
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    // 选中月份/年份该方向的总金额（分）
-    val totalCents: StateFlow<Long> = categoryStats
-        .map { list -> list.sumOf { it.totalCents } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
-
-    /** Income minus expenses for the selected date, month, or year. */
-    val balanceCents: StateFlow<Long> = combine(
-        _selectedMonth,
-        _selectedDate,
-        _period,
-    ) { month, date, period ->
+    // One current-range Room query shared by the related derived metrics.
+    private val currentRangeRows = combine(_selectedMonth, _selectedDate, _period) { month, date, period ->
         rangeFor(month, date, period)
-    }
-        .flatMapLatest { (start, end) ->
-            repository.observeBetween(start, end).map { transactions ->
-                StatsAggregation.totalCents(transactions, TransactionType.INCOME) -
-                    StatsAggregation.totalCents(transactions, TransactionType.EXPENSE)
-            }
-        }
+    }.distinctUntilChanged().flatMapLatest { (start, end) ->
+        _statsLoaded.value = false
+        repository.observeBetween(start, end)
+    }.flowOn(Dispatchers.Default).shareIn(viewModelScope,
+        SharingStarted.WhileSubscribed(30_000, replayExpirationMillis = 0), replay = 1)
+
+    internal val coreUiState: StateFlow<StatsCoreUiState> =
+        combine(currentRangeRows, _viewingType) { rows, type ->
+            val categories = StatsAggregation.categoryStats(rows, type)
+            StatsCoreUiState(
+                rows = rows,
+                categories = categories,
+                totalCents = categories.sumOf { it.totalCents },
+                balanceCents = StatsAggregation.totalCents(rows, TransactionType.INCOME) -
+                    StatsAggregation.totalCents(rows, TransactionType.EXPENSE),
+                accounts = AccountAggregation.accountStats(rows, type),
+                mostlyUncategorized = AccountAggregation.isMostlyUncategorized(rows, type),
+            ).also { _statsLoaded.value = true }
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), StatsCoreUiState())
+
+    // Keep the public derived streams for existing callers, but compose the
+    // active page from one coherent result instead of six intermediate emissions.
+    val categoryStats: StateFlow<List<CategoryStat>> = coreUiState.map { it.categories }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val totalCents: StateFlow<Long> = coreUiState.map { it.totalCents }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+    val balanceCents: StateFlow<Long> = coreUiState.map { it.balanceCents }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
     val selectedDaySummary: StateFlow<DayStatsSummary> = _selectedDate
@@ -454,9 +452,10 @@ class StatsViewModel @Inject constructor(
                 )
             }.onStart { emit(DayStatsSummary(0L, 0L, 0L, 0)) }
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(
             viewModelScope,
-            SharingStarted.WhileSubscribed(5_000),
+            SharingStarted.WhileSubscribed(30_000),
             DayStatsSummary(0L, 0L, 0L, 0),
         )
 
@@ -471,7 +470,8 @@ class StatsViewModel @Inject constructor(
                 StatsAggregation.dailyTotals(transactions, type, month)
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     // 选中月份的 12 个月分布（全年视图用；每月恰好统计一次）
     val monthlyTotals: StateFlow<List<MonthlyTotal>> = _selectedMonth
@@ -485,7 +485,8 @@ class StatsViewModel @Inject constructor(
                 StatsAggregation.monthlyTotals(transactions, type, year)
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     // 上一月/上一年同方向总额，用于环比
     val previousPeriodTotalCents: StateFlow<Long> =
@@ -514,7 +515,8 @@ class StatsViewModel @Inject constructor(
                     StatsAggregation.totalCents(transactions, type)
                 }
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0L)
 
     // 目标统计页口径：期间总额 / 期间天数
     val dailyAverageCents: StateFlow<Long> =
@@ -524,54 +526,40 @@ class StatsViewModel @Inject constructor(
                 StatsPeriod.MONTH -> BudgetCalculations.averagePerDay(total, month)
                 StatsPeriod.YEAR -> StatsAggregation.averagePerDay(total, yearOf(month))
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0L)
 
     // 分类下钻使用：当前选中统计范围内的全部交易。
-    val periodTransactions: StateFlow<List<TransactionEntity>> =
-        combine(_selectedMonth, _selectedDate, _period) { month, date, period ->
-            rangeFor(month, date, period)
-        }
-            .flatMapLatest { (start, end) ->
-                repository.observeBetween(start, end)
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val periodTransactions: StateFlow<List<TransactionEntity>> = currentRangeRows
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val previousComparison: StateFlow<MonthComparison> = combine(
         totalCents,
         previousPeriodTotalCents,
     ) { current, previous ->
         BudgetCalculations.comparison(current, previous)
-    }.stateIn(
+    }.flowOn(Dispatchers.Default).stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5_000),
+        SharingStarted.WhileSubscribed(30_000),
         MonthComparison(0L, 0L, null),
     )
 
-    val accountStats: StateFlow<List<AccountStat>> = combine(
-        periodTransactions,
-        _viewingType,
-    ) { transactions, type ->
-        AccountAggregation.accountStats(transactions, type)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val accountStats: StateFlow<List<AccountStat>> = coreUiState.map { it.accounts }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val accountCoverageRatio: StateFlow<Float> = combine(
         periodTransactions,
         _viewingType,
     ) { transactions, type ->
         AccountAggregation.coverageRatio(transactions, type)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0f)
 
-    val isAccountMostlyUncategorized: StateFlow<Boolean> = combine(
-        periodTransactions,
-        _viewingType,
-    ) { transactions, type ->
-        AccountAggregation.isMostlyUncategorized(transactions, type)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+    val isAccountMostlyUncategorized: StateFlow<Boolean> = coreUiState.map { it.mostlyUncategorized }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     val subscriptionStats: StateFlow<SubscriptionStatsState> =
         combine(
             subscriptionRepository.observeActive(),
-            repository.observeAll(),
+            repository.observeUiTransactions(),
         ) { activeSubs, _ -> activeSubs }
             .map { activeSubs ->
                 val cal = Calendar.getInstance()
@@ -591,9 +579,10 @@ class StatsViewModel @Inject constructor(
                     recurringCandidateCount = candidateCount,
                 )
             }
+            .flowOn(Dispatchers.Default)
             .stateIn(
                 viewModelScope,
-                SharingStarted.WhileSubscribed(5_000),
+                SharingStarted.WhileSubscribed(30_000),
                 SubscriptionStatsState(),
             )
 
@@ -664,3 +653,12 @@ class StatsViewModel @Inject constructor(
         const val MAX_YEAR: Int = 2099
     }
 }
+
+internal data class StatsCoreUiState(
+    val rows: List<TransactionEntity> = emptyList(),
+    val categories: List<CategoryStat> = emptyList(),
+    val totalCents: Long = 0L,
+    val balanceCents: Long = 0L,
+    val accounts: List<AccountStat> = emptyList(),
+    val mostlyUncategorized: Boolean = false,
+)

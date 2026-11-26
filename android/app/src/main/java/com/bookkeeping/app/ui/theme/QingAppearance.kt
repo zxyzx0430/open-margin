@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import com.bookkeeping.app.ui.components.QingChromeTier
@@ -14,7 +14,7 @@ data class QingAppearance(
     val chromeTier: QingChromeTier = QingChromeTier.SOLID,
 )
 
-val LocalQingAppearance = staticCompositionLocalOf { QingAppearance() }
+val LocalQingAppearance = compositionLocalOf { QingAppearance() }
 
 @Composable
 fun rememberQingAppearancePreferences(): SharedPreferences {

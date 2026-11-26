@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.calendar
 
+import android.util.LruCache
 import androidx.compose.ui.layout.layout
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import androidx.compose.animation.core.snap
@@ -401,7 +402,8 @@ fun CalendarScreen(
     onOpenDetail: (Long) -> Unit = {},
     onOpenSubscriptions: (Boolean) -> Unit = {},
 ) {
-    val transactions by viewModel.transactions.collectAsState()
+    val calendarSnapshot by viewModel.indexedTransactions.collectAsState()
+    val transactions = calendarSnapshot.rows
     val allSubscriptions by viewModel.allSubscriptions.collectAsState()
     val fxRates by viewModel.fxRates.collectAsState()
     val monthlyOccurrencesByDay by viewModel.monthlyOccurrencesByDay.collectAsState()
@@ -499,13 +501,13 @@ fun CalendarScreen(
     val monthTransactions = remember(transactions, monthKey) {
         transactions.filter { it.timestamp in monthStart until monthEnd && !it.syncDeleted }
     }
-    val selectedTransactions = remember(transactions, rangeStart, rangeEnd) {
+    val calendarDateIndex = calendarSnapshot.byDate
+    val selectedTransactions = remember(calendarDateIndex, rangeStart, rangeEnd) {
         val start = rangeStart
         val end = rangeEnd
         if (start == null || end == null) emptyList()
-        else transactions.filter {
-            !it.syncDeleted && dateOf(it.timestamp) in start..end
-        }.sortedByDescending { it.timestamp }
+        else calendarDateIndex.entries.asSequence().filter { it.key in start..end }
+            .flatMap { it.value.asSequence() }.sortedByDescending { it.timestamp }.toList()
     }
     val selectionStart = rangeStart
     val selectionEnd = rangeEnd
@@ -2070,7 +2072,7 @@ private fun firstDayOffset(year: Int, month: Int, weekStartsMonday: Boolean): In
     return (dayOfWeek - first + 7) % 7
 }
 
-private data class CalendarDate(
+internal data class CalendarDate(
     val year: Int,
     val month: Int,
     val day: Int,
@@ -2131,7 +2133,7 @@ internal fun heatmapAlpha(value: Long, sortedPositiveDailyValues: List<Long>): F
     }
 }
 
-private fun dateOf(timestamp: Long): CalendarDate =
+internal fun dateOf(timestamp: Long): CalendarDate =
     Calendar.getInstance().apply { timeInMillis = timestamp }.let { cal ->
         CalendarDate(
             cal.get(Calendar.YEAR),
@@ -2158,7 +2160,11 @@ private fun monthLabel(key: String): String {
     return CalendarDateText.monthHeading(parts.year, parts.month)
 }
 
+private val lunarDateCache by lazy { LruCache<String, String>(512) }
+
 private fun lunarLabel(year: Int, month: Int, day: Int): String {
+    val key = java.util.TimeZone.getDefault().id + ":" + year + ":" + month + ":" + day
+    lunarDateCache.get(key)?.let { return it }
     return runCatching {
         val cal = Calendar.getInstance().apply {
             clear()
@@ -2181,5 +2187,5 @@ private fun lunarLabel(year: Int, month: Int, day: Int): String {
             )
             names[(lunarDay - 1).coerceIn(0, 29)]
         }
-    }.getOrDefault("")
+    }.getOrDefault("").also { lunarDateCache.put(key, it) }
 }

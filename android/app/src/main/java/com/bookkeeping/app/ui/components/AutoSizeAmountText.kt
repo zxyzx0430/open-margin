@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -24,6 +28,8 @@ import androidx.compose.ui.unit.sp
  * （≤11 字符，如 ¥26,825.14）排下；从 22sp 基准看，档位就是 22 / 19 / 16 / 13sp，
  * 与设计给的档位一致，其他基准按同样步进收缩。
  */
+internal val LocalAmountTextMeasurer = staticCompositionLocalOf<TextMeasurer?> { null }
+
 object AmountTextSizing {
     /** 低于 11sp 金额就难读了，到此为止。 */
     const val MIN_FONT_SIZE_SP = 11f
@@ -61,6 +67,7 @@ fun AutoSizeAmountText(
     val floor = minimumSizeSp.coerceAtMost(base)
     val initialSp = AmountTextSizing.fontSizeSp(base, text.length).coerceAtLeast(floor)
     var fontSizeSp by remember(text, base, floor) { mutableFloatStateOf(initialSp) }
+    val measurer = LocalAmountTextMeasurer.current ?: rememberTextMeasurer(cacheSize = 4)
     Text(
         text = text,
         modifier = modifier,
@@ -75,8 +82,21 @@ fun AutoSizeAmountText(
             if ((result.didOverflowWidth || result.hasVisualOverflow) &&
                 fontSizeSp > floor
             ) {
-                fontSizeSp = (fontSizeSp - 1f).coerceAtLeast(floor)
+                val unconstrained = measurer.measure(
+                    text = androidx.compose.ui.text.AnnotatedString(text),
+                    style = result.layoutInput.style,
+                    maxLines = 1, softWrap = false,
+                    constraints = Constraints(),
+                ).size.width
+                fontSizeSp = fitAmountFontSize(fontSizeSp, floor, result.layoutInput.constraints.maxWidth, unconstrained)
             }
         },
     )
+}
+
+
+internal fun fitAmountFontSize(current: Float, floor: Float, available: Int, intrinsic: Int): Float {
+    if (intrinsic <= 0 || available <= 0) return floor
+    return (current * available.toFloat() / intrinsic * 0.98f)
+        .coerceAtMost(current - 0.5f).coerceAtLeast(floor)
 }

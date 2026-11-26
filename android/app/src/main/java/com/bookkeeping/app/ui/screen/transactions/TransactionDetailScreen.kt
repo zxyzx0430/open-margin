@@ -112,13 +112,12 @@ fun TransactionDetailScreen(
     initialEntry: TransactionEntity? = null,
 ) {
     val transaction by detailViewModel.transaction.collectAsState()
-    val allTransactions by transactionViewModel.allTransactions.collectAsState()
     val displayedEntry = if (transaction.loaded) transaction.entry else initialEntry
     TransactionDetailScreenContent(
         entry = displayedEntry,
         onBack = onBack,
         onDeleted = onDeleted,
-        historyTransactions = allTransactions,
+        historyProvider = transactionViewModel::freshRuleHistory,
         animateReceipt = initialEntry != null,
         loadingEntry = !transaction.loaded && initialEntry == null,
         onSaveMerchantRuleWithHistory = { merchant, category, update -> transactionViewModel.saveMerchantRule(merchant, category, update) },
@@ -155,6 +154,7 @@ fun TransactionDetailScreenContent(
     onConfirmEventTime: (TransactionEntity) -> Unit,
     onUpdateEventTime: (TransactionEntity, Long) -> Unit,
     historyTransactions: List<TransactionEntity> = emptyList(),
+    historyProvider: (suspend () -> List<TransactionEntity>)? = null,
     onSaveMerchantRuleWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
     animateReceipt: Boolean = false,
     loadingEntry: Boolean = false,
@@ -243,13 +243,19 @@ fun TransactionDetailScreenContent(
     }
 
     if (addingRule && entry != null) {
+        val history by produceState<List<TransactionEntity>?>(if (historyProvider == null) historyTransactions else null, historyProvider, historyTransactions) {
+            if (historyProvider != null) value = withContext(Dispatchers.IO) { historyProvider() }
+        }
+        val historyCounter: ((String) -> Int)? = remember(history, onSaveMerchantRuleWithHistory != null) {
+            val rows = history
+            if (onSaveMerchantRuleWithHistory == null || rows == null) null else { name: String ->
+                rows.count { !it.syncDeleted && com.bookkeeping.app.data.merchant.MerchantRules.matches(it.merchant, name) }
+            }
+        }
         MerchantRuleDialog(
             merchant = entry.merchant,
-            historyCount = if (onSaveMerchantRuleWithHistory == null) null else { name ->
-                historyTransactions.count {
-                    !it.syncDeleted && com.bookkeeping.app.data.merchant.MerchantRules.matches(it.merchant, name)
-                }
-            },
+            historyLoading = history == null,
+            historyCount = historyCounter,
             onSaveWithHistory = onSaveMerchantRuleWithHistory?.let { save -> { name, category, update ->
                 save(name, category, update)
                 addingRule = false

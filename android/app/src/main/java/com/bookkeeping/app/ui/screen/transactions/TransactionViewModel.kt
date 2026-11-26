@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.budget.BudgetMonth
@@ -179,14 +183,14 @@ class TransactionViewModel @Inject constructor(
     val ledgerLoadState: StateFlow<LedgerLoadState> = _ledgerLoadState
 
     // Kept for callers that only need the raw list (duplicate originals, calendar).
-    val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
-        .onStart { _ledgerLoadState.value = LedgerLoadState.LOADING }
+    val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeUiTransactions()
+        .onStart { if (_ledgerLoadState.value != LedgerLoadState.READY) _ledgerLoadState.value = LedgerLoadState.LOADING }
         .onEach { _ledgerLoadState.value = LedgerLoadState.READY }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val hasAnyTransactions: StateFlow<Boolean> = allTransactions
         .map { it.isNotEmpty() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), false)
 
     val periodTransactions: StateFlow<List<TransactionEntity>> =
         combine(allTransactions, periodState) { all, period ->
@@ -196,7 +200,7 @@ class TransactionViewModel @Inject constructor(
                     (range == null ||
                         (transaction.timestamp >= range.first && transaction.timestamp < range.second))
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
@@ -240,7 +244,8 @@ class TransactionViewModel @Inject constructor(
                     }
                 }
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val duplicateCandidates: StateFlow<List<DuplicateCandidate>> =
         combine(
@@ -256,7 +261,7 @@ class TransactionViewModel @Inject constructor(
                         original = candidate.duplicateOfId?.let(byId::get),
                     )
                 }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val periodExpenseCents: StateFlow<Long> = periodTransactions
         .map { list ->
@@ -266,7 +271,8 @@ class TransactionViewModel @Inject constructor(
                     it.isLedgerTotalsCandidate()
             }.sumOf { it.amountCents }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0L)
 
     val periodIncomeCents: StateFlow<Long> = periodTransactions
         .map { list ->
@@ -275,7 +281,24 @@ class TransactionViewModel @Inject constructor(
                     it.isLedgerTotalsCandidate()
             }.sumOf { it.amountCents }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0L)
+
+    internal val ledgerReviewRows: StateFlow<List<DuplicateCandidate>> = allTransactions.map { all ->
+        val byId = all.associateBy { it.id }
+        all.filter { CaptureMergePolicy.needsManualReview(it) }
+            .map { DuplicateCandidate(candidate = it, original = it.duplicateOfId?.let(byId::get)) }
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
+
+    internal val groupedLedgerRows: StateFlow<LedgerRows> =
+        displayedTransactions.map { rows ->
+            val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            LedgerRows(rows, rows.groupBy { format.format(java.util.Date(it.timestamp)) }.entries.toList())
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), LedgerRows())
+
+    suspend fun freshRuleHistory(): List<TransactionEntity> = repository.observeAll().first()
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
@@ -600,3 +623,8 @@ class TransactionViewModel @Inject constructor(
         LedgerTimeFilter.ALL -> null
     }
 }
+
+internal data class LedgerRows(
+    val transactions: List<TransactionEntity> = emptyList(),
+    val groups: List<Map.Entry<String, List<TransactionEntity>>> = emptyList(),
+)

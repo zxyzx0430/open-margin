@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.theme
 
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.bookkeeping.app.ui.components.LocalAmountTextMeasurer
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -132,7 +134,7 @@ fun BookkeepingAppTheme(
         prefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
-    val colorScheme = (if (darkTheme) QingDarkColors else QingLightColors).copy(
+    val colorScheme = remember(darkTheme) { (if (darkTheme) QingDarkColors else QingLightColors).copy(
         background = tokens.surfaceCanvas, onBackground = tokens.textPrimary,
         surface = tokens.surfaceCard, onSurface = tokens.textPrimary,
         surfaceVariant = tokens.surfaceElevated, onSurfaceVariant = tokens.textSecondary,
@@ -145,11 +147,12 @@ fun BookkeepingAppTheme(
         surfaceContainerHighest = tokens.surfaceSheet,
         surfaceDim = tokens.surfaceCanvas, surfaceBright = tokens.surfaceSheet,
         outlineVariant = tokens.strokeHairline,
-    )
+    ) }
     CompositionLocalProvider(
         LocalQingDark provides darkTheme,
         LocalQingReduceMotion provides observeReduceMotion(),
         LocalQingAppearance provides appearance,
+        LocalAmountTextMeasurer provides rememberTextMeasurer(cacheSize = 128),
         LocalQingSemanticColors provides QingSemanticColors(
             income = colorScheme.secondary,
             expenseText = colorScheme.error,

@@ -58,7 +58,6 @@ internal fun EntryPanelLayout(
             modifier = modifier
                 .fillMaxWidth()
                 .heightIn(max = 720.dp)
-                .imePadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 16.dp)
                 .verticalScroll(rememberScrollState()),

@@ -1,5 +1,11 @@
 package com.bookkeeping.app.data.repository
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.distinctUntilChanged
 import android.content.Context
 import androidx.room.withTransaction
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
@@ -136,6 +142,17 @@ class TransactionRepository @Inject constructor(
 ) {
     private val duplicateMutex = Mutex()
 
+    // UI consumers can share one live Room query. Keep the original cold API
+    // for point-in-time business reads and writes; never feed a cached replay
+    // to code that needs a fresh database snapshot.
+    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val uiTransactions by lazy {
+        dao.observeAll().distinctUntilChanged().shareIn(
+            uiScope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 15_000,
+                replayExpirationMillis = 0), replay = 1,
+        )
+    }
+    fun observeUiTransactions(): Flow<List<TransactionEntity>> = uiTransactions
     fun observeAll(): Flow<List<TransactionEntity>> = dao.observeAll()
     fun observeById(id: Long): Flow<TransactionEntity?> = dao.observeById(id)
 

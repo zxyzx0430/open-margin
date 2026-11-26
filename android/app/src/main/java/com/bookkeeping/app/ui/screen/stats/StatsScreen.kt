@@ -144,23 +144,25 @@ fun StatsScreen(
     viewModel: StatsViewModel = hiltViewModel(),
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
-    val stats by viewModel.categoryStats.collectAsState()
-    val accountStats by viewModel.accountStats.collectAsState()
-    val isAccountMostlyUncategorized by viewModel.isAccountMostlyUncategorized.collectAsState()
-    val subscriptionStats by viewModel.subscriptionStats.collectAsState()
-    val totalCents by viewModel.totalCents.collectAsState()
-    val balanceCents by viewModel.balanceCents.collectAsState()
-    val viewingType by viewModel.viewingType.collectAsState()
-    val dailyTotals by viewModel.dailyTotals.collectAsState()
-    val selectedMonth by viewModel.selectedMonth.collectAsState()
-    val dailyAverage by viewModel.dailyAverageCents.collectAsState()
-    val comparison by viewModel.previousComparison.collectAsState()
     val period by viewModel.period.collectAsState()
+    val isFinancial = selectedTab != StatsTab.SUBSCRIPTION
+    val core = if (isFinancial) viewModel.coreUiState.collectAsState().value else viewModel.coreUiState.value
+    val stats = core.categories
+    val accountStats = core.accounts
+    val isAccountMostlyUncategorized = core.mostlyUncategorized
+    val subscriptionStats = if (!isFinancial) viewModel.subscriptionStats.collectAsState().value else viewModel.subscriptionStats.value
+    val totalCents = core.totalCents
+    val balanceCents = core.balanceCents
+    val viewingType by viewModel.viewingType.collectAsState()
+    val dailyTotals = if (isFinancial && period == StatsPeriod.MONTH) viewModel.dailyTotals.collectAsState().value else emptyList()
+    val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val dailyAverage = if (isFinancial) viewModel.dailyAverageCents.collectAsState().value else viewModel.dailyAverageCents.value
+    val comparison = if (isFinancial) viewModel.previousComparison.collectAsState().value else viewModel.previousComparison.value
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedDate by viewModel.selectedDate.collectAsState()
-    val selectedDaySummary by viewModel.selectedDaySummary.collectAsState()
-    val monthlyTotals by viewModel.monthlyTotals.collectAsState()
-    val periodTransactions by viewModel.periodTransactions.collectAsState()
+    val selectedDaySummary = if (isFinancial && period == StatsPeriod.DAY) viewModel.selectedDaySummary.collectAsState().value else viewModel.selectedDaySummary.value
+    val monthlyTotals = if (isFinancial && period == StatsPeriod.YEAR) viewModel.monthlyTotals.collectAsState().value else emptyList()
+    val periodTransactions = core.rows
 
     var showMonthPicker by remember { mutableStateOf(false) }
     var showDayPicker by remember { mutableStateOf(false) }
