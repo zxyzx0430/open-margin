@@ -16,7 +16,6 @@ import com.bookkeeping.app.ui.theme.QingAmountExpense
 import com.bookkeeping.app.ui.theme.QingTypeTokens
 import com.bookkeeping.app.ui.theme.qingColors
 import android.graphics.Paint
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -58,14 +57,12 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -560,10 +557,8 @@ private fun AccountDistributionCard(
     val maxTotalCents = accountStats.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
     val activeBarColor = if (type == TransactionType.INCOME) QingIncome else QingPrimary
 
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -690,10 +685,8 @@ private fun SubscriptionEmptyGuideCard(
     onDiscoverClick: () -> Unit,
     onAddClick: () -> Unit,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier
@@ -758,13 +751,16 @@ private fun SubscriptionEmptyGuideCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                OutlinedButton(
+                Button(
                     onClick = onDiscoverClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 44.dp),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, QingOutline),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = qingColors.surfaceElevated,
+                        contentColor = qingColors.textPrimary,
+                    ),
                 ) {
                     Text(
                         text = if (recurringCandidateCount > 0) {
@@ -875,10 +871,8 @@ private fun SubscriptionSummaryCard(
 private fun SubscriptionStructureGrid(
     state: SubscriptionStatsState,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -976,7 +970,6 @@ private fun SubscriptionPendingCancelBanner(
             .clickable(role = Role.Button, onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = QingWarningContainer,
-        border = BorderStroke(1.dp, QingWarning.copy(alpha = 0.35f)),
     ) {
         Row(
             modifier = Modifier
@@ -1016,10 +1009,8 @@ private fun SubscriptionRankingCard(
     items: List<SubscriptionRankItem>,
     onOpenAll: () -> Unit,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1111,10 +1102,8 @@ private fun SubscriptionBreakdownCard(
     title: String,
     items: List<SubscriptionBreakdownItem>,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1184,10 +1173,8 @@ private fun SubscriptionForecastCard(
     var selectedIndex by remember(forecast) { mutableIntStateOf(defaultSelectedIndex) }
     val selectedPoint = forecast.getOrNull(selectedIndex)
 
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1529,10 +1516,9 @@ private fun DayStatsSummaryCard(
 ) {
     val balance = (if (summary.balanceCents >= 0) "+" else "−") +
         formatCny(abs(summary.balanceCents))
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = QingPrimaryContainer),
+        hero = true,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
@@ -1827,10 +1813,8 @@ private fun MonthlyTrendCard(
     val shape = RoundedCornerShape(22.dp)
     val amountColor = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense
     val maxCents = monthlyTotals.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1914,10 +1898,8 @@ private fun EmptyStatsCard(
     onOpenLedger: () -> Unit,
 ) {
     val shape = RoundedCornerShape(22.dp)
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
     ) {
         Row(
             modifier = Modifier
@@ -2053,13 +2035,10 @@ private fun CategoryDetailDialog(
                         Icon(Icons.Default.Close, contentDescription = tr("关闭"))
                     }
                 }
-                Card(
+                WalletCardSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = QingSurface),
-                    border = BorderStroke(1.dp, QingOutline),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -2086,13 +2065,16 @@ private fun CategoryDetailDialog(
                             .padding(top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        OutlinedButton(
+                        Button(
                             onClick = onOpenOtherCleanup,
                             modifier = Modifier
                                 .weight(1f)
                                 .heightIn(min = 46.dp),
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, QingOutline),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = qingColors.surfaceElevated,
+                                contentColor = qingColors.textPrimary,
+                            ),
                         ) {
                             Text(
                                 text = tr("批量整理其他分类"),
@@ -2215,13 +2197,10 @@ private fun DayDetailDialog(
                         Icon(Icons.Default.Close, contentDescription = tr("关闭"))
                     }
                 }
-                Card(
+                WalletCardSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = QingSurface),
-                    border = BorderStroke(1.dp, QingOutline),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(

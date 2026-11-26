@@ -1,6 +1,9 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import com.bookkeeping.app.ui.components.MerchantSuggestionBar
 import com.bookkeeping.app.ui.components.QingConfirmationSheet
+import com.bookkeeping.app.ui.components.QingSegmentedControl
+import com.bookkeeping.app.ui.components.QingSwitch
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.qingColors
 import com.bookkeeping.app.ui.components.QingSheetGrabber
@@ -11,8 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -22,6 +24,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,8 +43,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,7 +51,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -69,6 +70,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -117,7 +119,7 @@ private val PAYMENT_CHANNEL_PRESETS = listOf(
     "未指定",
 )
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditSubscriptionSheet(
     existing: SubscriptionEntity? = null,
@@ -150,8 +152,14 @@ fun EditSubscriptionSheet(
                 .takeIf { it in SUPPORTED_CURRENCIES } ?: "CNY",
         )
     }
+    var currencyTouched by remember(existing?.id, candidatePrefill) {
+        mutableStateOf(isEditing || candidatePrefill != null)
+    }
     var cadence by remember(existing?.id, candidatePrefill) {
         mutableStateOf(existing?.cadence ?: candidatePrefill?.cadence ?: SubscriptionCadence.MONTHLY)
+    }
+    var cadenceTouched by remember(existing?.id, candidatePrefill) {
+        mutableStateOf(isEditing || candidatePrefill != null)
     }
     var nextDueMs by remember(existing?.id, candidatePrefill) {
         mutableLongStateOf(
@@ -282,6 +290,7 @@ fun EditSubscriptionSheet(
                                         text = { Text("${currencyPrefix(code)} $code") },
                                         onClick = {
                                             currency = code
+                                            currencyTouched = true
                                             showCurrencyMenu = false
                                         },
                                     )
@@ -366,7 +375,7 @@ fun EditSubscriptionSheet(
                 }
             }
 
-            // 2. Borderless soft Name input
+            // 2. Borderless soft Name input + real-time MerchantIconCatalog suggestions
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -380,9 +389,12 @@ fun EditSubscriptionSheet(
                     ) {
                         if (name.isEmpty()) {
                             Text(
-                                text = "订阅名称（如 ChatGPT Plus、淘宝 88VIP）",
+                                text = tr("订阅名称（如 ChatGPT）"),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = QingTextSecondary,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                         BasicTextField(
@@ -401,6 +413,19 @@ fun EditSubscriptionSheet(
                         )
                     }
                 }
+                MerchantSuggestionBar(
+                    query = name,
+                    onSelect = { suggestion ->
+                        name = suggestion.displayName
+                        nameError = null
+                        if (!currencyTouched && suggestion.defaultCurrency != null) {
+                            currency = suggestion.defaultCurrency
+                        }
+                        if (!cadenceTouched && suggestion.defaultCadence != null) {
+                            cadence = suggestion.defaultCadence
+                        }
+                    },
+                )
                 if (nameError != null) {
                     Text(
                         text = nameError.orEmpty(),
@@ -411,40 +436,38 @@ fun EditSubscriptionSheet(
                 }
             }
 
-            // 3. Cadence row
+            // 3. Cadence row (QingSegmentedControl)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "周期",
+                    text = tr("周期"),
                     style = MaterialTheme.typography.labelMedium,
                     color = QingTextSecondary,
                 )
-                Row(
+                val selectedCadenceIndex = CADENCE_OPTIONS.indexOfFirst { it.first == cadence }.coerceAtLeast(0)
+                QingSegmentedControl(
+                    labels = CADENCE_OPTIONS.map { tr(it.second) },
+                    selectedIndex = selectedCadenceIndex,
+                    onSelect = { index ->
+                        cadence = CADENCE_OPTIONS[index].first
+                        cadenceTouched = true
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    CADENCE_OPTIONS.forEach { (value, label) ->
-                        SubscriptionChoiceChip(
-                            label = label,
-                            selected = cadence == value,
-                            onClick = { cadence = value },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
+                )
             }
 
-            // 4. Payment channel chips (matches 新建账单 账户 row)
+            // 4. Payment channel row (borderless horizontal scrolling soft pills)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "扣款渠道",
+                    text = tr("扣款渠道"),
                     style = MaterialTheme.typography.labelMedium,
                     color = QingTextSecondary,
                 )
-                FlowRow(
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
                 ) {
-                    PAYMENT_CHANNEL_PRESETS.forEach { preset ->
+                    items(PAYMENT_CHANNEL_PRESETS, key = { it }) { preset ->
                         val isUnspecified = preset == "未指定"
                         val selected = if (isUnspecified) {
                             customChannelText.isBlank() &&
@@ -452,14 +475,26 @@ fun EditSubscriptionSheet(
                         } else {
                             customChannelText.isBlank() && paymentChannel == preset
                         }
-                        SubscriptionChoiceChip(
-                            label = preset,
-                            selected = selected,
-                            onClick = {
-                                customChannelText = ""
-                                paymentChannel = if (isUnspecified) "" else preset
-                            },
-                        )
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable(role = Role.RadioButton) {
+                                    customChannelText = ""
+                                    paymentChannel = if (isUnspecified) "" else preset
+                                },
+                            shape = RoundedCornerShape(999.dp),
+                            color = if (selected) QingPrimaryContainer else qingColors.surfaceElevated,
+                        ) {
+                            Text(
+                                text = tr(preset),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (selected) QingPrimaryDeep else qingColors.textSecondary,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -491,7 +526,7 @@ fun EditSubscriptionSheet(
                                 color = QingTextSecondary,
                             )
                         }
-                        Switch(
+                        QingSwitch(
                             checked = autoRenew,
                             onCheckedChange = { autoRenew = it },
                         )
@@ -524,7 +559,7 @@ fun EditSubscriptionSheet(
                                 color = QingTextSecondary,
                             )
                         }
-                        Switch(
+                        QingSwitch(
                             checked = notifyEnabled,
                             onCheckedChange = { notifyEnabled = it },
                         )
@@ -698,37 +733,6 @@ fun EditSubscriptionSheet(
             },
         )
     }
-}
-
-@Composable
-private fun SubscriptionChoiceChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(12.dp),
-        label = {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-            )
-        },
-        border = if (selected) null else BorderStroke(1.dp, QingOutline),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = QingSurface,
-            labelColor = QingTextSecondary,
-            selectedContainerColor = QingPrimaryContainer,
-            selectedLabelColor = QingPrimaryDeep,
-        ),
-    )
 }
 
 private fun currencyPrefix(currency: String): String = when (currency.uppercase(Locale.US)) {

@@ -69,6 +69,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.AppLanguage
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import com.bookkeeping.app.ui.components.formatCny
 import com.bookkeeping.app.ui.theme.QingExpense
 import com.bookkeeping.app.ui.theme.QingIncome
@@ -806,8 +807,9 @@ private fun BackupRestorePreviewDialog(
     val dateText = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
         .format(Date(preview.manifest.exportedAtMs))
 
-    AlertDialog(
+    QingConfirmationSheet(
         onDismissRequest = { if (!restoring) onDismiss() },
+        canDismiss = !restoring,
         title = {
             Text(
                 text = bilingual("确认从完整备份恢复", "Restore from full backup"),

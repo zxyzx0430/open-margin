@@ -28,8 +28,9 @@ fun QingConfirmationSheet(onDismissRequest: () -> Unit,
     confirmButton: @Composable () -> Unit,
     title: @Composable (() -> Unit)? = null,
     text: @Composable (() -> Unit)? = null,
-    dismissButton: @Composable (() -> Unit)? = null) {
-    QingGestureSheet(onDismissRequest = onDismissRequest) {
+    dismissButton: @Composable (() -> Unit)? = null,
+    canDismiss: Boolean = true) {
+    QingGestureSheet(onDismissRequest = onDismissRequest, canDismiss = canDismiss) {
         Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleLarge) { title?.invoke() }

@@ -1775,6 +1775,12 @@ internal object EnglishUiText {
         "含周期续费" to "Includes recurring",
         "按当前节奏预计超支" to "Projected overspend at current pace",
         "按当前节奏预计结余" to "Projected balance at current pace",
+        "订阅名称（如 ChatGPT）" to "Subscription name (e.g. ChatGPT)",
+        "周期" to "Billing cycle",
+        "扣款渠道" to "Payment method",
+        "云闪付" to "UnionPay",
+        "京东白条" to "JD Baitiao",
+        "Apple Pay" to "Apple Pay",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(
