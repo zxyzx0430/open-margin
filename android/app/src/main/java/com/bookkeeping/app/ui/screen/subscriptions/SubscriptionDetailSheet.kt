@@ -569,19 +569,45 @@ internal fun SubscriptionBadgeAvatar(
     size: androidx.compose.ui.unit.Dp = 42.dp,
     wallet: Boolean = false,
 ) {
-    val label = name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
+    val spec = remember(name) { com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(name) }
+    val vector = remember(spec?.systemIcon) { com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon) }
+    val brandColor = spec?.colorArgb?.let { androidx.compose.ui.graphics.Color(it) }
+    val label = spec?.initials ?: name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
+    val bgColor = when {
+        wallet && vector != null -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.94f)
+        wallet -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)
+        brandColor != null && active -> brandColor.copy(alpha = 0.14f)
+        active -> QingMintSoft
+        else -> QingSurfaceVariant
+    }
+    val fgColor = when {
+        wallet && vector != null -> brandColor ?: QingPrimaryDeep
+        wallet -> androidx.compose.ui.graphics.Color.White
+        brandColor != null && active -> brandColor
+        active -> QingPrimaryDeep
+        else -> QingTextSecondary
+    }
     Box(
         modifier = Modifier
             .size(size)
             .clip(RoundedCornerShape(size * 0.30f))
-            .background(if (wallet) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.12f) else if (active) QingMintSoft else QingSurfaceVariant),
+            .background(bgColor),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = if (wallet) androidx.compose.ui.graphics.Color.White else if (active) QingPrimaryDeep else QingTextSecondary,
-        )
+        if (vector != null) {
+            Icon(
+                imageVector = vector,
+                contentDescription = null,
+                tint = fgColor,
+                modifier = Modifier.size(size * 0.56f),
+            )
+        } else {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = fgColor,
+            )
+        }
     }
 }

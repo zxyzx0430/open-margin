@@ -43,6 +43,39 @@ object MerchantIconCatalog {
         Rule(listOf("电费", "水费", "燃气"), "utilities", "电", 0xFF1F9D8A, "bolt"),
         Rule(listOf("医院", "药房", "医疗"), "health", "医", 0xFF8D6E63, "health"),
         Rule(listOf("学费", "教育", "书店"), "education", "学", 0xFFD99A2B, "education"),
+        // AI & Developer Tools
+        Rule(listOf("chatgpt", "openai", "gpt"), "chatgpt", "G", 0xFF23272D, "ai"),
+        Rule(listOf("claude", "anthropic"), "claude", "C", 0xFFB85D3B, "ai"),
+        Rule(listOf("gemini", "google ai"), "gemini", "G", 0xFF2563EB, "ai"),
+        Rule(listOf("cursor", "copilot", "codex", "opencode", "code goat", "windsurf", "trae"), "coding_ai", "C", 0xFF2B313B, "code"),
+        Rule(listOf("midjourney", "suno", "runway", "perplexity", "poe", "kimi", "豆包", "通义", "智谱", "deepseek"), "ai_service", "A", 0xFF4F46E5, "ai"),
+        Rule(listOf("github"), "github", "G", 0xFF24292F, "code"),
+        // Streaming Video & Music
+        Rule(listOf("youtube", "油管"), "youtube", "Y", 0xFFB91C1C, "video"),
+        Rule(listOf("netflix", "奈飞", "网飞"), "netflix", "N", 0xFFB21D26, "movie"),
+        Rule(listOf("disney"), "disney", "D", 0xFF136F78, "movie"),
+        Rule(listOf("bilibili", "b站", "哔哩哔哩"), "bilibili", "B", 0xFFD95375, "video"),
+        Rule(listOf("爱奇艺", "iqiyi"), "iqiyi", "爱", 0xFF1F7A55, "video"),
+        Rule(listOf("腾讯视频", "腾迅视频"), "tencent_video", "腾", 0xFF2563EB, "video"),
+        Rule(listOf("优酷", "youku", "芒果tv", "apple tv", "prime video", "hbo", "max"), "streaming", "影", 0xFF1E293B, "movie"),
+        Rule(listOf("spotify"), "spotify", "S", 0xFF15803D, "music"),
+        Rule(listOf("网易云", "netease"), "netease_music", "网", 0xFFC23030, "music"),
+        Rule(listOf("qq音乐", "qq music", "酷狗", "酷我", "汽水音乐"), "music_cn", "音", 0xFF1D8348, "music"),
+        Rule(listOf("apple music", "喜马拉雅", "小宇宙"), "audio", "乐", 0xFFC83E4D, "music"),
+        // Cloud, Storage & Productivity
+        Rule(listOf("icloud", "apple one", "applecare"), "icloud", "i", 0xFF2B7CD3, "cloud"),
+        Rule(listOf("google one", "google drive"), "google_one", "G", 0xFF2563EB, "cloud"),
+        Rule(listOf("onedrive", "microsoft 365", "office 365", "dropbox", "百度网盘", "阿里云盘", "夸克网盘"), "cloud_drive", "云", 0xFF1E6091, "cloud"),
+        Rule(listOf("notion", "obsidian", "raycast", "1password", "bitwarden", "figma", "adobe", "photoshop", "wps"), "productivity", "P", 0xFF334155, "productivity"),
+        // Infrastructure & Telecom
+        Rule(listOf("vps", "服务器", "云主机", "aws", "cloudflare", "aliyun", "阿里云", "腾讯云", "vultr", "digitalocean", "bandwagon", "搬瓦工", "域名", "domain"), "server", "V", 0xFF2B3540, "server"),
+        Rule(listOf("话费", "手机", "流量", "移动", "联通", "电信", "港卡", "sim", "esim", "cls", "club sim", "宽带"), "telecom", "卡", 0xFF1E6B5E, "sim"),
+        // Shopping, Reading, Fitness & Gaming
+        Rule(listOf("88vip", "天猫"), "88vip", "8", 0xFFD95B26, "shopping"),
+        Rule(listOf("京东plus", "jd plus", "山姆", "costco", "amazon prime"), "vip_shop", "会", 0xFF1D4ED8, "shopping"),
+        Rule(listOf("微信读书", "kindle", "知乎", "得到"), "reading", "读", 0xFF2C6E9B, "book"),
+        Rule(listOf("健身", "gym", "keep", "apple fitness"), "fitness", "健", 0xFF2F5E4E, "fitness"),
+        Rule(listOf("xbox", "game pass", "playstation", "ps plus", "nintendo", "switch", "steam", "geforce"), "gaming", "游", 0xFF1F6E3D, "game"),
     )
 
     private val byKey: Map<String, MerchantIconSpec> = rules.associate { rule ->
