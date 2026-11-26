@@ -21,6 +21,7 @@ android {
         versionName = "1.47.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["openMarginProfileable"] = "false"
 
         // 主动截图监听（MediaStore 新截图）默认关闭；GitHub 实验版构建显式开启；
         // Play 不传该参数。分享与选图不受影响。
@@ -49,6 +50,7 @@ android {
             // Do not change the default debug/CI instrumentation variant.
             if (providers.gradleProperty("openMarginPerformancePreview").orNull == "true") {
                 isDebuggable = false
+                manifestPlaceholders["openMarginProfileable"] = "true"
                 signingConfig = signingConfigs.getByName("debug")
                 isMinifyEnabled = true
                 proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -111,6 +113,8 @@ dependencies {
 
     // Navigation Compose
     implementation(libs.androidx.navigation.compose)
+
+    implementation("androidx.profileinstaller:profileinstaller:1.4.0")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

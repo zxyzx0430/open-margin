@@ -20,3 +20,8 @@ dependencyResolutionManagement {
 rootProject.name = "BookkeepingApp"
 include(":app")
 include(":paddle-ocr-sdk")
+
+// Keep developer/CI builds offline-compatible; device benchmarks are opt-in.
+if (providers.gradleProperty("openMarginBenchmarks").orNull == "true") {
+    include(":benchmark")
+}

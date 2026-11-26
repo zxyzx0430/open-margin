@@ -252,7 +252,7 @@ internal data class LedgerRowUiModel(
     val type: TransactionType,
     val source: String,
     val sourceTagKey: String,
-    val account: String,
+    val account: String?,
     val timeText: String,
     val eventTimeNeedsConfirmation: Boolean,
     val amount: String,

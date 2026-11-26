@@ -47,6 +47,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.BookkeepingApp">
+        <profileable android:shell="\${openMarginProfileable}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
