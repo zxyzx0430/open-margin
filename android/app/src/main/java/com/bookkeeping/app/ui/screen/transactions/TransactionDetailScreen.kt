@@ -1,6 +1,5 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import com.bookkeeping.app.ui.navigation.qingLedgerShared
 import com.bookkeeping.app.ui.navigation.LocalQingLedgerTransition
 import com.bookkeeping.app.ui.components.QingConfirmationSheet
 
@@ -429,18 +428,16 @@ private fun AmountHero(
         }.padding(top = 24.dp, bottom = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        MerchantAvatar(modifier = Modifier.qingLedgerShared(entry.id, "icon"),
-            merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
+        MerchantAvatar(merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
             merchantIconPath = entry.merchantIconPath, category = category, size = 48.dp, cornerRadius = 14.dp)
         Spacer(Modifier.height(10.dp))
         Text(entry.merchant.ifBlank { tr(category.displayName) },
-            modifier = Modifier.qingLedgerShared(entry.id, "merchant"),
             style = QingTypeTokens.title.copy(fontSize = 18.sp), textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         AutoSizeAmountText(
             text = transactionAmount(entry),
             style = QingTypeTokens.receiptAmount,
-            modifier = Modifier.qingLedgerShared(entry.id, "amount"),
+            modifier = Modifier.fillMaxWidth(),
             color = if (income) QingAmountIncome else QingAmountExpense,
             textAlign = TextAlign.Center,
             minimumSizeSp = 14f,

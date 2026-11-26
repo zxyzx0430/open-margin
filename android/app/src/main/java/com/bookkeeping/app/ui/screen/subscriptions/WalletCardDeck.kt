@@ -155,12 +155,18 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
         days == 1 -> tr("明天扣款")
         else -> tr("%d 天后扣款").format(days)
     }
-    val material = remember(color) { Brush.linearGradient(listOf(lerp(color, white, 0.045f), color,
-        lerp(color, Color.Black, 0.16f))) }
+    val material = remember(color) {
+        Brush.linearGradient(
+            0f to lerp(color, white, 0.18f),
+            0.38f to lerp(color, white, 0.05f),
+            0.72f to color,
+            1f to lerp(color, Color.Black, 0.12f),
+        )
+    }
     Column(
-        Modifier.fillMaxSize().qingPressFeedback(QingMotionTokens.cardPressedScale)
-            .shadow(2.dp, shape, ambientColor = Color.Black.copy(alpha = 0.10f),
-                spotColor = Color.Black.copy(alpha = 0.14f))
+        Modifier.fillMaxSize().then(deckDrag).qingPressFeedback(QingMotionTokens.cardPressedScale)
+            .shadow(if (expanded) 5.dp else 3.dp, shape, ambientColor = Color.Black.copy(alpha = 0.12f),
+                spotColor = Color.Black.copy(alpha = 0.20f))
             .clip(shape).background(material)
             .drawWithContent {
                 drawContent()
@@ -174,7 +180,7 @@ private fun WalletSubscriptionCard(subscription: SubscriptionEntity, color: Colo
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 48.dp).then(deckDrag), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().height(if (expanded) 56.dp else 48.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SubscriptionBadgeAvatar(subscription.name, subscription.active, 30.dp, wallet = true)
             Column(Modifier.weight(1f)) {

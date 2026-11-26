@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.bookkeeping.app.ui.navigation.qingLedgerContainer
 import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.lazy.LazyListScope
@@ -232,6 +236,7 @@ fun TransactionListScreen(
     var exactDateFilter by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     var duplicateListExpanded by remember { mutableStateOf(false) }
     var statusRefresh by remember { mutableIntStateOf(0) }
+    var statusExpanded by rememberSaveable { mutableStateOf(false) }
     var saveRequestSequence by remember { mutableIntStateOf(0) }
     var latestFeedbackSaveSequence by remember { mutableIntStateOf(0) }
     var scrollTargetTransactionId by remember { mutableStateOf<Long?>(null) }
@@ -421,11 +426,15 @@ fun TransactionListScreen(
         }.sumOf { it.amountCents }
     }
     val defaultMonthHero = timeFilter == LedgerTimeFilter.ALL && exactDateFilter == null && activeDrilldown == null
-    val currentMonthTotals = remember(allTransactions, heroMonth) {
-        val (start, end) = BudgetMonth.range(heroMonth)
-        val items = allTransactions.filter { !it.syncDeleted && it.timestamp >= start && it.timestamp < end && it.isLedgerTotalsCandidate() }
-        items.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents } to
-            items.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
+    val currentMonthTotals by androidx.compose.runtime.key(heroMonth) {
+        produceState<Pair<Long, Long>?>(null, allTransactions, heroMonth) {
+            value = withContext(Dispatchers.Default) {
+                val (start, end) = BudgetMonth.range(heroMonth)
+                val items = allTransactions.filter { !it.syncDeleted && it.timestamp >= start && it.timestamp < end && it.isLedgerTotalsCandidate() }
+                items.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents } to
+                    items.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents }
+            }
+        }
     }
     val hasCaptureReviewSection = captureReview.pending.isNotEmpty() ||
                 (captureReview.ignored.isNotEmpty() && !captureReview.ignoredBannerDismissed) ||
@@ -559,8 +568,59 @@ fun TransactionListScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
-            ledgerSectionItem(key = "status") {
+            ledgerSectionItem(key = "period") {
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = periodLabel,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (activeDrilldown != null || exactDateFilter != null) {
+                        TextButton(
+                            onClick = {
+                                activeDrilldown = null
+                                exactDateFilter = null
+                                viewModel.clearFilters()
+                            },
+                        ) {
+                            Text(tr("全部账单"))
+                        }
+                    }
+                }
+            }
+
+            ledgerSectionItem(key = "summary") {
+                if (ledgerLoadState == LedgerLoadState.READY && (!defaultMonthHero || currentMonthTotals != null)) {
+                    MonthlySummaryCard(
+                        expenseCents = if (defaultMonthHero) (currentMonthTotals?.first ?: 0L) else shownExpense,
+                        incomeCents = if (defaultMonthHero) (currentMonthTotals?.second ?: 0L) else shownIncome,
+                        monthly = defaultMonthHero || (timeFilter == LedgerTimeFilter.MONTH && exactDateFilter == null),
+                        budgetCents = monthlyBudget.monthlyTotalCents,
+                    )
+                } else {
+                    LoadingMonthlySummaryCard()
+                }
+            }
+
+            ledgerSectionItem(key = "status") {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { statusExpanded = !statusExpanded }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(tr("采集与同步状态"), Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(status.captureText, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(if (statusExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (statusExpanded) tr("收起") else tr("展开"),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (statusExpanded) Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState()),
@@ -600,6 +660,7 @@ fun TransactionListScreen(
                             )
                         }
                     }
+                }
                 }
             }
 
@@ -673,44 +734,6 @@ fun TransactionListScreen(
                         onAcknowledgeStorageWarning = captureReviewViewModel::acknowledgeStorageWarning,
                         onAcknowledgeIntakeFailure = captureReviewViewModel::acknowledgeIntakeFailureNotice,
                     )
-                }
-            }
-
-            ledgerSectionItem(key = "period") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = periodLabel,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (activeDrilldown != null || exactDateFilter != null) {
-                        TextButton(
-                            onClick = {
-                                activeDrilldown = null
-                                exactDateFilter = null
-                                viewModel.clearFilters()
-                            },
-                        ) {
-                            Text(tr("全部账单"))
-                        }
-                    }
-                }
-            }
-
-            ledgerSectionItem(key = "summary") {
-                if (ledgerLoadState == LedgerLoadState.READY) {
-                    MonthlySummaryCard(
-                        expenseCents = if (defaultMonthHero) currentMonthTotals.first else shownExpense,
-                        incomeCents = if (defaultMonthHero) currentMonthTotals.second else shownIncome,
-                        monthly = defaultMonthHero || (timeFilter == LedgerTimeFilter.MONTH && exactDateFilter == null),
-                        budgetCents = monthlyBudget.monthlyTotalCents,
-                    )
-                } else {
-                    LoadingMonthlySummaryCard()
                 }
             }
 
@@ -832,13 +855,11 @@ fun TransactionListScreen(
                                     "possible_duplicate",
                                 )
                         } }
-                        val expense = valid
-                            .filter { it.type == "EXPENSE" && it.category != "TRANSFER" }
-                            .sumOf { it.amountCents }
-                        val income = valid
-                            .filter { it.type == "INCOME" }
-                            .sumOf { it.amountCents }
-                        val foreignOnly = valid.isEmpty() && dayItems.any { it.currency != "CNY" }
+                        val (expense, income) = remember(valid) {
+                            valid.filter { it.type == "EXPENSE" && it.category != "TRANSFER" }.sumOf { it.amountCents } to
+                                valid.filter { it.type == "INCOME" }.sumOf { it.amountCents }
+                        }
+                        val foreignOnly = remember(valid, dayItems) { valid.isEmpty() && dayItems.any { it.currency != "CNY" } }
                         TransactionDayHeader(
                             label = dayLabel(dayKey),
                             count = valid.size,
@@ -1168,29 +1189,8 @@ private fun LedgerDayCardRow(
     val dark = com.bookkeeping.app.ui.theme.LocalQingDark.current
     val timeText = remember(transaction.timestamp) { timeOnlyFormat.format(Date(transaction.timestamp)) }
     Column {
-        Column(Modifier.fillMaxWidth().then(if (first || last) Modifier.clip(shape) else Modifier).background(colors.surfaceCard, shape)
-            .drawWithContent {
-                drawContent()
-                val stroke = 0.5.dp.toPx()
-                // Seamless group outline: never frame internal edges.
-                val r = radius.toPx().coerceAtMost(size.width / 2f).coerceAtMost(size.height / 2f)
-                val topY = if (first) r else 0f
-                val bottomY = if (last) size.height-r else size.height
-                if (!dark) {
-                    drawLine(colors.strokeHairline, Offset(stroke/2, topY), Offset(stroke/2, bottomY), stroke)
-                    drawLine(colors.strokeHairline, Offset(size.width-stroke/2, topY), Offset(size.width-stroke/2, bottomY), stroke)
-                }
-                if (first) clipRect(bottom = r+stroke) {
-                    drawRoundRect(colors.strokeHairline, Offset(stroke/2, stroke/2),
-                        Size(size.width-stroke, size.height-stroke),
-                        androidx.compose.ui.geometry.CornerRadius(r), style = Stroke(stroke))
-                }
-                if (last && !dark) clipRect(top = size.height-r-stroke) {
-                    drawRoundRect(colors.strokeHairline, Offset(stroke/2, stroke/2),
-                        Size(size.width-stroke, size.height-stroke),
-                        androidx.compose.ui.geometry.CornerRadius(r), style = Stroke(stroke))
-                }
-            }
+        Column(Modifier.fillMaxWidth().qingLedgerContainer(transaction.id)
+            .then(if (first || last) Modifier.clip(shape) else Modifier).background(colors.surfaceCard, shape)
             .padding(horizontal = 16.dp).padding(top = if (first) 2.dp else 0.dp, bottom = if (last) 2.dp else 0.dp)) {
             LedgerTransactionRow(
                 transaction = transaction,

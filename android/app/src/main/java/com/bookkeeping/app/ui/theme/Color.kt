@@ -111,4 +111,4 @@ val QingLightHeroEnd = Color(0xFFF4FAF7)
 val QingDarkHeroStart = Color(0xFF17211E)
 val QingDarkHeroEnd = Color(0xFF121716)
 
-internal val WalletSubscriptionPalette = listOf(Color(0xFF1B4D3E), Color(0xFF1E2226), Color(0xFF23303D), Color(0xFF332D29), Color(0xFF263830))
+internal val WalletSubscriptionPalette = listOf(Color(0xFF214D40), Color(0xFF343C43), Color(0xFF2D4353), Color(0xFF51413B), Color(0xFF34483E))

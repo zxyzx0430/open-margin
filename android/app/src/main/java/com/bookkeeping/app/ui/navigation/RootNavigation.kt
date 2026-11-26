@@ -1,5 +1,7 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -274,18 +276,28 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 startDestination = BottomNavItem.Transactions.route,
                 modifier = Modifier.fillMaxSize().padding(bodyPadding).consumeWindowInsets(innerPadding)
                     .background(canvasColor),
-                enterTransition = { EnterTransition.None },
+                enterTransition = {
+                    if (reducedMotion || targetState.destination.route in tabRoutes) EnterTransition.None
+                    else if (targetState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
+                        fadeIn(tween(DETAIL_TRANSITION_MS))
+                    else slideInHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
+                },
                 exitTransition = {
-                    if (!reducedMotion && targetState.destination.route == AppRoutes.TRANSACTION_DETAIL)
-                        slideOutHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { -it / 16 }
+                    if (!reducedMotion && targetState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
+                        fadeOut(tween(DETAIL_TRANSITION_MS), targetAlpha = 0.99f)
                     else ExitTransition.None
                 },
                 popEnterTransition = {
-                    if (!reducedMotion && initialState.destination.route == AppRoutes.TRANSACTION_DETAIL)
-                        slideInHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { -it / 16 }
+                    if (!reducedMotion && initialState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
+                        fadeIn(tween(DETAIL_TRANSITION_MS), initialAlpha = 0.99f)
                     else EnterTransition.None
                 },
-                popExitTransition = { ExitTransition.None },
+                popExitTransition = {
+                    if (reducedMotion || initialState.destination.route in tabRoutes) ExitTransition.None
+                    else if (initialState.destination.route == AppRoutes.TRANSACTION_DETAIL && ledgerSharedOrigin && transitionEntry != null)
+                        fadeOut(tween(DETAIL_TRANSITION_MS))
+                    else slideOutHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
+                },
             ) {
                 // No crossfade between top-level tabs. Detail alone has a
                 // hierarchical transition and non-nested shared content.
@@ -328,7 +340,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
                 composable(
                     route = BottomNavItem.Calendar.route,
-                    popEnterTransition = { EnterTransition.None },
                 ) {
                     Box(Modifier.fillMaxSize().background(canvasColor).padding(bottom = chromeOverlap)) {
                         CalendarScreen(
@@ -341,7 +352,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
                 composable(
                     route = BottomNavItem.Stats.route,
-                    popEnterTransition = { EnterTransition.None },
                 ) {
                     StatsScreen(
                         onOpenLedger = { drilldown ->
@@ -362,28 +372,16 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 // 账单页仍可打开独立导入页；设置页入口在本页弹出导入 / 导出面板。
                 composable(
                     route = AppRoutes.BILL_IMPORT,
-                    enterTransition = { EnterTransition.None },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
                 ) {
                     BillImportScreen(onClose = { navController.popBackStack() })
                 }
                 composable(
                     route = AppRoutes.PENDING_CONFLICTS,
-                    enterTransition = { EnterTransition.None },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
                 ) {
                     PendingConflictsScreen(onBack = { navController.popBackStack() })
                 }
                 composable(
                     route = AppRoutes.TRANSACTION_DIAGNOSTICS,
-                    enterTransition = { EnterTransition.None },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
                 ) {
                     TransactionDiagnosticsScreen(
                         onBack = { navController.popBackStack() },
@@ -394,10 +392,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
                 composable(
                     route = AppRoutes.SYNC_SETTINGS,
-                    enterTransition = { EnterTransition.None },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
                 ) {
                     SyncSettingsScreen(onBack = { navController.popBackStack() })
                 }
@@ -406,26 +400,18 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     arguments = listOf(
                         navArgument(AppRoutes.TRANSACTION_ID) { type = NavType.LongType },
                     ),
-                    // Opaque page motion, not an alpha blend of two pages.
-                    enterTransition = {
-                        if (reducedMotion) EnterTransition.None
-                        else slideInHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
-                    },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = {
-                        if (reducedMotion) ExitTransition.None
-                        else slideOutHorizontally(tween(DETAIL_TRANSITION_MS, easing = FastOutSlowInEasing)) { it / 5 }
-                    },
                 ) { entry ->
                     val snapshot = transitionEntry?.takeIf { it.id == entry.arguments?.getLong(AppRoutes.TRANSACTION_ID) }
                     val visibility = this
                     val shared = snapshot?.takeIf { ledgerSharedOrigin }
-                    Box(Modifier.fillMaxSize().background(canvasColor).padding(bottom = navInset)) {
-                        CompositionLocalProvider(LocalQingChromeOverlap provides 0.dp,
-                            LocalQingLedgerTransition provides shared?.let {
-                                QingLedgerTransition(sharedScope, visibility, it.id)
-                            }) {
+                    CompositionLocalProvider(LocalQingChromeOverlap provides 0.dp,
+                        LocalQingLedgerTransition provides shared?.let {
+                            QingLedgerTransition(sharedScope, visibility, it.id)
+                        }) {
+                        val surface = Modifier.fillMaxSize().let { base ->
+                            if (shared != null) base.qingLedgerContainer(shared.id) else base
+                        }
+                        Box(surface.background(canvasColor).padding(bottom = navInset)) {
                             TransactionDetailScreen(
                                 initialEntry = snapshot,
                                 transactionViewModel = transactionViewModel,
@@ -437,7 +423,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
                 composable(
                     route = BottomNavItem.Budget.route,
-                    popEnterTransition = { EnterTransition.None },
                 ) {
                     BudgetScreen(
                         onOpenLedger = { drilldown ->
@@ -461,10 +446,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                             defaultValue = false
                         },
                     ),
-                    enterTransition = { EnterTransition.None },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None },
                 ) { backStackEntry ->
                     val filterPendingCancel = backStackEntry.arguments
                         ?.getBoolean(AppRoutes.SUBSCRIPTIONS_PENDING_CANCEL_ARG) == true
@@ -491,7 +472,6 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 }
                 composable(
                     route = BottomNavItem.Settings.route,
-                    popEnterTransition = { EnterTransition.None },
                 ) {
                     SettingsScreen(
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },

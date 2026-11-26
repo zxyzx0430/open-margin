@@ -1,12 +1,8 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import com.bookkeeping.app.ui.navigation.qingLedgerShared
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.draw.drawBehind
@@ -14,8 +10,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import com.bookkeeping.app.ui.theme.rememberReduceMotion
 
 
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import com.bookkeeping.app.ui.theme.QingMotionTokens
 import androidx.compose.foundation.layout.heightIn
 import com.bookkeeping.app.ui.theme.QingTypeTokens
 import com.bookkeeping.app.ui.theme.QingAmountIncome
@@ -77,10 +71,12 @@ fun LedgerTransactionRow(
     statusBadge: Pair<String, StatusTone>? = null,
     onClick: () -> Unit,
 ) {
-    val category = runCatching { TransactionCategory.valueOf(transaction.category) }
-        .getOrDefault(TransactionCategory.OTHER)
-    val type = runCatching { TransactionType.valueOf(transaction.type) }
-        .getOrDefault(TransactionType.EXPENSE)
+    val category = remember(transaction.category) {
+        runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER)
+    }
+    val type = remember(transaction.type) {
+        runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE)
+    }
     val sourceTag = ledgerTransactionSourceTag(transaction)
     val isScrollTarget = scrollTargetTransactionId == transaction.id
     val bringIntoViewRequester = if (isScrollTarget) remember(transaction.id) { BringIntoViewRequester() } else null
@@ -108,13 +104,6 @@ fun LedgerTransactionRow(
             }
         }
     }
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed = interactionSource.collectIsPressedAsState()
-    val scaleState = animateFloatAsState(
-        targetValue = if (pressed.value && !reduced) QingMotionTokens.rowPressedScale else 1f,
-        animationSpec = QingMotionTokens.motionPress.spec(reduced),
-        label = "ledgerTapScale",
-    )
     val haptics = LocalHapticFeedback.current
     val amount = remember(transaction.currency, transaction.amountCents) {
         if (transaction.currency == "CNY") formatCny(transaction.amountCents)
@@ -123,17 +112,13 @@ fun LedgerTransactionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .drawWithContent {
-                val factor = scaleState.value
-                if (factor == 1f) drawContent() else scale(factor, factor) { this@drawWithContent.drawContent() }
-            }
             .heightIn(min = 56.dp)
             .drawBehind {
                 if (highlightAlpha.floatValue > 0f) drawRoundRect(highlightColor.copy(alpha = highlightAlpha.floatValue),
                     cornerRadius = CornerRadius(14.dp.toPx()))
             }
             .then(if (bringIntoViewRequester != null) Modifier.bringIntoViewRequester(bringIntoViewRequester) else Modifier)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = {
+            .clickable(interactionSource = null, indication = ripple(), onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onClick()
             })
@@ -142,7 +127,6 @@ fun LedgerTransactionRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         MerchantAvatar(
-            modifier = Modifier.qingLedgerShared(transaction.id, "icon"),
             merchant = transaction.merchant,
             merchantIconKey = transaction.merchantIconKey,
             merchantIconPath = transaction.merchantIconPath,
@@ -156,7 +140,6 @@ fun LedgerTransactionRow(
         ) {
             Text(
                 text = transaction.merchant.ifBlank { tr(category.displayName) },
-                modifier = Modifier.qingLedgerShared(transaction.id, "merchant"),
                 style = QingTypeTokens.body,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -209,7 +192,7 @@ fun LedgerTransactionRow(
         AutoSizeAmountText(
             text = (if (type == TransactionType.INCOME) "+" else "−") + amount,
             style = QingTypeTokens.rowAmount,
-            modifier = Modifier.widthIn(min = 80.dp).qingLedgerShared(transaction.id, "amount"),
+            modifier = Modifier.widthIn(min = 80.dp),
             minimumSizeSp = 14f,
             fontWeight = FontWeight.SemiBold,
             color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,
