@@ -266,9 +266,9 @@ private fun WalletSubscriptionCard(
         SimpleDateFormat("yyyy.MM.dd", if (isEnglish) Locale.ENGLISH else Locale.CHINA)
             .format(Date(subscription.nextDueMs))
     }
-    val startDateText = remember(subscription.startMs, isEnglish) {
+    val startDateText = remember(subscription.startMs, subscription.nextDueMs, isEnglish) {
         SimpleDateFormat("yyyy.MM.dd", if (isEnglish) Locale.ENGLISH else Locale.CHINA)
-            .format(Date(subscription.startMs))
+            .format(Date(subscription.startMs ?: subscription.nextDueMs))
     }
     val days = SubscriptionProjection.daysUntilDue(subscription.nextDueMs, System.currentTimeMillis())
     val countdown = when {

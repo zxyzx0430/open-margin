@@ -219,11 +219,9 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     val detailInFlight = activeRoute == AppRoutes.TRANSACTION_DETAIL ||
         AppRoutes.TRANSACTION_DETAIL in visibleRoutes
     val showBottomBar = shouldShowMainChrome(activeRoute, visibleRoutes, tabRoutes)
+    var activeDetailId by rememberSaveable { mutableStateOf<Long?>(null) }
     fun openTransaction(id: Long) {
-        if (navController.currentDestination?.route == AppRoutes.TRANSACTION_DETAIL) return
-        ledgerSharedOrigin = navController.currentDestination?.route == BottomNavItem.Transactions.route
-        transitionEntry = transactionViewModel.allTransactions.value.firstOrNull { it.id == id }
-        navController.navigate(AppRoutes.transactionDetail(id)) { launchSingleTop = true }
+        activeDetailId = id
     }
     // 长按 FAB 达到录音阈值就打开面板；开着的时候禁掉 FAB 的新按压。
     var voiceSheetOpen by remember { mutableStateOf(false) }
@@ -571,7 +569,43 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         // 录音面板是和 FAB 同一个窗口的覆盖层（不是 Dialog）：达到长按阈值后仍允许
         // 按住时滑出取消；点面板「停止」才结束录音。
         // 面板只铺在 Scaffold 之上，录音期间底下的 tab / FAB 都点不到。
-        if (voiceSheetOpen) {
+        activeDetailId?.let { detailId ->
+        val allTransactions by transactionViewModel.allTransactions.collectAsState()
+        val detailEntry = allTransactions.firstOrNull { it.id == detailId }
+        com.bookkeeping.app.ui.components.QingGestureSheet(
+            onDismissRequest = { activeDetailId = null },
+        ) {
+            com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreenContent(
+                entry = detailEntry,
+                onBack = { activeDetailId = null },
+                onDeleted = { activeDetailId = null },
+                historyProvider = transactionViewModel::freshRuleHistory,
+                animateReceipt = false,
+                loadingEntry = false,
+                inBottomSheet = true,
+                onSaveMerchantRuleWithHistory = { merchant, category, update ->
+                    transactionViewModel.saveMerchantRule(merchant, category, update)
+                },
+                onSave = { current, fields -> transactionViewModel.saveTransaction(current, fields) },
+                onToggleExclude = { current ->
+                    transactionViewModel.setReviewStatus(
+                        current,
+                        if (current.remoteReviewStatus == "excluded") "unverified" else "excluded",
+                    )
+                },
+                onSaveMerchantRule = { merchant, category ->
+                    transactionViewModel.saveMerchantRule(merchant, category)
+                },
+                onDelete = { current -> transactionViewModel.delete(current) },
+                onConfirmEventTime = { current -> transactionViewModel.confirmEventTime(current) },
+                onUpdateEventTime = { current, pickedMs ->
+                    transactionViewModel.updateEventTime(current, pickedMs)
+                },
+            )
+        }
+    }
+
+    if (voiceSheetOpen) {
             VoiceCapturePanel(
                 onCancel = {
                     voiceSheetOpen = false

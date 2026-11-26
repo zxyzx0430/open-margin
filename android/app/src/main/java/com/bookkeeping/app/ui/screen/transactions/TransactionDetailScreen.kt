@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -159,6 +161,7 @@ fun TransactionDetailScreenContent(
     onSaveMerchantRuleWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
     animateReceipt: Boolean = false,
     loadingEntry: Boolean = false,
+    inBottomSheet: Boolean = false,
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
@@ -180,15 +183,82 @@ fun TransactionDetailScreenContent(
 
     if (editing && entry != null) {
         // 全屏编辑页替换详情页；保存/取消都回到这里，删除复用同一个二次确认。
-        TransactionEditScreen(
-            initial = entry,
-            onCancel = { editing = false },
-            onDelete = { confirmingDelete = true },
-            onSave = { fields ->
-                onSave(entry, fields)
-                editing = false
-            },
-        )
+        Box(
+            modifier = if (inBottomSheet) Modifier.fillMaxWidth().fillMaxHeight(0.92f) else Modifier.fillMaxSize(),
+        ) {
+            TransactionEditScreen(
+                initial = entry,
+                onCancel = { editing = false },
+                onDelete = { confirmingDelete = true },
+                onSave = { fields ->
+                    onSave(entry, fields)
+                    editing = false
+                },
+            )
+        }
+    } else if (inBottomSheet) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val syncLabel = entry?.let(::transactionSyncLabel)
+                if (!syncLabel.isNullOrBlank()) {
+                    StatusChip(text = syncLabel, tone = StatusTone.INFO)
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = tr("关闭"),
+                        tint = qingColors.textSecondary,
+                    )
+                }
+            }
+            if (entry == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 180.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (missingConfirmed) {
+                        Text(
+                            text = tr("这笔记录已不存在"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            } else {
+                DetailContent(
+                    entry = entry,
+                    animateReceipt = animateReceipt,
+                    onEditTime = { editingTimeInline = true },
+                    onConfirmEventTime = { onConfirmEventTime(entry) },
+                    onPreviewEvidence = { path -> previewEvidencePath = path },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false),
+                )
+                DetailActionBar(
+                    showExclude = entry.remoteReviewStatus != "refund",
+                    excluded = entry.remoteReviewStatus == "excluded",
+                    onToggleExclude = { onToggleExclude(entry) },
+                    onAddRule = { addingRule = true },
+                    onEdit = { editing = true },
+                    onDelete = { confirmingDelete = true },
+                )
+            }
+        }
     } else {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
