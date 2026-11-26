@@ -50,13 +50,16 @@ android {
             if (providers.gradleProperty("openMarginPerformancePreview").orNull == "true") {
                 isDebuggable = false
                 signingConfig = signingConfigs.getByName("debug")
+                isMinifyEnabled = true
+                proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             }
             resValue("string", "app_name", "清衡测试")
             resValue("string", "page_recognition_service_label", "清衡测试 · 页面识别")
             resValue("string", "accessibility_fallback_service_label", "清衡测试 · 转账红包兜底")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = providers.gradleProperty("openMarginReleaseR8").orNull == "true"
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // ABI 已在 defaultConfig 里收敛到 arm64-v8a（release 与 debug 一致）。
         }
     }
