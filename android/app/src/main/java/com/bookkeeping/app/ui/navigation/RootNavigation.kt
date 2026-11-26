@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.foundation.layout.width
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.slideInHorizontally
@@ -604,32 +605,42 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 Row(Modifier.fillMaxWidth().height(60.dp).selectableGroup(),
                     verticalAlignment = Alignment.CenterVertically) {
                     navItems.forEach { item ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                        val selected = activeRoute == item.route
                         val tint = if (selected) qingColors.accentPrimary else qingColors.textSecondary.copy(alpha = 0.72f)
-                        Column(
-                            Modifier.weight(1f).padding(horizontal = 3.dp, vertical = 5.dp)
-                                .height(50.dp).clip(RoundedCornerShape(25.dp))
-                                .background(if (selected) qingColors.accentContainer.copy(alpha = 0.65f) else Color.Transparent)
+                        Box(
+                            Modifier.weight(1f).height(60.dp)
                                 .selectable(selected = selected, interactionSource = null, indication = null,
                                     role = Role.Tab, onClick = {
-                                    if (navController.currentDestination?.route in tabRoutes &&
-                                        navController.currentDestination?.route != item.route) {
-                                        deferChrome()
-                                        navController.navigate(item.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
+                                        if (navController.currentDestination?.route in tabRoutes &&
+                                            navController.currentDestination?.route != item.route) {
+                                            deferChrome()
+                                            navController.navigate(item.route) {
+                                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
                                         }
-                                    }
-                                }),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
+                                    }),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Icon(if (selected) item.icon else item.outlineIcon, null,
-                                modifier = Modifier.size(23.dp), tint = tint)
-                            Text(tr(item.label), fontSize = 10.sp, fontWeight = FontWeight.Medium,
-                                color = tint, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 1.dp))
+                            Column(
+                                modifier = Modifier.padding(bottom = 5.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(if (selected) item.icon else item.outlineIcon, null,
+                                    modifier = Modifier.size(23.dp), tint = tint)
+                                Text(tr(item.label), fontSize = 10.sp, fontWeight = FontWeight.Medium,
+                                    color = tint, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 1.dp))
+                            }
+                            // Option C: no nested selection capsule. The indicator
+                            // occupies a fixed overlay, never changing item measurement.
+                            if (selected) {
+                                Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 5.dp)
+                                    .width(16.dp).height(2.dp)
+                                    .background(qingColors.accentPrimary, RoundedCornerShape(1.dp)))
+                            }
                         }
                     }
                 }
