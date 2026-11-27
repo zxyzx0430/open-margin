@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -581,11 +582,11 @@ private fun AmountHero(
                         .background(MaterialTheme.colorScheme.surface)
                         .padding(2.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
-                        .background(QingPrimary),
+                        .background(com.bookkeeping.app.ui.theme.QingPrimary),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.Edit,
+                        imageVector = androidx.compose.material.icons.Icons.Outlined.Edit,
                         contentDescription = tr("点击更换图标"),
                         tint = androidx.compose.ui.graphics.Color.White,
                         modifier = Modifier.size(10.dp),

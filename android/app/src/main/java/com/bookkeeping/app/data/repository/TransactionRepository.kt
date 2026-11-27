@@ -1698,6 +1698,49 @@ class TransactionRepository @Inject constructor(
         if (failure is android.database.sqlite.SQLiteException) "Database operation failed"
         else "Operation failed"
 
+    suspend fun recentMerchants(limit: Int = 80): List<String> =
+        dao.recentMerchants(limit)
+
+    suspend fun applyMerchantIcon(
+        transactionId: Long?,
+        merchant: String,
+        iconKey: String?,
+        iconPath: String?,
+        applyToAllHistory: Boolean,
+    ): Int {
+        val trimmed = merchant.trim()
+        if (applyToAllHistory && trimmed.isNotEmpty()) {
+            return dao.updateMerchantIconByMerchant(trimmed, iconKey, iconPath)
+        }
+        val id = transactionId ?: return 0
+        return dao.updateMerchantIconById(id, iconKey, iconPath)
+    }
+
+    suspend fun refreshAllLedgerIcons(
+        customStore: com.bookkeeping.app.data.merchant.CustomMerchantIconStore,
+    ): Int {
+        val rows = dao.getAllActiveWithMerchant()
+        var updated = 0
+        for (tx in rows) {
+            val custom = customStore.resolve(tx.merchant)
+            val targetKey: String?
+            val targetPath: String?
+            if (custom != null) {
+                targetKey = custom.brandKey
+                targetPath = custom.imageFileName
+            } else {
+                val catalogSpec = com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(tx.merchant)
+                if (catalogSpec == null) continue
+                targetKey = catalogSpec.key
+                targetPath = tx.merchantIconPath
+            }
+            if (tx.merchantIconKey != targetKey || tx.merchantIconPath != targetPath) {
+                updated += dao.updateMerchantIconById(tx.id, targetKey, targetPath)
+            }
+        }
+        return updated
+    }
+
     companion object {
         const val POSSIBLE_DUPLICATE_WINDOW_MS: Long = DuplicateReviewPolicy.WINDOW_MS
     }
@@ -1880,47 +1923,4 @@ object CrossSourceDuplicatePolicy {
 
     /** 已经不计入或已判定为重复的行不参与比较，否则会被列表里看不见的旧行拦下。 */
     private val SKIPPED_STATUSES = setOf("excluded", "possible_duplicate")
-
-    suspend fun recentMerchants(limit: Int = 80): List<String> =
-        transactionDao.recentMerchants(limit)
-
-    suspend fun applyMerchantIcon(
-        transactionId: Long?,
-        merchant: String,
-        iconKey: String?,
-        iconPath: String?,
-        applyToAllHistory: Boolean,
-    ): Int {
-        val trimmed = merchant.trim()
-        if (applyToAllHistory && trimmed.isNotEmpty()) {
-            return transactionDao.updateMerchantIconByMerchant(trimmed, iconKey, iconPath)
-        }
-        val id = transactionId ?: return 0
-        return transactionDao.updateMerchantIconById(id, iconKey, iconPath)
-    }
-
-    suspend fun refreshAllLedgerIcons(
-        customStore: com.bookkeeping.app.data.merchant.CustomMerchantIconStore,
-    ): Int {
-        val rows = transactionDao.getAllActiveWithMerchant()
-        var updated = 0
-        for (tx in rows) {
-            val custom = customStore.resolve(tx.merchant)
-            val targetKey: String?
-            val targetPath: String?
-            if (custom != null) {
-                targetKey = custom.brandKey
-                targetPath = custom.imageFileName
-            } else {
-                val catalogSpec = com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(tx.merchant)
-                if (catalogSpec == null) continue
-                targetKey = catalogSpec.key
-                targetPath = tx.merchantIconPath
-            }
-            if (tx.merchantIconKey != targetKey || tx.merchantIconPath != targetPath) {
-                updated += transactionDao.updateMerchantIconById(tx.id, targetKey, targetPath)
-            }
-        }
-        return updated
-    }
 }

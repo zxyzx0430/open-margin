@@ -2,6 +2,7 @@ package com.bookkeeping.app.ui.screen.subscriptions
 
 import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import com.bookkeeping.app.ui.components.QingGestureSheet
+import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke

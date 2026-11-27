@@ -161,6 +161,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun refreshRecentMerchants() {
+        viewModelScope.launch {
+            _recentMerchants.value = runCatching {
+                transactionDao.recentMerchants(RECENT_MERCHANT_LIMIT)
+            }.getOrDefault(emptyList())
+        }
+    }
+
     fun refreshAllLedgerIcons(onResult: (Int) -> Unit) {
         viewModelScope.launch {
             val store = com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(appContext)
