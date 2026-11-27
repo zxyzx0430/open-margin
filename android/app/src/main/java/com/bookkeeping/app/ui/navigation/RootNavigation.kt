@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.navigation
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.layout.width
@@ -171,6 +172,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
     var waitingForAccess by rememberSaveable { mutableStateOf(false) }
     var leftForAccess by rememberSaveable { mutableStateOf(false) }
     var focusUpdateSettings by remember { mutableStateOf(false) }
+    var openAutomationSettings by remember { mutableStateOf(false) }
     val postNotificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun finishOnboarding(skipped: Boolean) {
@@ -523,6 +525,8 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                             navController.navigate(AppRoutes.TRANSACTION_DIAGNOSTICS)
                         },
                         onReplayOnboarding = onboarding::restart,
+                        openAutomationSetup = openAutomationSettings,
+                        onAutomationOpened = { openAutomationSettings = false },
                         focusUpdateCard = focusUpdateSettings,
                         onUpdateCardFocused = { focusUpdateSettings = false },
                     )
@@ -684,7 +688,11 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 },
             )
         }
-        if (tour == TourState.Showing) {
+        AnimatedVisibility(
+            visible = tour == TourState.Showing,
+            enter = fadeIn(tween(240)),
+            exit = fadeOut(tween(220)),
+        ) {
             BackHandler { finishOnboarding(skipped = true) }
             OnboardingWelcome(
                 onStart = { finishOnboarding(skipped = false) },
@@ -701,6 +709,19 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                                     else "无法打开系统设置", Toast.LENGTH_SHORT).show()
                             }
                     }
+                },
+                onOpenAutomationGuide = {
+                    finishOnboarding(skipped = false)
+                    openAutomationSettings = true
+                    navController.navigate(BottomNavItem.Settings.route) {
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onImportBills = {
+                    finishOnboarding(skipped = false)
+                    showBillImportSheet = true
                 },
                 notificationAccessEnabled = notificationEnabled,
             )

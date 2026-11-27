@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.onboarding.SupportedScenariosSheet
 import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import com.bookkeeping.app.ui.theme.QingRadiusTokens
@@ -227,6 +228,7 @@ fun SettingsScreen(
     var showExportGuide by remember { mutableStateOf(false) }
     var showImportExportSheet by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
+    var showSupportedScenarios by remember { mutableStateOf(false) }
     var showWebDavBackup by remember { mutableStateOf(false) }
     var webDavSnap by remember { mutableStateOf(WebDavPrefs(context).read()) }
     val categoryCatalog = remember(context) { CategoryCatalog.get(context) }
@@ -531,6 +533,13 @@ fun SettingsScreen(
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("支持场景与能力说明"),
+                        subtitle = tr("查看支持的记账方式、能力边界与隐私承诺"),
+                        onClick = { showSupportedScenarios = true },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
                         icon = Icons.Filled.HelpOutline,
                         title = tr("重看引导"),
                         subtitle = tr("再次查看清衡的主要功能"),
@@ -562,6 +571,10 @@ fun SettingsScreen(
                 countByCategory = viewModel::countByCategory,
                 reassignCategory = viewModel::reassignCategory,
             )
+        }
+
+        if (showSupportedScenarios) {
+            SupportedScenariosSheet(onDismiss = { showSupportedScenarios = false })
         }
 
         if (showImportExportSheet) {
