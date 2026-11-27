@@ -165,6 +165,7 @@ import com.bookkeeping.app.ui.theme.QingWarning
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onOpenMerchantRules: () -> Unit = {},
+    onOpenMerchantIcons: () -> Unit = {},
     onOpenSyncSettings: () -> Unit = {},
     onOpenPendingConflicts: () -> Unit = {},
     onOpenTransactionDiagnostics: () -> Unit = {},
@@ -226,7 +227,6 @@ fun SettingsScreen(
     var showExportGuide by remember { mutableStateOf(false) }
     var showImportExportSheet by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
-    var showMerchantIconManager by remember { mutableStateOf(false) }
     var showWebDavBackup by remember { mutableStateOf(false) }
     var webDavSnap by remember { mutableStateOf(WebDavPrefs(context).read()) }
     val categoryCatalog = remember(context) { CategoryCatalog.get(context) }
@@ -410,7 +410,7 @@ fun SettingsScreen(
                         icon = Icons.Filled.Store,
                         title = tr("商户图标管理"),
                         subtitle = tr("自定义图标与一键刷新老账本"),
-                        onClick = { showMerchantIconManager = true },
+                        onClick = onOpenMerchantIcons,
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
@@ -561,13 +561,6 @@ fun SettingsScreen(
                 onDismiss = { showCategoryManager = false },
                 countByCategory = viewModel::countByCategory,
                 reassignCategory = viewModel::reassignCategory,
-            )
-        }
-
-        if (showMerchantIconManager) {
-            MerchantIconManagerSheet(
-                viewModel = viewModel,
-                onDismiss = { showMerchantIconManager = false },
             )
         }
 

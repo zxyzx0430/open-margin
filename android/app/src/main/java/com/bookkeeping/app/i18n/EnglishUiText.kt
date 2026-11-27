@@ -1850,6 +1850,19 @@ internal object EnglishUiText {
         "已自定义商户（%d）" to "Customized merchants (%d)",
         "还没有自定义图标，可在账单详情点击商户头像或上方按钮添加" to "No custom icons yet. Tap a merchant avatar in transaction details or use the button above.",
         "点击更换图标" to "Tap to change icon",
+        "搜索商户或输入新商户名" to "Search or enter merchant name",
+        "用最新品牌库和自定义图标更新历史账单" to "Update past transactions with latest brand & custom icons",
+        "刷新" to "Refresh",
+        "刷新中" to "Refreshing",
+        "为「%s」自定义图标" to "Customize icon for “%s”",
+        "已自定义（%d）" to "Customized (%d)",
+        "账本中的商户（%d）" to "Ledger merchants (%d)",
+        "相册图片" to "Gallery photo",
+        "品牌图标" to "Brand icon",
+        "更换" to "Change",
+        "账本里还没有商户记录，可在上方搜索框输入商户名添加" to "No merchants in ledger yet. Enter a name in the search bar above to add.",
+        "已恢复默认图标" to "Reset to default icon",
+        "已保存" to "Saved",
     )
 
     private val diagnosticDetailTranslationKeys: Map<String, String> = mapOf(

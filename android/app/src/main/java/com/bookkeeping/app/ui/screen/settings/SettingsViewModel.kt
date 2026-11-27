@@ -197,7 +197,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     companion object {
-        /** 「最近商户」候选数量：够覆盖常用商户，又不会把面板塞满。 */
-        const val RECENT_MERCHANT_LIMIT = 30
+        /** 「最近商户」候选数量：覆盖常用与历史商户。 */
+        const val RECENT_MERCHANT_LIMIT = 150
     }
 }

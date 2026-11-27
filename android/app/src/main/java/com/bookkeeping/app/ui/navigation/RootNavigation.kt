@@ -129,6 +129,7 @@ import com.bookkeeping.app.ui.screen.billimport.BillImportScreen
 import com.bookkeeping.app.ui.screen.budget.BudgetScreen
 import com.bookkeeping.app.ui.screen.calendar.CalendarScreen
 import com.bookkeeping.app.ui.screen.diagnostics.TransactionDiagnosticsScreen
+import com.bookkeeping.app.ui.screen.settings.MerchantIconsScreen
 import com.bookkeeping.app.ui.screen.settings.MerchantRulesScreen
 import com.bookkeeping.app.ui.screen.settings.SettingsScreen
 import com.bookkeeping.app.ui.screen.stats.StatsScreen
@@ -504,10 +505,18 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                     )
                 }
                 composable(
+                    route = AppRoutes.MERCHANT_ICONS,
+                ) {
+                    MerchantIconsScreen(
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(
                     route = BottomNavItem.Settings.route,
                 ) {
                     SettingsScreen(
                         onOpenMerchantRules = { navController.navigate(AppRoutes.MERCHANT_RULES) },
+                        onOpenMerchantIcons = { navController.navigate(AppRoutes.MERCHANT_ICONS) },
                         onOpenSyncSettings = { navController.navigate(AppRoutes.SYNC_SETTINGS) },
                         onOpenPendingConflicts = { navController.navigate(AppRoutes.PENDING_CONFLICTS) },
                         onOpenTransactionDiagnostics = {
