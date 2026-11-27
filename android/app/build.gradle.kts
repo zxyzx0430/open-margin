@@ -18,7 +18,7 @@ android {
         // rc.13 startup and duplicate-notification fixes.
         // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.3.0).
         versionCode = 58
-        versionName = "1.48.0-rc1"
+        versionName = "1.47.9-rc.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["openMarginProfileable"] = "false"
