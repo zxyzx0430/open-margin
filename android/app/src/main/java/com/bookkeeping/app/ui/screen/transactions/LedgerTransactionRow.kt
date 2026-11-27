@@ -47,6 +47,7 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.ui.components.AutoSizeAmountText
 import com.bookkeeping.app.ui.components.MerchantAvatar
+import com.bookkeeping.app.ui.components.categoryDisplayName
 import com.bookkeeping.app.ui.components.SoftBadge
 import com.bookkeeping.app.ui.components.StatusTone
 import com.bookkeeping.app.ui.components.formatCny
@@ -146,13 +147,14 @@ internal fun LedgerTransactionRow(
             category = category,
             size = 40.dp,
             cornerRadius = 12.dp,
+            categoryKey = model.categoryKey,
         )
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = model.merchant.ifBlank { tr(category.displayName) },
+                text = model.merchant.ifBlank { tr(categoryDisplayName(model.categoryKey)) },
                 style = QingTypeTokens.body,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -167,7 +169,7 @@ internal fun LedgerTransactionRow(
                 }
                 Text(
                     text = "$sourceTag · " + transactionSubtitle(
-                        categoryLabel = tr(category.displayName),
+                        categoryLabel = tr(categoryDisplayName(model.categoryKey)),
                         sourceLabel = ledgerTransactionSourceLabel(model.source),
                         account = model.account,
                         timeText = model.timeText,
@@ -248,6 +250,7 @@ internal data class LedgerRowUiModel(
     val merchantIconKey: String?,
     val merchantIconPath: String?,
     val category: TransactionCategory,
+    val categoryKey: String = category.name,
     val type: TransactionType,
     val source: String,
     val sourceTagKey: String,
@@ -263,6 +266,7 @@ internal data class LedgerRowUiModel(
             merchantIconKey = transaction.merchantIconKey,
             merchantIconPath = transaction.merchantIconPath,
             category = runCatching { TransactionCategory.valueOf(transaction.category) }.getOrDefault(TransactionCategory.OTHER),
+            categoryKey = transaction.category,
             type = runCatching { TransactionType.valueOf(transaction.type) }.getOrDefault(TransactionType.EXPENSE),
             source = transaction.source,
             sourceTagKey = ledgerSourceTagKey(transaction),

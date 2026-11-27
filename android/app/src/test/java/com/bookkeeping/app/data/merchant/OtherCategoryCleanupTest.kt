@@ -22,9 +22,23 @@ class OtherCategoryCleanupTest {
                 row(9, "未知商户"),
             ),
         )
-        assertEquals(listOf(2, 1, 1, 1, 1, 1), groups.map { it.rows.size })
+        assertEquals(listOf(2), groups.map { it.rows.size })
         assertEquals(300L, groups.first().rows.sumOf { it.amountCents })
-        assertEquals(setOf(3L, 4L, 7L, 8L, 9L), groups.drop(1).map { it.singleId }.toSet())
+
+        val allGroups = otherMerchantGroups(
+            listOf(
+                row(1, "Shop (A)"),
+                row(2, " shop "),
+                row(3, ""),
+                row(4, " "),
+                row(7, "微信支付"),
+                row(8, "微信支付"),
+                row(9, "未知商户"),
+            ),
+            minCount = 1,
+        )
+        assertEquals(listOf(2, 1, 1, 1, 1, 1), allGroups.map { it.rows.size })
+        assertEquals(setOf(3L, 4L, 7L, 8L, 9L), allGroups.drop(1).map { it.singleId }.toSet())
     }
 
     @Test fun matchesCurrentOtherOnlyAndSingletonById() {

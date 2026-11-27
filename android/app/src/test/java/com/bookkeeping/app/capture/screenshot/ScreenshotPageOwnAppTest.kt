@@ -15,6 +15,12 @@ class ScreenshotPageOwnAppTest {
         assertTrue(ScreenshotPageInterpreter.isOwnAppPageText(
             listOf("清衡(2)", "截图识别待确认", "自动记账服务正常运行中"),
         ))
+        assertTrue(ScreenshotPageInterpreter.isOwnAppPageText(
+            listOf("本月支出", "本月收入", "星巴克", "¥35.00", "账单", "统计", "预算", "订阅", "设置"),
+        ))
+        assertTrue(ScreenshotPageInterpreter.isOwnAppPageText(
+            listOf("账单详情", "原图留证", "编辑账单", "删除账单"),
+        ))
     }
 
     @Test fun realWechatOrAlipayBillsAreNotRejected() {

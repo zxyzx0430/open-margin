@@ -156,6 +156,33 @@ class TransactionRepository @Inject constructor(
     fun observeAll(): Flow<List<TransactionEntity>> = dao.observeAll()
     fun observeById(id: Long): Flow<TransactionEntity?> = dao.observeById(id)
 
+    suspend fun countByCategory(categoryKey: String): Int = dao.countByCategory(categoryKey)
+
+    suspend fun reassignCategory(sourceKey: String, targetKey: String): Int {
+        require(sourceKey != targetKey)
+        require(sourceKey.isNotBlank() && targetKey.isNotBlank())
+        val updates = database.withTransaction {
+            val now = System.currentTimeMillis()
+            val matched = dao.currentActive()
+                .filter { it.category == sourceKey }
+                .map { markCategorized(it, targetKey, now, UUID.randomUUID().toString()) }
+            if (matched.isNotEmpty()) dao.updateAll(matched)
+            matched
+        }
+        if (updates.isNotEmpty()) {
+            withContext(NonCancellable) {
+                requestSyncForTransactions(
+                    updates.map {
+                        TransactionDiagnosticInput(
+                            callSite = "TransactionRepository.reassignCategory",
+                        ) to it
+                    },
+                )
+            }
+        }
+        return updates.size
+    }
+
     suspend fun categorizeOther(
         merchant: String,
         singleId: Long?,
@@ -1595,46 +1622,75 @@ class TransactionRepository @Inject constructor(
         if (items.isEmpty()) return
         val enabled = context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE)
             .getBoolean("enabled", false)
-        items.forEach { (input, transaction) ->
+        val firstInput = items.first().first
+        val firstTx = items.first().second
+        val isBatch = items.size > 1
+        val summaryInput = if (isBatch) {
+            "${items.size} 笔账单"
+        } else {
+            DiagnosticSummary.amountWithMerchant(
+                amount = DiagnosticSummary.amount(firstTx.type, firstTx.amountCents, firstTx.currency),
+                merchant = firstTx.merchant,
+            )
+        }
+        if (!enabled) {
             diagnostics.record(
-                attemptId = input.attemptId,
+                attemptId = firstInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = TransactionDiagnostics.RESULT_WARNING,
+                details = if (isBatch) {
+                    "Sync is disabled; ${items.size} transactions remain local"
+                } else {
+                    "Sync is disabled; transaction remains local"
+                },
+                transactionId = if (isBatch) null else firstTx.id.takeIf { it > 0L },
+                callSite = firstInput.callSite ?: "TransactionRepository.requestSync",
+                inputSummary = summaryInput,
+                outputSummary = "同步未开启，仅保留本机",
+            )
+            return
+        }
+        if (isBatch) {
+            diagnostics.record(
+                attemptId = firstInput.attemptId,
                 stage = TransactionDiagnostics.STAGE_SYNC,
                 result = TransactionDiagnostics.RESULT_STARTED,
-                details = if (enabled) "Sync work requested" else "Sync is disabled; transaction remains local",
-                transactionId = transaction.id.takeIf { it > 0L },
-                callSite = input.callSite ?: "TransactionRepository.requestSync",
-                inputSummary = DiagnosticSummary.amountWithMerchant(
-                    amount = DiagnosticSummary.amount(transaction.type, transaction.amountCents, transaction.currency),
-                    merchant = transaction.merchant,
-                ),
+                details = "Batch sync work requested for ${items.size} transactions",
+                callSite = firstInput.callSite ?: "TransactionRepository.requestSync",
+                inputSummary = summaryInput,
+            )
+        } else {
+            diagnostics.record(
+                attemptId = firstInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = TransactionDiagnostics.RESULT_STARTED,
+                details = "Sync work requested",
+                transactionId = firstTx.id.takeIf { it > 0L },
+                callSite = firstInput.callSite ?: "TransactionRepository.requestSync",
+                inputSummary = summaryInput,
             )
         }
         try {
             TransactionSyncWorker.requestImmediate(context)
-            items.forEach { (input, transaction) ->
-                diagnostics.record(
-                    attemptId = input.attemptId,
-                    stage = TransactionDiagnostics.STAGE_SYNC,
-                    result = if (enabled) TransactionDiagnostics.RESULT_SUCCESS
-                    else TransactionDiagnostics.RESULT_WARNING,
-                    details = if (enabled) "Sync work queued" else "No network upload scheduled",
-                    transactionId = transaction.id.takeIf { it > 0L },
-                    callSite = input.callSite ?: "TransactionRepository.requestSync",
-                    outputSummary = if (enabled) "已排队上传" else "同步未开启，仅保留本机",
-                )
-            }
+            diagnostics.record(
+                attemptId = firstInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = TransactionDiagnostics.RESULT_SUCCESS,
+                details = if (isBatch) "Batch sync work queued (${items.size})" else "Sync work queued",
+                transactionId = if (isBatch) null else firstTx.id.takeIf { it > 0L },
+                callSite = firstInput.callSite ?: "TransactionRepository.requestSync",
+                outputSummary = "已排队上传",
+            )
         } catch (failure: Exception) {
-            items.forEach { (input, transaction) ->
-                diagnostics.record(
-                    attemptId = input.attemptId,
-                    stage = TransactionDiagnostics.STAGE_SYNC,
-                    result = TransactionDiagnostics.RESULT_FAILURE,
-                    details = diagnosticError(failure),
-                    transactionId = transaction.id.takeIf { it > 0L },
-                    callSite = input.callSite ?: "TransactionRepository.requestSync",
-                    outputSummary = "排队失败，账本不受影响",
-                )
-            }
+            diagnostics.record(
+                attemptId = firstInput.attemptId,
+                stage = TransactionDiagnostics.STAGE_SYNC,
+                result = TransactionDiagnostics.RESULT_FAILURE,
+                details = diagnosticError(failure),
+                transactionId = if (isBatch) null else firstTx.id.takeIf { it > 0L },
+                callSite = firstInput.callSite ?: "TransactionRepository.requestSync",
+                outputSummary = "排队失败，账本不受影响",
+            )
         }
     }
 

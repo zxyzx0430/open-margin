@@ -9,6 +9,7 @@ import com.bookkeeping.app.billimport.BillParserOptions
 import com.bookkeeping.app.billimport.BillPreviewKind
 import com.bookkeeping.app.ui.screen.billimport.BillImportMapping
 import com.bookkeeping.app.data.budget.BudgetMonth
+import com.bookkeeping.app.data.category.CategoryCatalog
 import com.bookkeeping.app.data.budget.BudgetSettings
 import com.bookkeeping.app.data.local.entity.SubscriptionCadence
 import com.bookkeeping.app.data.local.entity.SubscriptionEntity
@@ -123,6 +124,9 @@ class FullBackupManager(
             put(ENTRY_BUDGETS, budgetsBytes)
             put(ENTRY_MERCHANT_RULES, merchantRulesBytes)
             put(ENTRY_SETTINGS, settingsBytes)
+            CategoryCatalog.peek()?.exportJson()?.let { json ->
+                put(ENTRY_CATEGORIES, json.toByteArray(Charsets.UTF_8))
+            }
             putAll(evidenceEntries)
         }
         val checksums = payloadEntries.mapValues { (_, bytes) -> sha256Hex(bytes) }
@@ -386,6 +390,14 @@ class FullBackupManager(
 
         var restoredSettings = 0
         var skippedSettings = 0
+        if (options.restoreSettings) {
+            archive.entries[ENTRY_CATEGORIES]?.let { catBytes ->
+                CategoryCatalog.peek()?.importMerge(
+                    rawJson = catBytes.toString(Charsets.UTF_8),
+                    overwrite = options.overwriteExistingConfigs,
+                )
+            }
+        }
         if (options.restoreSettings) {
             val settingsMap = archive.entries[ENTRY_SETTINGS]?.let(::parseSettings)
             if (!settingsMap.isNullOrEmpty()) {
@@ -843,6 +855,7 @@ class FullBackupManager(
         const val ENTRY_BUDGETS = "budgets.json"
         const val ENTRY_MERCHANT_RULES = "merchant_rules.json"
         const val ENTRY_SETTINGS = "settings.json"
+        const val ENTRY_CATEGORIES = "categories.json"
         const val EVIDENCE_DIR_PREFIX = "evidence/"
 
         const val SETTING_LANGUAGE = "language"

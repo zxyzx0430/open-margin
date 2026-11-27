@@ -51,9 +51,16 @@ object ScreenshotPageInterpreter {
             "商户分类记忆", "常驻运行状态", "待核对", "记一笔",
             "同步冲突", "偏好设置", "截图识别待确认", "自动记账服务正常运行中",
             "待确认扫描结果", "去核对", "应用信息", "卸载",
+            "原图留证", "记为退款", "编辑账单", "删除账单", "批量整理其他分类",
         )
+        val navTabs = listOf("账单", "统计", "预算", "订阅", "设置")
+        val navMatches = navTabs.count { tab -> lines.any { it.trim() == tab } }
+        val homeMatches = listOf("本月支出", "本月收入", "搜索账单", "结余").count { full.contains(it) }
         val found = chrome.count { full.contains(it) }
-        return (appName && found >= 1) || found >= 3
+        return (appName && (found >= 1 || navMatches >= 3 || homeMatches >= 2)) ||
+            found >= 3 ||
+            navMatches >= 4 ||
+            (navMatches >= 3 && homeMatches >= 2)
     }
 
     private val WECHAT_MARKERS = listOf(

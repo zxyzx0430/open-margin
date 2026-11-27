@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.bookkeeping.app.data.category.CategoryCatalog
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.ui.screen.stats.categoryColor
 import com.bookkeeping.app.ui.theme.LocalQingDark
@@ -109,4 +110,36 @@ fun merchantSystemIcon(name: String?): ImageVector? = when (name) {
     "fitness" -> Icons.Outlined.FitnessCenter
     "game" -> Icons.Outlined.SportsEsports
     else -> null
+}
+
+@Composable
+fun categoryVisual(categoryKey: String): CategoryVisual {
+    val builtIn = TransactionCategory.entries.firstOrNull { it.name == categoryKey }
+    val custom = CategoryCatalog.peek()?.find(categoryKey)
+    if (custom != null) {
+        val accent = Color(custom.colorArgb)
+        val icon = CategoryIconCatalog.iconForKey(custom.iconKey)
+        return if (!LocalQingDark.current) {
+            CategoryVisual(
+                background = accent.copy(alpha = 0.14f),
+                foreground = accent,
+                icon = icon,
+            )
+        } else {
+            val lifted = lerp(accent, Color.White, 0.30f)
+            CategoryVisual(
+                background = lifted.copy(alpha = 0.18f),
+                foreground = lifted,
+                icon = icon,
+            )
+        }
+    }
+    if (builtIn != null) return categoryVisual(builtIn)
+    return categoryVisual(TransactionCategory.OTHER)
+}
+
+fun categoryDisplayName(categoryKey: String): String {
+    CategoryCatalog.peek()?.displayName(categoryKey)?.let { return it }
+    return TransactionCategory.entries.firstOrNull { it.name == categoryKey }?.displayName
+        ?: categoryKey
 }

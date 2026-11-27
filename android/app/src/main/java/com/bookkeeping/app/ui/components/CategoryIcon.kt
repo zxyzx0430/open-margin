@@ -35,6 +35,29 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun CategoryIcon(
+    categoryKey: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 42.dp,
+) {
+    val visual = categoryVisual(categoryKey)
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(size * 0.34f))
+            .background(visual.background),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = visual.icon,
+            contentDescription = null,
+            tint = visual.foreground,
+            modifier = Modifier.size(size * 0.48f),
+        )
+    }
+}
+
+@Composable
+fun CategoryIcon(
     category: TransactionCategory,
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
@@ -71,6 +94,7 @@ fun MerchantAvatar(
     size: Dp = 42.dp,
     merchantIconPath: String? = null,
     cornerRadius: Dp = size * 0.34f,
+    categoryKey: String? = null,
 ) {
     val filesDir = LocalContext.current.filesDir
     val localIcon = if (!merchantIconPath.isNullOrBlank()) {
@@ -122,7 +146,11 @@ fun MerchantAvatar(
     }
     val spec = remember(merchant, merchantIconKey) { MerchantIconCatalog.forTransaction(merchant, merchantIconKey) }
     if (spec == null) {
-        CategoryIcon(category = category, modifier = modifier, size = size, cornerRadius = cornerRadius)
+        if (!categoryKey.isNullOrBlank()) {
+            CategoryIcon(categoryKey = categoryKey, modifier = modifier, size = size)
+        } else {
+            CategoryIcon(category = category, modifier = modifier, size = size, cornerRadius = cornerRadius)
+        }
         return
     }
     val brandDrawable = remember(spec.key) { brandLogoDrawableRes(spec.key) }
