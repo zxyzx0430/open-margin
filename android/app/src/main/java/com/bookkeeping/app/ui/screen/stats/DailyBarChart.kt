@@ -79,7 +79,7 @@ fun DailyBarChart(
     ) {
         val leftPad = 4.dp.toPx()
         val rightPad = 4.dp.toPx()
-        val topPad = 22.dp.toPx()
+        val topPad = 36.dp.toPx()
         val bottomPad = 18.dp.toPx()
         val chartWidth = (size.width - leftPad - rightPad).coerceAtLeast(1f)
         val chartHeight = (size.height - topPad - bottomPad).coerceAtLeast(1f)

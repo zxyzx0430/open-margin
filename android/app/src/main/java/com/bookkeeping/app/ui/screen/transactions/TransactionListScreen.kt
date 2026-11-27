@@ -666,24 +666,7 @@ fun TransactionListScreen(
             }
 
             if (!notificationListenerEnabled || !pageRecognitionEnabled) {
-                ledgerSectionItem(key = "notification_banner") {
-                    PermissionBanner(
-                        title = tr("自动记账设置未完成"),
-                        body = tr("缺少通知使用权或页面识别；点击补全后，再到设置页做一次检查。"),
-                        onClick = {
-                            if (!notificationListenerEnabled) {
-                                NotificationListenerHelper.openSettings(context)
-                            } else {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
-                                    )
-                                }
-                            }
-                        },
-                        error = true,
-                    )
-                }
+                // Kept tucked inside the expandable status row instead of a loud pink banner.
             }
 
             if (siteUpdateBanner != null) {
@@ -746,10 +729,10 @@ fun TransactionListScreen(
             }
 
             ledgerSectionItem(key = "filters") {
-                LedgerFilterRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     accountFilter?.let { activeAccount ->
                         LedgerFilterChip(
@@ -760,12 +743,14 @@ fun TransactionListScreen(
                                 viewModel.setAccountFilter(null)
                                 activeDrilldown = activeDrilldown?.copy(account = null)
                             },
+                            modifier = Modifier.weight(1f),
                         )
                     }
                     LedgerFilterChip(
                         label = categoryFilter?.let { tr(it.displayName) } ?: tr("分类"),
                         selected = categoryFilter != null,
                         onClick = { showCategorySheet = true },
+                        modifier = Modifier.weight(1f),
                     )
                     LedgerFilterChip(
                         label = tr("支出"),
@@ -776,6 +761,7 @@ fun TransactionListScreen(
                                 else TransactionType.EXPENSE
                             )
                         },
+                        modifier = Modifier.weight(1f),
                     )
                     LedgerFilterChip(
                         label = tr("收入"),
@@ -786,6 +772,7 @@ fun TransactionListScreen(
                                 else TransactionType.INCOME
                             )
                         },
+                        modifier = Modifier.weight(1f),
                     )
                     if (filterActive) {
                         LedgerFilterChip(
@@ -796,6 +783,7 @@ fun TransactionListScreen(
                                 exactDateFilter = null
                                 viewModel.clearFilters()
                             },
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
@@ -1112,16 +1100,6 @@ private fun TransactionDayHeader(
                     )
                 }
             }
-        }
-        if (excludedCount > 0) {
-            Text(
-                text = "$excludedCount ${tr("未计入")}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
-            )
         }
     }
 }

@@ -34,7 +34,7 @@ fun brandLogoDrawableRes(key: String?): Int? = when (key) {
     "dropbox" -> R.drawable.ic_brand_dropbox
     "cloud_drive" -> R.drawable.ic_brand_onedrive
     "streaming" -> R.drawable.ic_brand_prime_video
-    "1password" -> R.drawable.ic_brand_1password
+    "1password" -> R.drawable.ic_brand_onepassword
     "bitwarden" -> R.drawable.ic_brand_bitwarden
     "raycast" -> R.drawable.ic_brand_raycast
     "obsidian" -> R.drawable.ic_brand_obsidian

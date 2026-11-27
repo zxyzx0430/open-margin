@@ -47,7 +47,7 @@ internal fun TransactionEntity.isLedgerTotalsCandidate(): Boolean =
     currency == "CNY" &&
         !syncDeleted &&
         duplicateOfId == null &&
-        remoteReviewStatus !in setOf("excluded", "transfer", "refund", "possible_duplicate")
+        remoteReviewStatus !in setOf("excluded", "refund", "possible_duplicate")
 
 internal object LedgerFilter {
     fun parseAmountCents(query: String): Long? {

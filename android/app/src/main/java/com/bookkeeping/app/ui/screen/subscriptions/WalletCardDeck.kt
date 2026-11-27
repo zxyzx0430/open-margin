@@ -142,10 +142,20 @@ internal fun WalletCardDeck(
     var dragStartY by remember { mutableFloatStateOf(0f) }
     var dragDeltaY by remember { mutableFloatStateOf(0f) }
 
+    val deckHeight by animateDpAsState(
+        targetValue = if (expandedIndex < localOrder.lastIndex) {
+            expandedHeight * 2 + reveal * (localOrder.size - 2).coerceAtLeast(0) + 16.dp
+        } else {
+            expandedHeight + reveal * (localOrder.size - 1).coerceAtLeast(0) + 16.dp
+        },
+        animationSpec = QingMotionTokens.motionGesture.spec(reduced),
+        label = "walletDeckHeight",
+    )
+
     Box(
         Modifier
             .fillMaxWidth()
-            .height(expandedHeight + reveal * (localOrder.size - 1).coerceAtLeast(0) + 12.dp),
+            .height(deckHeight),
     ) {
         localOrder.forEachIndexed { index, subId ->
             val subscription = byId[subId] ?: return@forEachIndexed
@@ -218,16 +228,10 @@ internal fun WalletCardDeck(
                     Modifier
                 }
 
-                val cardHeight by animateDpAsState(
-                    targetValue = if (isExpanded || index < expandedIndex) expandedHeight else 68.dp,
-                    animationSpec = QingMotionTokens.motionGesture.spec(reduced),
-                    label = "walletCardHeight",
-                )
-
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(cardHeight)
+                        .height(expandedHeight)
                         .zIndex(if (isDragging) 100f else index.toFloat())
                         .graphicsLayer {
                             translationY = yOffset
@@ -331,11 +335,12 @@ private fun WalletSubscriptionCard(
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        // Exposed top strip (图 3 风格: 左图标 + 名称 + 周期小字，右侧留白)
+        // Exposed top strip (图 3 风格: 舒适顶部留白 + 图标 + 名称 + 周期)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp),
+                .height(62.dp)
+                .padding(top = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {

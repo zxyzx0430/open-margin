@@ -162,12 +162,11 @@ internal fun LedgerTransactionRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                SoftBadge(text = sourceTag, tone = StatusTone.NEUTRAL)
                 if (model.eventTimeNeedsConfirmation) {
                     SoftBadge(text = tr("时间待确认"), tone = StatusTone.WARNING)
                 }
                 Text(
-                    text = transactionSubtitle(
+                    text = "$sourceTag · " + transactionSubtitle(
                         categoryLabel = tr(category.displayName),
                         sourceLabel = ledgerTransactionSourceLabel(model.source),
                         account = model.account,
