@@ -319,9 +319,6 @@ fun StatsScreen(
                             onOpenAllSubscriptions = { onOpenSubscriptions(false) },
                         )
                     }
-                    item(key = "subscription_structure") {
-                        SubscriptionStructureGrid(state = subscriptionStats)
-                    }
                     if (subscriptionStats.pendingCancelCount > 0) {
                         item(key = "subscription_pending_cancel") {
                             SubscriptionPendingCancelBanner(
@@ -786,7 +783,6 @@ private fun SubscriptionSummaryCard(
     onOpenAllSubscriptions: () -> Unit,
 ) {
     val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
-    val forecastTotalCents = state.forecast12Months.sumOf { it.totalCnyCents }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -832,13 +828,28 @@ private fun SubscriptionSummaryCard(
             color = QingPrimaryDeep,
             fontWeight = FontWeight.Bold,
         )
+        HorizontalDivider(
+            color = QingPrimaryDeep.copy(alpha = 0.12f),
+            thickness = 0.5.dp,
+            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+        )
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
+            SummaryMetric(
+                label = bilingual("在用订阅", "Active"),
+                modifier = Modifier.weight(1f),
+            ) {
+                AutoSizeAmountText(
+                    text = bilingual("${state.activeCount} 项", "${state.activeCount}"),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = QingPrimaryDeep,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Start,
+                )
+            }
             SummaryMetric(
                 label = bilingual("折合年费", "Annualized"),
                 modifier = Modifier.weight(1f),
@@ -852,11 +863,15 @@ private fun SubscriptionSummaryCard(
                 )
             }
             SummaryMetric(
-                label = bilingual("未来12月预计", "Next 12 Months"),
+                label = bilingual("最高月费", "Highest/mo"),
                 modifier = Modifier.weight(1f),
             ) {
                 AutoSizeAmountText(
-                    text = formatCny(forecastTotalCents),
+                    text = if (state.mostExpensiveMonthlyCnyCents > 0L) {
+                        formatCny(state.mostExpensiveMonthlyCnyCents)
+                    } else {
+                        "—"
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,

@@ -52,6 +52,7 @@ class SubscriptionsViewModel @Inject constructor(
     init {
         viewModelScope.launch(Dispatchers.IO) {
             subscriptionRepository.advanceOverdueAutoRenew()
+            fxRatesStore.refreshIfStale()
         }
     }
 
@@ -67,13 +68,7 @@ class SubscriptionsViewModel @Inject constructor(
     private val allTransactions: StateFlow<List<TransactionEntity>> = transactionRepository.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val fxRates: StateFlow<Map<String, Double>> = allSubscriptions
-        .map { fxRatesStore.currentRates() }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5_000),
-            SubscriptionFxRatesCalculator.DEFAULT_RATES,
-        )
+    val fxRates: StateFlow<Map<String, Double>> = fxRatesStore.ratesFlow
 
     val recurringCandidates: StateFlow<List<RecurringCandidate>> = combine(
         allTransactions,

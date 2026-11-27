@@ -162,6 +162,7 @@ fun TransactionDetailScreenContent(
     animateReceipt: Boolean = false,
     loadingEntry: Boolean = false,
     inBottomSheet: Boolean = false,
+    onEditingChanged: (Boolean) -> Unit = {},
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
@@ -176,6 +177,9 @@ fun TransactionDetailScreenContent(
         }
     }
     var editing by remember { mutableStateOf(false) }
+    LaunchedEffect(editing) {
+        onEditingChanged(editing)
+    }
     var editingTimeInline by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
@@ -790,6 +794,12 @@ private fun DetailActionBar(
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(ACTION_ROW_GAP),
             ) {
+                ActionButton(
+                    text = tr("编辑"),
+                    onClick = onEdit,
+                    style = ActionButtonStyle.PRIMARY,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(ACTION_BUTTON_GAP)) {
                     if (showExclude) {
                         ActionButton(
@@ -806,18 +816,14 @@ private fun DetailActionBar(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(ACTION_BUTTON_GAP)) {
-                    ActionButton(
-                        text = tr("编辑"),
-                        onClick = onEdit,
-                        style = ActionButtonStyle.PRIMARY,
-                        modifier = Modifier.weight(2f),
-                    )
-                    ActionButton(
-                        text = tr("删除"),
-                        onClick = onDelete,
-                        style = ActionButtonStyle.DANGER_OUTLINED,
-                        modifier = Modifier.weight(1f),
+                TextButton(
+                    onClick = onDelete,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(
+                        text = tr("删除此账单"),
+                        color = QingAmountExpense,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
             }

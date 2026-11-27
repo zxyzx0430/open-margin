@@ -15,6 +15,7 @@ import com.bookkeeping.app.data.local.entity.TransactionEntity
 import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.data.repository.TransactionRepository
 import com.bookkeeping.app.data.subscription.MonthlyForecastPoint
+import com.bookkeeping.app.data.subscription.SubscriptionFxRates
 import com.bookkeeping.app.data.subscription.SubscriptionFxRatesCalculator
 import com.bookkeeping.app.data.subscription.SubscriptionProjection
 import com.bookkeeping.app.data.subscription.SubscriptionRepository
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.TimeZone
 import javax.inject.Inject
@@ -374,7 +376,14 @@ internal object SubscriptionStatsCalculator {
 class StatsViewModel @Inject constructor(
     private val repository: TransactionRepository,
     private val subscriptionRepository: SubscriptionRepository,
+    private val fxRatesStore: SubscriptionFxRates,
 ) : ViewModel() {
+
+    init {
+        viewModelScope.launch {
+            fxRatesStore.refreshIfStale()
+        }
+    }
 
     private val _selectedTab = MutableStateFlow(StatsTab.EXPENSE)
     val selectedTab: StateFlow<StatsTab> = _selectedTab
@@ -560,8 +569,9 @@ class StatsViewModel @Inject constructor(
         combine(
             subscriptionRepository.observeActive(),
             repository.observeUiTransactions(),
-        ) { activeSubs, _ -> activeSubs }
-            .map { activeSubs ->
+            fxRatesStore.ratesFlow,
+        ) { activeSubs, _, rates -> activeSubs to rates }
+            .map { (activeSubs, rates) ->
                 val cal = Calendar.getInstance()
                 val startYear = cal.get(Calendar.YEAR)
                 val startMonth = cal.get(Calendar.MONTH) + 1
@@ -577,6 +587,7 @@ class StatsViewModel @Inject constructor(
                     monthlyTotalOverrideCnyCents = monthlyTotal,
                     pendingCancelSavingsOverrideCnyCents = pendingCancelSavings,
                     recurringCandidateCount = candidateCount,
+                    fxRates = rates,
                 )
             }
             .flowOn(Dispatchers.Default)

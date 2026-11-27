@@ -65,13 +65,7 @@ class CalendarViewModel @Inject constructor(
         subscriptionRepository.observeActive()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
-    val fxRates: StateFlow<Map<String, Double>> = activeSubscriptions
-        .map { fxRatesStore.currentRates() }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(30_000),
-            SubscriptionFxRatesCalculator.DEFAULT_RATES,
-        )
+    val fxRates: StateFlow<Map<String, Double>> = fxRatesStore.ratesFlow
 
     val activeSubscriptionCount: StateFlow<Int> = activeSubscriptions
         .map { it.size }

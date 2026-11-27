@@ -9,53 +9,87 @@ import com.bookkeeping.app.R
 @DrawableRes
 fun brandLogoDrawableRes(key: String?): Int? = when (key) {
     "chatgpt", "codex" -> R.drawable.ic_brand_chatgpt
-    "google_one" -> R.drawable.ic_brand_google_one
-    "youtube" -> R.drawable.ic_brand_youtube
-    "netflix" -> R.drawable.ic_brand_netflix
-    "spotify" -> R.drawable.ic_brand_spotify
-    "icloud" -> R.drawable.ic_brand_icloud
-    "disney" -> R.drawable.ic_brand_disney
-    "bilibili" -> R.drawable.ic_brand_bilibili
     "claude" -> R.drawable.ic_brand_claude
     "gemini" -> R.drawable.ic_brand_gemini
-    "grok" -> R.drawable.ic_brand_x
+    "grok" -> R.drawable.ic_brand_grok
     "perplexity" -> R.drawable.ic_brand_perplexity
-    "cursor", "coding_ai" -> R.drawable.ic_brand_cursor
+    "cursor" -> R.drawable.ic_brand_cursor
     "copilot" -> R.drawable.ic_brand_copilot
     "github" -> R.drawable.ic_brand_github
     "doubao" -> R.drawable.ic_brand_doubao
     "qwen" -> R.drawable.ic_brand_qwen
     "deepseek" -> R.drawable.ic_brand_deepseek
-    "netease_music" -> R.drawable.ic_brand_netease_music
-    "music_cn" -> R.drawable.ic_brand_tencent_qq
-    "tencent_video" -> R.drawable.ic_brand_tencent_video
-    "audio" -> R.drawable.ic_brand_apple_music
+    "midjourney" -> R.drawable.ic_brand_midjourney
+    "poe" -> R.drawable.ic_brand_poe
+    "suno" -> R.drawable.ic_brand_suno
+    "runway" -> R.drawable.ic_brand_runway
+    "kimi" -> R.drawable.ic_brand_kimi
+    "zhipu" -> R.drawable.ic_brand_zhipu
+    "youtube" -> R.drawable.ic_brand_youtube
+    "netflix" -> R.drawable.ic_brand_netflix
+    "disney" -> R.drawable.ic_brand_disney
     "apple_tv" -> R.drawable.ic_brand_apple_tv
+    "prime_video" -> R.drawable.ic_brand_prime_video
+    "hbo_max" -> R.drawable.ic_brand_hbo_max
+    "bilibili" -> R.drawable.ic_brand_bilibili
+    "iqiyi" -> R.drawable.ic_brand_iqiyi
+    "tencent_video" -> R.drawable.ic_brand_tencent_video
+    "youku" -> R.drawable.ic_brand_youku
+    "mango_tv" -> R.drawable.ic_brand_mango_tv
+    "spotify" -> R.drawable.ic_brand_spotify
+    "netease_music" -> R.drawable.ic_brand_netease_music
+    "qq_music" -> R.drawable.ic_brand_qq_music
+    "kugou" -> R.drawable.ic_brand_kugou
+    "qishui" -> R.drawable.ic_brand_qishui
+    "apple_music" -> R.drawable.ic_brand_apple_music
+    "ximalaya" -> R.drawable.ic_brand_ximalaya
+    "xiaoyuzhou" -> R.drawable.ic_brand_xiaoyuzhou
+    "icloud" -> R.drawable.ic_brand_icloud
+    "google_one" -> R.drawable.ic_brand_google_one
     "dropbox" -> R.drawable.ic_brand_dropbox
-    "cloud_drive" -> R.drawable.ic_brand_onedrive
-    "streaming" -> R.drawable.ic_brand_prime_video
+    "onedrive" -> R.drawable.ic_brand_onedrive
+    "microsoft_365" -> R.drawable.ic_brand_microsoft_365
+    "baidu" -> R.drawable.ic_brand_baidu
+    "aliyun_drive" -> R.drawable.ic_brand_aliyun_drive
+    "quark" -> R.drawable.ic_brand_quark
     "1password" -> R.drawable.ic_brand_onepassword
     "bitwarden" -> R.drawable.ic_brand_bitwarden
     "raycast" -> R.drawable.ic_brand_raycast
     "obsidian" -> R.drawable.ic_brand_obsidian
     "figma" -> R.drawable.ic_brand_figma
     "adobe" -> R.drawable.ic_brand_adobe
-    "productivity" -> R.drawable.ic_brand_notion
-    "cloudflare", "server" -> R.drawable.ic_brand_cloudflare
+    "notion" -> R.drawable.ic_brand_notion
+    "wps" -> R.drawable.ic_brand_wps
+    "cloudflare" -> R.drawable.ic_brand_cloudflare
     "aliyun" -> R.drawable.ic_brand_aliyun
+    "tencent_cloud" -> R.drawable.ic_brand_tencent_cloud
     "aws" -> R.drawable.ic_brand_aws
     "digitalocean" -> R.drawable.ic_brand_digitalocean
     "vultr" -> R.drawable.ic_brand_vultr
     "wechat" -> R.drawable.ic_brand_wechat
     "alipay" -> R.drawable.ic_brand_alipay
-    "88vip" -> R.drawable.ic_brand_taobao
+    "xiaohongshu" -> R.drawable.ic_brand_xiaohongshu
+    "88vip", "taobao" -> R.drawable.ic_brand_taobao
+    "jd" -> R.drawable.ic_brand_jd
+    "sams_club" -> R.drawable.ic_brand_sams_club
+    "costco" -> R.drawable.ic_brand_costco
+    "pinduoduo" -> R.drawable.ic_brand_pinduoduo
     "amazon" -> R.drawable.ic_brand_amazon
-    "baidu" -> R.drawable.ic_brand_baidu
-    "meituan" -> R.drawable.ic_brand_meituan
-    "reading" -> R.drawable.ic_brand_zhihu
-    "gaming" -> R.drawable.ic_brand_xbox
+    "weread" -> R.drawable.ic_brand_weread
+    "kindle" -> R.drawable.ic_brand_kindle
+    "zhihu" -> R.drawable.ic_brand_zhihu
+    "dedao" -> R.drawable.ic_brand_dedao
+    "keep" -> R.drawable.ic_brand_keep
+    "xbox" -> R.drawable.ic_brand_xbox
+    "playstation" -> R.drawable.ic_brand_playstation
+    "nintendo" -> R.drawable.ic_brand_nintendo
+    "steam" -> R.drawable.ic_brand_steam
     "starbucks" -> R.drawable.ic_brand_starbucks
     "mcdonalds" -> R.drawable.ic_brand_mcdonalds
     "kfc" -> R.drawable.ic_brand_kfc
+    "meituan" -> R.drawable.ic_brand_meituan
+    "hema" -> R.drawable.ic_brand_hema
+    "haidilao" -> R.drawable.ic_brand_haidilao
+    "didi" -> R.drawable.ic_brand_didi
     else -> null
 }

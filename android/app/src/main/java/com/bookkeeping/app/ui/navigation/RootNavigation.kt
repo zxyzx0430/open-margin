@@ -570,8 +570,10 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
         activeDetailId?.let { detailId ->
         val allTransactions by transactionViewModel.allTransactions.collectAsState()
         val detailEntry = allTransactions.firstOrNull { it.id == detailId }
+        var detailEditing by remember(detailId) { mutableStateOf(false) }
         com.bookkeeping.app.ui.components.QingGestureSheet(
-            onDismissRequest = { activeDetailId = null },
+            onDismissRequest = { if (!detailEditing) activeDetailId = null },
+            canDismiss = !detailEditing,
         ) {
             com.bookkeeping.app.ui.screen.transactions.TransactionDetailScreenContent(
                 entry = detailEntry,
@@ -581,6 +583,7 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 animateReceipt = false,
                 loadingEntry = false,
                 inBottomSheet = true,
+                onEditingChanged = { detailEditing = it },
                 onSaveMerchantRuleWithHistory = { merchant, category, update ->
                     transactionViewModel.saveMerchantRule(merchant, category, update)
                 },

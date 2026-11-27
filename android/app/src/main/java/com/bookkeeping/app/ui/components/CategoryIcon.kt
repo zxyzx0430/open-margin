@@ -125,6 +125,18 @@ fun MerchantAvatar(
         CategoryIcon(category = category, modifier = modifier, size = size, cornerRadius = cornerRadius)
         return
     }
+    val brandDrawable = remember(spec.key) { brandLogoDrawableRes(spec.key) }
+    if (brandDrawable != null) {
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
+            contentDescription = merchant,
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(RoundedCornerShape(cornerRadius)),
+        )
+        return
+    }
     val color = Color(spec.colorArgb)
     val displayColor = if (LocalQingDark.current) {
         lerp(color, Color.White, 0.25f)

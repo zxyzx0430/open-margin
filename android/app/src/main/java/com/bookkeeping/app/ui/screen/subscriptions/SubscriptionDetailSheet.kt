@@ -592,16 +592,16 @@ internal fun SubscriptionBadgeAvatar(
     Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.30f))
+            .clip(RoundedCornerShape(if (brandDrawable != null) size * 0.24f else size * 0.30f))
             .background(bgColor),
         contentAlignment = Alignment.Center,
     ) {
         if (brandDrawable != null) {
-            Icon(
+            androidx.compose.foundation.Image(
                 painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
-                contentDescription = null,
-                tint = androidx.compose.ui.graphics.Color.Unspecified,
-                modifier = Modifier.size(size * 0.62f),
+                contentDescription = name,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(size),
             )
         } else if (vector != null) {
             Icon(

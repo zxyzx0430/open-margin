@@ -105,11 +105,11 @@ private fun MerchantSuggestionChip(
                 contentAlignment = Alignment.Center,
             ) {
                 if (brandDrawable != null) {
-                    Icon(
+                    androidx.compose.foundation.Image(
                         painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
                         contentDescription = null,
-                        tint = Color.Unspecified,
-                        modifier = Modifier.size(14.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.size(20.dp),
                     )
                 } else if (vector != null) {
                     Icon(
