@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
 import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 
 enum class StatusTone { POSITIVE, WARNING, ERROR, NEUTRAL }
@@ -111,9 +113,9 @@ fun SoftBadge(
     Text(
         text = text,
         color = foreground,
-        style = MaterialTheme.typography.labelSmall,
+        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
         modifier = modifier
-            .clip(RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(QingRadiusTokens.radiusBadge))
             .background(background)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )

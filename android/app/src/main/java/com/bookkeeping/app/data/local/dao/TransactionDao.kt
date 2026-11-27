@@ -53,6 +53,9 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<TransactionEntity>>
 
+    @Query("SELECT * FROM transactions WHERE id = :id AND syncDeleted = 0")
+    fun observeById(id: Long): Flow<TransactionEntity?>
+
     @Query("SELECT * FROM transactions WHERE syncDeleted = 0 AND category = 'OTHER'")
     suspend fun currentOther(): List<TransactionEntity>
 
@@ -257,4 +260,27 @@ interface TransactionDao {
         nowMs: Long,
         mutationId: String,
     ): Int
+
+    @Query("""UPDATE transactions
+              SET merchantIconKey = :iconKey,
+                  merchantIconPath = :iconPath
+              WHERE syncDeleted = 0 AND LOWER(TRIM(merchant)) = LOWER(TRIM(:merchant))""")
+    suspend fun updateMerchantIconByMerchant(
+        merchant: String,
+        iconKey: String?,
+        iconPath: String?,
+    ): Int
+
+    @Query("""UPDATE transactions
+              SET merchantIconKey = :iconKey,
+                  merchantIconPath = :iconPath
+              WHERE id = :id""")
+    suspend fun updateMerchantIconById(
+        id: Long,
+        iconKey: String?,
+        iconPath: String?,
+    ): Int
+
+    @Query("SELECT * FROM transactions WHERE syncDeleted = 0 AND TRIM(merchant) <> ''")
+    suspend fun getAllActiveWithMerchant(): List<TransactionEntity>
 }

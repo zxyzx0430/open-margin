@@ -1,5 +1,11 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+
+import androidx.compose.foundation.layout.heightIn
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.qingColors
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.selection.toggleable
@@ -46,37 +52,25 @@ fun SettingsGroupCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = MaterialTheme.shapes.large,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), content = content)
+    WalletCardSurface(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp), content = content)
     }
 }
 
 @Composable
 fun SettingsRowDivider() {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+    HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
 }
 
 @Composable
 fun SettingsIconBubble(icon: ImageVector, tone: StatusTone) {
-    val (background, foreground) = when (tone) {
-        StatusTone.POSITIVE -> QingPrimaryContainer to MaterialTheme.colorScheme.primary
-        StatusTone.WARNING -> QingWarningContainer to QingWarning
-        StatusTone.ERROR -> QingErrorContainer to MaterialTheme.colorScheme.error
-        StatusTone.NEUTRAL -> QingSurfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+    val tint = if (tone == StatusTone.NEUTRAL) qingColors.textSecondary else when (tone) {
+        StatusTone.POSITIVE -> qingColors.accentPrimary
+        StatusTone.WARNING -> qingColors.semanticWarning
+        StatusTone.ERROR -> qingColors.semanticExpense
+        StatusTone.NEUTRAL -> qingColors.textSecondary
     }
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .background(background, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = foreground, modifier = Modifier.size(21.dp))
-    }
+    Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
 }
 
 @Composable
@@ -86,12 +80,12 @@ private fun SettingsTrailingChevron(clickable: Boolean) {
             Icons.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.size(18.dp),
+            modifier = Modifier.size(16.dp),
         )
     } else {
         // Keep the trailing column width identical to clickable rows so badges
         // and chevrons share the same right edge without faking a tap target.
-        Spacer(Modifier.size(18.dp))
+        Spacer(Modifier.size(16.dp))
     }
 }
 
@@ -114,7 +108,8 @@ fun SettingsStatusRow(
                     Modifier
                 }
             )
-            .padding(vertical = 12.dp),
+            .heightIn(min = 52.dp)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -161,15 +156,17 @@ fun SettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .toggleable(
                 value = checked,
                 role = Role.Switch,
-                onValueChange = onCheckedChange,
+                onValueChange = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onCheckedChange(it) },
             )
-            .padding(vertical = 12.dp),
+            .heightIn(min = 52.dp)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -181,7 +178,7 @@ fun SettingsSwitchRow(
             SettingsRowTitle(title)
             SettingsRowSubtitle(subtitle)
         }
-        Switch(checked = checked, onCheckedChange = null)
+        QingSwitch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -197,7 +194,8 @@ fun SettingsActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = 12.dp),
+            .heightIn(min = 52.dp)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bookkeeping.app.data.budget.BudgetMonth
@@ -43,7 +47,7 @@ internal fun TransactionEntity.isLedgerTotalsCandidate(): Boolean =
     currency == "CNY" &&
         !syncDeleted &&
         duplicateOfId == null &&
-        remoteReviewStatus !in setOf("excluded", "transfer", "refund", "possible_duplicate")
+        remoteReviewStatus !in setOf("excluded", "refund", "possible_duplicate")
 
 internal object LedgerFilter {
     fun parseAmountCents(query: String): Long? {
@@ -179,14 +183,14 @@ class TransactionViewModel @Inject constructor(
     val ledgerLoadState: StateFlow<LedgerLoadState> = _ledgerLoadState
 
     // Kept for callers that only need the raw list (duplicate originals, calendar).
-    val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
-        .onStart { _ledgerLoadState.value = LedgerLoadState.LOADING }
+    val allTransactions: StateFlow<List<TransactionEntity>> = repository.observeUiTransactions()
+        .onStart { if (_ledgerLoadState.value != LedgerLoadState.READY) _ledgerLoadState.value = LedgerLoadState.LOADING }
         .onEach { _ledgerLoadState.value = LedgerLoadState.READY }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val hasAnyTransactions: StateFlow<Boolean> = allTransactions
         .map { it.isNotEmpty() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), false)
 
     val periodTransactions: StateFlow<List<TransactionEntity>> =
         combine(allTransactions, periodState) { all, period ->
@@ -196,7 +200,7 @@ class TransactionViewModel @Inject constructor(
                     (range == null ||
                         (transaction.timestamp >= range.first && transaction.timestamp < range.second))
             }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val displayedTransactions: StateFlow<List<TransactionEntity>> =
@@ -240,7 +244,8 @@ class TransactionViewModel @Inject constructor(
                     }
                 }
             }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val duplicateCandidates: StateFlow<List<DuplicateCandidate>> =
         combine(
@@ -256,7 +261,7 @@ class TransactionViewModel @Inject constructor(
                         original = candidate.duplicateOfId?.let(byId::get),
                     )
                 }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     val periodExpenseCents: StateFlow<Long> = periodTransactions
         .map { list ->
@@ -266,7 +271,8 @@ class TransactionViewModel @Inject constructor(
                     it.isLedgerTotalsCandidate()
             }.sumOf { it.amountCents }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0L)
 
     val periodIncomeCents: StateFlow<Long> = periodTransactions
         .map { list ->
@@ -275,7 +281,49 @@ class TransactionViewModel @Inject constructor(
                     it.isLedgerTotalsCandidate()
             }.sumOf { it.amountCents }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0L)
+
+    internal val ledgerReviewRows: StateFlow<List<DuplicateCandidate>> = allTransactions.map { all ->
+        val byId = all.associateBy { it.id }
+        all.filter { CaptureMergePolicy.needsManualReview(it) }
+            .map { DuplicateCandidate(candidate = it, original = it.duplicateOfId?.let(byId::get)) }
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
+
+    internal val groupedLedgerRows: StateFlow<LedgerRows> =
+        displayedTransactions.map { rows ->
+            val format = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            val time = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            LedgerRows(
+                rows,
+                rows.groupBy { format.format(java.util.Date(it.timestamp)) }.entries.toList(),
+                rows.associate { it.id to LedgerRowUiModel.from(it, time.format(java.util.Date(it.timestamp))) },
+            )
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), LedgerRows())
+
+    // Coherent data snapshot: totals derive from the exact same period list.
+    // Keep raw flows for other callers, but the ledger doesn't observe them individually.
+    internal val ledgerUiState: StateFlow<LedgerUiState> = combine(
+        groupedLedgerRows, periodTransactions, allTransactions, ledgerLoadState, ledgerReviewRows,
+    ) { rows, period, all, load, reviews ->
+        val valid = period.filter { it.isLedgerTotalsCandidate() }
+        LedgerUiState(
+            rows, period, all, load, reviews,
+            valid.filter { it.type == TransactionType.EXPENSE.name && it.category != TransactionCategory.TRANSFER.name }.sumOf { it.amountCents },
+            valid.filter { it.type == TransactionType.INCOME.name }.sumOf { it.amountCents },
+        )
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), LedgerUiState())
+
+    internal val ledgerFilterUiState: StateFlow<LedgerFilterUiState> = combine(
+        searchQuery, typeFilter, categoryFilter, accountFilter,
+        combine(timeFilter, selectedMonth) { time, month -> time to month },
+    ) { query, type, category, account, period ->
+        LedgerFilterUiState(query, type, category, account, period.first, period.second)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), LedgerFilterUiState())
+
+    suspend fun freshRuleHistory(): List<TransactionEntity> = repository.observeAll().first()
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
@@ -620,6 +668,26 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch { repository.mergeDuplicate(original, duplicate) }
     }
 
+    fun applyMerchantIcon(
+        transactionId: Long?,
+        merchant: String,
+        iconKey: String?,
+        iconPath: String?,
+        applyToAllHistory: Boolean,
+        onComplete: (Int) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val count = repository.applyMerchantIcon(
+                transactionId = transactionId,
+                merchant = merchant,
+                iconKey = iconKey,
+                iconPath = iconPath,
+                applyToAllHistory = applyToAllHistory,
+            )
+            onComplete(count)
+        }
+    }
+
     private fun periodRange(period: PeriodState): Pair<Long, Long>? = when (period.time) {
         LedgerTimeFilter.MONTH -> BudgetMonth.range(period.month)
         LedgerTimeFilter.YEAR -> {
@@ -636,3 +704,28 @@ class TransactionViewModel @Inject constructor(
         LedgerTimeFilter.ALL -> null
     }
 }
+
+internal data class LedgerRows(
+    val transactions: List<TransactionEntity> = emptyList(),
+    val groups: List<Map.Entry<String, List<TransactionEntity>>> = emptyList(),
+    val presentations: Map<Long, LedgerRowUiModel> = emptyMap(),
+)
+
+internal data class LedgerUiState(
+    val rows: LedgerRows = LedgerRows(),
+    val periodTransactions: List<TransactionEntity> = emptyList(),
+    val allTransactions: List<TransactionEntity> = emptyList(),
+    val load: LedgerLoadState = LedgerLoadState.INITIAL,
+    val reviews: List<TransactionViewModel.DuplicateCandidate> = emptyList(),
+    val expense: Long = 0L,
+    val income: Long = 0L,
+)
+
+internal data class LedgerFilterUiState(
+    val query: String = "",
+    val type: TransactionType? = null,
+    val category: TransactionCategory? = null,
+    val account: String? = null,
+    val time: LedgerTimeFilter = LedgerTimeFilter.ALL,
+    val month: String = BudgetMonth.currentKey(),
+)

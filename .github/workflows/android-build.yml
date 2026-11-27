@@ -106,3 +106,29 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
           retention-days: 7
+
+      # This opt-in gate is limited to the V4 test branch until the device
+      # regression suite accepts R8. Regular release signing stays unchanged.
+      - name: Build V4 R8 performance preview
+        if: github.ref_name == 'feat/frontend-v4'
+        working-directory: android
+        run: |
+          ./gradlew --no-daemon --max-workers=2 --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" -PopenMarginPerformancePreview=true -PopenMarginScreenshotWatcher=true :app:assembleDebug
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -s app/build/outputs/mapping/debug/mapping.txt
+          unzip -tq app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/open-margin-v4-performance.apk
+          unzip -l app/build/outputs/apk/debug/open-margin-v4-performance.apk | grep 'libsherpa-onnx-jni.so'
+      - name: Upload V4 R8 performance preview
+        if: github.ref_name == 'feat/frontend-v4'
+        uses: actions/upload-artifact@v4
+        with:
+          name: finance-collector-v4-performance
+          path: android/app/build/outputs/apk/debug/open-margin-v4-performance.apk
+          if-no-files-found: error
+          retention-days: 14
+      - name: Compile V4 benchmark module
+        if: github.ref_name == 'feat/frontend-v4'
+        working-directory: android
+        run: |
+          ./gradlew --no-daemon --max-workers=2 --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -Dfile.encoding=UTF-8" -PopenMarginPerformancePreview=true -PopenMarginBenchmarks=true -PopenMarginScreenshotWatcher=true :benchmark:assembleDebug

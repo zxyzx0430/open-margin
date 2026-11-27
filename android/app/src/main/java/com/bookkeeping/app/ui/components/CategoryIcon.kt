@@ -1,5 +1,9 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
+import android.util.LruCache
+import java.io.File
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -9,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -57,12 +62,13 @@ fun CategoryIcon(
     category: TransactionCategory,
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
+    cornerRadius: Dp = size * 0.34f,
 ) {
     val visual = categoryVisual(category)
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.34f))
+            .clip(RoundedCornerShape(cornerRadius))
             .background(visual.background),
         contentAlignment = Alignment.Center,
     ) {
@@ -75,6 +81,11 @@ fun CategoryIcon(
     }
 }
 
+private data class CachedMerchantBitmap(val stamp: Long, val bytes: Long, val bitmap: ImageBitmap)
+private val merchantBitmapCache = object : LruCache<String, CachedMerchantBitmap>(4 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: CachedMerchantBitmap): Int = value.bitmap.width * value.bitmap.height * 4
+}
+
 @Composable
 fun MerchantAvatar(
     merchant: String,
@@ -83,35 +94,63 @@ fun MerchantAvatar(
     modifier: Modifier = Modifier,
     size: Dp = 42.dp,
     merchantIconPath: String? = null,
+    cornerRadius: Dp = size * 0.34f,
     categoryKey: String? = null,
 ) {
-    val localIcon by produceState<ImageBitmap?>(initialValue = null, merchantIconPath) {
-        value = merchantIconPath?.let { path ->
-            withContext(Dispatchers.IO) {
-                val options = BitmapFactory.Options().apply { inSampleSize = 3 }
-                BitmapFactory.decodeFile(path, options)?.asImageBitmap()
-            }
-        }
+    val context = LocalContext.current
+    val customOverrides by remember(context) {
+        com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(context).overrides
+    }.collectAsState()
+    val customOverride = remember(merchant, customOverrides) {
+        com.bookkeeping.app.data.merchant.CustomMerchantIconStore.resolveFrom(customOverrides, merchant)
     }
-    val iconBitmap = localIcon
-    if (iconBitmap != null) {
+
+    val effectivePath = customOverride?.imageFileName ?: merchantIconPath
+    val localIcon = rememberLocalMerchantBitmap(effectivePath)
+    if (localIcon != null) {
         Image(
-            bitmap = iconBitmap,
+            bitmap = localIcon,
             contentDescription = merchant,
             contentScale = ContentScale.Crop,
             modifier = modifier
                 .size(size)
-                .clip(RoundedCornerShape(size * 0.34f)),
+                .clip(RoundedCornerShape(cornerRadius)),
         )
         return
     }
-    val spec = MerchantIconCatalog.forTransaction(merchant, merchantIconKey)
+    val overrideBrandDrawable = remember(customOverride?.brandKey) {
+        brandLogoDrawableRes(customOverride?.brandKey)
+    }
+    if (overrideBrandDrawable != null) {
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = overrideBrandDrawable),
+            contentDescription = merchant,
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(RoundedCornerShape(cornerRadius)),
+        )
+        return
+    }
+    val spec = remember(merchant, merchantIconKey) { MerchantIconCatalog.forTransaction(merchant, merchantIconKey) }
     if (spec == null) {
         if (!categoryKey.isNullOrBlank()) {
             CategoryIcon(categoryKey = categoryKey, modifier = modifier, size = size)
         } else {
-            CategoryIcon(category = category, modifier = modifier, size = size)
+            CategoryIcon(category = category, modifier = modifier, size = size, cornerRadius = cornerRadius)
         }
+        return
+    }
+    val brandDrawable = remember(spec.key) { brandLogoDrawableRes(spec.key) }
+    if (brandDrawable != null) {
+        Image(
+            painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
+            contentDescription = merchant,
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(RoundedCornerShape(cornerRadius)),
+        )
         return
     }
     val color = Color(spec.colorArgb)
@@ -123,7 +162,7 @@ fun MerchantAvatar(
     Box(
         modifier = modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.34f))
+            .clip(RoundedCornerShape(cornerRadius))
             .background(displayColor.copy(alpha = 0.13f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -144,4 +183,46 @@ fun MerchantAvatar(
             )
         }
     }
+}
+
+@Composable
+internal fun rememberLocalMerchantBitmap(iconPath: String?): ImageBitmap? {
+    if (iconPath.isNullOrBlank()) return null
+    val filesDir = LocalContext.current.filesDir
+    val path = remember(iconPath, filesDir) {
+        val file = File(iconPath)
+        if (file.isAbsolute) file.absolutePath
+        else if (file.name == iconPath) File(File(filesDir, "merchant_icons"), file.name).absolutePath
+        else null
+    } ?: return null
+    val loaded by androidx.compose.runtime.key(path) {
+        produceState<ImageBitmap?>(merchantBitmapCache.get(path)?.bitmap, path) {
+            value = withContext(Dispatchers.IO) {
+                val file = File(path)
+                if (!file.isFile) {
+                    merchantBitmapCache.remove(path)
+                    null
+                } else {
+                    val stamp = file.lastModified()
+                    val bytes = file.length()
+                    val cached = merchantBitmapCache.get(path)
+                    if (cached != null && cached.stamp == stamp && cached.bytes == bytes) {
+                        cached.bitmap
+                    } else {
+                        runCatching {
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeFile(path, bounds)
+                            val maxDim = maxOf(bounds.outWidth, bounds.outHeight)
+                            val sample = if (maxDim > 384) 2 else 1
+                            val options = BitmapFactory.Options().apply { inSampleSize = sample }
+                            BitmapFactory.decodeFile(path, options)?.asImageBitmap()?.also {
+                                merchantBitmapCache.put(path, CachedMerchantBitmap(stamp, bytes, it))
+                            }
+                        }.getOrNull()
+                    }
+                }
+            }
+        }
+    }
+    return loaded
 }

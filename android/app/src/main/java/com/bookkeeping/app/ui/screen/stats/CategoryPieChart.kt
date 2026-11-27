@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import androidx.compose.runtime.key
+import androidx.compose.animation.core.snap
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -220,12 +223,13 @@ fun CategoryPieChart(
     }
 
     // 按分类存动画状态：扇区按金额排序，选中态切换时新旧两段各自过渡。
+    val reduced = rememberReduceMotion()
     val animationByCategory: Map<TransactionCategory, State<Float>> = slices.associate { slice ->
-        slice.stat.category to animateFloatAsState(
+        slice.stat.category to key(slice.stat.category) { animateFloatAsState(
             targetValue = if (slice.stat.category == selectedCategory) 1f else 0f,
-            animationSpec = tween(durationMillis = PIE_SELECT_ANIMATION_MS),
+            animationSpec = if (reduced) snap() else tween(durationMillis = PIE_SELECT_ANIMATION_MS),
             label = "pie-slice-${slice.stat.category.name}",
-        )
+        ) }
     }
 
     val sliceColors = slices.map { categoryColor(it.stat.category) }

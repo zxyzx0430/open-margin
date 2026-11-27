@@ -1,5 +1,14 @@
 package com.bookkeeping.app.ui.theme
 
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.bookkeeping.app.ui.components.LocalAmountTextMeasurer
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import android.content.SharedPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -10,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 data class QingSemanticColors(
@@ -101,11 +111,11 @@ private val QingDarkColors = darkColorScheme(
 )
 
 private val QingShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    extraSmall = RoundedCornerShape(QingRadiusTokens.radiusBadge),
+    small = RoundedCornerShape(QingRadiusTokens.radiusControl),
+    medium = RoundedCornerShape(QingRadiusTokens.radiusControl),
+    large = RoundedCornerShape(QingRadiusTokens.radiusCard),
+    extraLarge = RoundedCornerShape(QingRadiusTokens.radiusHero),
 )
 
 @Composable
@@ -114,14 +124,40 @@ fun BookkeepingAppTheme(
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val colorScheme = if (darkTheme) QingDarkColors else QingLightColors
+    val tokens = if (darkTheme) QingDarkTokens else QingLightTokens
+    val prefs = rememberQingAppearancePreferences()
+    var appearance by remember(prefs) { mutableStateOf(readQingAppearance(prefs)) }
+    DisposableEffect(prefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            appearance = readQingAppearance(prefs)
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    val colorScheme = remember(darkTheme) { (if (darkTheme) QingDarkColors else QingLightColors).copy(
+        background = tokens.surfaceCanvas, onBackground = tokens.textPrimary,
+        surface = tokens.surfaceCard, onSurface = tokens.textPrimary,
+        surfaceVariant = tokens.surfaceElevated, onSurfaceVariant = tokens.textSecondary,
+        primary = tokens.accentPrimary, primaryContainer = tokens.accentContainer,
+        secondary = tokens.semanticIncome, error = tokens.semanticExpense,
+        surfaceContainerLowest = tokens.surfaceCanvas,
+        surfaceContainerLow = tokens.surfaceCard,
+        surfaceContainer = tokens.surfaceCard,
+        surfaceContainerHigh = tokens.surfaceElevated,
+        surfaceContainerHighest = tokens.surfaceSheet,
+        surfaceDim = tokens.surfaceCanvas, surfaceBright = tokens.surfaceSheet,
+        outlineVariant = tokens.strokeHairline,
+    ) }
     CompositionLocalProvider(
         LocalQingDark provides darkTheme,
+        LocalQingReduceMotion provides observeReduceMotion(),
+        LocalQingAppearance provides appearance,
+        LocalAmountTextMeasurer provides rememberTextMeasurer(cacheSize = 128),
         LocalQingSemanticColors provides QingSemanticColors(
             income = colorScheme.secondary,
             expenseText = colorScheme.error,
             warningContainer = if (darkTheme) Color(0xFF4A3510) else QingWarningContainerBase,
-            warningText = if (darkTheme) Color(0xFFF0C36A) else QingWarningBase,
+            warningText = tokens.semanticWarning,
             errorContainer = colorScheme.errorContainer,
         ),
     ) {
@@ -132,4 +168,16 @@ fun BookkeepingAppTheme(
             content = content,
         )
     }
+}
+
+/** Canonical radii for V3 components; legacy Material shapes remain untouched in P0. */
+object QingRadiusTokens {
+    val radiusBadge = 8.dp
+    val radiusControl = 14.dp
+    val radiusCard = 22.dp
+    val radiusHero = 28.dp
+    val radiusPill = 999.dp
+
+    fun innerRadius(outer: Dp, padding: Dp): Dp =
+        (outer - padding).coerceAtLeast(radiusBadge)
 }

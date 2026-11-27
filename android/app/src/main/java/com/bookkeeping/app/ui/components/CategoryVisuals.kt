@@ -1,16 +1,27 @@
 package com.bookkeeping.app.ui.components
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DirectionsSubway
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.LocalCafe
 import androidx.compose.material.icons.outlined.MedicalServices
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material.icons.outlined.Movie
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Payments
+import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.ShoppingBag
+import androidx.compose.material.icons.outlined.SimCard
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.SwapHoriz
@@ -86,6 +97,18 @@ fun merchantSystemIcon(name: String?): ImageVector? = when (name) {
     "bolt" -> Icons.Outlined.Bolt
     "health" -> Icons.Outlined.MedicalServices
     "education" -> Icons.Outlined.School
+    "ai" -> Icons.Outlined.AutoAwesome
+    "code" -> Icons.Outlined.Code
+    "video" -> Icons.Outlined.PlayCircle
+    "movie" -> Icons.Outlined.Movie
+    "music" -> Icons.Outlined.MusicNote
+    "cloud" -> Icons.Outlined.Cloud
+    "productivity" -> Icons.Outlined.Layers
+    "server" -> Icons.Outlined.Dns
+    "sim" -> Icons.Outlined.SimCard
+    "book" -> Icons.Outlined.MenuBook
+    "fitness" -> Icons.Outlined.FitnessCenter
+    "game" -> Icons.Outlined.SportsEsports
     else -> null
 }
 

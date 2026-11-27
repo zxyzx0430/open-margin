@@ -19,7 +19,10 @@ class TransactionDetailViewModel @Inject constructor(
 ) : ViewModel() {
     private val transactionId = savedStateHandle.get<Long>("id") ?: -1L
 
-    val transaction: StateFlow<TransactionEntity?> = repository.observeAll()
-        .map { transactions -> transactions.firstOrNull { it.id == transactionId } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // Distinguish the initial loading sentinel from an authoritative missing row.
+    internal val transaction: StateFlow<DetailTransactionState> = repository.observeById(transactionId)
+        .map { DetailTransactionState(loaded = true, entry = it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailTransactionState())
 }
+
+internal data class DetailTransactionState(val loaded: Boolean = false, val entry: TransactionEntity? = null)

@@ -66,6 +66,7 @@ import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.capture.CaptureCandidate
 import com.bookkeeping.app.notification.capture.ScreenshotCapturePolicy
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import com.bookkeeping.app.ui.components.CategoryIcon
 import com.bookkeeping.app.ui.components.LedgerFilterChip
 import com.bookkeeping.app.ui.theme.QingErrorContainer
@@ -100,7 +101,7 @@ fun CaptureReviewDialog(
     var confirmIgnoreAll by remember { mutableStateOf(false) }
 
     if (confirmIgnoreAll) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { confirmIgnoreAll = false },
             title = { Text(tr("忽略全部待确认记录")) },
             text = {

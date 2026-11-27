@@ -1,5 +1,11 @@
 package com.bookkeeping.app.data.repository
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.distinctUntilChanged
 import android.content.Context
 import androidx.room.withTransaction
 import com.bookkeeping.app.data.diagnostics.DiagnosticRawText
@@ -136,7 +142,19 @@ class TransactionRepository @Inject constructor(
 ) {
     private val duplicateMutex = Mutex()
 
+    // UI consumers can share one live Room query. Keep the original cold API
+    // for point-in-time business reads and writes; never feed a cached replay
+    // to code that needs a fresh database snapshot.
+    private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val uiTransactions by lazy {
+        dao.observeAll().distinctUntilChanged().shareIn(
+            uiScope, SharingStarted.WhileSubscribed(stopTimeoutMillis = 15_000,
+                replayExpirationMillis = 0), replay = 1,
+        )
+    }
+    fun observeUiTransactions(): Flow<List<TransactionEntity>> = uiTransactions
     fun observeAll(): Flow<List<TransactionEntity>> = dao.observeAll()
+    fun observeById(id: Long): Flow<TransactionEntity?> = dao.observeById(id)
 
     suspend fun countByCategory(categoryKey: String): Int = dao.countByCategory(categoryKey)
 
@@ -1679,6 +1697,49 @@ class TransactionRepository @Inject constructor(
     private fun diagnosticError(failure: Exception): String =
         if (failure is android.database.sqlite.SQLiteException) "Database operation failed"
         else "Operation failed"
+
+    suspend fun recentMerchants(limit: Int = 80): List<String> =
+        dao.recentMerchants(limit)
+
+    suspend fun applyMerchantIcon(
+        transactionId: Long?,
+        merchant: String,
+        iconKey: String?,
+        iconPath: String?,
+        applyToAllHistory: Boolean,
+    ): Int {
+        val trimmed = merchant.trim()
+        if (applyToAllHistory && trimmed.isNotEmpty()) {
+            return dao.updateMerchantIconByMerchant(trimmed, iconKey, iconPath)
+        }
+        val id = transactionId ?: return 0
+        return dao.updateMerchantIconById(id, iconKey, iconPath)
+    }
+
+    suspend fun refreshAllLedgerIcons(
+        customStore: com.bookkeeping.app.data.merchant.CustomMerchantIconStore,
+    ): Int {
+        val rows = dao.getAllActiveWithMerchant()
+        var updated = 0
+        for (tx in rows) {
+            val custom = customStore.resolve(tx.merchant)
+            val targetKey: String?
+            val targetPath: String?
+            if (custom != null) {
+                targetKey = custom.brandKey
+                targetPath = custom.imageFileName
+            } else {
+                val catalogSpec = com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(tx.merchant)
+                if (catalogSpec == null) continue
+                targetKey = catalogSpec.key
+                targetPath = tx.merchantIconPath
+            }
+            if (tx.merchantIconKey != targetKey || tx.merchantIconPath != targetPath) {
+                updated += dao.updateMerchantIconById(tx.id, targetKey, targetPath)
+            }
+        }
+        return updated
+    }
 
     companion object {
         const val POSSIBLE_DUPLICATE_WINDOW_MS: Long = DuplicateReviewPolicy.WINDOW_MS

@@ -1,5 +1,10 @@
 package com.bookkeeping.app.ui.screen.subscriptions
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+import com.bookkeeping.app.ui.components.QingGestureSheet
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,7 +31,6 @@ import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.Remove
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,7 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -91,7 +95,6 @@ fun SubscriptionDetailSheet(
     onReactivate: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val cnyCents = remember(subscription, fxRates) {
         SubscriptionProjection.estimateCnyCents(subscription, fxRates)
@@ -107,15 +110,11 @@ fun SubscriptionDetailSheet(
         SubscriptionProjection.daysUntilDue(subscription.nextDueMs)
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = QingSurface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-    ) {
+    QingGestureSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -183,9 +182,8 @@ fun SubscriptionDetailSheet(
             // Amount + cycle + matched history card
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = QingPrimaryContainer.copy(alpha = 0.72f),
-                border = BorderStroke(1.dp, QingPrimary.copy(alpha = 0.14f)),
+                shape = RoundedCornerShape(22.dp),
+                color = QingPrimaryContainer.copy(alpha = 0.55f),
             ) {
                 Column(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -262,9 +260,8 @@ fun SubscriptionDetailSheet(
             // Direct toggles
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(22.dp),
                 color = QingSurfaceVariant.copy(alpha = 0.45f),
-                border = BorderStroke(1.dp, QingOutline),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     DetailSwitchRow(
@@ -383,13 +380,12 @@ fun SubscriptionDetailSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedButton(
+                TextButton(
                     onClick = onEdit,
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp),
                     shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, QingOutline),
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Edit,
@@ -401,7 +397,7 @@ fun SubscriptionDetailSheet(
                 }
 
                 if (subscription.active) {
-                    OutlinedButton(
+                    TextButton(
                         onClick = {
                             onDeactivate()
                             onDismiss()
@@ -410,7 +406,6 @@ fun SubscriptionDetailSheet(
                             .weight(1f)
                             .height(44.dp),
                         shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, QingOutline),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.PauseCircleOutline,
@@ -421,7 +416,7 @@ fun SubscriptionDetailSheet(
                         Text("停用")
                     }
                 } else if (onReactivate != null) {
-                    OutlinedButton(
+                    TextButton(
                         onClick = {
                             onReactivate()
                             onDismiss()
@@ -430,7 +425,6 @@ fun SubscriptionDetailSheet(
                             .weight(1f)
                             .height(44.dp),
                         shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, QingPrimary.copy(alpha = 0.45f)),
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.PlayCircleOutline,
@@ -462,10 +456,10 @@ fun SubscriptionDetailSheet(
     }
 
     if (showDeleteConfirm && onDelete != null) {
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("删除订阅？") },
-            text = { Text("删除「${subscription.name}」后将不再显示在续费排期中，历史账单记录不受影响。") },
+            title = { Text(tr("删除订阅？")) },
+            text = { Text(tr("删除「%s」后将不再显示在续费排期中，历史账单记录不受影响。").format(subscription.name)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -512,7 +506,7 @@ private fun DetailSwitchRow(
             )
         }
         Spacer(Modifier.width(12.dp))
-        Switch(
+        QingSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
         )
@@ -574,20 +568,73 @@ internal fun SubscriptionBadgeAvatar(
     name: String,
     active: Boolean,
     size: androidx.compose.ui.unit.Dp = 42.dp,
+    wallet: Boolean = false,
 ) {
-    val label = name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val customOverrides by remember(context) {
+        com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(context).overrides
+    }.collectAsState()
+    val customOverride = remember(name, customOverrides) {
+        com.bookkeeping.app.data.merchant.CustomMerchantIconStore.resolveFrom(customOverrides, name)
+    }
+    val customBitmap = com.bookkeeping.app.ui.components.rememberLocalMerchantBitmap(customOverride?.imageFileName)
+    val spec = remember(name) { com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(name) }
+    val brandDrawable = remember(customOverride?.brandKey, spec?.key) {
+        com.bookkeeping.app.ui.components.brandLogoDrawableRes(customOverride?.brandKey ?: spec?.key)
+    }
+    val vector = remember(spec?.systemIcon) { com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon) }
+    val brandColor = spec?.colorArgb?.let { androidx.compose.ui.graphics.Color(it) }
+    val label = spec?.initials ?: name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
+    val hasGraphic = brandDrawable != null || vector != null
+    val bgColor = when {
+        wallet && hasGraphic -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.94f)
+        wallet -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)
+        brandColor != null && active -> brandColor.copy(alpha = 0.14f)
+        active -> QingMintSoft
+        else -> QingSurfaceVariant
+    }
+    val fgColor = when {
+        wallet && hasGraphic -> brandColor ?: QingPrimaryDeep
+        wallet -> androidx.compose.ui.graphics.Color.White
+        brandColor != null && active -> brandColor
+        active -> QingPrimaryDeep
+        else -> QingTextSecondary
+    }
     Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(size * 0.30f))
-            .background(if (active) QingMintSoft else QingSurfaceVariant),
+            .clip(RoundedCornerShape(if (customBitmap != null || brandDrawable != null) size * 0.24f else size * 0.30f))
+            .background(bgColor),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = if (active) QingPrimaryDeep else QingTextSecondary,
-        )
+        if (customBitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = customBitmap,
+                contentDescription = name,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(size),
+            )
+        } else if (brandDrawable != null) {
+            androidx.compose.foundation.Image(
+                painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
+                contentDescription = name,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(size),
+            )
+        } else if (vector != null) {
+            Icon(
+                imageVector = vector,
+                contentDescription = null,
+                tint = fgColor,
+                modifier = Modifier.size(size * 0.56f),
+            )
+        } else {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = fgColor,
+            )
+        }
     }
 }

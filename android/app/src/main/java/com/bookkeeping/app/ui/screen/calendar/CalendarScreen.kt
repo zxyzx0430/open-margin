@@ -1,5 +1,12 @@
 package com.bookkeeping.app.ui.screen.calendar
 
+import com.bookkeeping.app.ui.components.QingSwitch
+import android.util.LruCache
+import androidx.compose.ui.layout.layout
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
+import androidx.compose.animation.core.snap
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
 import com.bookkeeping.app.ui.components.MonthPickerDialog
 
 import android.content.Context
@@ -55,7 +62,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -113,7 +119,6 @@ import com.bookkeeping.app.ui.screen.subscriptions.SubscriptionHistoryStats
 import com.bookkeeping.app.ui.screen.subscriptions.formatSmartCny
 import com.bookkeeping.app.ui.screen.subscriptions.subscriptionCadenceLabel
 import com.bookkeeping.app.ui.screen.transactions.LedgerTransactionRow
-import com.bookkeeping.app.ui.theme.LocalQingSemanticColors
 import com.bookkeeping.app.ui.theme.QingMintSoft
 import com.bookkeeping.app.ui.theme.QingOutline
 import com.bookkeeping.app.ui.theme.QingPrimary
@@ -397,7 +402,8 @@ fun CalendarScreen(
     onOpenDetail: (Long) -> Unit = {},
     onOpenSubscriptions: (Boolean) -> Unit = {},
 ) {
-    val transactions by viewModel.transactions.collectAsState()
+    val calendarSnapshot by viewModel.indexedTransactions.collectAsState()
+    val transactions = calendarSnapshot.rows
     val allSubscriptions by viewModel.allSubscriptions.collectAsState()
     val fxRates by viewModel.fxRates.collectAsState()
     val monthlyOccurrencesByDay by viewModel.monthlyOccurrencesByDay.collectAsState()
@@ -495,13 +501,13 @@ fun CalendarScreen(
     val monthTransactions = remember(transactions, monthKey) {
         transactions.filter { it.timestamp in monthStart until monthEnd && !it.syncDeleted }
     }
-    val selectedTransactions = remember(transactions, rangeStart, rangeEnd) {
+    val calendarDateIndex = calendarSnapshot.byDate
+    val selectedTransactions = remember(calendarDateIndex, rangeStart, rangeEnd) {
         val start = rangeStart
         val end = rangeEnd
         if (start == null || end == null) emptyList()
-        else transactions.filter {
-            !it.syncDeleted && dateOf(it.timestamp) in start..end
-        }.sortedByDescending { it.timestamp }
+        else calendarDateIndex.entries.asSequence().filter { it.key in start..end }
+            .flatMap { it.value.asSequence() }.sortedByDescending { it.timestamp }.toList()
     }
     val selectionStart = rangeStart
     val selectionEnd = rangeEnd
@@ -518,6 +524,7 @@ fun CalendarScreen(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             // 顶部状态栏留白由外层 Scaffold 的 innerPadding 负责，这里再加会翻倍
             .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
@@ -569,7 +576,7 @@ fun CalendarScreen(
                                 )
                             },
                             trailingIcon = {
-                                Switch(
+                                QingSwitch(
                                     checked = highlightEnabled,
                                     onCheckedChange = { enabled ->
                                         heatmap = setCalendarHighlightEnabled(heatmap, enabled)
@@ -625,7 +632,7 @@ fun CalendarScreen(
                                 )
                             },
                             trailingIcon = {
-                                Switch(
+                                QingSwitch(
                                     checked = numberEnabled,
                                     onCheckedChange = { enabled ->
                                         calendarNumberMode = setCalendarNumberEnabled(
@@ -873,12 +880,14 @@ private fun MonthHeader(
 ) {
     // 翻月反馈：月份标题 150ms 淡入 + 轻微放大，让用户看出「刚翻了一页」。
     // 第一次组合不播（否则每次进页面都闪一下），之后每次换月才从 0 起跳。
+    val reduced = rememberReduceMotion()
     var hasShownMonth by remember { mutableStateOf(false) }
     val flipProgress = remember(monthKey) {
-        Animatable(if (hasShownMonth) 0f else 1f)
+        Animatable(if (hasShownMonth && !reduced) 0f else 1f)
     }
-    LaunchedEffect(monthKey) {
-        if (hasShownMonth) {
+    LaunchedEffect(monthKey, reduced) {
+        if (reduced) { flipProgress.snapTo(1f); hasShownMonth = true }
+        else if (hasShownMonth) {
             flipProgress.animateTo(1f, tween(durationMillis = 150))
         } else {
             hasShownMonth = true
@@ -930,7 +939,7 @@ private fun MonthHeader(
 
 @Composable
 private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
-    val semantic = LocalQingSemanticColors.current
+
     val expense = transactions
         .filter { StatsTransactionPolicy.matches(it, TransactionType.EXPENSE) }
         .sumOf { it.amountCents }
@@ -943,12 +952,12 @@ private fun MonthTotalsRow(transactions: List<TransactionEntity>) {
             .fillMaxWidth()
             .padding(bottom = 4.dp),
     ) {
-        CalendarMetric(tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f))
-        CalendarMetric(tr("收入"), formatCny(income), semantic.income, Modifier.weight(1f))
+        CalendarMetric(tr("支出"), formatCny(expense), QingAmountExpense, Modifier.weight(1f))
+        CalendarMetric(tr("收入"), formatCny(income), QingAmountIncome, Modifier.weight(1f))
         CalendarMetric(
             tr("结余"),
             (if (net >= 0) "+" else "−") + formatCny(abs(net)),
-            if (net >= 0) semantic.income else semantic.expenseText,
+            if (net >= 0) QingAmountIncome else QingAmountExpense,
             Modifier.weight(1f),
         )
     }
@@ -1396,16 +1405,16 @@ private fun CalendarMonthGrid(
                                     ),
                                 )
                             }
-                            val semantic = LocalQingSemanticColors.current
+
                             val numberColor = when {
                                 isEdge -> MaterialTheme.colorScheme.onPrimary
                                 inRange -> MaterialTheme.colorScheme.onPrimaryContainer
-                                calendarNumberMode == CalendarNumberMode.EXPENSE -> semantic.expenseText
-                                calendarNumberMode == CalendarNumberMode.INCOME -> semantic.income
+                                calendarNumberMode == CalendarNumberMode.EXPENSE -> QingAmountExpense
+                                calendarNumberMode == CalendarNumberMode.INCOME -> QingAmountIncome
                                 calendarNumberMode == CalendarNumberMode.NET -> if ((selectedAmount ?: 0L) >= 0L) {
-                                    semantic.income
+                                    QingAmountIncome
                                 } else {
-                                    semantic.expenseText
+                                    QingAmountExpense
                                 }
                                 else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
@@ -1536,6 +1545,7 @@ private fun CalendarListDrawer(
 ) {
     val english = AppLanguage.current() == AppLanguage.ENGLISH
     val density = LocalDensity.current
+    val reduceMotion = rememberReduceMotion()
     val heightAnimation = remember { Animatable(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
     var dragFraction by remember { mutableStateOf(CALENDAR_DRAWER_COLLAPSED_FRACTION) }
     var dragging by remember { mutableStateOf(false) }
@@ -1546,8 +1556,7 @@ private fun CalendarListDrawer(
             CALENDAR_DRAWER_EXPANDED_FRACTION,
         )
     }
-    val visibleFraction = if (dragging) dragFraction else heightAnimation.value
-    val dayAmount = if (start == end) calendarDrawerDayAmount(transactions) else null
+    val dayAmount = remember(start, end, transactions) { if (start == end) calendarDrawerDayAmount(transactions) else null }
     val dayAmountLabel = dayAmount?.let {
         val typeLabel = tr(
             if (it.type == TransactionType.EXPENSE) "支出" else "收入",
@@ -1561,13 +1570,17 @@ private fun CalendarListDrawer(
         singleDaySummary = dayAmountLabel,
     )
     val rangeTotals = remember(transactions) { calendarSelectionTotals(transactions) }
-    val semantic = LocalQingSemanticColors.current
-    val drawerShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+
+    val drawerShape = RoundedCornerShape(22.dp)
 
     Box(
         modifier = modifier
-            .height(availableHeight * visibleFraction)
-            .shadow(12.dp, drawerShape)
+            .layout { measurable, constraints ->
+                val fraction = if (dragging) dragFraction else heightAnimation.value
+                val h = (availableHeightPx * fraction).toInt().coerceIn(constraints.minHeight, constraints.maxHeight)
+                val measured = measurable.measure(constraints.copy(minHeight = h, maxHeight = h))
+                layout(measured.width, measured.height) { measured.placeRelative(0, 0) }
+            }
             .clip(drawerShape)
             .background(MaterialTheme.colorScheme.surface),
     ) {
@@ -1612,7 +1625,7 @@ private fun CalendarListDrawer(
                                     dragging = false
                                     heightAnimation.animateTo(
                                         targetFraction,
-                                        tween(durationMillis = 180),
+                                        if (reduceMotion) snap() else tween(durationMillis = 180),
                                     )
                                 }
                             }
@@ -1663,20 +1676,20 @@ private fun CalendarListDrawer(
                     CalendarMetric(
                         tr("支出"),
                         formatCny(rangeTotals.expenseCents),
-                        semantic.expenseText,
+                        QingAmountExpense,
                         Modifier.weight(1f),
                     )
                     CalendarMetric(
                         tr("收入"),
                         formatCny(rangeTotals.incomeCents),
-                        semantic.income,
+                        QingAmountIncome,
                         Modifier.weight(1f),
                     )
                     CalendarMetric(
                         if (english) "Net" else tr("结余"),
                         (if (rangeTotals.netCents >= 0) "+" else "−") +
                             formatCny(abs(rangeTotals.netCents)),
-                        if (rangeTotals.netCents >= 0) semantic.income else semantic.expenseText,
+                        if (rangeTotals.netCents >= 0) QingAmountIncome else QingAmountExpense,
                         Modifier.weight(1f),
                     )
                 }
@@ -1861,7 +1874,7 @@ private fun SelectionSummary(
     onClear: () -> Unit,
     showHeading: Boolean = true,
 ) {
-    val semantic = LocalQingSemanticColors.current
+
     val hasSelection = start != null && end != null
     val source = if (hasSelection) transactions else monthFallback
     val includedExpenses = source.filter {
@@ -1931,17 +1944,17 @@ private fun SelectionSummary(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CalendarMetric(
-                    tr("支出"), formatCny(expense), semantic.expenseText, Modifier.weight(1f),
+                    tr("支出"), formatCny(expense), QingAmountExpense, Modifier.weight(1f),
                 )
                 CalendarMetric(
-                    tr("收入"), formatCny(income), semantic.income, Modifier.weight(1f),
+                    tr("收入"), formatCny(income), QingAmountIncome, Modifier.weight(1f),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CalendarMetric(
                     tr("结余"),
                     (if (net >= 0) "+" else "−") + formatCny(abs(net)),
-                    if (net >= 0) semantic.income else semantic.expenseText,
+                    if (net >= 0) QingAmountIncome else QingAmountExpense,
                     Modifier.weight(1f),
                 )
                 CalendarMetric(
@@ -2058,7 +2071,7 @@ private fun firstDayOffset(year: Int, month: Int, weekStartsMonday: Boolean): In
     return (dayOfWeek - first + 7) % 7
 }
 
-private data class CalendarDate(
+internal data class CalendarDate(
     val year: Int,
     val month: Int,
     val day: Int,
@@ -2119,7 +2132,7 @@ internal fun heatmapAlpha(value: Long, sortedPositiveDailyValues: List<Long>): F
     }
 }
 
-private fun dateOf(timestamp: Long): CalendarDate =
+internal fun dateOf(timestamp: Long): CalendarDate =
     Calendar.getInstance().apply { timeInMillis = timestamp }.let { cal ->
         CalendarDate(
             cal.get(Calendar.YEAR),
@@ -2146,7 +2159,11 @@ private fun monthLabel(key: String): String {
     return CalendarDateText.monthHeading(parts.year, parts.month)
 }
 
+private val lunarDateCache by lazy { LruCache<String, String>(512) }
+
 private fun lunarLabel(year: Int, month: Int, day: Int): String {
+    val key = java.util.TimeZone.getDefault().id + ":" + year + ":" + month + ":" + day
+    lunarDateCache.get(key)?.let { return it }
     return runCatching {
         val cal = Calendar.getInstance().apply {
             clear()
@@ -2169,5 +2186,5 @@ private fun lunarLabel(year: Int, month: Int, day: Int): String {
             )
             names[(lunarDay - 1).coerceIn(0, 29)]
         }
-    }.getOrDefault("")
+    }.getOrDefault("").also { lunarDateCache.put(key, it) }
 }

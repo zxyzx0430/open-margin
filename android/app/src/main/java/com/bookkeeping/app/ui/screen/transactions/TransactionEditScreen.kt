@@ -1,7 +1,6 @@
 package com.bookkeeping.app.ui.screen.transactions
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +36,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -54,10 +52,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
+import com.bookkeeping.app.ui.components.QingSegmentedControl
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.qingColors
 import com.bookkeeping.app.capture.screenshot.ReceiptEvidenceStore
 import com.bookkeeping.app.data.local.entity.TransactionCategory
 import com.bookkeeping.app.data.local.entity.TransactionEntity
@@ -204,25 +207,18 @@ fun TransactionEditScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        OutlinedButton(
+                        TextButton(
                             onClick = onDelete,
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error,
-                            ),
                             modifier = Modifier.height(44.dp),
                         ) {
-                            Text(tr("删除"), maxLines = 1)
+                            Text(tr("删除"), color = MaterialTheme.colorScheme.error, maxLines = 1)
                         }
                         Spacer(Modifier.weight(1f))
-                        OutlinedButton(
+                        TextButton(
                             onClick = onCancel,
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             modifier = Modifier.height(44.dp),
                         ) {
-                            Text(tr("取消"), maxLines = 1)
+                            Text(tr("取消"), color = qingColors.textSecondary, maxLines = 1)
                         }
                         Button(
                             onClick = { fields?.let(onSave) },
@@ -237,12 +233,13 @@ fun TransactionEditScreen(
             }
         },
     ) { innerPadding ->
+        val colors = qingColors
         val fieldShape = RoundedCornerShape(14.dp)
         val fieldColors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = MaterialTheme.colorScheme.primary,
-            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-            focusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+            focusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = Color.Transparent,
+            focusedContainerColor = colors.surfaceElevated,
+            unfocusedContainerColor = colors.surfaceElevated,
         )
         Column(
             modifier = Modifier
@@ -254,29 +251,20 @@ fun TransactionEditScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // 收支类型
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
+            WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     FieldLabel(tr("收支类型"))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        EditPillChip(
-                            label = tr("支出"),
-                            selected = selectedType == TransactionType.EXPENSE,
-                            onClick = { selectedType = TransactionType.EXPENSE },
-                        )
-                        EditPillChip(
-                            label = tr("收入"),
-                            selected = selectedType == TransactionType.INCOME,
-                            onClick = { selectedType = TransactionType.INCOME },
-                        )
-                    }
+                    QingSegmentedControl(
+                        labels = listOf(tr("支出"), tr("收入")),
+                        selectedIndex = if (selectedType == TransactionType.EXPENSE) 0 else 1,
+                        onSelect = { idx ->
+                            selectedType = if (idx == 0) TransactionType.EXPENSE else TransactionType.INCOME
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
 
@@ -378,35 +366,51 @@ fun TransactionEditScreen(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FieldLabel(tr("发生时间"))
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(
-                        onClick = { showDatePicker = true },
-                        shape = fieldShape,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    Surface(
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp),
+                            .height(46.dp)
+                            .clip(fieldShape)
+                            .clickable { showDatePicker = true },
+                        shape = fieldShape,
+                        color = colors.surfaceElevated,
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CalendarMonth,
-                            contentDescription = null,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("${tr("日期")}：${formatEditDate(timestamp)}", maxLines = 1)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.CalendarMonth,
+                                contentDescription = null,
+                                tint = colors.accentPrimary,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("${tr("日期")}：${formatEditDate(timestamp)}", maxLines = 1)
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { showTimePicker = true },
-                        shape = fieldShape,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    Surface(
                         modifier = Modifier
                             .weight(1f)
-                            .height(46.dp),
+                            .height(46.dp)
+                            .clip(fieldShape)
+                            .clickable { showTimePicker = true },
+                        shape = fieldShape,
+                        color = colors.surfaceElevated,
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Schedule,
-                            contentDescription = null,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("${tr("时间")}：${formatEditTime(timestamp)}", maxLines = 1)
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Schedule,
+                                contentDescription = null,
+                                tint = colors.accentPrimary,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("${tr("时间")}：${formatEditTime(timestamp)}", maxLines = 1)
+                        }
                     }
                 }
                 errors.timestamp?.let {
@@ -430,22 +434,17 @@ fun TransactionEditScreen(
                 error = errors.reviewStatus,
             )
 
-            // 只读信息：证明这条记录是谁、同步到哪一步、有没有待上传改动。
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
+            // 只读信息：弱化收拢到底部，保持详情/编辑一致的安静感。
+            WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
                         text = tr("记录信息"),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.textSecondary,
                     )
                     ReadOnlyField(
                         tr("记录 ID 后 6 位"),
@@ -525,22 +524,17 @@ private fun EditPillChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val colors = qingColors
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(50),
         color = if (selected) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            colors.surfaceElevated
         },
-        border = BorderStroke(
-            width = 1.dp,
-            color = if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.outlineVariant
-            },
-        ),
     ) {
         Text(
             text = label,
@@ -549,7 +543,7 @@ private fun EditPillChip(
             color = if (selected) {
                 MaterialTheme.colorScheme.onPrimaryContainer
             } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+                colors.textSecondary
             },
             maxLines = 1,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -568,23 +562,17 @@ private fun <T> ChoiceField(
     error: String? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val colors = qingColors
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         FieldLabel(label)
         Box(modifier = Modifier.fillMaxWidth()) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
                     .clickable { expanded = true },
                 shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(
-                    width = 1.dp,
-                    color = if (error != null) {
-                        MaterialTheme.colorScheme.error
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
-                    },
-                ),
+                color = colors.surfaceElevated,
             ) {
                 Row(
                     modifier = Modifier

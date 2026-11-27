@@ -1,5 +1,6 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -13,7 +14,6 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -197,7 +197,7 @@ internal fun ScreenshotCaptureCard() {
             },
         )
         if (confirmingClearEvidence) {
-            AlertDialog(
+            QingConfirmationSheet(
                 onDismissRequest = { confirmingClearEvidence = false },
                 title = { Text(tr("清理扫描原图缓存？")) },
                 text = { Text(tr("将删除本地归档的扫描原图（约 %s），已记入的账单记录不会受影响。").format(formatEvidenceBytes(evidenceBytes))) },

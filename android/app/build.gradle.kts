@@ -17,10 +17,11 @@ android {
         // Stable v1.2.0: all capture/import/classification/UI work plus the
         // rc.13 startup and duplicate-notification fixes.
         // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.3.0).
-        versionCode = 57
-        versionName = "1.47.9"
+        versionCode = 61
+        versionName = "1.48.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["openMarginProfileable"] = "false"
 
         // 主动截图监听（MediaStore 新截图）默认关闭；GitHub 实验版构建显式开启；
         // Play 不传该参数。分享与选图不受影响。
@@ -45,12 +46,22 @@ android {
             // Different Actions runners produce different debug signing keys.
             // Keep the original installed app/data untouched during migration.
             applicationIdSuffix = ".sync3"
+            // Opt-in performance preview retains the test package/signing key.
+            // Do not change the default debug/CI instrumentation variant.
+            if (providers.gradleProperty("openMarginPerformancePreview").orNull == "true") {
+                isDebuggable = false
+                manifestPlaceholders["openMarginProfileable"] = "true"
+                signingConfig = signingConfigs.getByName("debug")
+                isMinifyEnabled = true
+                proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            }
             resValue("string", "app_name", "清衡测试")
             resValue("string", "page_recognition_service_label", "清衡测试 · 页面识别")
             resValue("string", "accessibility_fallback_service_label", "清衡测试 · 转账红包兜底")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = providers.gradleProperty("openMarginReleaseR8").orNull == "true"
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // ABI 已在 defaultConfig 里收敛到 arm64-v8a（release 与 debug 一致）。
         }
     }
@@ -102,6 +113,8 @@ dependencies {
 
     // Navigation Compose
     implementation(libs.androidx.navigation.compose)
+
+    implementation("androidx.profileinstaller:profileinstaller:1.4.0")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

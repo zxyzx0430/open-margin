@@ -58,6 +58,10 @@ class MainActivity : AppCompatActivity() {
             },
         )
 
+        // Preserve edge-to-edge navigation; avoid the OS contrast scrim turning
+        // the gesture area into a separate gray pedestal.
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+
         val showNotificationPermissionIntro = shouldShowNotificationPermissionIntro()
 
         // 如果用户开了「常驻通知保活」就启动前台服务。

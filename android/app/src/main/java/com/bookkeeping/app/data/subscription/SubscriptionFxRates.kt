@@ -4,9 +4,15 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.bookkeeping.app.sync.TransactionSyncWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.net.HttpURLConnection
+import java.net.URL
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -79,6 +85,9 @@ class SubscriptionFxRates @Inject constructor(
     private val prefs: SharedPreferences =
         context.getSharedPreferences(TransactionSyncWorker.PREFS, Context.MODE_PRIVATE)
 
+    private val _ratesFlow = MutableStateFlow(currentRates())
+    val ratesFlow: StateFlow<Map<String, Double>> = _ratesFlow
+
     fun currentRates(): Map<String, Double> =
         SubscriptionFxRatesCalculator.parseRatesJson(
             prefs.getString(SubscriptionFxRatesCalculator.PREFS_KEY_FX_RATES, null),
@@ -91,6 +100,46 @@ class SubscriptionFxRates @Inject constructor(
                 SubscriptionFxRatesCalculator.encodeRatesJson(rates),
             )
             .apply()
+        _ratesFlow.value = SubscriptionFxRatesCalculator.parseRatesJson(
+            SubscriptionFxRatesCalculator.encodeRatesJson(rates),
+        )
+    }
+
+    suspend fun refreshIfStale(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
+        val lastUpdated = prefs.getLong(PREFS_KEY_FX_UPDATED_MS, 0L)
+        val now = System.currentTimeMillis()
+        if (!force && now - lastUpdated < FX_CACHE_TTL_MS) return@withContext false
+
+        runCatching {
+            val conn = (URL("https://open.er-api.com/v6/latest/CNY").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6_000
+                readTimeout = 6_000
+                requestMethod = "GET"
+            }
+            try {
+                if (conn.responseCode !in 200..299) return@withContext false
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val ratesObj = JSONObject(body).optJSONObject("rates") ?: return@withContext false
+                val merged = currentRates().toMutableMap()
+                for (code in listOf("USD", "HKD", "EUR", "JPY", "GBP")) {
+                    val perCny = ratesObj.optDouble(code, Double.NaN)
+                    if (perCny.isFinite() && perCny > 0.0) {
+                        merged[code] = 1.0 / perCny
+                    }
+                }
+                merged["CNY"] = 1.0
+                updateRates(merged)
+                prefs.edit().putLong(PREFS_KEY_FX_UPDATED_MS, now).apply()
+                true
+            } finally {
+                conn.disconnect()
+            }
+        }.getOrDefault(false)
+    }
+
+    companion object {
+        private const val PREFS_KEY_FX_UPDATED_MS = "subscription_fx_rates_updated_ms"
+        private const val FX_CACHE_TTL_MS = 6L * 60L * 60L * 1000L
     }
 
     fun updateRatesFromJson(json: JSONObject?) {

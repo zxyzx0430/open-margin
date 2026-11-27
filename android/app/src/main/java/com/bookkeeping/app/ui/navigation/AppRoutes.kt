@@ -17,6 +17,9 @@ object AppRoutes {
     const val MERCHANT_RULES_ROUTE = "merchant-rules?cleanup={cleanup}"
     const val MERCHANT_RULES_CLEANUP_ARG = "cleanup"
 
+    /** 商户图标管理全屏子页：从设置进入，返回回设置。 */
+    const val MERCHANT_ICONS = "merchant-icons"
+
     /** 同步状态与配置使用同一独立页面，返回回到原设置页。 */
     const val SYNC_SETTINGS = "sync-settings"
 

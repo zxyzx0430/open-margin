@@ -4,7 +4,7 @@
 .finance-native-heading,.finance-line{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
 .finance-native-heading h2{margin:0!important;}
 .finance-native-heading label{font-size:12px;display:flex;gap:8px;align-items:center;color:var(--fin-muted);}
-.finance-native-heading input{min-height:37px;padding:6px 10px;border:1px solid var(--om-field-border,var(--fin-border));background:var(--fin-panel);border-radius:var(--om-radius-sm,10px);color:var(--fin-fg);max-width:165px;}
+.finance-native-heading input{min-height:37px;padding:6px 10px;border:1px solid var(--om-field-border,var(--fin-border));background:var(--fin-panel);border-radius:var(--om-radius-md,10px);color:var(--fin-fg);max-width:165px;}
 .finance-hint{font-size:12px;color:var(--fin-muted);margin:8px 0 14px;line-height:1.5;}
 .finance-metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:12px 0;}
 .finance-metric{display:flex;flex-direction:column;align-items:flex-start;gap:8px;min-width:0;padding:18px;border:1px solid var(--fin-border);border-radius:var(--om-radius,16px);color:var(--fin-fg);background:var(--fin-panel);box-shadow:var(--om-shadow,none);font:inherit;text-align:left;transition:border-color .15s ease,box-shadow .15s ease;}
@@ -17,8 +17,8 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
 .finance-progress>div{height:100%;background:var(--fin-accent);border-radius:999px;max-width:100%;transition:width .2s ease;}
 .finance-budget-form{display:flex;align-items:flex-end;gap:10px;margin-top:12px;flex-wrap:wrap;}
 .finance-budget-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--fin-muted);}
-.finance-budget-form input{width:150px;min-height:36px;border:1px solid var(--om-field-border,var(--fin-border));background:var(--fin-panel);color:var(--fin-fg);border-radius:var(--om-radius-sm,10px);padding:6px 10px;}
-.finance-budget-form button,.finance-tab,.finance-switch button,.finance-category-row,.finance-day-chip{background:var(--fin-panel);border:1px solid var(--fin-border);border-radius:var(--om-radius-sm,10px);color:var(--fin-fg);padding:8px 14px;cursor:pointer;font:inherit;}
+.finance-budget-form input{width:150px;min-height:36px;border:1px solid var(--om-field-border,var(--fin-border));background:var(--fin-panel);color:var(--fin-fg);border-radius:var(--om-radius-md,10px);padding:6px 10px;}
+.finance-budget-form button,.finance-tab,.finance-switch button,.finance-category-row,.finance-day-chip{background:var(--fin-panel);border:1px solid var(--fin-border);border-radius:var(--om-radius-md,10px);color:var(--fin-fg);padding:8px 14px;cursor:pointer;font:inherit;}
 .finance-budget-form button{background:var(--fin-accent);color:white;border-color:var(--fin-accent);font-weight:600;}
 .finance-switch{display:inline-flex;gap:4px;background:var(--om-surface-variant,#F0F2F0);padding:3px;border-radius:var(--om-radius-pill,999px);border:1px solid var(--fin-border);}
 .finance-switch button{font-size:12px;min-width:54px;border:0;background:transparent;border-radius:var(--om-radius-pill,999px);padding:6px 12px;}
@@ -32,7 +32,7 @@ button.finance-metric:hover,button.finance-metric:focus-visible{border-color:var
 .finance-category-track{height:9px;border-radius:999px;background:color-mix(in srgb,var(--fin-accent) 12%,transparent);overflow:hidden;}
 .finance-category-fill{display:block;height:100%;background:var(--fin-accent);border-radius:999px;}
 .finance-subscriptions{display:flex;flex-direction:column;gap:10px;}
-.finance-subscription{padding:12px 14px;border:1px solid var(--fin-border);border-radius:var(--om-radius-sm,10px);display:flex;justify-content:space-between;gap:10px;align-items:center;background:var(--fin-panel);}
+.finance-subscription{padding:12px 14px;border:1px solid var(--fin-border);border-radius:var(--om-radius-md,10px);display:flex;justify-content:space-between;gap:10px;align-items:center;background:var(--fin-panel);}
 .finance-subscription button{border:0;background:none;color:var(--fin-accent);cursor:pointer;text-align:left;font:inherit;font-weight:600;}
 .finance-calendar-amount{display:block;font-size:11px;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums;color:var(--main-color);}
 .finance-calendar-day[data-finance-day]{cursor:pointer;}

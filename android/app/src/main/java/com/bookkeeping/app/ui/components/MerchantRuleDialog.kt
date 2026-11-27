@@ -1,5 +1,8 @@
 package com.bookkeeping.app.ui.components
 
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +56,7 @@ fun MerchantRuleDialog(
     onSave: (merchant: String, category: TransactionCategory) -> Unit,
     initialCategory: TransactionCategory? = null,
     historyCount: ((String) -> Int)? = null,
+    historyLoading: Boolean = false,
     onSaveWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -65,9 +69,14 @@ fun MerchantRuleDialog(
     val trimmedMerchant = merchantName.trim()
     val placeholderMerchant = trimmedMerchant.isNotEmpty() && isCleanupSingletonMerchant(trimmedMerchant)
     val validMerchant = trimmedMerchant.isNotEmpty() && !placeholderMerchant
-    val matchingHistoryCount = remember(trimmedMerchant, validMerchant, historyCount) {
-        if (!validMerchant || historyCount == null) 0 else historyCount(trimmedMerchant).coerceAtLeast(0)
+    val historyResult by produceState<Pair<String, Int>?>(null, trimmedMerchant, validMerchant, historyCount) {
+        value = null
+        val count = if (!validMerchant || historyCount == null) 0
+            else withContext(Dispatchers.Default) { historyCount(trimmedMerchant).coerceAtLeast(0) }
+        value = trimmedMerchant to count
     }
+    val matchingHistoryCount = historyResult?.takeIf { it.first == trimmedMerchant }?.second ?: 0
+    val historyPending = historyLoading || (historyCount != null && historyResult?.first != trimmedMerchant)
     val canUpdateHistory =
         onSaveWithHistory != null &&
             matchingHistoryCount > 0 &&
@@ -189,7 +198,7 @@ fun MerchantRuleDialog(
                             onSave(trimmedMerchant, category)
                         }
                     },
-                    enabled = validMerchant && selectedCategory != null,
+                    enabled = validMerchant && selectedCategory != null && !historyPending,
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),

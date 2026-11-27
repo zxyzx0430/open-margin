@@ -49,27 +49,27 @@ class CalendarViewModel @Inject constructor(
 
     private val _selectedMonthKey = MutableStateFlow(BudgetMonth.currentKey())
 
-    val transactions: StateFlow<List<TransactionEntity>> = repository.observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val transactions: StateFlow<List<TransactionEntity>> = repository.observeUiTransactions()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
+
+    internal val indexedTransactions: StateFlow<CalendarLedgerSnapshot> = transactions
+        .map { rows ->
+            CalendarLedgerSnapshot(rows, rows.asSequence().filterNot { it.syncDeleted }.groupBy { dateOf(it.timestamp) })
+        }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), CalendarLedgerSnapshot())
 
     val allSubscriptions: StateFlow<List<SubscriptionEntity>> = subscriptionRepository.observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
     private val activeSubscriptions: StateFlow<List<SubscriptionEntity>> =
         subscriptionRepository.observeActive()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyList())
 
-    val fxRates: StateFlow<Map<String, Double>> = activeSubscriptions
-        .map { fxRatesStore.currentRates() }
-        .stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5_000),
-            SubscriptionFxRatesCalculator.DEFAULT_RATES,
-        )
+    val fxRates: StateFlow<Map<String, Double>> = fxRatesStore.ratesFlow
 
     val activeSubscriptionCount: StateFlow<Int> = activeSubscriptions
         .map { it.size }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0)
 
     val recurringCandidateCount: StateFlow<Int> = combine(
         transactions,
@@ -83,7 +83,7 @@ class CalendarViewModel @Inject constructor(
         ).size
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), 0)
 
     val monthlyOccurrencesByDay: StateFlow<Map<Int, List<SubscriptionOccurrence>>> = combine(
         _selectedMonthKey,
@@ -122,7 +122,7 @@ class CalendarViewModel @Inject constructor(
             .groupBy { it.dayOfMonth }
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyMap())
 
     val monthlyRenewalSummary: StateFlow<MonthlyRenewalSummary> = monthlyOccurrencesByDay
         .map { byDay ->
@@ -133,7 +133,7 @@ class CalendarViewModel @Inject constructor(
                 remainingUnpaidCnyCents = all.filter { !it.isPaidInCycle }.sumOf { it.cnyAmountCents },
             )
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MonthlyRenewalSummary())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), MonthlyRenewalSummary())
 
     val historyStatsBySubscriptionId: StateFlow<Map<Long, SubscriptionHistoryStats>> = combine(
         allSubscriptions,
@@ -151,7 +151,7 @@ class CalendarViewModel @Inject constructor(
         }
     }
         .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(30_000), emptyMap())
 
     fun setMonthKey(monthKey: String) {
         if (BudgetMonth.isValid(monthKey)) {
@@ -219,3 +219,8 @@ class CalendarViewModel @Inject constructor(
         }
     }
 }
+
+internal data class CalendarLedgerSnapshot(
+    val rows: List<TransactionEntity> = emptyList(),
+    val byDate: Map<CalendarDate, List<TransactionEntity>> = emptyMap(),
+)

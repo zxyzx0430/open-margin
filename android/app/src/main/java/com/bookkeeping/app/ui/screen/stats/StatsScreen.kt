@@ -1,7 +1,29 @@
 package com.bookkeeping.app.ui.screen.stats
 
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.bookkeeping.app.ui.components.QingSegmentedControl
+
+import androidx.compose.foundation.lazy.rememberLazyListState
+
+import com.bookkeeping.app.ui.components.QingLargeTitle
+
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
+import com.bookkeeping.app.ui.theme.QingTypeTokens
+import com.bookkeeping.app.ui.theme.qingColors
 import android.graphics.Paint
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,14 +65,12 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.EventRepeat
 import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -131,23 +151,25 @@ fun StatsScreen(
     viewModel: StatsViewModel = hiltViewModel(),
 ) {
     val selectedTab by viewModel.selectedTab.collectAsState()
-    val stats by viewModel.categoryStats.collectAsState()
-    val accountStats by viewModel.accountStats.collectAsState()
-    val isAccountMostlyUncategorized by viewModel.isAccountMostlyUncategorized.collectAsState()
-    val subscriptionStats by viewModel.subscriptionStats.collectAsState()
-    val totalCents by viewModel.totalCents.collectAsState()
-    val balanceCents by viewModel.balanceCents.collectAsState()
-    val viewingType by viewModel.viewingType.collectAsState()
-    val dailyTotals by viewModel.dailyTotals.collectAsState()
-    val selectedMonth by viewModel.selectedMonth.collectAsState()
-    val dailyAverage by viewModel.dailyAverageCents.collectAsState()
-    val comparison by viewModel.previousComparison.collectAsState()
     val period by viewModel.period.collectAsState()
+    val isFinancial = selectedTab != StatsTab.SUBSCRIPTION
+    val core = if (isFinancial) viewModel.coreUiState.collectAsState().value else viewModel.coreUiState.value
+    val stats = core.categories
+    val accountStats = core.accounts
+    val isAccountMostlyUncategorized = core.mostlyUncategorized
+    val subscriptionStats = if (!isFinancial) viewModel.subscriptionStats.collectAsState().value else viewModel.subscriptionStats.value
+    val totalCents = core.totalCents
+    val balanceCents = core.balanceCents
+    val viewingType by viewModel.viewingType.collectAsState()
+    val dailyTotals = if (isFinancial && period == StatsPeriod.MONTH) viewModel.dailyTotals.collectAsState().value else emptyList()
+    val selectedMonth by viewModel.selectedMonth.collectAsState()
+    val dailyAverage = if (isFinancial) viewModel.dailyAverageCents.collectAsState().value else viewModel.dailyAverageCents.value
+    val comparison = if (isFinancial) viewModel.previousComparison.collectAsState().value else viewModel.previousComparison.value
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedDate by viewModel.selectedDate.collectAsState()
-    val selectedDaySummary by viewModel.selectedDaySummary.collectAsState()
-    val monthlyTotals by viewModel.monthlyTotals.collectAsState()
-    val periodTransactions by viewModel.periodTransactions.collectAsState()
+    val selectedDaySummary = if (isFinancial && period == StatsPeriod.DAY) viewModel.selectedDaySummary.collectAsState().value else viewModel.selectedDaySummary.value
+    val monthlyTotals = if (isFinancial && period == StatsPeriod.YEAR) viewModel.monthlyTotals.collectAsState().value else emptyList()
+    val periodTransactions = core.rows
 
     var showMonthPicker by remember { mutableStateOf(false) }
     var showDayPicker by remember { mutableStateOf(false) }
@@ -179,31 +201,20 @@ fun StatsScreen(
         )
     }
 
+    val statsListState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(statsListState)
     Scaffold(
+        modifier = Modifier.nestedScroll(titleCollapse.connection),
         containerColor = QingBackground,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = QingBackground,
-                    titleContentColor = QingText,
-                ),
-                title = {
-                    Text(
-                        text = tr("统计"),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
-            )
-        },
+        topBar = { QingLargeTitle(tr("统计"), titleCollapse) },
     ) { innerPadding ->
         LazyColumn(
+            state = statsListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "stats_tab_bar") {
@@ -213,149 +224,136 @@ fun StatsScreen(
                 )
             }
 
-            if (selectedTab != StatsTab.SUBSCRIPTION) {
-                item(key = "compact_period_bar") {
-                    CompactPeriodFilterBar(
-                        period = period,
-                        selectedMonth = selectedMonth,
-                        selectedYear = selectedYear,
-                        selectedDate = selectedDate,
-                        onSelectPeriod = viewModel::setPeriod,
-                        onOpenMonthPicker = { showMonthPicker = true },
-                        onPreviousYear = { viewModel.shiftYear(-1) },
-                        onNextYear = { viewModel.shiftYear(1) },
-                        onPreviousDay = { viewModel.shiftDay(-1) },
-                        onNextDay = { viewModel.shiftDay(1) },
-                        onOpenDayPicker = { showDayPicker = true },
-                    )
-                }
-                item(key = "summary") {
-                    if (period == StatsPeriod.DAY) {
-                        DayStatsSummaryCard(
-                            summary = selectedDaySummary,
-                        )
-                    } else {
-                        StatsSummaryCard(
-                            totalCents = totalCents,
-                            dailyAverageCents = dailyAverage,
-                            balanceCents = balanceCents,
-                            comparison = comparison,
-                            type = viewingType,
-                            period = period,
-                        )
-                    }
-                }
-                if (stats.isEmpty()) {
-                    item(key = "empty") {
-                        EmptyStatsCard(
-                            type = viewingType,
-                            period = period,
-                            onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
-                        )
-                    }
-                } else {
-                    item(key = "donut") {
-                        CategoryDonutCard(
-                            stats = stats,
-                            totalCents = totalCents,
-                            type = viewingType,
-                            onCategoryClick = { selectedCategory = it },
-                        )
-                    }
-                    if (isAccountMostlyUncategorized) {
-                        item(key = "account_distribution_hint") {
-                            CollapsedAccountDistributionHint()
-                        }
-                    } else if (accountStats.isNotEmpty()) {
-                        item(key = "account_distribution") {
-                            AccountDistributionCard(
-                                accountStats = accountStats,
-                                type = viewingType,
-                                expanded = accountsExpanded,
-                                onToggleExpanded = { accountsExpanded = !accountsExpanded },
-                                onAccountClick = { accountKey ->
-                                    onOpenLedger(ledgerDrilldown(account = accountKey))
-                                },
+            item(key = "stats_tab_body") {
+                val decel = remember { CubicBezierEasing(0.22f, 1f, 0.36f, 1f) }
+                AnimatedContent(
+                    targetState = selectedTab,
+                    label = "stats_tab_transition",
+                    transitionSpec = {
+                        val dir = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                        (slideInHorizontally(tween(160, easing = decel)) { (it * 0.06f * dir).toInt() } +
+                            fadeIn(tween(160, easing = decel))) togetherWith
+                            (slideOutHorizontally(tween(130, easing = decel)) { -(it * 0.04f * dir).toInt() } +
+                                fadeOut(tween(130, easing = decel)))
+                    },
+                ) { tab ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (tab != StatsTab.SUBSCRIPTION) {
+                            CompactPeriodFilterBar(
+                                period = period,
+                                selectedMonth = selectedMonth,
+                                selectedYear = selectedYear,
+                                selectedDate = selectedDate,
+                                onSelectPeriod = viewModel::setPeriod,
+                                onOpenMonthPicker = { showMonthPicker = true },
+                                onPreviousYear = { viewModel.shiftYear(-1) },
+                                onNextYear = { viewModel.shiftYear(1) },
+                                onPreviousDay = { viewModel.shiftDay(-1) },
+                                onNextDay = { viewModel.shiftDay(1) },
+                                onOpenDayPicker = { showDayPicker = true },
                             )
-                        }
-                    }
-                    when (period) {
-                        StatsPeriod.MONTH -> item(key = "daily_trend") {
-                            DailyTrendCard(
-                                dailyTotals = dailyTotals,
-                                dailyAverageCents = dailyAverage,
-                                monthKey = selectedMonth,
-                                onOpenLedger = { day ->
-                                    selectedTrendDay = day
-                                },
-                            )
-                        }
-                        StatsPeriod.YEAR -> item(key = "monthly_trend") {
-                            MonthlyTrendCard(
-                                monthlyTotals = monthlyTotals,
-                                year = selectedYear,
-                                type = viewingType,
-                            )
-                        }
-                        StatsPeriod.DAY -> Unit
-                    }
-                }
-            } else {
-                if (subscriptionStats.activeCount == 0) {
-                    item(key = "subscription_empty") {
-                        SubscriptionEmptyGuideCard(
-                            recurringCandidateCount = subscriptionStats.recurringCandidateCount,
-                            onDiscoverClick = { onOpenSubscriptions(false) },
-                            onAddClick = { onOpenSubscriptions(false) },
-                        )
-                    }
-                } else {
-                    item(key = "subscription_summary") {
-                        SubscriptionSummaryCard(
-                            state = subscriptionStats,
-                            onOpenAllSubscriptions = { onOpenSubscriptions(false) },
-                        )
-                    }
-                    item(key = "subscription_structure") {
-                        SubscriptionStructureGrid(state = subscriptionStats)
-                    }
-                    if (subscriptionStats.pendingCancelCount > 0) {
-                        item(key = "subscription_pending_cancel") {
-                            SubscriptionPendingCancelBanner(
-                                pendingCancelCount = subscriptionStats.pendingCancelCount,
-                                monthlySavingsCents = subscriptionStats.pendingCancelMonthlySavingsCents,
-                                onClick = { onOpenSubscriptions(true) },
-                            )
-                        }
-                    }
-                    item(key = "subscription_forecast") {
-                        SubscriptionForecastCard(
-                            forecast = subscriptionStats.forecast12Months,
-                            peakMonth = subscriptionStats.peakMonth,
-                        )
-                    }
-                    if (subscriptionStats.topSubscriptions.isNotEmpty()) {
-                        item(key = "subscription_ranking") {
-                            SubscriptionRankingCard(
-                                items = subscriptionStats.topSubscriptions,
-                                onOpenAll = { onOpenSubscriptions(false) },
-                            )
-                        }
-                    }
-                    if (subscriptionStats.channelBreakdown.isNotEmpty()) {
-                        item(key = "subscription_channel_breakdown") {
-                            SubscriptionBreakdownCard(
-                                title = bilingual("按扣款渠道分布", "By Payment Channel"),
-                                items = subscriptionStats.channelBreakdown,
-                            )
-                        }
-                    }
-                    if (subscriptionStats.cadenceBreakdown.isNotEmpty()) {
-                        item(key = "subscription_cadence_breakdown") {
-                            SubscriptionBreakdownCard(
-                                title = bilingual("按周期分布", "By Billing Cycle"),
-                                items = subscriptionStats.cadenceBreakdown,
-                            )
+                            if (period == StatsPeriod.DAY) {
+                                DayStatsSummaryCard(
+                                    summary = selectedDaySummary,
+                                )
+                            } else {
+                                StatsSummaryCard(
+                                    totalCents = totalCents,
+                                    dailyAverageCents = dailyAverage,
+                                    balanceCents = balanceCents,
+                                    comparison = comparison,
+                                    type = viewingType,
+                                    period = period,
+                                )
+                            }
+                            if (stats.isEmpty()) {
+                                EmptyStatsCard(
+                                    type = viewingType,
+                                    period = period,
+                                    onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
+                                )
+                            } else {
+                                CategoryDonutCard(
+                                    stats = stats,
+                                    totalCents = totalCents,
+                                    type = viewingType,
+                                    onCategoryClick = { selectedCategory = it },
+                                )
+                                if (isAccountMostlyUncategorized) {
+                                    CollapsedAccountDistributionHint()
+                                } else if (accountStats.isNotEmpty()) {
+                                    AccountDistributionCard(
+                                        accountStats = accountStats,
+                                        type = viewingType,
+                                        expanded = accountsExpanded,
+                                        onToggleExpanded = { accountsExpanded = !accountsExpanded },
+                                        onAccountClick = { accountKey ->
+                                            onOpenLedger(ledgerDrilldown(account = accountKey))
+                                        },
+                                    )
+                                }
+                                when (period) {
+                                    StatsPeriod.MONTH -> DailyTrendCard(
+                                        dailyTotals = dailyTotals,
+                                        dailyAverageCents = dailyAverage,
+                                        monthKey = selectedMonth,
+                                        onOpenLedger = { day ->
+                                            selectedTrendDay = day
+                                        },
+                                    )
+                                    StatsPeriod.YEAR -> MonthlyTrendCard(
+                                        monthlyTotals = monthlyTotals,
+                                        year = selectedYear,
+                                        type = viewingType,
+                                    )
+                                    StatsPeriod.DAY -> Unit
+                                }
+                            }
+                        } else {
+                            if (subscriptionStats.activeCount == 0) {
+                                SubscriptionEmptyGuideCard(
+                                    recurringCandidateCount = subscriptionStats.recurringCandidateCount,
+                                    onDiscoverClick = { onOpenSubscriptions(false) },
+                                    onAddClick = { onOpenSubscriptions(false) },
+                                )
+                            } else {
+                                SubscriptionSummaryCard(
+                                    state = subscriptionStats,
+                                    onOpenAllSubscriptions = { onOpenSubscriptions(false) },
+                                )
+                                if (subscriptionStats.pendingCancelCount > 0) {
+                                    SubscriptionPendingCancelBanner(
+                                        pendingCancelCount = subscriptionStats.pendingCancelCount,
+                                        monthlySavingsCents = subscriptionStats.pendingCancelMonthlySavingsCents,
+                                        onClick = { onOpenSubscriptions(true) },
+                                    )
+                                }
+                                SubscriptionForecastCard(
+                                    forecast = subscriptionStats.forecast12Months,
+                                    peakMonth = subscriptionStats.peakMonth,
+                                )
+                                if (subscriptionStats.topSubscriptions.isNotEmpty()) {
+                                    SubscriptionRankingCard(
+                                        items = subscriptionStats.topSubscriptions,
+                                        onOpenAll = { onOpenSubscriptions(false) },
+                                    )
+                                }
+                                if (subscriptionStats.channelBreakdown.isNotEmpty()) {
+                                    SubscriptionBreakdownCard(
+                                        title = bilingual("按扣款渠道分布", "By Payment Channel"),
+                                        items = subscriptionStats.channelBreakdown,
+                                    )
+                                }
+                                if (subscriptionStats.cadenceBreakdown.isNotEmpty()) {
+                                    SubscriptionBreakdownCard(
+                                        title = bilingual("按周期分布", "By Billing Cycle"),
+                                        items = subscriptionStats.cadenceBreakdown,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -444,79 +442,10 @@ fun StatsScreen(
 }
 
 @Composable
-private fun StatsTabBar(
-    selected: StatsTab,
-    onSelect: (StatsTab) -> Unit,
-) {
-    val shape = RoundedCornerShape(14.dp)
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        color = QingSurface,
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .selectableGroup()
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StatsTabSegment(
-                text = tr("支出"),
-                selected = selected == StatsTab.EXPENSE,
-                onClick = { onSelect(StatsTab.EXPENSE) },
-                modifier = Modifier.weight(1f),
-            )
-            StatsTabSegment(
-                text = tr("收入"),
-                selected = selected == StatsTab.INCOME,
-                onClick = { onSelect(StatsTab.INCOME) },
-                modifier = Modifier.weight(1f),
-            )
-            StatsTabSegment(
-                text = bilingual("订阅", "Subscriptions"),
-                selected = selected == StatsTab.SUBSCRIPTION,
-                onClick = { onSelect(StatsTab.SUBSCRIPTION) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun StatsTabSegment(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val pillShape = RoundedCornerShape(10.dp)
-    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
-    Box(
-        modifier = modifier
-            .heightIn(min = 38.dp)
-            .clip(pillShape)
-            .background(if (selected) QingPrimary else Color.Transparent)
-            .selectable(
-                selected = selected,
-                role = Role.Tab,
-                onClick = onClick,
-            )
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = foreground,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
+private fun StatsTabBar(selected: StatsTab, onSelect: (StatsTab) -> Unit) {
+    val options = listOf(StatsTab.EXPENSE, StatsTab.INCOME, StatsTab.SUBSCRIPTION)
+    QingSegmentedControl(listOf(tr("支出"), tr("收入"), tr("订阅")), options.indexOf(selected),
+        { onSelect(options[it]) }, Modifier.fillMaxWidth())
 }
 
 @Composable
@@ -564,72 +493,10 @@ private fun CompactPeriodFilterBar(
 }
 
 @Composable
-private fun CompactPeriodPillGroup(
-    selected: StatsPeriod,
-    onSelect: (StatsPeriod) -> Unit,
-) {
-    val containerShape = RoundedCornerShape(50)
-    Surface(
-        shape = containerShape,
-        color = QingSurface,
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
-        Row(
-            modifier = Modifier
-                .selectableGroup()
-                .padding(3.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CompactPeriodOption(
-                text = bilingual("日", "Day"),
-                selected = selected == StatsPeriod.DAY,
-                onClick = { onSelect(StatsPeriod.DAY) },
-            )
-            CompactPeriodOption(
-                text = bilingual("月", "Mo"),
-                selected = selected == StatsPeriod.MONTH,
-                onClick = { onSelect(StatsPeriod.MONTH) },
-            )
-            CompactPeriodOption(
-                text = bilingual("年", "Yr"),
-                selected = selected == StatsPeriod.YEAR,
-                onClick = { onSelect(StatsPeriod.YEAR) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun CompactPeriodOption(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(50)
-    val foreground = if (selected) MaterialTheme.colorScheme.onPrimary else QingTextSecondary
-    Box(
-        modifier = Modifier
-            .heightIn(min = 32.dp)
-            .clip(shape)
-            .background(if (selected) QingPrimary else Color.Transparent)
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp, vertical = 5.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelMedium,
-            color = foreground,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
+private fun CompactPeriodPillGroup(selected: StatsPeriod, onSelect: (StatsPeriod) -> Unit) {
+    val options = listOf(StatsPeriod.DAY, StatsPeriod.MONTH, StatsPeriod.YEAR)
+    QingSegmentedControl(listOf(tr("日"), tr("月"), tr("年")), options.indexOf(selected),
+        { onSelect(options[it]) }, Modifier.width(132.dp))
 }
 
 @Composable
@@ -638,7 +505,6 @@ private fun CollapsedAccountDistributionHint() {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         color = QingSurface,
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Row(
             modifier = Modifier
@@ -675,7 +541,7 @@ private fun AccountDistributionCard(
     onToggleExpanded: () -> Unit,
     onAccountClick: (String) -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(22.dp)
     val hasMore = accountStats.size > AccountAggregation.DEFAULT_VISIBLE_LIMIT
     val visibleStats = if (expanded || !hasMore) {
         accountStats
@@ -686,11 +552,8 @@ private fun AccountDistributionCard(
     val maxTotalCents = accountStats.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
     val activeBarColor = if (type == TransactionType.INCOME) QingIncome else QingPrimary
 
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -817,11 +680,8 @@ private fun SubscriptionEmptyGuideCard(
     onDiscoverClick: () -> Unit,
     onAddClick: () -> Unit,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier
@@ -886,13 +746,16 @@ private fun SubscriptionEmptyGuideCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                OutlinedButton(
+                Button(
                     onClick = onDiscoverClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 44.dp),
                     shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, QingOutline),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = qingColors.surfaceElevated,
+                        contentColor = qingColors.textPrimary,
+                    ),
                 ) {
                     Text(
                         text = if (recurringCandidateCount > 0) {
@@ -918,11 +781,10 @@ private fun SubscriptionSummaryCard(
     onOpenAllSubscriptions: () -> Unit,
 ) {
     val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
-    val forecastTotalCents = state.forecast12Months.sumOf { it.totalCnyCents }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(22.dp))
             .background(QingPrimaryContainer)
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -964,13 +826,28 @@ private fun SubscriptionSummaryCard(
             color = QingPrimaryDeep,
             fontWeight = FontWeight.Bold,
         )
+        HorizontalDivider(
+            color = QingPrimaryDeep.copy(alpha = 0.12f),
+            thickness = 0.5.dp,
+            modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+        )
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.Top,
         ) {
+            SummaryMetric(
+                label = bilingual("在用订阅", "Active"),
+                modifier = Modifier.weight(1f),
+            ) {
+                AutoSizeAmountText(
+                    text = bilingual("${state.activeCount} 项", "${state.activeCount}"),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = QingPrimaryDeep,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Start,
+                )
+            }
             SummaryMetric(
                 label = bilingual("折合年费", "Annualized"),
                 modifier = Modifier.weight(1f),
@@ -984,11 +861,15 @@ private fun SubscriptionSummaryCard(
                 )
             }
             SummaryMetric(
-                label = bilingual("未来12月预计", "Next 12 Months"),
+                label = bilingual("最高月费", "Highest/mo"),
                 modifier = Modifier.weight(1f),
             ) {
                 AutoSizeAmountText(
-                    text = formatCny(forecastTotalCents),
+                    text = if (state.mostExpensiveMonthlyCnyCents > 0L) {
+                        formatCny(state.mostExpensiveMonthlyCnyCents)
+                    } else {
+                        "—"
+                    },
                     style = MaterialTheme.typography.titleMedium,
                     color = QingPrimaryDeep,
                     fontWeight = FontWeight.SemiBold,
@@ -1003,11 +884,8 @@ private fun SubscriptionSummaryCard(
 private fun SubscriptionStructureGrid(
     state: SubscriptionStatsState,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1105,7 +983,6 @@ private fun SubscriptionPendingCancelBanner(
             .clickable(role = Role.Button, onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         color = QingWarningContainer,
-        border = BorderStroke(1.dp, QingWarning.copy(alpha = 0.35f)),
     ) {
         Row(
             modifier = Modifier
@@ -1145,11 +1022,8 @@ private fun SubscriptionRankingCard(
     items: List<SubscriptionRankItem>,
     onOpenAll: () -> Unit,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1241,11 +1115,8 @@ private fun SubscriptionBreakdownCard(
     title: String,
     items: List<SubscriptionBreakdownItem>,
 ) {
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1315,11 +1186,8 @@ private fun SubscriptionForecastCard(
     var selectedIndex by remember(forecast) { mutableIntStateOf(defaultSelectedIndex) }
     val selectedPoint = forecast.getOrNull(selectedIndex)
 
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1362,24 +1230,6 @@ private fun SubscriptionForecastCard(
                     .fillMaxWidth()
                     .height(172.dp),
             )
-            // X-axis month ticks aligned under the 12 forecast bars
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 36.dp, end = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                forecast.forEachIndexed { idx, pt ->
-                    if (idx % 2 == 0 || idx == forecast.lastIndex) {
-                        Text(
-                            text = "${pt.month}月",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (idx == selectedIndex) QingPrimaryDeep else QingTextSecondary,
-                            fontWeight = if (idx == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
-                        )
-                    }
-                }
-            }
             if (selectedPoint != null) {
                 Row(
                     modifier = Modifier
@@ -1495,11 +1345,7 @@ private fun SubscriptionForecastBarChart(
                 point.year == peakMonth.year &&
                 point.month == peakMonth.month
             val isSelected = index == selectedIndex
-            val color = when {
-                isPeak -> peakBarColor
-                isSelected -> selectedBarColor
-                else -> normalBarColor
-            }
+            val color = if (isSelected) selectedBarColor else normalBarColor
             if (barHeight > 0f) {
                 val radius = min(barWidth / 2f, barHeight / 2f)
                 drawRoundRect(
@@ -1540,14 +1386,12 @@ private fun StatsSummaryCard(
         income -> tr("本月总收入")
         else -> tr("本月总支出")
     }
-    val totalColor = if (income) QingIncome else QingExpense
-    val mutedOnContainer = QingPrimaryDeep.copy(alpha = 0.72f)
+    val totalColor = if (income) QingAmountIncome else QingAmountExpense
+    val mutedOnContainer = qingColors.textSecondary
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(QingPrimaryContainer)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
+            .padding(horizontal = 4.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
@@ -1557,7 +1401,7 @@ private fun StatsSummaryCard(
         )
         AutoSizeAmountText(
             text = formatCny(totalCents),
-            style = MaterialTheme.typography.headlineMedium,
+            style = QingTypeTokens.heroAmount,
             color = totalColor,
             fontWeight = FontWeight.Bold,
         )
@@ -1575,7 +1419,7 @@ private fun StatsSummaryCard(
                 AutoSizeAmountText(
                     text = formatCny(dailyAverageCents),
                     style = MaterialTheme.typography.titleMedium,
-                    color = QingPrimaryDeep,
+                    color = qingColors.textPrimary,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Start,
                 )
@@ -1587,7 +1431,7 @@ private fun StatsSummaryCard(
                 AutoSizeAmountText(
                     text = (if (balanceCents >= 0) "+" else "−") + formatCny(abs(balanceCents)),
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (balanceCents >= 0) QingIncome else QingExpense,
+                    color = if (balanceCents >= 0) QingAmountIncome else QingAmountExpense,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Start,
                 )
@@ -1663,11 +1507,9 @@ private fun DayStatsSummaryCard(
 ) {
     val balance = (if (summary.balanceCents >= 0) "+" else "−") +
         formatCny(abs(summary.balanceCents))
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = QingPrimaryContainer),
-        border = BorderStroke(1.dp, QingOutline),
+        hero = true,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
@@ -1680,13 +1522,13 @@ private fun DayStatsSummaryCard(
                 DaySummaryMetric(
                     label = tr("当日支出"),
                     value = if (summary.isLoaded) formatCny(summary.expenseCents) else "—",
-                    color = QingExpense,
+                    color = QingAmountExpense,
                     modifier = Modifier.weight(1f),
                 )
                 DaySummaryMetric(
                     label = tr("当日收入"),
                     value = if (summary.isLoaded) formatCny(summary.incomeCents) else "—",
-                    color = QingIncome,
+                    color = QingAmountIncome,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -1697,7 +1539,7 @@ private fun DayStatsSummaryCard(
                 DaySummaryMetric(
                     label = tr("当日结余"),
                     value = if (summary.isLoaded) balance else "—",
-                    color = if (summary.balanceCents >= 0) QingIncome else QingExpense,
+                    color = if (summary.balanceCents >= 0) QingAmountIncome else QingAmountExpense,
                     modifier = Modifier.weight(1f),
                 )
                 DaySummaryMetric(
@@ -1770,15 +1612,9 @@ private fun CategoryDonutCard(
     var selectedCategory by remember(stats) { mutableStateOf<TransactionCategory?>(null) }
     // 分类明细已经合并进图例，所以图例一次性展示全部，不再折叠。
     val visibleStats = stats
-    val shape = RoundedCornerShape(20.dp)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SectionHeader(tr("分类占比"))
@@ -1793,7 +1629,6 @@ private fun CategoryDonutCard(
                 selectedCategory = selectedCategory,
                 onSliceClick = { selectedCategory = it },
             )
-            HorizontalDivider(color = QingOutline)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 visibleStats.forEach { stat ->
                     CategoryLegendRow(
@@ -1829,8 +1664,8 @@ private fun CategoryLegendRow(stat: CategoryStat, selected: Boolean, onClick: ()
     ) {
         Box(
             modifier = Modifier
-                .size(12.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .size(8.dp)
+                .clip(RoundedCornerShape(50))
                 .background(categoryColor(stat.category)),
         )
         Text(
@@ -1869,15 +1704,9 @@ private fun DailyTrendCard(
     var selectedDay by remember(dailyTotals, monthKey) {
         mutableIntStateOf(dailyTotals.maxByOrNull { it.totalCents }?.day ?: 1)
     }
-    val shape = RoundedCornerShape(20.dp)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
-    ) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(
@@ -1972,14 +1801,11 @@ private fun MonthlyTrendCard(
     type: TransactionType,
 ) {
     if (monthlyTotals.isEmpty()) return
-    val shape = RoundedCornerShape(20.dp)
-    val amountColor = if (type == TransactionType.INCOME) QingIncome else QingExpense
+    val shape = RoundedCornerShape(22.dp)
+    val amountColor = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense
     val maxCents = monthlyTotals.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
-    Card(
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -2062,12 +1888,9 @@ private fun EmptyStatsCard(
     period: StatsPeriod,
     onOpenLedger: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
-    Card(
+    val shape = RoundedCornerShape(22.dp)
+    WalletCardSurface(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = QingSurface),
-        border = BorderStroke(1.dp, QingOutline),
     ) {
         Row(
             modifier = Modifier
@@ -2203,13 +2026,10 @@ private fun CategoryDetailDialog(
                         Icon(Icons.Default.Close, contentDescription = tr("关闭"))
                     }
                 }
-                Card(
+                WalletCardSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = QingSurface),
-                    border = BorderStroke(1.dp, QingOutline),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -2225,7 +2045,7 @@ private fun CategoryDetailDialog(
                             text = formatCny(total),
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
+                            color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,
                         )
                     }
                 }
@@ -2236,13 +2056,16 @@ private fun CategoryDetailDialog(
                             .padding(top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        OutlinedButton(
+                        Button(
                             onClick = onOpenOtherCleanup,
                             modifier = Modifier
                                 .weight(1f)
                                 .heightIn(min = 46.dp),
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, QingOutline),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = qingColors.surfaceElevated,
+                                contentColor = qingColors.textPrimary,
+                            ),
                         ) {
                             Text(
                                 text = tr("批量整理其他分类"),
@@ -2365,13 +2188,10 @@ private fun DayDetailDialog(
                         Icon(Icons.Default.Close, contentDescription = tr("关闭"))
                     }
                 }
-                Card(
+                WalletCardSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 12.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = QingSurface),
-                    border = BorderStroke(1.dp, QingOutline),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
@@ -2383,7 +2203,7 @@ private fun DayDetailDialog(
                             text = formatCny(total),
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (type == TransactionType.INCOME) QingIncome else QingExpense,
+                            color = if (type == TransactionType.INCOME) QingAmountIncome else QingAmountExpense,
                         )
                     }
                 }
@@ -2449,7 +2269,7 @@ private fun DayDetailDialog(
                                         formatCny(transaction.amountCents),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (type == TransactionType.EXPENSE) QingExpense else QingIncome,
+                                    color = if (type == TransactionType.EXPENSE) QingAmountExpense else QingAmountIncome,
                                 )
                             }
                         }
@@ -2504,7 +2324,7 @@ private fun CategoryDetailTransactionRow(
             text = (if (type == TransactionType.EXPENSE) "−" else "+") +
                 formatCny(transaction.amountCents),
             style = MaterialTheme.typography.titleSmall,
-            color = if (type == TransactionType.EXPENSE) QingExpense else QingIncome,
+            color = if (type == TransactionType.EXPENSE) QingAmountExpense else QingAmountIncome,
             fontWeight = FontWeight.SemiBold,
         )
     }
@@ -2522,7 +2342,6 @@ private fun CompactMonthPickerButton(
             .heightIn(min = 38.dp)
             .clip(shape)
             .background(QingSurface)
-            .border(1.dp, QingOutline, shape)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2566,8 +2385,7 @@ private fun CompactDateStepper(
         modifier = Modifier
             .heightIn(min = 38.dp)
             .clip(shape)
-            .background(QingSurface)
-            .border(1.dp, QingOutline, shape),
+            .background(QingSurface),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(
@@ -2622,8 +2440,7 @@ private fun CompactYearStepper(
         modifier = Modifier
             .heightIn(min = 38.dp)
             .clip(shape)
-            .background(QingSurface)
-            .border(1.dp, QingOutline, shape),
+            .background(QingSurface),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(

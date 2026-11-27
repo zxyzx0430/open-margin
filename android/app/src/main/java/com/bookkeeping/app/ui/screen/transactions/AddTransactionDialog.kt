@@ -1,6 +1,5 @@
 package com.bookkeeping.app.ui.screen.transactions
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -77,6 +76,8 @@ import com.bookkeeping.app.data.local.entity.TransactionType
 import com.bookkeeping.app.i18n.tr
 import com.bookkeeping.app.notification.CategoryClassifier
 import com.bookkeeping.app.ui.components.CategoryIcon
+import com.bookkeeping.app.ui.components.MerchantSuggestionBar
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
 import com.bookkeeping.app.ui.components.QuickEntryBar
 import com.bookkeeping.app.ui.components.QuickEntryRule
 import com.bookkeeping.app.ui.theme.QingExpense
@@ -682,7 +683,7 @@ fun AddTransactionDialog(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                AnimatedVisibility(visible = categoryMenuExpanded) {
+                if (categoryMenuExpanded) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         val gridItems: List<CategoryDefinition?> = extraCategories + listOf<CategoryDefinition?>(null)
                         gridItems.chunked(5).forEach { rowItems ->
@@ -782,6 +783,15 @@ fun AddTransactionDialog(
                         placeholder = tr("商户/对方（可选）"),
                         singleLine = true,
                     )
+                    MerchantSuggestionBar(
+                        query = merchant,
+                        onSelect = { suggestion ->
+                            merchant = suggestion.displayName
+                            merchantTouched = true
+                            quickEntryPreview = quickEntryPreview?.copy(merchant = null)
+                        },
+                        modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+                    )
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 14.dp),
                         color = QingOutline.copy(alpha = 0.55f),
@@ -834,7 +844,7 @@ fun AddTransactionDialog(
 
     // 疑似重复：只提示，不合并、不静默去重。取消回到表单，数据一个都不丢。
     duplicateHit?.let { hit ->
-        AlertDialog(
+        QingConfirmationSheet(
             onDismissRequest = {
                 duplicateHit = null
                 pendingSave = null

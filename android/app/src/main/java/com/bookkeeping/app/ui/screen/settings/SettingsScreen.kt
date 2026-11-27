@@ -1,5 +1,21 @@
 package com.bookkeeping.app.ui.screen.settings
 
+import com.bookkeeping.app.onboarding.SupportedScenariosSheet
+import com.bookkeeping.app.ui.components.rememberQingTitleCollapseState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
+import com.bookkeeping.app.ui.components.QingSheetGrabber
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+
+import com.bookkeeping.app.ui.components.QingLargeTitle
+
+import com.bookkeeping.app.ui.components.LocalQingChromeOverlap
+
+import androidx.compose.ui.unit.sp
+import com.bookkeeping.app.ui.theme.LocalQingAppearance
+import com.bookkeeping.app.ui.theme.rememberQingAppearancePreferences
+import com.bookkeeping.app.ui.theme.setQingRedIncome
 import com.bookkeeping.app.i18n.tr
 import android.Manifest
 import android.content.Context
@@ -42,7 +58,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
+import com.bookkeeping.app.ui.components.QingSwitch
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.FilterChip
@@ -150,6 +166,7 @@ import com.bookkeeping.app.ui.theme.QingWarning
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onOpenMerchantRules: () -> Unit = {},
+    onOpenMerchantIcons: () -> Unit = {},
     onOpenSyncSettings: () -> Unit = {},
     onOpenPendingConflicts: () -> Unit = {},
     onOpenTransactionDiagnostics: () -> Unit = {},
@@ -211,6 +228,7 @@ fun SettingsScreen(
     var showExportGuide by remember { mutableStateOf(false) }
     var showImportExportSheet by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
+    var showSupportedScenarios by remember { mutableStateOf(false) }
     var showWebDavBackup by remember { mutableStateOf(false) }
     var webDavSnap by remember { mutableStateOf(WebDavPrefs(context).read()) }
     val categoryCatalog = remember(context) { CategoryCatalog.get(context) }
@@ -221,6 +239,7 @@ fun SettingsScreen(
     var permissionRefreshKey by remember { mutableStateOf(0) }
     var permissionsExpanded by rememberSaveable { mutableStateOf(false) }
     val settingsListState = rememberLazyListState()
+    val titleCollapse = rememberQingTitleCollapseState(settingsListState)
 
     LaunchedEffect(focusUpdateCard) {
         if (focusUpdateCard) {
@@ -314,31 +333,17 @@ fun SettingsScreen(
     val missingCapabilityNames = AutomationStatus.missingNames(context)
 
     Scaffold(
+        modifier = Modifier.nestedScroll(titleCollapse.connection),
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        tr("设置"),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                ),
-                windowInsets = WindowInsets(0, 0, 0, 0),
-            )
-        },
+        topBar = { QingLargeTitle(tr("设置"), titleCollapse) },
     ) { innerPadding ->
         LazyColumn(
             state = settingsListState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalQingChromeOverlap.current),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "status_overview") {
@@ -393,7 +398,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("记账与采集")) }
+            item { SettingsAppearanceSectionHeader(tr("记账与采集")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -401,6 +406,13 @@ fun SettingsScreen(
                         title = tr("分类管理"),
                         subtitle = tr("已启用 %d 个分类 · 可自定义或删除").format(activeCategoryCount),
                         onClick = { showCategoryManager = true },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Store,
+                        title = tr("商户图标管理"),
+                        subtitle = tr("自定义图标与一键刷新老账本"),
+                        onClick = onOpenMerchantIcons,
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
@@ -424,7 +436,7 @@ fun SettingsScreen(
             }
             item { ScreenshotCaptureCard() }
 
-            item { SectionHeader(tr("数据与同步")) }
+            item { SettingsAppearanceSectionHeader(tr("数据与同步")) }
             item {
                 SyncOverviewGroup(
                     enabled = syncEnabled,
@@ -472,7 +484,7 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionHeader(tr("偏好设置")) }
+            item { SettingsAppearanceSectionHeader(tr("偏好设置")) }
             item {
                 SettingsGroupCard {
                     SettingsSwitchRow(
@@ -500,8 +512,10 @@ fun SettingsScreen(
                 }
             }
             item { LanguageCard() }
+            item { SettingsAppearanceSectionHeader(tr("外观")) }
+            item { AppearancePreferencesCard() }
 
-            item { SectionHeader(tr("诊断与关于")) }
+            item { SettingsAppearanceSectionHeader(tr("诊断与关于")) }
             item {
                 SettingsGroupCard {
                     SettingsActionRow(
@@ -516,6 +530,13 @@ fun SettingsScreen(
                         title = tr("后台运行设置"),
                         subtitle = tr("自启动与省电策略"),
                         onClick = { detailDialog = "rom" },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
+                        icon = Icons.Filled.Info,
+                        title = tr("支持场景与能力说明"),
+                        subtitle = tr("查看支持的记账方式、能力边界与隐私承诺"),
+                        onClick = { showSupportedScenarios = true },
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
@@ -552,12 +573,19 @@ fun SettingsScreen(
             )
         }
 
+        if (showSupportedScenarios) {
+            SupportedScenariosSheet(onDismiss = { showSupportedScenarios = false })
+        }
+
         if (showImportExportSheet) {
             val importSheetState = rememberModalBottomSheetState(
                 skipPartiallyExpanded = true,
                 confirmValueChange = { !importViewModel.state.value.importing },
             )
             ModalBottomSheet(
+                containerColor = qingColors.surfaceSheet,
+                shape = RoundedCornerShape(topStart = QingRadiusTokens.radiusHero, topEnd = QingRadiusTokens.radiusHero),
+                dragHandle = { QingSheetGrabber() },
                 onDismissRequest = { dismissImportExportSheet() },
                 sheetState = importSheetState,
             ) {
@@ -1217,42 +1245,33 @@ internal fun SettingsDetailDialog(
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Dialog(
+    com.bookkeeping.app.ui.components.QingGestureSheet(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .wrapContentHeight(),
+                .fillMaxWidth()
+                .heightIn(max = 620.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 620.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f),
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = tr("关闭"),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = tr("关闭"),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
-                content()
             }
+            content()
         }
     }
 }
@@ -1303,7 +1322,7 @@ private fun SuccessNotificationCard(enabled: Boolean, onToggle: (Boolean) -> Uni
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = enabled, onCheckedChange = onToggle)
+                QingSwitch(checked = enabled, onCheckedChange = onToggle)
             }
             HorizontalDivider()
             Text(
@@ -1941,4 +1960,24 @@ private fun AboutUpdateCard(
     }
 
     updateInstall.Dialog()
+}
+
+@Composable
+private fun AppearancePreferencesCard() {
+    val preferences = rememberQingAppearancePreferences()
+    val appearance = LocalQingAppearance.current
+    SettingsGroupCard {
+        SettingsActionRow(
+            icon = Icons.Filled.Visibility,
+            title = tr("收支配色习惯"),
+            subtitle = if (appearance.redIncome) tr("红收绿支") else tr("绿收红支"),
+            onClick = { setQingRedIncome(preferences, !appearance.redIncome) },
+        )
+    }
+}
+
+@Composable
+private fun SettingsAppearanceSectionHeader(text: String) {
+    Text(text, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp))
 }

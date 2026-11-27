@@ -1,5 +1,17 @@
 package com.bookkeeping.app.ui.screen.transactions
 
+import com.bookkeeping.app.ui.navigation.LocalQingLedgerTransition
+import com.bookkeeping.app.ui.components.QingConfirmationSheet
+
+import com.bookkeeping.app.ui.components.MerchantAvatar
+import com.bookkeeping.app.ui.components.AutoSizeAmountText
+import com.bookkeeping.app.ui.components.SoftBadge
+import com.bookkeeping.app.ui.components.WalletCardSurface
+import com.bookkeeping.app.ui.theme.QingTypeTokens
+import com.bookkeeping.app.ui.theme.QingAmountIncome
+import com.bookkeeping.app.ui.theme.QingAmountExpense
+import com.bookkeeping.app.ui.theme.QingRadiusTokens
+import com.bookkeeping.app.ui.theme.qingColors
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -10,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,8 +38,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,6 +50,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import com.bookkeeping.app.ui.theme.rememberReduceMotion
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -93,14 +113,17 @@ fun TransactionDetailScreen(
     onDeleted: () -> Unit,
     detailViewModel: TransactionDetailViewModel = hiltViewModel(),
     transactionViewModel: TransactionViewModel = hiltViewModel(),
+    initialEntry: TransactionEntity? = null,
 ) {
     val transaction by detailViewModel.transaction.collectAsState()
-    val allTransactions by transactionViewModel.allTransactions.collectAsState()
+    val displayedEntry = if (transaction.loaded) transaction.entry else initialEntry
     TransactionDetailScreenContent(
-        entry = transaction,
+        entry = displayedEntry,
         onBack = onBack,
         onDeleted = onDeleted,
-        historyTransactions = allTransactions,
+        historyProvider = transactionViewModel::freshRuleHistory,
+        animateReceipt = initialEntry != null,
+        loadingEntry = !transaction.loaded && initialEntry == null,
         onSaveMerchantRuleWithHistory = { merchant, category, update -> transactionViewModel.saveMerchantRule(merchant, category, update) },
         onSave = { current, fields -> transactionViewModel.saveTransaction(current, fields) },
         onToggleExclude = { current ->
@@ -116,6 +139,15 @@ fun TransactionDetailScreen(
         onConfirmEventTime = { current -> transactionViewModel.confirmEventTime(current) },
         onUpdateEventTime = { current, pickedMs ->
             transactionViewModel.updateEventTime(current, pickedMs)
+        },
+        onApplyMerchantIcon = { current, iconKey, iconPath, applyAll ->
+            transactionViewModel.applyMerchantIcon(
+                transactionId = current.id,
+                merchant = current.merchant,
+                iconKey = iconKey,
+                iconPath = iconPath,
+                applyToAllHistory = applyAll,
+            )
         },
     )
 }
@@ -135,14 +167,20 @@ fun TransactionDetailScreenContent(
     onConfirmEventTime: (TransactionEntity) -> Unit,
     onUpdateEventTime: (TransactionEntity, Long) -> Unit,
     historyTransactions: List<TransactionEntity> = emptyList(),
+    historyProvider: (suspend () -> List<TransactionEntity>)? = null,
     onSaveMerchantRuleWithHistory: ((String, TransactionCategory, Boolean) -> Unit)? = null,
+    animateReceipt: Boolean = false,
+    loadingEntry: Boolean = false,
+    inBottomSheet: Boolean = false,
+    onEditingChanged: (Boolean) -> Unit = {},
+    onApplyMerchantIcon: ((TransactionEntity, String?, String?, Boolean) -> Unit)? = null,
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
     // 真被删掉的记录 300ms 后照样给出提示。
     var missingConfirmed by remember { mutableStateOf(false) }
-    LaunchedEffect(entry) {
-        if (entry == null) {
+    LaunchedEffect(entry, loadingEntry) {
+        if (entry == null && !loadingEntry) {
             delay(300)
             missingConfirmed = true
         } else {
@@ -150,22 +188,96 @@ fun TransactionDetailScreenContent(
         }
     }
     var editing by remember { mutableStateOf(false) }
+    LaunchedEffect(editing) {
+        onEditingChanged(editing)
+    }
     var editingTimeInline by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
+    var pickingIcon by remember { mutableStateOf(false) }
     var previewEvidencePath by remember { mutableStateOf<String?>(null) }
 
     if (editing && entry != null) {
         // 全屏编辑页替换详情页；保存/取消都回到这里，删除复用同一个二次确认。
-        TransactionEditScreen(
-            initial = entry,
-            onCancel = { editing = false },
-            onDelete = { confirmingDelete = true },
-            onSave = { fields ->
-                onSave(entry, fields)
-                editing = false
-            },
-        )
+        Box(
+            modifier = if (inBottomSheet) Modifier.fillMaxWidth().fillMaxHeight(0.92f) else Modifier.fillMaxSize(),
+        ) {
+            TransactionEditScreen(
+                initial = entry,
+                onCancel = { editing = false },
+                onDelete = { confirmingDelete = true },
+                onSave = { fields ->
+                    onSave(entry, fields)
+                    editing = false
+                },
+            )
+        }
+    } else if (inBottomSheet) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val syncLabel = entry?.let(::transactionSyncLabel)
+                if (!syncLabel.isNullOrBlank()) {
+                    StatusChip(text = syncLabel, tone = StatusTone.NEUTRAL)
+                } else {
+                    Spacer(Modifier.width(1.dp))
+                }
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = tr("关闭"),
+                        tint = qingColors.textSecondary,
+                    )
+                }
+            }
+            if (entry == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 180.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (missingConfirmed) {
+                        Text(
+                            text = tr("这笔记录已不存在"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            } else {
+                DetailContent(
+                    entry = entry,
+                    animateReceipt = animateReceipt,
+                    onEditTime = { editingTimeInline = true },
+                    onConfirmEventTime = { onConfirmEventTime(entry) },
+                    onPreviewEvidence = { path -> previewEvidencePath = path },
+                    onAvatarClick = if (onApplyMerchantIcon != null && entry.merchant.isNotBlank()) {
+                        { pickingIcon = true }
+                    } else null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false),
+                )
+                DetailActionBar(
+                    showExclude = entry.remoteReviewStatus != "refund",
+                    excluded = entry.remoteReviewStatus == "excluded",
+                    onToggleExclude = { onToggleExclude(entry) },
+                    onAddRule = { addingRule = true },
+                    onEdit = { editing = true },
+                    onDelete = { confirmingDelete = true },
+                )
+            }
+        }
     } else {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -208,9 +320,13 @@ fun TransactionDetailScreenContent(
             } else {
                 DetailContent(
                     entry = entry,
+                    animateReceipt = animateReceipt,
                     onEditTime = { editingTimeInline = true },
                     onConfirmEventTime = { onConfirmEventTime(entry) },
                     onPreviewEvidence = { path -> previewEvidencePath = path },
+                    onAvatarClick = if (onApplyMerchantIcon != null && entry.merchant.isNotBlank()) {
+                        { pickingIcon = true }
+                    } else null,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
@@ -219,14 +335,49 @@ fun TransactionDetailScreenContent(
         }
     }
 
+    if (pickingIcon && entry != null && onApplyMerchantIcon != null) {
+        val context = LocalContext.current
+        val customStore = remember(context) {
+            com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(context)
+        }
+        val category = runCatching { TransactionCategory.valueOf(entry.category) }
+            .getOrDefault(TransactionCategory.OTHER)
+        com.bookkeeping.app.ui.components.MerchantIconPickerSheet(
+            merchantName = entry.merchant,
+            category = category,
+            onDismiss = { pickingIcon = false },
+            onApplyBrand = { brandKey, applyAll ->
+                customStore.setBrandIcon(entry.merchant, brandKey)
+                onApplyMerchantIcon(entry, brandKey, null, applyAll)
+                pickingIcon = false
+            },
+            onApplyImage = { fileName, applyAll ->
+                customStore.setImageIcon(entry.merchant, fileName)
+                onApplyMerchantIcon(entry, null, fileName, applyAll)
+                pickingIcon = false
+            },
+            onResetDefault = { applyAll ->
+                customStore.remove(entry.merchant)
+                onApplyMerchantIcon(entry, null, null, applyAll)
+                pickingIcon = false
+            },
+        )
+    }
+
     if (addingRule && entry != null) {
+        val history by produceState<List<TransactionEntity>?>(if (historyProvider == null) historyTransactions else null, historyProvider, historyTransactions) {
+            if (historyProvider != null) value = withContext(Dispatchers.IO) { historyProvider() }
+        }
+        val historyCounter: ((String) -> Int)? = remember(history, onSaveMerchantRuleWithHistory != null) {
+            val rows = history
+            if (onSaveMerchantRuleWithHistory == null || rows == null) null else { name: String ->
+                rows.count { !it.syncDeleted && com.bookkeeping.app.data.merchant.MerchantRules.matches(it.merchant, name) }
+            }
+        }
         MerchantRuleDialog(
             merchant = entry.merchant,
-            historyCount = if (onSaveMerchantRuleWithHistory == null) null else { name ->
-                historyTransactions.count {
-                    !it.syncDeleted && com.bookkeeping.app.data.merchant.MerchantRules.matches(it.merchant, name)
-                }
-            },
+            historyLoading = history == null,
+            historyCount = historyCounter,
             onSaveWithHistory = onSaveMerchantRuleWithHistory?.let { save -> { name, category, update ->
                 save(name, category, update)
                 addingRule = false
@@ -320,7 +471,7 @@ private fun DetailHeader(
                 )
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
     }
 }
 
@@ -331,6 +482,8 @@ private fun DetailContent(
     onConfirmEventTime: () -> Unit,
     onPreviewEvidence: (String) -> Unit,
     modifier: Modifier = Modifier,
+    animateReceipt: Boolean = false,
+    onAvatarClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val category = runCatching { TransactionCategory.valueOf(entry.category) }
@@ -346,7 +499,12 @@ private fun DetailContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        AmountHero(entry = entry, category = category)
+        AmountHero(
+            entry = entry,
+            category = category,
+            animateReceipt = animateReceipt,
+            onAvatarClick = onAvatarClick,
+        )
         FieldCard(
             rows = buildList<Pair<String, String>> {
                 add(tr("收支类型") to transactionTypeLabel(entry.type))
@@ -356,13 +514,11 @@ private fun DetailContent(
                 add(tr("来源") to transactionSourceLabel(entry.source))
                 add(tr("发生时间") to transactionTime(entry.timestamp))
             },
+            note = entry.note,
             showTimeNeedsConfirmation = entry.eventTimeNeedsConfirmation,
             onConfirmEventTime = onConfirmEventTime,
             onEditTime = onEditTime,
         )
-        if (entry.note.isNotBlank()) {
-            NoteCard(note = entry.note)
-        }
         if (evidencePath != null) {
             EvidenceImageCard(
                 path = evidencePath,
@@ -376,60 +532,82 @@ private fun DetailContent(
 }
 
 /** 金额主视觉区：大字金额 + 分类图标 / 商户 / 时间，单独一张浅色卡片。 */
+@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 private fun AmountHero(
     entry: TransactionEntity,
     category: TransactionCategory,
+    animateReceipt: Boolean,
+    onAvatarClick: (() -> Unit)? = null,
 ) {
     val income = entry.type == TransactionType.INCOME.name
+    val reduced = rememberReduceMotion()
+    val offsetPx = with(LocalDensity.current) { 8.dp.toPx() }
+    val usesShared = LocalQingLedgerTransition.current?.id == entry.id
+    val progress = remember(entry.id) { Animatable(if (animateReceipt && !reduced && !usesShared) 0f else 1f) }
+    LaunchedEffect(entry.id, reduced) {
+        if (reduced || usesShared) progress.snapTo(1f)
+        else progress.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
+    }
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
-            .padding(horizontal = 16.dp, vertical = 20.dp),
+        modifier = Modifier.fillMaxWidth().graphicsLayer {
+            translationY = offsetPx * (1f - progress.value)
+            alpha = 0.96f + 0.04f * progress.value
+        }.padding(top = 24.dp, bottom = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
+        Box(
+            modifier = if (onAvatarClick != null) {
+                Modifier.clickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = onAvatarClick,
+                )
+            } else Modifier,
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+            MerchantAvatar(
+                merchant = entry.merchant,
+                merchantIconKey = entry.merchantIconKey,
+                merchantIconPath = entry.merchantIconPath,
+                category = category,
+                size = 52.dp,
+                cornerRadius = 15.dp,
+            )
+            if (onAvatarClick != null) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(2.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(com.bookkeeping.app.ui.theme.QingPrimary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Outlined.Edit,
+                        contentDescription = tr("点击更换图标"),
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(entry.merchant.ifBlank { tr(category.displayName) },
+            style = QingTypeTokens.title.copy(fontSize = 18.sp), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(6.dp))
+        AutoSizeAmountText(
             text = transactionAmount(entry),
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontSize = 34.sp,
-                lineHeight = 42.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
-            color = if (income) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.error
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            style = QingTypeTokens.receiptAmount,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (income) QingAmountIncome else QingAmountExpense,
+            textAlign = TextAlign.Center,
+            minimumSizeSp = 14f,
         )
         Spacer(Modifier.height(10.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            CategoryIcon(category = category, size = 20.dp)
-            Text(
-                text = entry.merchant.ifBlank { tr(category.displayName) },
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            Text(
-                text = "·",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = transactionTimeCompact(entry.timestamp),
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-        }
+        SoftBadge(text = tr("来源") + ": " + ledgerTransactionSourceTag(entry), tone = StatusTone.NEUTRAL)
     }
 }
 
@@ -443,29 +621,26 @@ private fun AmountHero(
 @Composable
 private fun FieldCard(
     rows: List<Pair<String, String>>,
+    note: String,
     showTimeNeedsConfirmation: Boolean,
     onConfirmEventTime: () -> Unit,
     onEditTime: () -> Unit,
 ) {
     val semantic = LocalQingSemanticColors.current
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+    WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp)) {
             rows.forEachIndexed { index, (label, value) ->
                 val isTimeRow = index == rows.lastIndex && showTimeNeedsConfirmation
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 44.dp)
+                        .heightIn(min = 48.dp)
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         text = label,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -494,7 +669,7 @@ private fun FieldCard(
                     }
                 }
                 if (index != rows.lastIndex) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
                 }
             }
             if (showTimeNeedsConfirmation) {
@@ -543,6 +718,14 @@ private fun FieldCard(
                             .clickable(role = Role.Button, onClick = onEditTime)
                             .padding(horizontal = 6.dp, vertical = 4.dp),
                     )
+                }
+            }
+            if (note.isNotBlank()) {
+                HorizontalDivider(thickness = 0.5.dp, color = qingColors.strokeHairline)
+                Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                    Text(tr("备注"), fontSize = 14.sp, color = qingColors.textSecondary)
+                    Spacer(Modifier.height(6.dp))
+                    Text(note, fontSize = 15.sp, color = qingColors.textPrimary)
                 }
             }
         }
@@ -701,6 +884,12 @@ private fun DetailActionBar(
                     .padding(start = 16.dp, end = 16.dp, top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(ACTION_ROW_GAP),
             ) {
+                ActionButton(
+                    text = tr("编辑"),
+                    onClick = onEdit,
+                    style = ActionButtonStyle.PRIMARY,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(ACTION_BUTTON_GAP)) {
                     if (showExclude) {
                         ActionButton(
@@ -717,18 +906,14 @@ private fun DetailActionBar(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(ACTION_BUTTON_GAP)) {
-                    ActionButton(
-                        text = tr("编辑"),
-                        onClick = onEdit,
-                        style = ActionButtonStyle.PRIMARY,
-                        modifier = Modifier.weight(2f),
-                    )
-                    ActionButton(
-                        text = tr("删除"),
-                        onClick = onDelete,
-                        style = ActionButtonStyle.DANGER_OUTLINED,
-                        modifier = Modifier.weight(1f),
+                TextButton(
+                    onClick = onDelete,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    Text(
+                        text = tr("删除此账单"),
+                        color = QingAmountExpense,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
             }
@@ -738,8 +923,8 @@ private fun DetailActionBar(
 
 private enum class ActionButtonStyle { TONAL, PRIMARY, DANGER_OUTLINED }
 
-private val ACTION_BUTTON_HEIGHT = 46.dp
-private val ACTION_BUTTON_SHAPE = RoundedCornerShape(12.dp)
+private val ACTION_BUTTON_HEIGHT = 48.dp
+private val ACTION_BUTTON_SHAPE = RoundedCornerShape(QingRadiusTokens.radiusControl)
 private val ACTION_BUTTON_GAP = 12.dp
 private val ACTION_ROW_GAP = 10.dp
 private val ACTION_BOTTOM_GAP = 12.dp
@@ -770,7 +955,7 @@ private fun ActionButton(
             .background(container)
             .then(
                 if (style == ActionButtonStyle.DANGER_OUTLINED) {
-                    Modifier.border(1.dp, MaterialTheme.colorScheme.error, ACTION_BUTTON_SHAPE)
+                    Modifier
                 } else {
                     Modifier
                 }
@@ -798,7 +983,7 @@ private fun DeleteTransactionDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
+    QingConfirmationSheet(
         onDismissRequest = onDismiss,
         title = { Text(tr("删除这笔交易？")) },
         text = {
