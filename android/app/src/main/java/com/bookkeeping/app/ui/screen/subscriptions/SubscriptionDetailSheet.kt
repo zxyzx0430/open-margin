@@ -569,8 +569,18 @@ internal fun SubscriptionBadgeAvatar(
     size: androidx.compose.ui.unit.Dp = 42.dp,
     wallet: Boolean = false,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val customOverrides by remember(context) {
+        com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(context).overrides
+    }.collectAsState()
+    val customOverride = remember(name, customOverrides) {
+        com.bookkeeping.app.data.merchant.CustomMerchantIconStore.resolveFrom(customOverrides, name)
+    }
+    val customBitmap = com.bookkeeping.app.ui.components.rememberLocalMerchantBitmap(customOverride?.imageFileName)
     val spec = remember(name) { com.bookkeeping.app.data.merchant.MerchantIconCatalog.forMerchant(name) }
-    val brandDrawable = remember(spec?.key) { com.bookkeeping.app.ui.components.brandLogoDrawableRes(spec?.key) }
+    val brandDrawable = remember(customOverride?.brandKey, spec?.key) {
+        com.bookkeeping.app.ui.components.brandLogoDrawableRes(customOverride?.brandKey ?: spec?.key)
+    }
     val vector = remember(spec?.systemIcon) { com.bookkeeping.app.ui.components.merchantSystemIcon(spec?.systemIcon) }
     val brandColor = spec?.colorArgb?.let { androidx.compose.ui.graphics.Color(it) }
     val label = spec?.initials ?: name.trim().take(1).uppercase(Locale.ROOT).ifEmpty { "订" }
@@ -592,11 +602,18 @@ internal fun SubscriptionBadgeAvatar(
     Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(if (brandDrawable != null) size * 0.24f else size * 0.30f))
+            .clip(RoundedCornerShape(if (customBitmap != null || brandDrawable != null) size * 0.24f else size * 0.30f))
             .background(bgColor),
         contentAlignment = Alignment.Center,
     ) {
-        if (brandDrawable != null) {
+        if (customBitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = customBitmap,
+                contentDescription = name,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(size),
+            )
+        } else if (brandDrawable != null) {
             androidx.compose.foundation.Image(
                 painter = androidx.compose.ui.res.painterResource(id = brandDrawable),
                 contentDescription = name,

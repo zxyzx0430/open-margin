@@ -161,6 +161,33 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun refreshAllLedgerIcons(onResult: (Int) -> Unit) {
+        viewModelScope.launch {
+            val store = com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(appContext)
+            val updated = repository.refreshAllLedgerIcons(store)
+            onResult(updated)
+        }
+    }
+
+    fun applyCustomMerchantIcon(
+        merchant: String,
+        iconKey: String?,
+        iconPath: String?,
+        applyToAllHistory: Boolean,
+        onComplete: (Int) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val count = repository.applyMerchantIcon(
+                transactionId = null,
+                merchant = merchant,
+                iconKey = iconKey,
+                iconPath = iconPath,
+                applyToAllHistory = applyToAllHistory,
+            )
+            onComplete(count)
+        }
+    }
+
     companion object {
         /** 「最近商户」候选数量：够覆盖常用商户，又不会把面板塞满。 */
         const val RECENT_MERCHANT_LIMIT = 30

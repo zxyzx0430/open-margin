@@ -139,6 +139,15 @@ fun TransactionDetailScreen(
         onUpdateEventTime = { current, pickedMs ->
             transactionViewModel.updateEventTime(current, pickedMs)
         },
+        onApplyMerchantIcon = { current, iconKey, iconPath, applyAll ->
+            transactionViewModel.applyMerchantIcon(
+                transactionId = current.id,
+                merchant = current.merchant,
+                iconKey = iconKey,
+                iconPath = iconPath,
+                applyToAllHistory = applyAll,
+            )
+        },
     )
 }
 
@@ -163,6 +172,7 @@ fun TransactionDetailScreenContent(
     loadingEntry: Boolean = false,
     inBottomSheet: Boolean = false,
     onEditingChanged: (Boolean) -> Unit = {},
+    onApplyMerchantIcon: ((TransactionEntity, String?, String?, Boolean) -> Unit)? = null,
 ) {
     // Room 的 Flow 首帧是 null。详情页现在是同一帧切过来（没有转场遮挡），
     // 直接渲染「这笔记录已不存在」会闪一下错误文案，所以先留一帧缓冲；
@@ -183,6 +193,7 @@ fun TransactionDetailScreenContent(
     var editingTimeInline by remember { mutableStateOf(false) }
     var confirmingDelete by remember { mutableStateOf(false) }
     var addingRule by remember { mutableStateOf(false) }
+    var pickingIcon by remember { mutableStateOf(false) }
     var previewEvidencePath by remember { mutableStateOf<String?>(null) }
 
     if (editing && entry != null) {
@@ -249,6 +260,9 @@ fun TransactionDetailScreenContent(
                     onEditTime = { editingTimeInline = true },
                     onConfirmEventTime = { onConfirmEventTime(entry) },
                     onPreviewEvidence = { path -> previewEvidencePath = path },
+                    onAvatarClick = if (onApplyMerchantIcon != null && entry.merchant.isNotBlank()) {
+                        { pickingIcon = true }
+                    } else null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f, fill = false),
@@ -309,12 +323,44 @@ fun TransactionDetailScreenContent(
                     onEditTime = { editingTimeInline = true },
                     onConfirmEventTime = { onConfirmEventTime(entry) },
                     onPreviewEvidence = { path -> previewEvidencePath = path },
+                    onAvatarClick = if (onApplyMerchantIcon != null && entry.merchant.isNotBlank()) {
+                        { pickingIcon = true }
+                    } else null,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
                 )
             }
         }
+    }
+
+    if (pickingIcon && entry != null && onApplyMerchantIcon != null) {
+        val context = LocalContext.current
+        val customStore = remember(context) {
+            com.bookkeeping.app.data.merchant.CustomMerchantIconStore.get(context)
+        }
+        val category = runCatching { TransactionCategory.valueOf(entry.category) }
+            .getOrDefault(TransactionCategory.OTHER)
+        com.bookkeeping.app.ui.components.MerchantIconPickerSheet(
+            merchantName = entry.merchant,
+            category = category,
+            onDismiss = { pickingIcon = false },
+            onApplyBrand = { brandKey, applyAll ->
+                customStore.setBrandIcon(entry.merchant, brandKey)
+                onApplyMerchantIcon(entry, brandKey, null, applyAll)
+                pickingIcon = false
+            },
+            onApplyImage = { fileName, applyAll ->
+                customStore.setImageIcon(entry.merchant, fileName)
+                onApplyMerchantIcon(entry, null, fileName, applyAll)
+                pickingIcon = false
+            },
+            onResetDefault = { applyAll ->
+                customStore.remove(entry.merchant)
+                onApplyMerchantIcon(entry, null, null, applyAll)
+                pickingIcon = false
+            },
+        )
     }
 
     if (addingRule && entry != null) {
@@ -436,6 +482,7 @@ private fun DetailContent(
     onPreviewEvidence: (String) -> Unit,
     modifier: Modifier = Modifier,
     animateReceipt: Boolean = false,
+    onAvatarClick: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val category = runCatching { TransactionCategory.valueOf(entry.category) }
@@ -451,7 +498,12 @@ private fun DetailContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        AmountHero(entry = entry, category = category, animateReceipt = animateReceipt)
+        AmountHero(
+            entry = entry,
+            category = category,
+            animateReceipt = animateReceipt,
+            onAvatarClick = onAvatarClick,
+        )
         FieldCard(
             rows = buildList<Pair<String, String>> {
                 add(tr("收支类型") to transactionTypeLabel(entry.type))
@@ -485,6 +537,7 @@ private fun AmountHero(
     entry: TransactionEntity,
     category: TransactionCategory,
     animateReceipt: Boolean,
+    onAvatarClick: (() -> Unit)? = null,
 ) {
     val income = entry.type == TransactionType.INCOME.name
     val reduced = rememberReduceMotion()
@@ -502,8 +555,44 @@ private fun AmountHero(
         }.padding(top = 24.dp, bottom = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        MerchantAvatar(merchant = entry.merchant, merchantIconKey = entry.merchantIconKey,
-            merchantIconPath = entry.merchantIconPath, category = category, size = 48.dp, cornerRadius = 14.dp)
+        Box(
+            modifier = if (onAvatarClick != null) {
+                Modifier.clickable(
+                    interactionSource = null,
+                    indication = null,
+                    onClick = onAvatarClick,
+                )
+            } else Modifier,
+            contentAlignment = Alignment.BottomEnd,
+        ) {
+            MerchantAvatar(
+                merchant = entry.merchant,
+                merchantIconKey = entry.merchantIconKey,
+                merchantIconPath = entry.merchantIconPath,
+                category = category,
+                size = 52.dp,
+                cornerRadius = 15.dp,
+            )
+            if (onAvatarClick != null) {
+                Box(
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(2.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(QingPrimary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Edit,
+                        contentDescription = tr("点击更换图标"),
+                        tint = androidx.compose.ui.graphics.Color.White,
+                        modifier = Modifier.size(10.dp),
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(10.dp))
         Text(entry.merchant.ifBlank { tr(category.displayName) },
             style = QingTypeTokens.title.copy(fontSize = 18.sp), textAlign = TextAlign.Center)

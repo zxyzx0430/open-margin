@@ -668,6 +668,26 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch { repository.mergeDuplicate(original, duplicate) }
     }
 
+    fun applyMerchantIcon(
+        transactionId: Long?,
+        merchant: String,
+        iconKey: String?,
+        iconPath: String?,
+        applyToAllHistory: Boolean,
+        onComplete: (Int) -> Unit = {},
+    ) {
+        viewModelScope.launch {
+            val count = repository.applyMerchantIcon(
+                transactionId = transactionId,
+                merchant = merchant,
+                iconKey = iconKey,
+                iconPath = iconPath,
+                applyToAllHistory = applyToAllHistory,
+            )
+            onComplete(count)
+        }
+    }
+
     private fun periodRange(period: PeriodState): Pair<Long, Long>? = when (period.time) {
         LedgerTimeFilter.MONTH -> BudgetMonth.range(period.month)
         LedgerTimeFilter.YEAR -> {

@@ -643,6 +643,15 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
                 onUpdateEventTime = { current, pickedMs ->
                     transactionViewModel.updateEventTime(current, pickedMs)
                 },
+                onApplyMerchantIcon = { current, iconKey, iconPath, applyAll ->
+                    transactionViewModel.applyMerchantIcon(
+                        transactionId = current.id,
+                        merchant = current.merchant,
+                        iconKey = iconKey,
+                        iconPath = iconPath,
+                        applyToAllHistory = applyAll,
+                    )
+                },
             )
         }
     }

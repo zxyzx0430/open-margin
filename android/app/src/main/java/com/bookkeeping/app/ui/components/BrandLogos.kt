@@ -3,8 +3,14 @@ package com.bookkeeping.app.ui.components
 import androidx.annotation.DrawableRes
 import com.bookkeeping.app.R
 
+data class BuiltInBrandOption(
+    val key: String,
+    val label: String,
+    @DrawableRes val drawableRes: Int,
+)
+
 /**
- * Authentic multi-color official brand vector drawable resources keyed by [MerchantIconCatalog] rule key.
+ * Authentic multi-color official brand drawable resources keyed by [MerchantIconCatalog] rule key.
  */
 @DrawableRes
 fun brandLogoDrawableRes(key: String?): Int? = when (key) {
@@ -119,5 +125,215 @@ fun brandLogoDrawableRes(key: String?): Int? = when (key) {
     "maimemo" -> R.drawable.ic_brand_maimemo
     "sanguosha" -> R.drawable.ic_brand_sanguosha
     "porkbun" -> R.drawable.ic_brand_porkbun
+    "honor_of_kings" -> R.drawable.ic_brand_honor_of_kings
+    "peacekeeper_elite" -> R.drawable.ic_brand_peacekeeper_elite
+    "genshin" -> R.drawable.ic_brand_genshin
+    "honkai_star_rail" -> R.drawable.ic_brand_honkai_star_rail
+    "egg_party" -> R.drawable.ic_brand_egg_party
+    "racing_master" -> R.drawable.ic_brand_racing_master
+    "lol_mobile" -> R.drawable.ic_brand_lol_mobile
+    "golden_spatula" -> R.drawable.ic_brand_golden_spatula
+    "identity_v" -> R.drawable.ic_brand_identity_v
+    "delta_force" -> R.drawable.ic_brand_delta_force
+    "sf_express" -> R.drawable.ic_brand_sf_express
+    "jd_logistics" -> R.drawable.ic_brand_jd_logistics
+    "cainiao" -> R.drawable.ic_brand_cainiao
+    "zto" -> R.drawable.ic_brand_zto
+    "yto" -> R.drawable.ic_brand_yto
+    "yunda" -> R.drawable.ic_brand_yunda
+    "sto" -> R.drawable.ic_brand_sto
+    "chagee" -> R.drawable.ic_brand_chagee
+    "heytea" -> R.drawable.ic_brand_heytea
+    "pizzahut" -> R.drawable.ic_brand_pizzahut
+    "burgerking" -> R.drawable.ic_brand_burgerking
+    "dicos" -> R.drawable.ic_brand_dicos
+    "familymart" -> R.drawable.ic_brand_familymart
+    "walmart" -> R.drawable.ic_brand_walmart
+    "rt_mart" -> R.drawable.ic_brand_rt_mart
+    "yonghui" -> R.drawable.ic_brand_yonghui
+    "miniso" -> R.drawable.ic_brand_miniso
+    "watsons" -> R.drawable.ic_brand_watsons
+    "ccb" -> R.drawable.ic_brand_ccb
+    "abc" -> R.drawable.ic_brand_abc
+    "cmb" -> R.drawable.ic_brand_cmb
+    "bocom" -> R.drawable.ic_brand_bocom
+    "psbc" -> R.drawable.ic_brand_psbc
+    "cgb" -> R.drawable.ic_brand_cgb
+    "pingan_bank" -> R.drawable.ic_brand_pingan_bank
+    "citic_bank" -> R.drawable.ic_brand_citic_bank
+    "amap" -> R.drawable.ic_brand_amap
+    "baidu_map" -> R.drawable.ic_brand_baidu_map
+    "qunar" -> R.drawable.ic_brand_qunar
+    "tongcheng" -> R.drawable.ic_brand_tongcheng
+    "caocao" -> R.drawable.ic_brand_caocao
+    "t3go" -> R.drawable.ic_brand_t3go
+    "dingtalk" -> R.drawable.ic_brand_dingtalk
+    "wecom" -> R.drawable.ic_brand_wecom
+    "tencent_meeting" -> R.drawable.ic_brand_tencent_meeting
+    "capcut" -> R.drawable.ic_brand_capcut
+    "xingtu" -> R.drawable.ic_brand_xingtu
     else -> null
+}
+
+fun allBuiltInBrands(): List<BuiltInBrandOption> = listOf(
+    "wechat" to "微信",
+    "alipay" to "支付宝",
+    "taobao" to "淘宝",
+    "jd" to "京东",
+    "pinduoduo" to "拼多多",
+    "meituan" to "美团",
+    "douyin" to "抖音",
+    "xiaohongshu" to "小红书",
+    "bilibili" to "哔哩哔哩",
+    "luckin" to "瑞幸咖啡",
+    "cotti" to "库迪咖啡",
+    "starbucks" to "星巴克",
+    "chagee" to "霸王茶姬",
+    "heytea" to "喜茶",
+    "mixue" to "蜜雪冰城",
+    "mcdonalds" to "麦当劳",
+    "kfc" to "肯德基",
+    "pizzahut" to "必胜客",
+    "burgerking" to "汉堡王",
+    "dicos" to "德克士",
+    "tastien" to "塔斯汀",
+    "dominos" to "达美乐",
+    "haidilao" to "海底捞",
+    "hema" to "盒马",
+    "sams_club" to "山姆",
+    "costco" to "Costco",
+    "walmart" to "沃尔玛",
+    "rt_mart" to "大润发",
+    "yonghui" to "永辉",
+    "familymart" to "全家",
+    "meiyijia" to "美宜佳",
+    "seven_eleven" to "7-Eleven",
+    "miniso" to "名创优品",
+    "watsons" to "屈臣氏",
+    "mannings" to "万宁",
+    "sf_express" to "顺丰",
+    "jd_logistics" to "京东快递",
+    "cainiao" to "菜鸟",
+    "zto" to "中通",
+    "yto" to "圆通",
+    "yunda" to "韵达",
+    "sto" to "申通",
+    "china_post" to "中国邮政",
+    "fcbox" to "丰巢",
+    "honor_of_kings" to "王者荣耀",
+    "peacekeeper_elite" to "和平精英",
+    "genshin" to "原神",
+    "honkai_star_rail" to "星穹铁道",
+    "egg_party" to "蛋仔派对",
+    "racing_master" to "巅峰极速",
+    "lol_mobile" to "英雄联盟",
+    "golden_spatula" to "金铲铲",
+    "identity_v" to "第五人格",
+    "delta_force" to "三角洲",
+    "sanguosha" to "三国杀",
+    "steam" to "Steam",
+    "xbox" to "Xbox",
+    "playstation" to "PlayStation",
+    "nintendo" to "Switch",
+    "didi" to "滴滴",
+    "amap" to "高德地图",
+    "baidu_map" to "百度地图",
+    "hellobike" to "哈啰",
+    "huolala" to "货拉拉",
+    "caocao" to "曹操出行",
+    "t3go" to "T3出行",
+    "ctrip" to "携程",
+    "qunar" to "去哪儿",
+    "tongcheng" to "同程",
+    "railway_12306" to "12306",
+    "gz_metro" to "广州地铁",
+    "mtr" to "港铁MTR",
+    "icbc" to "工商银行",
+    "ccb" to "建设银行",
+    "abc" to "农业银行",
+    "boc" to "中国银行",
+    "cmb" to "招商银行",
+    "bocom" to "交通银行",
+    "psbc" to "邮储银行",
+    "cgb" to "广发银行",
+    "pingan_bank" to "平安银行",
+    "citic_bank" to "中信银行",
+    "china_telecom" to "中国电信",
+    "china_mobile" to "中国移动",
+    "china_unicom" to "中国联通",
+    "chatgpt" to "ChatGPT",
+    "claude" to "Claude",
+    "gemini" to "Gemini",
+    "grok" to "Grok",
+    "deepseek" to "DeepSeek",
+    "doubao" to "豆包",
+    "qwen" to "通义千问",
+    "kimi" to "Kimi",
+    "zhipu" to "智谱清言",
+    "perplexity" to "Perplexity",
+    "cursor" to "Cursor",
+    "copilot" to "Copilot",
+    "github" to "GitHub",
+    "poe" to "Poe",
+    "midjourney" to "Midjourney",
+    "suno" to "Suno",
+    "runway" to "Runway",
+    "youtube" to "YouTube",
+    "netflix" to "Netflix",
+    "disney" to "Disney+",
+    "spotify" to "Spotify",
+    "apple_music" to "Apple Music",
+    "apple_tv" to "Apple TV",
+    "prime_video" to "Prime Video",
+    "hbo_max" to "HBO Max",
+    "iqiyi" to "爱奇艺",
+    "tencent_video" to "腾讯视频",
+    "youku" to "优酷",
+    "mango_tv" to "芒果TV",
+    "netease_music" to "网易云音乐",
+    "qq_music" to "QQ音乐",
+    "kugou" to "酷狗音乐",
+    "qishui" to "汽水音乐",
+    "ximalaya" to "喜马拉雅",
+    "xiaoyuzhou" to "小宇宙",
+    "icloud" to "iCloud",
+    "google_one" to "Google One",
+    "onedrive" to "OneDrive",
+    "microsoft_365" to "Microsoft 365",
+    "dropbox" to "Dropbox",
+    "baidu" to "百度网盘",
+    "aliyun_drive" to "阿里云盘",
+    "quark" to "夸克",
+    "feishu" to "飞书",
+    "dingtalk" to "钉钉",
+    "wecom" to "企业微信",
+    "tencent_meeting" to "腾讯会议",
+    "notion" to "Notion",
+    "wps" to "WPS",
+    "obsidian" to "Obsidian",
+    "figma" to "Figma",
+    "adobe" to "Adobe",
+    "capcut" to "剪映",
+    "xingtu" to "醒图",
+    "1password" to "1Password",
+    "bitwarden" to "Bitwarden",
+    "raycast" to "Raycast",
+    "cloudflare" to "Cloudflare",
+    "aliyun" to "阿里云",
+    "tencent_cloud" to "腾讯云",
+    "aws" to "AWS",
+    "digitalocean" to "DigitalOcean",
+    "vultr" to "Vultr",
+    "porkbun" to "Porkbun",
+    "alibaba_1688" to "1688",
+    "roborock" to "石头科技",
+    "amazon" to "Amazon",
+    "weread" to "微信读书",
+    "kindle" to "Kindle",
+    "zhihu" to "知乎",
+    "dedao" to "得到",
+    "maimemo" to "墨墨背单词",
+    "keep" to "Keep",
+).mapNotNull { (key, label) ->
+    brandLogoDrawableRes(key)?.let { BuiltInBrandOption(key, label, it) }
 }

@@ -226,6 +226,7 @@ fun SettingsScreen(
     var showExportGuide by remember { mutableStateOf(false) }
     var showImportExportSheet by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
+    var showMerchantIconManager by remember { mutableStateOf(false) }
     var showWebDavBackup by remember { mutableStateOf(false) }
     var webDavSnap by remember { mutableStateOf(WebDavPrefs(context).read()) }
     val categoryCatalog = remember(context) { CategoryCatalog.get(context) }
@@ -406,6 +407,13 @@ fun SettingsScreen(
                     )
                     SettingsRowDivider()
                     SettingsActionRow(
+                        icon = Icons.Filled.Store,
+                        title = tr("商户图标管理"),
+                        subtitle = tr("自定义图标与一键刷新老账本"),
+                        onClick = { showMerchantIconManager = true },
+                    )
+                    SettingsRowDivider()
+                    SettingsActionRow(
                         icon = Icons.Filled.Notifications,
                         title = tr("自动记账向导"),
                         subtitle = tr("通知权限与页面识别的 4 步开启向导"),
@@ -553,6 +561,13 @@ fun SettingsScreen(
                 onDismiss = { showCategoryManager = false },
                 countByCategory = viewModel::countByCategory,
                 reassignCategory = viewModel::reassignCategory,
+            )
+        }
+
+        if (showMerchantIconManager) {
+            MerchantIconManagerSheet(
+                viewModel = viewModel,
+                onDismiss = { showMerchantIconManager = false },
             )
         }
 

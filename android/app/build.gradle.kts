@@ -17,8 +17,8 @@ android {
         // Stable v1.2.0: all capture/import/classification/UI work plus the
         // rc.13 startup and duplicate-notification fixes.
         // Keep in sync with UpdateVersionPolicy.CURRENT_TAG (v1.3.0).
-        versionCode = 58
-        versionName = "1.47.9-rc.1"
+        versionCode = 59
+        versionName = "1.47.9-rc.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["openMarginProfileable"] = "false"
