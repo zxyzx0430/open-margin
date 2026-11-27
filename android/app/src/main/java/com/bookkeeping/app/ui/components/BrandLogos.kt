@@ -91,5 +91,33 @@ fun brandLogoDrawableRes(key: String?): Int? = when (key) {
     "hema" -> R.drawable.ic_brand_hema
     "haidilao" -> R.drawable.ic_brand_haidilao
     "didi" -> R.drawable.ic_brand_didi
+    "luckin" -> R.drawable.ic_brand_luckin
+    "cotti" -> R.drawable.ic_brand_cotti
+    "mixue" -> R.drawable.ic_brand_mixue
+    "tastien" -> R.drawable.ic_brand_tastien
+    "dominos" -> R.drawable.ic_brand_dominos
+    "meiyijia" -> R.drawable.ic_brand_meiyijia
+    "seven_eleven" -> R.drawable.ic_brand_seven_eleven
+    "mannings" -> R.drawable.ic_brand_mannings
+    "alibaba_1688" -> R.drawable.ic_brand_alibaba_1688
+    "roborock" -> R.drawable.ic_brand_roborock
+    "douyin" -> R.drawable.ic_brand_douyin
+    "hellobike" -> R.drawable.ic_brand_hellobike
+    "huolala" -> R.drawable.ic_brand_huolala
+    "fcbox" -> R.drawable.ic_brand_fcbox
+    "ctrip" -> R.drawable.ic_brand_ctrip
+    "railway_12306" -> R.drawable.ic_brand_railway_12306
+    "gz_metro" -> R.drawable.ic_brand_gz_metro
+    "mtr" -> R.drawable.ic_brand_mtr
+    "china_post" -> R.drawable.ic_brand_china_post
+    "boc" -> R.drawable.ic_brand_boc
+    "icbc" -> R.drawable.ic_brand_icbc
+    "china_telecom" -> R.drawable.ic_brand_china_telecom
+    "china_mobile" -> R.drawable.ic_brand_china_mobile
+    "china_unicom" -> R.drawable.ic_brand_china_unicom
+    "feishu" -> R.drawable.ic_brand_feishu
+    "maimemo" -> R.drawable.ic_brand_maimemo
+    "sanguosha" -> R.drawable.ic_brand_sanguosha
+    "porkbun" -> R.drawable.ic_brand_porkbun
     else -> null
 }

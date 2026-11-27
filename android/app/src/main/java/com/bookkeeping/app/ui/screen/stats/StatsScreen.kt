@@ -16,6 +16,14 @@ import com.bookkeeping.app.ui.theme.QingAmountExpense
 import com.bookkeeping.app.ui.theme.QingTypeTokens
 import com.bookkeeping.app.ui.theme.qingColors
 import android.graphics.Paint
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -216,146 +224,136 @@ fun StatsScreen(
                 )
             }
 
-            if (selectedTab != StatsTab.SUBSCRIPTION) {
-                item(key = "compact_period_bar") {
-                    CompactPeriodFilterBar(
-                        period = period,
-                        selectedMonth = selectedMonth,
-                        selectedYear = selectedYear,
-                        selectedDate = selectedDate,
-                        onSelectPeriod = viewModel::setPeriod,
-                        onOpenMonthPicker = { showMonthPicker = true },
-                        onPreviousYear = { viewModel.shiftYear(-1) },
-                        onNextYear = { viewModel.shiftYear(1) },
-                        onPreviousDay = { viewModel.shiftDay(-1) },
-                        onNextDay = { viewModel.shiftDay(1) },
-                        onOpenDayPicker = { showDayPicker = true },
-                    )
-                }
-                item(key = "summary") {
-                    if (period == StatsPeriod.DAY) {
-                        DayStatsSummaryCard(
-                            summary = selectedDaySummary,
-                        )
-                    } else {
-                        StatsSummaryCard(
-                            totalCents = totalCents,
-                            dailyAverageCents = dailyAverage,
-                            balanceCents = balanceCents,
-                            comparison = comparison,
-                            type = viewingType,
-                            period = period,
-                        )
-                    }
-                }
-                if (stats.isEmpty()) {
-                    item(key = "empty") {
-                        EmptyStatsCard(
-                            type = viewingType,
-                            period = period,
-                            onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
-                        )
-                    }
-                } else {
-                    item(key = "donut") {
-                        CategoryDonutCard(
-                            stats = stats,
-                            totalCents = totalCents,
-                            type = viewingType,
-                            onCategoryClick = { selectedCategory = it },
-                        )
-                    }
-                    if (isAccountMostlyUncategorized) {
-                        item(key = "account_distribution_hint") {
-                            CollapsedAccountDistributionHint()
-                        }
-                    } else if (accountStats.isNotEmpty()) {
-                        item(key = "account_distribution") {
-                            AccountDistributionCard(
-                                accountStats = accountStats,
-                                type = viewingType,
-                                expanded = accountsExpanded,
-                                onToggleExpanded = { accountsExpanded = !accountsExpanded },
-                                onAccountClick = { accountKey ->
-                                    onOpenLedger(ledgerDrilldown(account = accountKey))
-                                },
+            item(key = "stats_tab_body") {
+                val decel = remember { CubicBezierEasing(0.22f, 1f, 0.36f, 1f) }
+                AnimatedContent(
+                    targetState = selectedTab,
+                    label = "stats_tab_transition",
+                    transitionSpec = {
+                        val dir = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                        (slideInHorizontally(tween(160, easing = decel)) { (it * 0.06f * dir).toInt() } +
+                            fadeIn(tween(160, easing = decel))) togetherWith
+                            (slideOutHorizontally(tween(130, easing = decel)) { -(it * 0.04f * dir).toInt() } +
+                                fadeOut(tween(130, easing = decel)))
+                    },
+                ) { tab ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (tab != StatsTab.SUBSCRIPTION) {
+                            CompactPeriodFilterBar(
+                                period = period,
+                                selectedMonth = selectedMonth,
+                                selectedYear = selectedYear,
+                                selectedDate = selectedDate,
+                                onSelectPeriod = viewModel::setPeriod,
+                                onOpenMonthPicker = { showMonthPicker = true },
+                                onPreviousYear = { viewModel.shiftYear(-1) },
+                                onNextYear = { viewModel.shiftYear(1) },
+                                onPreviousDay = { viewModel.shiftDay(-1) },
+                                onNextDay = { viewModel.shiftDay(1) },
+                                onOpenDayPicker = { showDayPicker = true },
                             )
-                        }
-                    }
-                    when (period) {
-                        StatsPeriod.MONTH -> item(key = "daily_trend") {
-                            DailyTrendCard(
-                                dailyTotals = dailyTotals,
-                                dailyAverageCents = dailyAverage,
-                                monthKey = selectedMonth,
-                                onOpenLedger = { day ->
-                                    selectedTrendDay = day
-                                },
-                            )
-                        }
-                        StatsPeriod.YEAR -> item(key = "monthly_trend") {
-                            MonthlyTrendCard(
-                                monthlyTotals = monthlyTotals,
-                                year = selectedYear,
-                                type = viewingType,
-                            )
-                        }
-                        StatsPeriod.DAY -> Unit
-                    }
-                }
-            } else {
-                if (subscriptionStats.activeCount == 0) {
-                    item(key = "subscription_empty") {
-                        SubscriptionEmptyGuideCard(
-                            recurringCandidateCount = subscriptionStats.recurringCandidateCount,
-                            onDiscoverClick = { onOpenSubscriptions(false) },
-                            onAddClick = { onOpenSubscriptions(false) },
-                        )
-                    }
-                } else {
-                    item(key = "subscription_summary") {
-                        SubscriptionSummaryCard(
-                            state = subscriptionStats,
-                            onOpenAllSubscriptions = { onOpenSubscriptions(false) },
-                        )
-                    }
-                    if (subscriptionStats.pendingCancelCount > 0) {
-                        item(key = "subscription_pending_cancel") {
-                            SubscriptionPendingCancelBanner(
-                                pendingCancelCount = subscriptionStats.pendingCancelCount,
-                                monthlySavingsCents = subscriptionStats.pendingCancelMonthlySavingsCents,
-                                onClick = { onOpenSubscriptions(true) },
-                            )
-                        }
-                    }
-                    item(key = "subscription_forecast") {
-                        SubscriptionForecastCard(
-                            forecast = subscriptionStats.forecast12Months,
-                            peakMonth = subscriptionStats.peakMonth,
-                        )
-                    }
-                    if (subscriptionStats.topSubscriptions.isNotEmpty()) {
-                        item(key = "subscription_ranking") {
-                            SubscriptionRankingCard(
-                                items = subscriptionStats.topSubscriptions,
-                                onOpenAll = { onOpenSubscriptions(false) },
-                            )
-                        }
-                    }
-                    if (subscriptionStats.channelBreakdown.isNotEmpty()) {
-                        item(key = "subscription_channel_breakdown") {
-                            SubscriptionBreakdownCard(
-                                title = bilingual("按扣款渠道分布", "By Payment Channel"),
-                                items = subscriptionStats.channelBreakdown,
-                            )
-                        }
-                    }
-                    if (subscriptionStats.cadenceBreakdown.isNotEmpty()) {
-                        item(key = "subscription_cadence_breakdown") {
-                            SubscriptionBreakdownCard(
-                                title = bilingual("按周期分布", "By Billing Cycle"),
-                                items = subscriptionStats.cadenceBreakdown,
-                            )
+                            if (period == StatsPeriod.DAY) {
+                                DayStatsSummaryCard(
+                                    summary = selectedDaySummary,
+                                )
+                            } else {
+                                StatsSummaryCard(
+                                    totalCents = totalCents,
+                                    dailyAverageCents = dailyAverage,
+                                    balanceCents = balanceCents,
+                                    comparison = comparison,
+                                    type = viewingType,
+                                    period = period,
+                                )
+                            }
+                            if (stats.isEmpty()) {
+                                EmptyStatsCard(
+                                    type = viewingType,
+                                    period = period,
+                                    onOpenLedger = { onOpenLedger(ledgerDrilldown()) },
+                                )
+                            } else {
+                                CategoryDonutCard(
+                                    stats = stats,
+                                    totalCents = totalCents,
+                                    type = viewingType,
+                                    onCategoryClick = { selectedCategory = it },
+                                )
+                                if (isAccountMostlyUncategorized) {
+                                    CollapsedAccountDistributionHint()
+                                } else if (accountStats.isNotEmpty()) {
+                                    AccountDistributionCard(
+                                        accountStats = accountStats,
+                                        type = viewingType,
+                                        expanded = accountsExpanded,
+                                        onToggleExpanded = { accountsExpanded = !accountsExpanded },
+                                        onAccountClick = { accountKey ->
+                                            onOpenLedger(ledgerDrilldown(account = accountKey))
+                                        },
+                                    )
+                                }
+                                when (period) {
+                                    StatsPeriod.MONTH -> DailyTrendCard(
+                                        dailyTotals = dailyTotals,
+                                        dailyAverageCents = dailyAverage,
+                                        monthKey = selectedMonth,
+                                        onOpenLedger = { day ->
+                                            selectedTrendDay = day
+                                        },
+                                    )
+                                    StatsPeriod.YEAR -> MonthlyTrendCard(
+                                        monthlyTotals = monthlyTotals,
+                                        year = selectedYear,
+                                        type = viewingType,
+                                    )
+                                    StatsPeriod.DAY -> Unit
+                                }
+                            }
+                        } else {
+                            if (subscriptionStats.activeCount == 0) {
+                                SubscriptionEmptyGuideCard(
+                                    recurringCandidateCount = subscriptionStats.recurringCandidateCount,
+                                    onDiscoverClick = { onOpenSubscriptions(false) },
+                                    onAddClick = { onOpenSubscriptions(false) },
+                                )
+                            } else {
+                                SubscriptionSummaryCard(
+                                    state = subscriptionStats,
+                                    onOpenAllSubscriptions = { onOpenSubscriptions(false) },
+                                )
+                                if (subscriptionStats.pendingCancelCount > 0) {
+                                    SubscriptionPendingCancelBanner(
+                                        pendingCancelCount = subscriptionStats.pendingCancelCount,
+                                        monthlySavingsCents = subscriptionStats.pendingCancelMonthlySavingsCents,
+                                        onClick = { onOpenSubscriptions(true) },
+                                    )
+                                }
+                                SubscriptionForecastCard(
+                                    forecast = subscriptionStats.forecast12Months,
+                                    peakMonth = subscriptionStats.peakMonth,
+                                )
+                                if (subscriptionStats.topSubscriptions.isNotEmpty()) {
+                                    SubscriptionRankingCard(
+                                        items = subscriptionStats.topSubscriptions,
+                                        onOpenAll = { onOpenSubscriptions(false) },
+                                    )
+                                }
+                                if (subscriptionStats.channelBreakdown.isNotEmpty()) {
+                                    SubscriptionBreakdownCard(
+                                        title = bilingual("按扣款渠道分布", "By Payment Channel"),
+                                        items = subscriptionStats.channelBreakdown,
+                                    )
+                                }
+                                if (subscriptionStats.cadenceBreakdown.isNotEmpty()) {
+                                    SubscriptionBreakdownCard(
+                                        title = bilingual("按周期分布", "By Billing Cycle"),
+                                        items = subscriptionStats.cadenceBreakdown,
+                                    )
+                                }
+                            }
                         }
                     }
                 }

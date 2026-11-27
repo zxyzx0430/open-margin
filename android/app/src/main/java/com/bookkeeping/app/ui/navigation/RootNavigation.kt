@@ -267,28 +267,69 @@ fun RootNavigation(onOnboardingVisibilityChanged: (Boolean) -> Unit = {}) {
             SharedTransitionLayout {
             val sharedScope = this
             val iosDecel = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+            val tabOrder = remember(navItems) { navItems.mapIndexed { idx, item -> item.route to idx }.toMap() }
             NavHost(
                 navController = navController,
                 startDestination = BottomNavItem.Transactions.route,
                 modifier = Modifier.fillMaxSize().padding(bodyPadding).consumeWindowInsets(innerPadding)
                     .background(canvasColor),
                 enterTransition = {
-                    if (reducedMotion || targetState.destination.route in tabRoutes) EnterTransition.None
-                    else slideInHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { it }
+                    val fromRoute = initialState.destination.route
+                    val toRoute = targetState.destination.route
+                    when {
+                        reducedMotion -> EnterTransition.None
+                        fromRoute in tabRoutes && toRoute in tabRoutes -> {
+                            val dir = if ((tabOrder[toRoute] ?: 0) >= (tabOrder[fromRoute] ?: 0)) 1 else -1
+                            slideInHorizontally(tween(200, easing = iosDecel)) { (it * 0.08f * dir).toInt() } +
+                                fadeIn(tween(200, easing = iosDecel))
+                        }
+                        toRoute in tabRoutes -> EnterTransition.None
+                        else -> slideInHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { it }
+                    }
                 },
                 exitTransition = {
-                    if (reducedMotion || targetState.destination.route in tabRoutes) ExitTransition.None
-                    else slideOutHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { -(it * 0.28f).toInt() } +
-                        fadeOut(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel), targetAlpha = 0.88f)
+                    val fromRoute = initialState.destination.route
+                    val toRoute = targetState.destination.route
+                    when {
+                        reducedMotion -> ExitTransition.None
+                        fromRoute in tabRoutes && toRoute in tabRoutes -> {
+                            val dir = if ((tabOrder[toRoute] ?: 0) >= (tabOrder[fromRoute] ?: 0)) 1 else -1
+                            slideOutHorizontally(tween(180, easing = iosDecel)) { -(it * 0.06f * dir).toInt() } +
+                                fadeOut(tween(160, easing = iosDecel))
+                        }
+                        toRoute in tabRoutes -> ExitTransition.None
+                        else -> slideOutHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { -(it * 0.28f).toInt() } +
+                            fadeOut(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel), targetAlpha = 0.88f)
+                    }
                 },
                 popEnterTransition = {
-                    if (reducedMotion || initialState.destination.route in tabRoutes) EnterTransition.None
-                    else slideInHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { -(it * 0.28f).toInt() } +
-                        fadeIn(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel), initialAlpha = 0.88f)
+                    val fromRoute = initialState.destination.route
+                    val toRoute = targetState.destination.route
+                    when {
+                        reducedMotion -> EnterTransition.None
+                        fromRoute in tabRoutes && toRoute in tabRoutes -> {
+                            val dir = if ((tabOrder[toRoute] ?: 0) >= (tabOrder[fromRoute] ?: 0)) 1 else -1
+                            slideInHorizontally(tween(200, easing = iosDecel)) { (it * 0.08f * dir).toInt() } +
+                                fadeIn(tween(200, easing = iosDecel))
+                        }
+                        fromRoute in tabRoutes -> EnterTransition.None
+                        else -> slideInHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { -(it * 0.28f).toInt() } +
+                            fadeIn(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel), initialAlpha = 0.88f)
+                    }
                 },
                 popExitTransition = {
-                    if (reducedMotion || initialState.destination.route in tabRoutes) ExitTransition.None
-                    else slideOutHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { it }
+                    val fromRoute = initialState.destination.route
+                    val toRoute = targetState.destination.route
+                    when {
+                        reducedMotion -> ExitTransition.None
+                        fromRoute in tabRoutes && toRoute in tabRoutes -> {
+                            val dir = if ((tabOrder[toRoute] ?: 0) >= (tabOrder[fromRoute] ?: 0)) 1 else -1
+                            slideOutHorizontally(tween(180, easing = iosDecel)) { -(it * 0.06f * dir).toInt() } +
+                                fadeOut(tween(160, easing = iosDecel))
+                        }
+                        fromRoute in tabRoutes -> ExitTransition.None
+                        else -> slideOutHorizontally(tween(IOS_PUSH_TRANSITION_MS, easing = iosDecel)) { it }
+                    }
                 },
             ) {
                 // No crossfade between top-level tabs. Detail alone has a
