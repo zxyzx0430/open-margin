@@ -132,10 +132,12 @@ internal fun WalletCardDeck(
     val reduced = rememberReduceMotion()
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
-    val reveal = 54.dp
-    val expandedHeight = 186.dp
+    val reveal = 58.dp
+    val expandedHeight = 192.dp
+    val overlap = 18.dp
     val revealPx = with(density) { reveal.toPx() }
     val expandedPx = with(density) { expandedHeight.toPx() }
+    val overlapPx = with(density) { overlap.toPx() }
     val maxCardY = with(density) { (reveal * (localOrder.size - 1).coerceAtLeast(0)).toPx() }
 
     var draggingId by remember { mutableStateOf<Long?>(null) }
@@ -144,9 +146,9 @@ internal fun WalletCardDeck(
 
     val deckHeight by animateDpAsState(
         targetValue = if (expandedIndex < localOrder.lastIndex) {
-            expandedHeight * 2 + reveal * (localOrder.size - 2).coerceAtLeast(0) + 16.dp
+            expandedHeight * 2 - overlap + reveal * (localOrder.size - 2).coerceAtLeast(0) + 12.dp
         } else {
-            expandedHeight + reveal * (localOrder.size - 1).coerceAtLeast(0) + 16.dp
+            expandedHeight + reveal * (localOrder.size - 1).coerceAtLeast(0) + 12.dp
         },
         animationSpec = QingMotionTokens.motionGesture.spec(reduced),
         label = "walletDeckHeight",
@@ -161,9 +163,11 @@ internal fun WalletCardDeck(
             val subscription = byId[subId] ?: return@forEachIndexed
             key(subId) {
                 val isExpanded = subId == activeExpandedId
+                val isFrontmost = index == localOrder.lastIndex
+                val showDetails = isExpanded || isFrontmost
                 val isDragging = draggingId == subId
                 val targetY = index * revealPx +
-                    if (index > expandedIndex) (expandedPx - revealPx) else 0f
+                    if (index > expandedIndex) (expandedPx - revealPx - overlapPx) else 0f
                 val animatedY by animateFloatAsState(
                     targetValue = targetY,
                     animationSpec = QingMotionTokens.motionGesture.spec(reduced),
@@ -191,7 +195,7 @@ internal fun WalletCardDeck(
                                 val idx = localOrder.indexOf(subId).coerceAtLeast(0)
                                 draggingId = subId
                                 dragStartY = idx * revealPx +
-                                    if (idx > expandedIndex) (expandedPx - revealPx) else 0f
+                                    if (idx > expandedIndex) (expandedPx - revealPx - overlapPx) else 0f
                                 dragDeltaY = 0f
                             },
                             onDrag = { change, dragAmount ->
@@ -243,8 +247,9 @@ internal fun WalletCardDeck(
                     WalletSubscriptionCard(
                         subscription = subscription,
                         color = brandColor,
-                        expanded = isExpanded,
+                        expanded = showDetails,
                         elevated = isDragging,
+                        overlappedBelow = isExpanded && !isFrontmost,
                     ) {
                         if (isExpanded) {
                             onOpenDetail(subscription.id)
@@ -264,6 +269,7 @@ private fun WalletSubscriptionCard(
     color: Color,
     expanded: Boolean,
     elevated: Boolean,
+    overlappedBelow: Boolean,
     onClick: () -> Unit,
 ) {
     val radius = QingRadiusTokens.radiusHero
@@ -335,21 +341,25 @@ private fun WalletSubscriptionCard(
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 20.dp),
     ) {
-        // Exposed top strip (图 3 风格: 舒适顶部留白 + 图标 + 名称 + 周期)
+        // Exposed top strip (Subfolio 风格: 完整露出图标 + 名称 + 周期，绝不裁切)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(62.dp)
-                .padding(top = 10.dp),
+                .height(54.dp)
+                .padding(top = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             SubscriptionBadgeAvatar(subscription.name, subscription.active, 32.dp, wallet = true)
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
                 Text(
                     text = subscription.name,
                     color = white,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
+                    lineHeight = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -358,6 +368,7 @@ private fun WalletSubscriptionCard(
                     text = cadence,
                     color = secondary,
                     fontSize = 11.sp,
+                    lineHeight = 13.sp,
                     maxLines = 1,
                 )
             }
@@ -373,7 +384,7 @@ private fun WalletSubscriptionCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 18.dp),
+                    .padding(bottom = if (overlappedBelow) 28.dp else 18.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {

@@ -1595,61 +1595,32 @@ private fun CategoryDonutCard(
     type: TransactionType,
     onCategoryClick: (TransactionCategory) -> Unit,
 ) {
-    val maxStatCents = stats.maxOfOrNull { it.totalCents }?.coerceAtLeast(1L) ?: 1L
+    // 环图与图例共用同一个选中分类：点扇区高亮、点图例行去账单，两者互不抢状态。
+    var selectedCategory by remember(stats) { mutableStateOf<TransactionCategory?>(null) }
+    // 分类明细已经合并进图例，所以图例一次性展示全部，不再折叠。
+    val visibleStats = stats
     WalletCardSurface(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                SectionHeader(tr("分类占比"))
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = QingTextSecondary,
-                    )
-                    AutoSizeAmountText(
-                        text = formatCny(totalCents),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = QingText,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.End,
-                    )
-                }
-            }
-
-            // Apple Card-style multi-segment horizontal proportion bar
-            if (stats.isNotEmpty() && totalCents > 0L) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(999.dp)),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    stats.forEach { stat ->
-                        val weight = stat.percentage.coerceAtLeast(0.02f)
-                        Box(
-                            modifier = Modifier
-                                .weight(weight)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(categoryColor(stat.category)),
-                        )
-                    }
-                }
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                stats.forEach { stat ->
+            SectionHeader(tr("分类占比"))
+            CategoryPieChart(
+                stats = stats,
+                totalCents = totalCents,
+                centerLabel = if (type == TransactionType.INCOME) tr("总收入") else tr("总支出"),
+                // 环外不再有引线与标签，高度按圆环本体给：短边一半减去留白就是半径。
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                selectedCategory = selectedCategory,
+                onSliceClick = { selectedCategory = it },
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                visibleStats.forEach { stat ->
                     CategoryLegendRow(
                         stat = stat,
-                        maxCents = maxStatCents,
+                        selected = stat.category == selectedCategory,
                         onClick = { onCategoryClick(stat.category) },
                     )
                 }
@@ -1658,77 +1629,55 @@ private fun CategoryDonutCard(
     }
 }
 
+/**
+ * 图例行：色块 + 分类名 + 百分比 + 金额。
+ *
+ * 色块用的是 [categoryColor]，和扇区同一份颜色映射，不在这里另算一遍，
+ * 否则图例颜色和饼图对不上时用户就只能靠猜。选中分类时整行铺一层 surfaceVariant，
+ * 环图与图例互相指认。
+ */
 @Composable
-private fun CategoryLegendRow(
-    stat: CategoryStat,
-    maxCents: Long,
-    onClick: () -> Unit,
-) {
-    val barColor = categoryColor(stat.category)
-    val fillFraction = (stat.totalCents.toFloat() / maxCents.toFloat()).coerceIn(0.04f, 1f)
+private fun CategoryLegendRow(stat: CategoryStat, selected: Boolean, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = 40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) QingSurfaceVariant else Color.Transparent)
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        CategoryIcon(
-            category = stat.category,
-            size = 36.dp,
-            cornerRadius = 10.dp,
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(50))
+                .background(categoryColor(stat.category)),
         )
-        Column(
+        Text(
+            text = tr(stat.category.displayName),
+            style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = tr(stat.category.displayName),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = QingText,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = categoryPercentText(stat.percentage),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = QingTextSecondary,
-                    maxLines = 1,
-                )
-                AutoSizeAmountText(
-                    text = formatCny(stat.totalCents),
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.widthIn(min = 76.dp, max = 96.dp),
-                    color = QingText,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.End,
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(QingSurfaceVariant),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fillFraction)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(50))
-                        .background(barColor),
-                )
-            }
-        }
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = categoryPercentText(stat.percentage),
+            style = MaterialTheme.typography.labelMedium,
+            color = QingTextSecondary,
+            modifier = Modifier.widthIn(min = 48.dp, max = 52.dp),
+            textAlign = TextAlign.End,
+            maxLines = 1,
+        )
+        AutoSizeAmountText(
+            text = formatCny(stat.totalCents),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.widthIn(min = 84.dp, max = 96.dp),
+            color = QingText,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.End,
+        )
     }
 }
 
